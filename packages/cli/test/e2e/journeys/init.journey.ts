@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { builtInPresetRegistry } from "@ykdz/template-builtin-presets";
+import { templateContent } from "@ykdz/template-content";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 import type { CliJourney } from "../journey.ts";
@@ -12,35 +12,36 @@ const snapshotNodeMajor = releaseToolchainSnapshot.nodeVersion.slice(
   releaseToolchainSnapshot.nodeVersion.indexOf("."),
 );
 
-function requireAddablePresetName(): string {
-  const definition = builtInPresetRegistry
-    .all()
-    .find(
-      (candidate) =>
-        candidate.planPackageAddition !== undefined &&
-        candidate.initialPrimaryPackage !== undefined,
-    );
-  if (definition === undefined) {
+const presets = templateContent.filter((content) => "kind" in content);
+
+function requireAddablePreset() {
+  const preset = presets.find(
+    (candidate) =>
+      candidate.operations.includes("init") &&
+      candidate.operations.includes("add") &&
+      Object.keys(candidate.nodes).length === 1,
+  );
+  if (preset === undefined) {
     throw new Error("init journey requires an addable Preset");
   }
-  return definition.metadata.name;
+  return preset;
 }
 
-function requireFixedTopologyPresetName(): string {
-  const definition = builtInPresetRegistry
-    .all()
-    .find((candidate) => candidate.initialPrimaryPackage === undefined);
-  if (definition === undefined) {
+function requireFixedTopologyPreset() {
+  const preset = presets.find(
+    (candidate) => Object.keys(candidate.nodes).length > 1,
+  );
+  if (preset === undefined) {
     throw new Error("init journey requires a fixed-topology Preset");
   }
-  return definition.metadata.name;
+  return preset;
 }
 
-const addablePresetName = requireAddablePresetName();
-const configurableDefinition = builtInPresetRegistry.require(addablePresetName);
-const defaultLeafName =
-  configurableDefinition.initialPrimaryPackage!.defaultLeafName;
-const fixedTopologyPresetName = requireFixedTopologyPresetName();
+const addablePreset = requireAddablePreset();
+const addablePresetName = addablePreset.metadata.alias;
+const defaultLeafName = Object.values(addablePreset.nodes)[0]!.reference
+  .defaultLeafName;
+const fixedTopologyPresetName = requireFixedTopologyPreset().metadata.alias;
 
 const journey: CliJourney = {
   name: "init",
@@ -181,9 +182,16 @@ const journey: CliJourney = {
         path.join(context.workDir, "project/.template/generation.json"),
         "utf8",
       ),
-    ) as { readonly toolchain: Record<string, unknown> };
-    assert.deepEqual(generationRecord.toolchain, {
+    ) as {
+      readonly schemaVersion: number;
+      readonly strategyState: {
+        readonly toolchain: Record<string, unknown>;
+      };
+    };
+    assert.equal(generationRecord.schemaVersion, 1);
+    assert.deepEqual(generationRecord.strategyState.toolchain, {
       nodeLtsMajor: snapshotNodeMajor,
+      nodeVersion: releaseToolchainSnapshot.nodeVersion,
       packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
     });
     assert.match(

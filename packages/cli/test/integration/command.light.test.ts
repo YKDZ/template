@@ -14,16 +14,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import {
-  builtInPresetRegistry,
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
-import {
-  canConsumeNodePackageNameImport,
-  canLinkNodePackageRoles,
-  canProvideSourceConditionPackageNameImport,
-} from "@ykdz/template-workspace/project-linking";
+import { templateContent } from "@ykdz/template-content";
+import { canLinkNodePackageRoles } from "@ykdz/template-workspace/project-linking";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
 
@@ -61,40 +53,24 @@ function requireLinkableAddablePreset(): {
   readonly name: string;
   readonly consumerPath: string;
 } {
-  const context = createGenerationContext({
-    targetDir: "demo",
-    defaultPackageScope: "acme",
-    toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
-  });
-  for (const definition of builtInPresetRegistry.all()) {
-    const packageLeafName = "utility";
-    const packagePath = definition.defaultPackagePath?.({
-      context,
-      packageLeafName,
-    });
-    if (packagePath === undefined || !definition.planPackageAddition) continue;
-    const provider = definition.planPackageAddition({
-      context,
-      packageLeafName,
-      packagePath,
-    });
-    if (!canProvideSourceConditionPackageNameImport(provider)) continue;
-    const consumers = planGeneratedRepositoryInitialization({
-      definition,
-      context,
-    }).packageContributions;
-    const consumer = consumers.find(
-      (candidate) =>
-        canConsumeNodePackageNameImport(candidate) &&
-        canLinkNodePackageRoles(
-          candidate.definition.role,
-          provider.definition.role,
-        ),
-    );
-    if (consumer !== undefined) {
+  const presets = templateContent.filter((content) => "kind" in content);
+  for (const preset of presets) {
+    if (
+      !preset.operations.includes("init") ||
+      !preset.operations.includes("add")
+    ) {
+      continue;
+    }
+    const [node] = Object.values(preset.nodes);
+    if (
+      node !== undefined &&
+      node.reference.defaultPath !== undefined &&
+      node.reference.role === "shared-library" &&
+      canLinkNodePackageRoles(node.reference.role, node.reference.role)
+    ) {
       return {
-        name: definition.metadata.name,
-        consumerPath: consumer.definition.path,
+        name: preset.metadata.alias,
+        consumerPath: node.reference.defaultPath,
       };
     }
   }
@@ -203,10 +179,22 @@ void describe("template CLI command control", () => {
       assert.match(output.stdout(), /^内置预设/mu);
       assert.equal(output.stdout(), repeat.stdout());
       assert.match(output.stdout(), /\n  [^:\s]+:/u);
+      const cliPreset = templateContent
+        .filter((content) => "kind" in content)
+        .find((preset) =>
+          Object.values(preset.nodes).some(
+            ({ reference }) =>
+              reference.manifest.name === "@ykdz/reference-ts-cli",
+          ),
+        );
+      if (cliPreset === undefined)
+        throw new Error("Expected a CLI preset in the content collection");
       assert.ok(
         output
           .stdout()
-          .includes("TypeScript 命令行工具 - TypeScript 命令行包。"),
+          .includes(
+            `${cliPreset.metadata.title} - ${cliPreset.metadata.description}`,
+          ),
       );
       assert.ok(!output.stdout().includes("TypeScript command-line package."));
       assert.equal(output.stderr(), "");
@@ -216,9 +204,9 @@ void describe("template CLI command control", () => {
         kind: "data",
         variant: "listed",
         data: {
-          presets: builtInPresetRegistry
-            .all()
-            .map((definition) => ({ name: definition.metadata.name })),
+          presets: templateContent
+            .filter((content) => "kind" in content)
+            .map((preset) => ({ name: preset.metadata.alias })),
         },
       });
       assert.equal(jsonOutput.stderr(), "");
@@ -611,17 +599,24 @@ void describe("template CLI command control", () => {
       path.join(tmpdir(), "template-cli-init-usage-"),
     );
     try {
-      const fixed = builtInPresetRegistry
-        .all()
-        .find((definition) => definition.initialPrimaryPackage === undefined)!;
+      const fixed = templateContent
+        .filter((content) => "kind" in content)
+        .find((preset) => Object.keys(preset.nodes).length !== 1)!;
       for (const args of [
         ["init", "unknown", "--preset", "missing-preset"],
-        ["init", "fixed", "--preset", fixed.metadata.name, "--name", "renamed"],
         [
           "init",
           "fixed",
           "--preset",
-          fixed.metadata.name,
+          fixed.metadata.alias,
+          "--name",
+          "renamed",
+        ],
+        [
+          "init",
+          "fixed",
+          "--preset",
+          fixed.metadata.alias,
           "--path",
           "apps/renamed",
         ],
@@ -631,7 +626,7 @@ void describe("template CLI command control", () => {
         assertPartialDeepStrictEqual(JSON.parse(output.stderr()), {
           kind: "usageFailure",
         });
-        if (args[3] === fixed.metadata.name) {
+        if (args[3] === fixed.metadata.alias) {
           assertPartialDeepStrictEqual(JSON.parse(output.stderr()), {
             helpArgv: ["template", "init", "--help"],
             issues: [{ code: "conditionalConstraintViolation" }],
@@ -1096,9 +1091,7 @@ void describe("template CLI command control", () => {
       const conflicts = JSON.parse(output.stderr()).data.conflicts;
       assert.equal(conflicts.length, 1);
       assert.equal(
-        conflicts[0].reason.includes(
-          "Package Path services/existing already exists",
-        ),
+        conflicts[0].reason.includes("新包路径已存在：services/existing"),
         true,
       );
       assertPartialDeepStrictEqual(JSON.parse(output.stderr()).data, {

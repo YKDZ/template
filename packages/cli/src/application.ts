@@ -2,28 +2,33 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  builtInPresetRegistry,
-  prepareGeneratedRepositoryPackageAddition,
-  validateGeneratedRepositoryInitializationInput,
-  prepareGeneratedRepositoryInitialization,
   validateProjectBlueprint,
-  type GeneratedRepositoryPlan,
-  type InitializationInputIssue,
-  type PackageAdditionInputIssue,
-  type NextStepInstruction,
   type ProjectBlueprint,
-  type PublicationSetupHandoff,
-  type ResolvedInitialization,
-} from "@ykdz/template-builtin-presets";
+} from "@ykdz/template-core/project-blueprint";
 import {
-  reconcileAndApplyProjectProjections,
-  materializeProjectProjection,
   type ProjectProjectionAction,
   type ProjectProjectionConflict,
 } from "@ykdz/template-core/project-projection";
-import { renderNewProject } from "@ykdz/template-core/renderer";
-import { projectNextStepsDocument } from "@ykdz/template-workspace/project-github";
+import type { GenerationRecord } from "@ykdz/template-generator";
+import { isDefaultWorkspaceMissingLinkConflict } from "@ykdz/template-workspace/default-workspace-strategy";
+import {
+  type DefaultWorkspaceOwnerFacts,
+  type DefaultWorkspaceState,
+} from "@ykdz/template-workspace/default-workspace-strategy";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
+
+import {
+  validateInitializationInput,
+  validatePackageAdditionInput,
+  type InitializationInputIssue,
+  type PackageAdditionInputIssue,
+} from "./input-validation.ts";
+import {
+  cliGenerator,
+  cliPresets,
+  cliWorkspaceStrategy,
+  presetByAlias,
+} from "./preset-catalog.ts";
 
 export type ApplicationRuntime = {
   readonly cwd: string;
@@ -48,6 +53,16 @@ export type AddPackageCommandOptions = {
   readonly dryRun: boolean;
 };
 
+type ResolvedInitialization = {
+  readonly preset: string;
+  readonly topology: "configurable-primary-package" | "fixed";
+  readonly packages: readonly {
+    readonly name: string;
+    readonly path: string;
+  }[];
+  readonly scope: string;
+};
+
 export type InitCommandResult =
   | {
       readonly status: "success";
@@ -55,10 +70,10 @@ export type InitCommandResult =
       readonly targetDir: string;
       readonly resolved: ResolvedInitialization;
       readonly blueprint: ProjectBlueprint;
-      readonly generationRecord: GeneratedRepositoryPlan["generationRecord"];
+      readonly generationRecord: GenerationRecord;
       readonly toolchain: ReturnType<typeof toolchainReport>;
-      readonly nextSteps: readonly NextStepInstruction[];
-      readonly publicationSetup: PublicationSetupHandoff;
+      readonly nextSteps: DefaultWorkspaceOwnerFacts["nextSteps"];
+      readonly publicationSetup: DefaultWorkspaceOwnerFacts["publication"]["setup"];
       readonly followUpDocument: {
         readonly enabled: boolean;
         readonly path?: string;
@@ -66,13 +81,11 @@ export type InitCommandResult =
     }
   | {
       readonly status: "usage-error";
-
       readonly targetDir: string;
       readonly issues: readonly InitializationInputIssue[];
     }
   | {
       readonly status: "operation-failure";
-
       readonly phase:
         | "preset"
         | "planning"
@@ -101,7 +114,6 @@ export type BlueprintValidationCommandResult =
     }
   | {
       readonly status: "invalid";
-
       readonly path: string;
       readonly issues: readonly {
         readonly path: string;
@@ -169,12 +181,10 @@ export type PackageAdditionCommandResult =
     }
   | {
       readonly status: "usage-error";
-
       readonly issues: readonly PackageAdditionInputIssue[];
     }
   | {
       readonly status: "operation-failure";
-
       readonly phase: "metadata" | "default" | "planning" | "reconciliation";
       readonly error: { readonly message: string; readonly suggestion: string };
     };
@@ -182,10 +192,10 @@ export type PackageAdditionCommandResult =
 export function listPresetCatalog(): PresetCatalogCommandResult {
   return {
     status: "success",
-    presets: builtInPresetRegistry.all().map((definition) => ({
-      name: definition.metadata.name,
-      title: definition.metadata.title,
-      description: definition.metadata.description,
+    presets: cliPresets.map(({ metadata }) => ({
+      name: metadata.alias,
+      title: metadata.title,
+      description: metadata.description,
     })),
   };
 }
@@ -227,7 +237,6 @@ export async function validateBlueprintFile(
   } catch {
     return {
       status: "operation-failure",
-
       path: resolvedPath,
       reason: "invalid-json",
       error: {
@@ -240,7 +249,6 @@ export async function validateBlueprintFile(
   if (!result.ok) {
     return {
       status: "invalid",
-
       path: resolvedPath,
       issues: result.issues,
     };
@@ -291,7 +299,6 @@ function readBlueprintFailure(
             ];
   return {
     status: "operation-failure",
-
     path: filePath,
     reason,
     error: { message, suggestion },
@@ -299,32 +306,42 @@ function readBlueprintFailure(
 }
 
 function initOperationFailure(options: {
-  readonly phase: Extract<
-    InitCommandResult,
-    { readonly status: "operation-failure" }
-  >["phase"];
+  readonly phase: "metadata" | "planning" | "render" | "reconciliation";
   readonly targetDir: string;
 }): Extract<InitCommandResult, { readonly status: "operation-failure" }> {
-  const phase =
-    options.phase === "preset"
-      ? "预设准备"
-      : options.phase === "planning"
-        ? "生成规划"
-        : options.phase === "preflight"
-          ? "生成预检"
-          : options.phase === "materialization"
-            ? "生成物料化"
-            : "目标目录渲染";
+  const phase = options.phase === "render" ? "render" : "planning";
+  const phaseName = phase === "planning" ? "生成规划" : "目标目录渲染";
   return {
     status: "operation-failure",
-
-    phase: options.phase,
+    phase,
     targetDir: options.targetDir,
     error: {
-      message: `${phase}失败。`,
+      message: `${phaseName}失败。`,
       suggestion: "检查目标目录与运行环境后重试；若问题持续发生，请人工处理。",
     },
   };
+}
+
+function initPackageIdentities(
+  presetAlias: string,
+  generationRecord: GenerationRecord,
+): ResolvedInitialization["packages"] {
+  const preset = presetByAlias(presetAlias);
+  if (preset === undefined) throw new Error("初始化预设在结果映射时不存在");
+  return Object.keys(preset.nodes).map((nodeIdentity) => {
+    const packageDefinitionId = generationRecord.nodeInstances[nodeIdentity];
+    const record = generationRecord.packages.find(
+      (candidate) =>
+        candidate.definition.packageDefinitionId === packageDefinitionId,
+    );
+    if (record === undefined) {
+      throw new Error("生成结果缺少预设节点对应的包实例：" + nodeIdentity);
+    }
+    return {
+      name: record.definition.name,
+      path: record.definition.path,
+    };
+  });
 }
 
 export async function runInit(
@@ -332,186 +349,183 @@ export async function runInit(
   runtime: ApplicationRuntime,
 ): Promise<InitCommandResult> {
   const targetDir = path.resolve(runtime.cwd, options.dir);
-  const overrides =
-    (options.name ?? options.path ?? options.scope) === undefined
+  const validation = validateInitializationInput({
+    preset: options.preset,
+    targetDir,
+    overrides: {
+      ...(options.name === undefined ? {} : { name: options.name }),
+      ...(options.path === undefined ? {} : { path: options.path }),
+      ...(options.scope === undefined ? {} : { scope: options.scope }),
+    },
+  });
+  if (validation.status === "input-invalid") {
+    return {
+      status: "usage-error",
+      targetDir: options.dir,
+      issues: validation.issues,
+    };
+  }
+  const { preset, repositoryName, defaultPackageScope } = validation.value;
+  const creationInput =
+    options.name === undefined && options.path === undefined
       ? undefined
       : {
-          ...(options.name === undefined ? {} : { name: options.name }),
-          ...(options.path === undefined ? {} : { path: options.path }),
-          ...(options.scope === undefined ? {} : { scope: options.scope }),
+          ...(options.name === undefined ? {} : { leafName: options.name }),
+          ...(options.path === undefined ? {} : { packagePath: options.path }),
         };
-  const input = validateGeneratedRepositoryInitializationInput({
-    preset: options.preset,
-    targetDir,
-    ...(overrides === undefined ? {} : { overrides }),
+  const result = await cliGenerator.init({
+    targetRoot: targetDir,
+    selection: {
+      roots: [
+        {
+          preset,
+          ...(creationInput === undefined ? {} : { creationInput }),
+        },
+      ],
+    },
+    strategyInput: { repositoryName, defaultPackageScope, todo: options.todo },
+    dryRun: options.dryRun,
   });
-  if (input.status === "input-invalid") {
+  if (result.status === "operation-failure") {
+    return initOperationFailure({
+      phase: result.phase,
+      targetDir: options.dir,
+    });
+  }
+  if (result.status === "input-invalid") {
     return {
       status: "usage-error",
-
       targetDir: options.dir,
-      issues: input.issues,
+      issues: result.issues.map(({ code }) => ({
+        code: code as InitializationInputIssue["code"],
+      })),
     };
   }
-  const preparation = prepareGeneratedRepositoryInitialization({
-    preset: options.preset,
-    targetDir,
-    ...(overrides === undefined ? {} : { overrides }),
-  });
-  if (preparation.status === "input-invalid") {
-    return {
-      status: "usage-error",
+  if (result.status === "conflict") {
+    return initOperationFailure({ phase: "render", targetDir: options.dir });
+  }
 
-      targetDir: options.dir,
-      issues: preparation.issues,
-    };
+  const strategyState = cliWorkspaceStrategy.parseState(
+    result.generationRecord.strategyState,
+  ) as DefaultWorkspaceState;
+  const ownerFacts = result.projection?.ownerFacts;
+  if (ownerFacts === undefined) {
+    throw new Error("默认工作区策略未返回初始化事实");
   }
-  if (preparation.status === "operation-failure") {
-    return initOperationFailure({
-      phase: preparation.phase,
-      targetDir: options.dir,
-    });
-  }
-  const { plan, resolved, publicationSetup } = preparation;
-  const operations = [
-    ...plan.operations,
-    ...(options.todo
-      ? [
-          {
-            kind: "writeText" as const,
-            to: "TODO.md",
-            text: projectNextStepsDocument(plan.nextStepInstructions),
-          },
-        ]
-      : []),
-  ];
-  try {
-    await materializeProjectProjection({
-      operations,
-      reconciliation: plan.reconciliation,
-    });
-  } catch {
-    return initOperationFailure({
-      phase: "materialization",
-      targetDir: options.dir,
-    });
-  }
-  const output: Extract<InitCommandResult, { readonly status: "success" }> = {
+  return {
     status: "success",
     dryRun: options.dryRun,
     targetDir: options.dir,
-    resolved,
-    blueprint: plan.blueprint,
-    generationRecord: plan.generationRecord,
+    resolved: {
+      preset: preset.metadata.alias,
+      topology:
+        Object.keys(preset.nodes).length === 1
+          ? "configurable-primary-package"
+          : "fixed",
+      packages: initPackageIdentities(
+        preset.metadata.alias,
+        result.generationRecord,
+      ),
+      scope: strategyState.defaultPackageScope,
+    },
+    blueprint: result.blueprint,
+    generationRecord: result.generationRecord,
     toolchain: toolchainReport(),
-    nextSteps: plan.nextStepInstructions,
-    publicationSetup,
+    nextSteps: ownerFacts.nextSteps,
+    publicationSetup: ownerFacts.publication.setup,
     followUpDocument: {
-      enabled: options.todo,
-      ...(options.todo ? { path: "TODO.md" } : {}),
+      enabled: strategyState.todo,
+      ...(strategyState.todo ? { path: "TODO.md" } : {}),
     },
   };
-  if (options.dryRun) return output;
+}
 
-  try {
-    await renderNewProject({
-      targetRoot: path.resolve(runtime.cwd, options.dir),
-      operations,
-    });
-  } catch {
-    return initOperationFailure({ phase: "render", targetDir: options.dir });
-  }
-  return output;
+function packageAdditionOperationFailure(
+  phase: "metadata" | "planning" | "render" | "reconciliation",
+  diagnostic?: { readonly message: string; readonly suggestion: string },
+): PackageAdditionCommandResult {
+  const mappedPhase = phase === "render" ? "reconciliation" : phase;
+  return {
+    status: "operation-failure",
+    phase: mappedPhase,
+    error: diagnostic ?? {
+      message: "添加 Package 时发生操作失败。",
+      suggestion:
+        "检查生成仓库元数据与工作区状态后重试；若问题持续发生，请人工处理。",
+    },
+  };
 }
 
 export async function runAddPackage(
   options: AddPackageCommandOptions,
   runtime: ApplicationRuntime,
 ): Promise<PackageAdditionCommandResult> {
-  const preparation = prepareGeneratedRepositoryPackageAddition({
-    repositoryRoot: runtime.cwd,
+  const validation = validatePackageAdditionInput({
     preset: options.preset,
     packageLeafName: options.name,
+    linkFrom: options.linkFrom,
     ...(options.path === undefined ? {} : { packagePath: options.path }),
-    ...(options.linkFrom.length === 0 ? {} : { linkFrom: options.linkFrom }),
   });
-  if (preparation.status === "input-invalid") {
-    return {
-      status: "usage-error",
-
-      issues: preparation.issues,
-    };
+  if (validation.status === "input-invalid") {
+    return { status: "usage-error", issues: validation.issues };
   }
-  if (preparation.status === "operation-failure") {
+  const result = await cliGenerator.add({
+    repositoryRoot: runtime.cwd,
+    preset: validation.preset,
+    creationInput: {
+      leafName: options.name,
+      ...(options.path === undefined ? {} : { packagePath: options.path }),
+      ...(validation.linkFrom.length === 0
+        ? {}
+        : { linkFrom: validation.linkFrom }),
+    },
+    dryRun: options.dryRun,
+  });
+  if (result.status === "operation-failure") {
     return packageAdditionOperationFailure(
-      preparation.phase,
-      preparation.diagnostic,
+      result.phase,
+      result.error.diagnostic,
     );
   }
-  if (preparation.status === "conflict") {
+  if (result.status === "input-invalid") {
+    return {
+      status: "usage-error",
+      issues: result.issues.map(({ code }) => ({
+        code: code as PackageAdditionInputIssue["code"],
+      })),
+    };
+  }
+  if (result.status === "conflict") {
+    const missingLinkConflict = isDefaultWorkspaceMissingLinkConflict(
+      result.ownerConflict,
+    )
+      ? {
+          kind: "missing-link" as const,
+          ...result.ownerConflict.facts,
+        }
+      : undefined;
+    if (
+      result.ownerConflict !== undefined &&
+      missingLinkConflict === undefined
+    ) {
+      return packageAdditionOperationFailure("planning");
+    }
     return {
       status: "conflict",
       dryRun: options.dryRun,
       actions: [],
       conflicts: [
-        {
-          kind: preparation.conflict.kind,
-          existing: {
-            name: preparation.conflict.existing.name,
-            path: preparation.conflict.existing.path,
-            role: preparation.conflict.existing.role,
-          },
-          requested: {
-            name: preparation.conflict.requested.name,
-            path: preparation.conflict.requested.path,
-            role: preparation.conflict.requested.role,
-          },
-          ...(preparation.conflict.missingLink === undefined
-            ? {}
-            : { missingLink: preparation.conflict.missingLink }),
-        },
+        ...(result.identityConflict === undefined
+          ? []
+          : [{ kind: "identity" as const, ...result.identityConflict }]),
+        ...(missingLinkConflict === undefined ? [] : [missingLinkConflict]),
+        ...result.conflicts.map(packageAdditionConflict),
       ],
-    };
-  }
-  let reconciliation: Awaited<
-    ReturnType<typeof reconcileAndApplyProjectProjections>
-  >;
-  try {
-    reconciliation = await reconcileAndApplyProjectProjections({
-      targetRoot: runtime.cwd,
-      ...preparation.plan.projectProjections,
-      dryRun: options.dryRun,
-    });
-  } catch {
-    return packageAdditionOperationFailure("reconciliation");
-  }
-  if (!reconciliation.ok) {
-    return {
-      status: "conflict",
-      dryRun: options.dryRun,
-      actions: [],
-      conflicts: reconciliation.conflicts.map(packageAdditionConflict),
     };
   }
   return {
     status: "success",
     dryRun: options.dryRun,
-    actions: reconciliation.actions,
-  };
-}
-
-function packageAdditionOperationFailure(
-  phase: "metadata" | "default" | "planning" | "reconciliation",
-  diagnostic?: { readonly message: string; readonly suggestion: string },
-): PackageAdditionCommandResult {
-  return {
-    status: "operation-failure",
-
-    phase,
-    error: diagnostic ?? {
-      message: "添加 Package 时发生操作失败。",
-      suggestion:
-        "检查生成仓库元数据与工作区状态后重试；若问题持续发生，请人工处理。",
-    },
+    actions: result.actions,
   };
 }

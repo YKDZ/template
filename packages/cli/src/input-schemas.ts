@@ -1,15 +1,22 @@
 import path from "node:path";
 
-import {
-  validateGeneratedRepositoryInitializationInput,
-  validateGeneratedRepositoryPackageAdditionInput,
-  type PackageAdditionInputIssue,
-  type InitializationInputIssue,
-} from "@ykdz/template-builtin-presets";
 import * as v from "valibot";
 
-import { listPresetCatalog } from "./application.ts";
+import {
+  validateInitializationInput,
+  validatePackageAdditionInput,
+  type InitializationInputIssue,
+  type PackageAdditionInputIssue,
+} from "./input-validation.ts";
+import { cliPresets } from "./preset-catalog.ts";
 import { standardSchema } from "./standard-schema.ts";
+
+const initializationPresetChoices = cliPresets
+  .filter((preset) => preset.operations.includes("init"))
+  .map(({ metadata }) => metadata.alias);
+const additionPresetChoices = cliPresets
+  .filter((preset) => preset.operations.includes("add"))
+  .map(({ metadata }) => metadata.alias);
 
 const initializationMessages: Record<InitializationInputIssue["code"], string> =
   {
@@ -28,7 +35,7 @@ export function initializationInputSchema(cwd: string) {
     v.pipe(
       v.object({
         dir: v.pipe(v.string(), v.nonEmpty()),
-        preset: v.picklist(listPresetCatalog().presets.map(({ name }) => name)),
+        preset: v.picklist(initializationPresetChoices),
         name: v.optional(
           v.pipe(
             v.string(),
@@ -57,7 +64,7 @@ export function initializationInputSchema(cwd: string) {
       v.rawCheck(({ dataset, addIssue }) => {
         if (!dataset.typed) return;
         const { dir, preset, name, path: packagePath, scope } = dataset.value;
-        const result = validateGeneratedRepositoryInitializationInput({
+        const result = validateInitializationInput({
           preset,
           targetDir: path.resolve(cwd, dir),
           overrides: {
@@ -67,8 +74,9 @@ export function initializationInputSchema(cwd: string) {
           },
         });
         if (result.status === "input-invalid") {
-          for (const issue of result.issues)
+          for (const issue of result.issues) {
             addIssue({ message: initializationMessages[issue.code] });
+          }
         }
       }),
     ),
@@ -91,7 +99,7 @@ const additionMessages: Record<PackageAdditionInputIssue["code"], string> = {
 export const packageAdditionInputSchema = standardSchema(
   v.pipe(
     v.object({
-      preset: v.picklist(listPresetCatalog().presets.map(({ name }) => name)),
+      preset: v.picklist(additionPresetChoices),
       name: v.pipe(v.string(), v.description("无 scope 的 npm 包叶名称。")),
       path: v.optional(
         v.pipe(
@@ -115,15 +123,16 @@ export const packageAdditionInputSchema = standardSchema(
     v.rawCheck(({ dataset, addIssue }) => {
       if (!dataset.typed) return;
       const input = dataset.value;
-      const result = validateGeneratedRepositoryPackageAdditionInput({
+      const result = validatePackageAdditionInput({
         preset: input.preset,
         packageLeafName: input.name,
         linkFrom: input.linkFrom,
         ...(input.path === undefined ? {} : { packagePath: input.path }),
       });
       if (result.status === "input-invalid") {
-        for (const issue of result.issues)
+        for (const issue of result.issues) {
           addIssue({ message: additionMessages[issue.code] });
+        }
       }
     }),
   ),

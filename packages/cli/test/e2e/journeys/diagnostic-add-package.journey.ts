@@ -8,11 +8,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
-import {
-  builtInPresetRegistry,
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
+import { templateContent } from "@ykdz/template-content";
 
 import type { CliJourney } from "../journey.ts";
 
@@ -67,55 +63,41 @@ function diagnosticScenario(): {
   readonly firstPackagePath: string;
   readonly secondPackagePath: string;
 } {
-  const context = createGenerationContext({
-    targetDir: "project",
-    defaultPackageScope: "acme",
-    toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
-  });
-  const base = builtInPresetRegistry
-    .all()
-    .find(
-      (definition) =>
-        planGeneratedRepositoryInitialization({ definition, context })
-          .ciDiagnosticArtifacts.length === 0,
-    );
-  const diagnostic = builtInPresetRegistry.all().find((definition) => {
-    if (definition.planPackageAddition === undefined) return false;
-    const packagePath = definition.defaultPackagePath?.({
-      context,
-      packageLeafName: "web",
-    });
-    if (packagePath === undefined) return false;
-    return (
-      (definition.planPackageAddition({
-        context,
-        packageLeafName: "web",
-        packagePath,
-      }).ciDiagnosticArtifacts?.length ?? 0) > 0
-    );
-  });
+  const presets = templateContent.filter((content) => "kind" in content);
+  const base = presets.find(
+    (preset) =>
+      preset.operations.includes("init") &&
+      Object.values(preset.nodes).some(
+        ({ reference }) => reference.role === "shared-library",
+      ),
+  );
+  const diagnostic = presets.find(
+    (preset) =>
+      preset.operations.includes("add") &&
+      Object.values(preset.nodes).some(
+        ({ reference }) => reference.role === "runtime-service",
+      ),
+  );
   if (base === undefined || diagnostic === undefined) {
     throw new Error(
-      "diagnostic-add-package journey requires registry-derived base and diagnostic Package Addition capabilities",
+      "diagnostic-add-package journey requires base and application presets from the content collection",
     );
   }
-  const firstPackagePath = diagnostic.defaultPackagePath?.({
-    context,
-    packageLeafName: "web",
-  });
-  const secondPackagePath = diagnostic.defaultPackagePath?.({
-    context,
-    packageLeafName: "admin",
-  });
-  if (firstPackagePath === undefined || secondPackagePath === undefined) {
+  const diagnosticNode = Object.values(diagnostic.nodes)[0];
+  const defaultPath = diagnosticNode?.reference.defaultPath;
+  if (defaultPath === undefined) {
     throw new Error(
-      "diagnostic-add-package journey requires default paths for diagnostic Package Addition",
+      "diagnostic-add-package journey requires an application default path",
     );
   }
+  const secondPackagePath = path.posix.join(
+    path.posix.dirname(defaultPath),
+    "admin",
+  );
   return {
-    basePreset: base.metadata.name,
-    diagnosticPreset: diagnostic.metadata.name,
-    firstPackagePath,
+    basePreset: base.metadata.alias,
+    diagnosticPreset: diagnostic.metadata.alias,
+    firstPackagePath: defaultPath,
     secondPackagePath,
   };
 }
