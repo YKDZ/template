@@ -71,6 +71,11 @@
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": ["template-dist/**"],
       "persistent": false
+    },
+    "check:author-planning-roles": {
+      "cache": false,
+      "outputs": [],
+      "tags": ["quality:light"]
     }
   }
 }

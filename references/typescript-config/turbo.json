@@ -41,6 +41,11 @@
       "tags": ["work:preparation"],
       "dependsOn": [],
       "outputs": ["template-dist/**"]
+    },
+    "check:author-planning-roles": {
+      "cache": false,
+      "outputs": [],
+      "tags": ["quality:light"]
     }
   }
 }

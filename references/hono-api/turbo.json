@@ -57,6 +57,11 @@
       ],
       "outputs": ["template-dist/**"],
       "tags": ["work:preparation"]
+    },
+    "check:author-planning-roles": {
+      "cache": false,
+      "outputs": [],
+      "tags": ["quality:light"]
     }
   }
 }

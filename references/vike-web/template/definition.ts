@@ -27,7 +27,11 @@ export const referencePackage = defineReferencePackage({
       },
       { name: "typescript-7", purpose: "template-execution" },
     ],
-    scripts: ["build:template", "typecheck:template"],
+    scripts: [
+      "build:template",
+      "typecheck:template",
+      "check:author-planning-roles",
+    ],
   },
   foundation: ({ definition }) => ({
     toolchains: {},

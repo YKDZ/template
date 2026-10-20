@@ -23,6 +23,7 @@
     }
   },
   "scripts": {
+    "check:author-planning-roles": "pnpm --workspace-root run author-planning-roles:workspace -- --owner-directory \"$PWD\"",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix .",

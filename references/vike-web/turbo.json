@@ -89,6 +89,11 @@
       ],
       "outputs": [],
       "tags": ["quality:light"]
+    },
+    "check:author-planning-roles": {
+      "cache": false,
+      "outputs": [],
+      "tags": ["quality:light"]
     }
   }
 }
