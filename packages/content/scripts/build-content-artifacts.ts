@@ -322,17 +322,26 @@ type PnpmDependencyNode = {
 type ResolvedPackages = {
   readonly versions: ReadonlyMap<string, string>;
   readonly paths: ReadonlyMap<string, string>;
+  /** pnpm list 的 from 保留 catalog alias 指向的真实 npm 包名。 */
+  readonly packageNames: ReadonlyMap<string, string>;
 };
 
 function collectResolvedPackages(
   value: unknown,
   versions: Map<string, string>,
   paths: Map<string, string>,
+  packageNames: Map<string, string>,
   fallbackName?: string,
 ): void {
   if (Array.isArray(value)) {
     for (const item of value) {
-      collectResolvedPackages(item, versions, paths, fallbackName);
+      collectResolvedPackages(
+        item,
+        versions,
+        paths,
+        packageNames,
+        fallbackName,
+      );
     }
     return;
   }
@@ -349,6 +358,13 @@ function collectResolvedPackages(
   if (name !== undefined && typeof node.path === "string") {
     paths.set(name, node.path);
   }
+  if (
+    name !== undefined &&
+    typeof node.from === "string" &&
+    node.from !== name
+  ) {
+    packageNames.set(name, node.from);
+  }
   for (const field of [
     "dependencies",
     "devDependencies",
@@ -362,42 +378,59 @@ function collectResolvedPackages(
       !Array.isArray(children)
     ) {
       for (const [childName, child] of Object.entries(children)) {
-        collectResolvedPackages(child, versions, paths, childName);
+        collectResolvedPackages(
+          child,
+          versions,
+          paths,
+          packageNames,
+          childName,
+        );
       }
     } else {
-      collectResolvedPackages(children, versions, paths);
+      collectResolvedPackages(children, versions, paths, packageNames);
     }
   }
 }
 
 async function resolvedVersions(
-  packageNames: readonly string[],
+  projectsToResolve: readonly string[],
   workspaceRoot: string,
   commandLog: string[],
 ): Promise<ResolvedPackages> {
   const versions = new Map<string, string>();
   const paths = new Map<string, string>();
-  for (const name of packageNames) {
+  const resolvedPackageNames = new Map<string, string>();
+  for (const name of projectsToResolve) {
     const stdout = await runPnpm(
       ["--filter", name, "list", "--depth", "Infinity", "--json"],
       workspaceRoot,
       commandLog,
     );
-    collectResolvedPackages(JSON.parse(stdout), versions, paths);
+    collectResolvedPackages(
+      JSON.parse(stdout),
+      versions,
+      paths,
+      resolvedPackageNames,
+    );
   }
-  return { versions, paths };
+  return { versions, paths, packageNames: resolvedPackageNames };
 }
 
 function versionForDependency(
   name: string,
   specifier: string,
   workspace: ReadonlyMap<string, WorkspaceProject>,
-  resolved: ReadonlyMap<string, string>,
+  resolved: ResolvedPackages,
 ): string {
   const project = workspace.get(name);
   if (project?.version !== undefined) return project.version;
-  const version = resolved.get(name);
-  if (version !== undefined) return version;
+  const version = resolved.versions.get(name);
+  if (version !== undefined) {
+    const packageName = resolved.packageNames.get(name);
+    return packageName === undefined
+      ? version
+      : `npm:${packageName}@${version}`;
+  }
   if (!/^(?:workspace|catalog|link):/u.test(specifier)) return specifier;
   throw new Error(
     `原生包管理器未解析依赖坐标 ${name}@${specifier}；无法投影安装清单`,
@@ -410,7 +443,7 @@ function artifactInstallDependencies(
   members: readonly NativeMember[],
   artifacts: ReadonlyMap<string, PreparedNativeContentArtifact>,
   workspace: ReadonlyMap<string, WorkspaceProject>,
-  resolved: ReadonlyMap<string, string>,
+  resolved: ResolvedPackages,
 ): Readonly<Record<string, string>> {
   const dependencies: Record<string, string> = {};
   for (const dependency of artifact.dependencies) {
@@ -1037,7 +1070,7 @@ export async function prepareContentCollection(
       members,
       artifactsByIdentity,
       workspace,
-      resolved.versions,
+      resolved,
     );
     const identitySuffix = createHash("sha256")
       .update(identityKey)
