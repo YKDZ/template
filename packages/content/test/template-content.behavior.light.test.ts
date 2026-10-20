@@ -758,6 +758,9 @@ void describe("公开模板内容集合", () => {
     assert.strictEqual(cliResult.status, "success", JSON.stringify(cliResult));
     const cliNode = tsCliPreset.definition.nodes.cli;
     assert.ok(cliNode?.creationInput);
+    const expectedCreationInput =
+      tsCliPreset.definition.nodes.cli?.creationInput?.init;
+    assert.ok(expectedCreationInput);
     const cliManifestPath = path.join(cliRoot, "packages/cli/package.json");
     const cliManifestBeforeAddition = await readFile(cliManifestPath, "utf8");
     const cliManifest = JSON.parse(cliManifestBeforeAddition) as {
@@ -791,9 +794,6 @@ void describe("公开模板内容集合", () => {
       readonly creationInput: TsCliCreationInput;
     };
     assert.strictEqual(publicationConfig.packagePath, "packages/cli");
-    const expectedCreationInput =
-      tsCliPreset.definition.nodes.cli?.creationInput?.init;
-    assert.ok(expectedCreationInput);
     assert.deepStrictEqual(
       publicationConfig.creationInput,
       expectedCreationInput,
