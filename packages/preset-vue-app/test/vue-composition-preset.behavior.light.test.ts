@@ -12,21 +12,66 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { preset } from "@ykdz/preset-vue-app/template";
-import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
-import { referenceDefinition as configurationDefinition } from "@ykdz/reference-typescript-config/template";
-import { referencePackage as vueApp } from "@ykdz/reference-vue-app/template";
-import { referencePackage as vueShared } from "@ykdz/reference-vue-shared/template";
+import { preset as presetDefinition } from "@ykdz/preset-vue-app/template";
+import { referencePackage as vueAppDefinition } from "@ykdz/reference-vue-app/template";
+import { referencePackage as vueSharedDefinition } from "@ykdz/reference-vue-shared/template";
+import {
+  contentIdentityKey,
+  createContentIndex,
+  type ContentIdentity,
+  type LoadedContentMember,
+} from "@ykdz/template-core/content-identity";
 import { definePreset } from "@ykdz/template-core/preset-definition";
 import { createGenerator } from "@ykdz/template-generator";
+import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
-const configuration = defineReferencePackage(configurationDefinition);
-const content = [vueApp, vueShared, library, configuration, preset] as const;
+const content = await loadContentSource({
+  namespace: "ykdz",
+  resolve: (specifier) => import.meta.resolve(specifier),
+  members: [
+    "@ykdz/reference-vue-app/template",
+    "@ykdz/reference-vue-shared/template",
+    "@ykdz/reference-ts-lib/template",
+    "@ykdz/reference-typescript-config/template",
+    "@ykdz/preset-vue-app/template",
+  ],
+  prepareReferenceDefinition(definition) {
+    return defineReferencePackage(
+      definition as Parameters<typeof defineReferencePackage>[0],
+    );
+  },
+});
+const contentIndex = createContentIndex(content);
+const vueApp = contentIndex.fromDefinition(
+  vueAppDefinition,
+  "reference",
+) as LoadedContentMember<
+  ReturnType<typeof defineReferencePackage>,
+  "reference"
+>;
+const vueShared = contentIndex.fromDefinition(vueSharedDefinition, "reference");
+const library = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/reference-ts-lib",
+    exportPath: "./template",
+  },
+  "reference",
+);
+const configuration = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/reference-typescript-config",
+    exportPath: "./template",
+  },
+  "reference",
+);
+const preset = contentIndex.fromDefinition(presetDefinition, "preset");
 
 type PersistedPackage = {
-  readonly contentIdentity: string;
+  readonly contentIdentity: ContentIdentity;
   readonly createdBy: string;
   readonly definition: {
     readonly packageDefinitionId: string;
@@ -107,7 +152,7 @@ void describe("Vue 独立组合预设", () => {
 
     const added = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: { leafName: "dashboard" },
     });
     assert.strictEqual(added.status, "success", JSON.stringify(added));
@@ -141,7 +186,7 @@ void describe("Vue 独立组合预设", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: {
         repositoryName: "demo",
         defaultPackageScope: "demo",
@@ -218,7 +263,7 @@ void describe("Vue 独立组合预设", () => {
     for (const leafName of ["admin", "portal"]) {
       const added = await generator.add({
         repositoryRoot: targetRoot,
-        preset,
+        preset: preset.identity,
         creationInput: { leafName },
       });
       assert.strictEqual(added.status, "success", JSON.stringify(added));
@@ -291,7 +336,9 @@ void describe("Vue 独立组合预设", () => {
     };
     const packages = generation.packages;
     const apps = packages.filter(
-      (item) => item.contentIdentity === vueApp.identity,
+      (item) =>
+        contentIdentityKey(item.contentIdentity) ===
+        contentIdentityKey(vueApp.identity),
     );
     assert.deepStrictEqual(
       apps.map((item) => item.definition.path).toSorted(),
@@ -319,20 +366,24 @@ void describe("Vue 独立组合预设", () => {
       ["addition", "addition"],
     );
     const sharedInstances = packages.filter(
-      (item) => item.contentIdentity === vueShared.identity,
+      (item) =>
+        contentIdentityKey(item.contentIdentity) ===
+        contentIdentityKey(vueShared.identity),
     );
     const configurationInstances = packages.filter(
-      (item) => item.contentIdentity === configuration.identity,
+      (item) =>
+        contentIdentityKey(item.contentIdentity) ===
+        contentIdentityKey(configuration.identity),
     );
     assert.strictEqual(sharedInstances.length, 1);
     assert.strictEqual(configurationInstances.length, 1);
     for (const app of apps) {
       assert.strictEqual(
-        app.bindings[vueShared.identity],
+        app.bindings[contentIdentityKey(vueShared.identity)],
         sharedInstances[0]!.definition.packageDefinitionId,
       );
       assert.strictEqual(
-        app.bindings[configuration.identity],
+        app.bindings[contentIdentityKey(configuration.identity)],
         configurationInstances[0]!.definition.packageDefinitionId,
       );
     }
@@ -352,7 +403,7 @@ void describe("Vue 独立组合预设", () => {
     });
     const result = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
 
@@ -377,7 +428,7 @@ void describe("Vue 独立组合预设", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -389,7 +440,7 @@ void describe("Vue 独立组合预设", () => {
     const generationPath = path.join(targetRoot, ".template/generation.json");
     const record = JSON.parse(await readFile(generationPath, "utf8")) as {
       packages: {
-        contentIdentity: string;
+        contentIdentity: ContentIdentity;
         definition: { path: string };
         bindings: Record<string, string>;
       }[];
@@ -398,15 +449,16 @@ void describe("Vue 独立组合预设", () => {
       (item) => item.definition.path === "apps/web",
     );
     assert.ok(web);
-    assert.ok(web.bindings[vueShared.identity]);
-    web.bindings[vueShared.identity] = "missing-shared-instance";
+    assert.ok(web.bindings[contentIdentityKey(vueShared.identity)]);
+    web.bindings[contentIdentityKey(vueShared.identity)] =
+      "missing-shared-instance";
     const invalidRecord = JSON.stringify(record, null, 2) + "\n";
     await writeFile(generationPath, invalidRecord);
     const beforeAddition = await snapshotTree(targetRoot);
 
     const result = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: { leafName: "rejected" },
     });
 
@@ -431,7 +483,7 @@ void describe("Vue 独立组合预设", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -448,7 +500,7 @@ void describe("Vue 独立组合预设", () => {
 
     const result = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: { leafName: "admin" },
     });
 
@@ -468,7 +520,7 @@ void describe("Vue 独立组合预设", () => {
   });
 
   void it("单节点布局覆盖传播且调用输入覆盖声明默认", async (testContext) => {
-    const layoutPreset = definePreset({
+    const layoutPresetDefinition = definePreset({
       metadata: {
         alias: "vue-layout-test",
         title: "Vue 布局测试",
@@ -477,7 +529,7 @@ void describe("Vue 独立组合预设", () => {
       operations: ["init", "add"],
       nodes: {
         web: {
-          reference: vueApp,
+          reference: vueApp.definition,
           layout: { packageDirectory: "frontends" },
           creationInput: {
             init: { leafName: "preset-home" },
@@ -485,6 +537,11 @@ void describe("Vue 独立组合预设", () => {
           },
         },
       },
+    });
+    const layoutPreset = Object.freeze({
+      ...preset,
+      alias: layoutPresetDefinition.metadata.alias,
+      definition: layoutPresetDefinition,
     });
     const temporaryRoot = await mkdtemp(
       path.join(tmpdir(), "template-vue-layout-override-"),
@@ -494,14 +551,17 @@ void describe("Vue 独立组合预设", () => {
     );
     const targetRoot = path.join(temporaryRoot, "demo");
     const generator = createGenerator({
-      content: [...content, layoutPreset],
+      content: [vueApp, vueShared, configuration, layoutPreset],
       strategy: createDefaultWorkspaceStrategy(),
     });
     const initialized = await generator.init({
       targetRoot,
       selection: {
         roots: [
-          { preset: layoutPreset, creationInput: { leafName: "caller-home" } },
+          {
+            preset: layoutPreset.identity,
+            creationInput: { leafName: "caller-home" },
+          },
         ],
       },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
@@ -523,7 +583,7 @@ void describe("Vue 独立组合预设", () => {
 
     const defaultAddition = await generator.add({
       repositoryRoot: targetRoot,
-      preset: layoutPreset,
+      preset: layoutPreset.identity,
     });
     assert.strictEqual(
       defaultAddition.status,
@@ -541,7 +601,7 @@ void describe("Vue 独立组合预设", () => {
 
     const callerAddition = await generator.add({
       repositoryRoot: targetRoot,
-      preset: layoutPreset,
+      preset: layoutPreset.identity,
       creationInput: { leafName: "caller-admin" },
     });
     assert.strictEqual(
@@ -560,7 +620,7 @@ void describe("Vue 独立组合预设", () => {
 
     const explicitPathAddition = await generator.add({
       repositoryRoot: targetRoot,
-      preset: layoutPreset,
+      preset: layoutPreset.identity,
       creationInput: {
         leafName: "explicit",
         packagePath: "custom/explicit",

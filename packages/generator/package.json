@@ -11,6 +11,11 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./content-source": {
+      "source": "./src/content-source.ts",
+      "types": "./dist/content-source.d.ts",
+      "default": "./dist/content-source.js"
     }
   },
   "scripts": {

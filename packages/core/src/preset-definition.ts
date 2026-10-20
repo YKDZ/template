@@ -1,18 +1,22 @@
+import type { ContentIdentity } from "./content-identity.ts";
 import type { PackageDefinition } from "./project-blueprint.ts";
 
 export type PresetOperation = "init" | "add";
 
-/** 预设项目行为的持久选择由所属包的真实公开导出标识。 */
-export type PresetOwnerSelection = {
+/** 声明预设项目行为的所属原生包出口。 */
+export type PresetOwnerDeclaration = {
   readonly packageName: string;
   readonly exportPath: string;
 };
+
+/** 记录中的预设选择使用完整规范身份。 */
+export type PresetOwnerSelection = ContentIdentity;
 
 /** 从包清单实际公开指向预设声明的出口推导其持久身份。 */
 export function presetOwnerFromManifest(
   manifest: unknown,
   exportPath: string,
-): PresetOwnerSelection {
+): PresetOwnerDeclaration {
   if (!isRecord(manifest) || typeof manifest.name !== "string") {
     throw new Error("预设所属包清单缺少包名");
   }
@@ -37,14 +41,14 @@ export type PresetProjectOptions<Context, Contribution> = {
 };
 
 type PresetProjectFields<Options, ProjectContribution> = {
-  readonly owner?: PresetOwnerSelection;
+  readonly owner?: PresetOwnerDeclaration;
   readonly project?: [Options] extends [never]
     ? never
     : (options: Options) => ProjectContribution;
 };
 
 export type PresetReference = {
-  readonly identity: string;
+  readonly alias: string;
   readonly instance: "shared" | "independent";
 };
 
@@ -128,7 +132,7 @@ type PresetBaseOptions<Nodes extends PresetNodeMap> = {
 /** 创建不读取资源、不执行规划的预设组合声明。 */
 export function definePreset<const Nodes extends PresetNodeMap>(
   options: PresetBaseOptions<Nodes> & {
-    readonly owner?: PresetOwnerSelection;
+    readonly owner?: PresetOwnerDeclaration;
     readonly project?: never;
   },
 ): PresetDefinition<
@@ -142,7 +146,7 @@ export function definePreset<
   ProjectContribution,
 >(
   options: PresetBaseOptions<Nodes> & {
-    readonly owner: PresetOwnerSelection;
+    readonly owner: PresetOwnerDeclaration;
     readonly project: (options: ProjectOptions) => ProjectContribution;
   },
 ): PresetDefinition<
@@ -154,7 +158,7 @@ export function definePreset<
 > & { readonly nodes: Nodes };
 export function definePreset<const Nodes extends PresetNodeMap>(
   options: PresetBaseOptions<Nodes> & {
-    readonly owner?: PresetOwnerSelection;
+    readonly owner?: PresetOwnerDeclaration;
     readonly project?: (...args: never[]) => unknown;
   },
 ): unknown {
@@ -191,7 +195,7 @@ export function definePreset<const Nodes extends PresetNodeMap>(
   if (nodeEntries.length === 0) {
     throw new Error("预设至少声明一个节点");
   }
-  const independentReferences = new Set<string>();
+  const independentReferences = new Set<PresetReference>();
   const nodes: Record<
     string,
     PresetNode<NodeReference<Nodes>, unknown, unknown>
@@ -203,18 +207,18 @@ export function definePreset<const Nodes extends PresetNodeMap>(
     if (
       !isRecord(value) ||
       !isRecord(value.reference) ||
-      typeof value.reference.identity !== "string" ||
-      value.reference.identity.length === 0 ||
+      typeof value.reference.alias !== "string" ||
+      value.reference.alias.trim().length === 0 ||
       !["shared", "independent"].includes(String(value.reference.instance))
     ) {
       throw new Error(`预设节点缺少有效参考：${identity}`);
     }
     const reference = value.reference as NodeReference<Nodes>;
     if (reference.instance === "independent") {
-      if (independentReferences.has(reference.identity)) {
-        throw new Error(`预设重复选择独立参考：${reference.identity}`);
+      if (independentReferences.has(reference)) {
+        throw new Error(`预设重复选择独立参考：${reference.alias}`);
       }
-      independentReferences.add(reference.identity);
+      independentReferences.add(reference);
     }
     if (value.creationInput !== undefined) {
       if (!isRecord(value.creationInput)) {

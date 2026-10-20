@@ -5,7 +5,7 @@ import { defineReferencePackage } from "@ykdz/template-workspace-authoring/refer
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vike-db",
   resolve: (specifier) => import.meta.resolve(specifier),
-  identity: "vike-database",
+  alias: "vike-database",
   instance: "independent",
   defaultLeafName: "db",
   defaultPath: "packages/db",

@@ -1,7 +1,7 @@
 export const referenceDefinition = {
   packageName: "@ykdz/reference-typescript-config",
   resolve: (specifier: string) => import.meta.resolve(specifier),
-  identity: "typescript-config",
+  alias: "typescript-config",
   instance: "shared",
   defaultLeafName: "typescript-config",
   role: "shared-library",

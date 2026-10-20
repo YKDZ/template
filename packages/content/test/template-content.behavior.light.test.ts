@@ -12,17 +12,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 
-import { preset as rustBinPreset } from "@ykdz/preset-rust-bin/template";
-import { preset as tsCliPreset } from "@ykdz/preset-ts-cli/template";
-import { preset } from "@ykdz/preset-ts-lib/template";
-import { preset as vikeAppPreset } from "@ykdz/preset-vike-app/template";
-import { preset as vueAppPreset } from "@ykdz/preset-vue-app/template";
-import { referencePackage as rustBin } from "@ykdz/reference-rust-bin/template";
-import { referencePackage as tsCli } from "@ykdz/reference-ts-cli/template";
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
-import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
-import { referencePackage as vueApp } from "@ykdz/reference-vue-app/template";
-import { templateContent } from "@ykdz/template-content";
+import {
+  templateContent,
+  type TemplatePreset,
+  type TemplateReferencePackage,
+} from "@ykdz/template-content";
+import { contentIdentityKey } from "@ykdz/template-core/content-identity";
 import {
   createGenerator,
   parseGenerationRecord,
@@ -34,6 +30,38 @@ import {
 } from "@ykdz/template-workspace/default-workspace-strategy";
 
 type WorkspaceCreationInput = DefaultWorkspaceCreationInput<TsCliCreationInput>;
+
+function requireReferenceMember(packageName: string): TemplateReferencePackage {
+  const member = templateContent.find(
+    (candidate): candidate is TemplateReferencePackage =>
+      candidate.kind === "reference" &&
+      candidate.identity.packageName === packageName,
+  );
+  assert.ok(member, `内容集合缺少参考包：${packageName}`);
+  return member;
+}
+
+function requirePresetMember(packageName: string): TemplatePreset {
+  const member = templateContent.find(
+    (candidate): candidate is TemplatePreset =>
+      candidate.kind === "preset" &&
+      candidate.identity.packageName === packageName,
+  );
+  assert.ok(member, `内容集合缺少预设：${packageName}`);
+  return member;
+}
+
+const libraryMember = requireReferenceMember("@ykdz/reference-ts-lib");
+const tsCliMember = requireReferenceMember("@ykdz/reference-ts-cli");
+const rustBinMember = requireReferenceMember("@ykdz/reference-rust-bin");
+const vueAppMember = requireReferenceMember("@ykdz/reference-vue-app");
+const library = libraryMember.definition;
+const tsCli = tsCliMember.definition;
+const tsLibPreset = requirePresetMember("@ykdz/preset-ts-lib");
+const tsCliPreset = requirePresetMember("@ykdz/preset-ts-cli");
+const rustBinPreset = requirePresetMember("@ykdz/preset-rust-bin");
+const vikeAppPreset = requirePresetMember("@ykdz/preset-vike-app");
+const vueAppPreset = requirePresetMember("@ykdz/preset-vue-app");
 
 const temporaryDirectories: string[] = [];
 
@@ -99,7 +127,7 @@ void describe("公开模板内容集合", () => {
       );
       const initialized = await generator.init({
         targetRoot,
-        selection: { roots: [{ preset }] },
+        selection: { roots: [{ preset: tsLibPreset.identity }] },
         strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
       });
       assert.strictEqual(
@@ -128,7 +156,7 @@ void describe("公开模板内容集合", () => {
         const beforeConflict = await snapshotTree(targetRoot);
         const conflict = await generator.add({
           repositoryRoot: targetRoot,
-          preset: vueAppPreset,
+          preset: vueAppPreset.identity,
           creationInput: { leafName: names[0] },
         });
         assert.strictEqual(conflict.status, "conflict");
@@ -139,7 +167,7 @@ void describe("公开模板内容集合", () => {
       for (const leafName of names) {
         const added = await generator.add({
           repositoryRoot: targetRoot,
-          preset: vueAppPreset,
+          preset: vueAppPreset.identity,
           creationInput: { leafName },
         });
         assert.strictEqual(added.status, "success", JSON.stringify(added));
@@ -176,7 +204,7 @@ void describe("公开模板内容集合", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: tsLibPreset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -190,7 +218,7 @@ void describe("公开模板内容集合", () => {
     await mkdir(workflowPath);
     const added = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: tsLibPreset.identity,
       creationInput: { leafName: "utilities" },
     });
 
@@ -207,7 +235,7 @@ void describe("公开模板内容集合", () => {
 
     const result = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: tsLibPreset.identity }] },
       strategyInput: { defaultPackageScope: "demo" },
     });
 
@@ -238,7 +266,7 @@ void describe("公开模板内容集合", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: tsCliPreset }] },
+      selection: { roots: [{ preset: tsCliPreset.identity }] },
       strategyInput: {
         repositoryName: "demo",
         defaultPackageScope: "demo",
@@ -283,7 +311,7 @@ void describe("公开模板内容集合", () => {
 
     const added = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
+      contentIdentity: libraryMember.identity,
       creationInput: { packagePath: "packages/provider" },
     });
     assert.strictEqual(added.status, "success", JSON.stringify(added));
@@ -314,7 +342,7 @@ void describe("公开模板内容集合", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: tsCliPreset }] },
+      selection: { roots: [{ preset: tsCliPreset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -330,7 +358,7 @@ void describe("公开模板内容集合", () => {
     } satisfies WorkspaceCreationInput;
     const result = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
+      contentIdentity: libraryMember.identity,
       creationInput,
     });
 
@@ -355,7 +383,9 @@ void describe("公开模板内容集合", () => {
     );
     assert.deepStrictEqual(
       result.generationRecord.packages.find(
-        (item) => item.contentIdentity === library.identity,
+        (item) =>
+          contentIdentityKey(item.contentIdentity) ===
+          contentIdentityKey(libraryMember.identity),
       )?.creationInput,
       creationInput,
     );
@@ -365,10 +395,23 @@ void describe("公开模板内容集合", () => {
     const targetRoot = await createTargetRoot(
       "template-content-link-from-contribution-",
     );
-    const provider = {
+    const providerDefinition = {
       ...library,
-      identity: "test:manifest-transformed-provider",
       manifest: { ...library.manifest, exports: {} },
+      contribute(options: Parameters<typeof library.contribute>[0]) {
+        const contribution = library.contribute(options);
+        return {
+          ...contribution,
+          manifest: { ...contribution.manifest, exports: {} },
+          exposure: { ...contribution.exposure, exports: {} },
+        };
+      },
+    };
+    const provider = {
+      ...libraryMember,
+      identity: { ...libraryMember.identity, namespace: "test-content" },
+      alias: "manifest-transformed-provider",
+      definition: providerDefinition,
     };
     const generator = createGenerator({
       content: [...templateContent, provider],
@@ -376,7 +419,7 @@ void describe("公开模板内容集合", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: tsCliPreset }] },
+      selection: { roots: [{ preset: tsCliPreset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -385,6 +428,7 @@ void describe("公开模板内容集合", () => {
       JSON.stringify(initialized),
     );
 
+    const before = await snapshotTree(targetRoot);
     const result = await generator.add({
       repositoryRoot: targetRoot,
       contentIdentity: provider.identity,
@@ -395,21 +439,11 @@ void describe("公开模板内容集合", () => {
       },
     });
 
-    assert.strictEqual(result.status, "success", JSON.stringify(result));
-    if (result.status !== "success") throw new Error("加包应成功");
-    assert.deepStrictEqual(result.blueprint.packageLinkIntents, [
-      {
-        consumerPackagePath: "packages/cli",
-        providerPackagePath: "packages/provider",
-      },
-    ]);
-    const providerManifest = JSON.parse(
-      await readFile(
-        path.join(targetRoot, "packages/provider/package.json"),
-        "utf8",
-      ),
-    ) as { exports: Record<string, unknown> };
-    assert.ok(Object.hasOwn(providerManifest.exports, "."));
+    assert.strictEqual(result.status, "input-invalid", JSON.stringify(result));
+    if (result.status === "input-invalid") {
+      assert.deepStrictEqual(result.issues, [{ code: "UNSUPPORTED_LINK" }]);
+    }
+    assert.strictEqual(await snapshotTree(targetRoot), before);
   });
 
   void it("重复已存在的 provider 时拒绝补交缺失的 linkFrom", async () => {
@@ -422,7 +456,7 @@ void describe("公开模板内容集合", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: tsCliPreset }] },
+      selection: { roots: [{ preset: tsCliPreset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -437,7 +471,7 @@ void describe("公开模板内容集合", () => {
     } satisfies WorkspaceCreationInput;
     const created = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
+      contentIdentity: libraryMember.identity,
       creationInput: originalInput,
     });
     assert.strictEqual(created.status, "success", JSON.stringify(created));
@@ -459,7 +493,7 @@ void describe("公开模板内容集合", () => {
     };
     const retry = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
+      contentIdentity: libraryMember.identity,
       creationInput: {
         ...originalInput,
         linkFrom: ["packages/cli"],
@@ -508,7 +542,7 @@ void describe("公开模板内容集合", () => {
 
     const identityRetry = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
+      contentIdentity: libraryMember.identity,
       creationInput: {
         leafName: "other",
         packagePath: "packages/provider",
@@ -549,7 +583,7 @@ void describe("公开模板内容集合", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: tsCliPreset }] },
+      selection: { roots: [{ preset: tsCliPreset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -561,7 +595,7 @@ void describe("公开模板内容集合", () => {
 
     const result = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
+      contentIdentity: libraryMember.identity,
       creationInput: {
         packagePath: "packages/provider",
         linkFrom: ["packages/missing"],
@@ -599,7 +633,7 @@ void describe("公开模板内容集合", () => {
       });
       const initialized = await generator.init({
         targetRoot,
-        selection: { roots: [{ preset: tsCliPreset }] },
+        selection: { roots: [{ preset: tsCliPreset.identity }] },
         strategyInput: {
           repositoryName: "demo",
           defaultPackageScope: "demo",
@@ -628,7 +662,7 @@ void describe("公开模板内容集合", () => {
 
       const result = await generator.add({
         repositoryRoot: targetRoot,
-        contentIdentity: library.identity,
+        contentIdentity: libraryMember.identity,
         creationInput: { leafName: "diagnostic-package" },
       });
 
@@ -657,7 +691,7 @@ void describe("公开模板内容集合", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: tsCliPreset }] },
+      selection: { roots: [{ preset: tsCliPreset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -684,7 +718,7 @@ void describe("公开模板内容集合", () => {
 
     const result = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
+      contentIdentity: libraryMember.identity,
       creationInput,
     });
 
@@ -713,11 +747,13 @@ void describe("公开模板内容集合", () => {
     const cliRoot = await createTargetRoot("template-content-ts-cli-");
     const cliResult = await generator.init({
       targetRoot: cliRoot,
-      selection: { roots: [{ preset: tsCliPreset }] },
+      selection: { roots: [{ preset: tsCliPreset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
 
     assert.strictEqual(cliResult.status, "success", JSON.stringify(cliResult));
+    const cliNode = tsCliPreset.definition.nodes.cli;
+    assert.ok(cliNode?.creationInput);
     const cliManifest = JSON.parse(
       await readFile(path.join(cliRoot, "packages/cli/package.json"), "utf8"),
     ) as {
@@ -748,7 +784,7 @@ void describe("公开模板内容集合", () => {
     assert.strictEqual(publicationConfig.packagePath, "packages/cli");
     assert.deepStrictEqual(
       publicationConfig.creationInput,
-      tsCliPreset.nodes.cli.creationInput.init,
+      cliNode.creationInput.init,
     );
     const blueprint = JSON.parse(
       await readFile(path.join(cliRoot, ".template/blueprint.json"), "utf8"),
@@ -788,7 +824,7 @@ void describe("公开模板内容集合", () => {
     const rustRoot = await createTargetRoot("template-content-rust-bin-");
     const rustResult = await generator.init({
       targetRoot: rustRoot,
-      selection: { roots: [{ preset: rustBinPreset }] },
+      selection: { roots: [{ preset: rustBinPreset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -815,7 +851,7 @@ void describe("公开模板内容集合", () => {
 
     const result = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: vikeAppPreset }] },
+      selection: { roots: [{ preset: vikeAppPreset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
 
@@ -826,7 +862,7 @@ void describe("公开模板内容集合", () => {
     const beforeConflict = await snapshotTree(targetRoot);
     const conflict = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
+      contentIdentity: libraryMember.identity,
     });
     assert.strictEqual(conflict.status, "conflict");
     assert.strictEqual(await snapshotTree(targetRoot), beforeConflict);
@@ -868,11 +904,11 @@ void describe("公开模板内容集合", () => {
     ]);
 
     for (const addition of [
-      { contentIdentity: library.identity },
-      { contentIdentity: tsCli.identity },
-      { contentIdentity: rustBin.identity },
+      { contentIdentity: libraryMember.identity },
+      { contentIdentity: tsCliMember.identity },
+      { contentIdentity: rustBinMember.identity },
       {
-        contentIdentity: vueApp.identity,
+        contentIdentity: vueAppMember.identity,
         creationInput: { leafName: "vue" },
       },
     ]) {

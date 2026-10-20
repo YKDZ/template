@@ -31,11 +31,11 @@ async function renderedPresetSource(
   const workspace = await mkdtemp(path.join(tmpdir(), "template-workflow-"));
   try {
     for (const preset of templatePresets) {
-      const targetRoot = path.join(workspace, preset.metadata.alias);
+      const targetRoot = path.join(workspace, preset.alias);
       const receipt = await initializePreset({
         preset,
         targetRoot,
-        repositoryName: preset.metadata.alias,
+        repositoryName: preset.alias,
       });
       const hasDeploymentCheck =
         receipt.result.projection.ownerFacts.requirements.deploymentCheck !==
@@ -79,11 +79,11 @@ async function publicationWorkflow(): Promise<{
   const workspace = await mkdtemp(path.join(tmpdir(), "template-workflow-"));
   try {
     for (const preset of templatePresets) {
-      const targetRoot = path.join(workspace, preset.metadata.alias);
+      const targetRoot = path.join(workspace, preset.alias);
       const receipt = await initializePreset({
         preset,
         targetRoot,
-        repositoryName: preset.metadata.alias,
+        repositoryName: preset.alias,
       });
       if (receipt.result.projection.ownerFacts.publication.candidate === null) {
         continue;

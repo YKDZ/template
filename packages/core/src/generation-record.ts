@@ -1,5 +1,11 @@
 import * as v from "valibot";
 
+const contentIdentitySchema = v.strictObject({
+  namespace: v.string(),
+  packageName: v.string(),
+  exportPath: v.string(),
+});
+
 import type {
   GenerationRecord,
   PackageCreationInput,
@@ -12,7 +18,7 @@ export const generationRecordSchema = v.looseObject({
   strategyState: v.unknown(),
   packages: v.array(
     v.looseObject({
-      contentIdentity: v.string(),
+      contentIdentity: contentIdentitySchema,
       createdBy: v.picklist([
         "initialization",
         "addition",
@@ -29,12 +35,7 @@ export const generationRecordSchema = v.looseObject({
     }),
   ),
   nodeInstances: v.record(v.string(), v.string()),
-  presetSelections: v.array(
-    v.looseObject({
-      packageName: v.string(),
-      exportPath: v.string(),
-    }),
-  ),
+  presetSelections: v.array(contentIdentitySchema),
 });
 
 /** 按公开 schema1 结构解析；策略语义由 generator/workspace owner 继续校验。 */

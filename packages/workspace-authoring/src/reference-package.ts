@@ -55,7 +55,8 @@ type Contextual<
 export type ReferencePackage<
   CreationInput extends PackageCreationInput = PackageCreationInput,
 > = {
-  readonly identity: string;
+  readonly alias: string;
+  readonly resolve: (specifier: string) => string;
   readonly instance: "shared" | "independent";
   readonly defaultLeafName: string;
   readonly defaultPath: string;
@@ -89,7 +90,7 @@ export function defineReferencePackage<
 >(options: {
   readonly packageName: string;
   readonly resolve: (specifier: string) => string;
-  readonly identity: string;
+  readonly alias: string;
   readonly instance: "shared" | "independent";
   readonly defaultLeafName: string;
   readonly defaultPath?: string;
@@ -222,7 +223,8 @@ export function defineReferencePackage<
   const operations = (targetPath: string): CopyFileOperation[] =>
     collectOperations(targetPath, false);
   return {
-    identity: options.identity,
+    alias: options.alias,
+    resolve: options.resolve,
     instance: options.instance,
     defaultLeafName: options.defaultLeafName,
     defaultPath: options.defaultPath ?? `packages/${options.defaultLeafName}`,

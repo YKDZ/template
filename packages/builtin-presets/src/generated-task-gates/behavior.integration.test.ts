@@ -17,7 +17,7 @@ import {
 } from "../../test-support/installed-integration-signal.ts";
 function presetFor(packageName: string) {
   const preset = templatePresets.find(
-    (candidate) => candidate.owner?.packageName === packageName,
+    (candidate) => candidate.identity.packageName === packageName,
   );
   assert.ok(preset, `缺少公开预设：${packageName}`);
   return preset;
@@ -45,7 +45,7 @@ void describe("生成任务公共入口", () => {
       try {
         const initialized = await currentGenerator.init({
           targetRoot,
-          selection: { roots: [{ preset }] },
+          selection: { roots: [{ preset: preset.identity }] },
           strategyInput: {
             repositoryName: "generated-library",
             defaultPackageScope: "generated",
@@ -58,7 +58,7 @@ void describe("生成任务公共入口", () => {
         );
         const addedPackage = await currentGenerator.add({
           repositoryRoot: targetRoot,
-          preset,
+          preset: preset.identity,
           creationInput: {
             leafName: "utilities",
             packagePath: "packages/utilities",
@@ -246,7 +246,7 @@ void describe("生成任务公共入口", () => {
       try {
         const initialized = await currentGenerator.init({
           targetRoot,
-          selection: { roots: [{ preset }] },
+          selection: { roots: [{ preset: preset.identity }] },
           strategyInput: {
             repositoryName: "generated-rust",
             defaultPackageScope: "generated",

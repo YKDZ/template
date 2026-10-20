@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { templateContent } from "@ykdz/template-content";
+import { templatePresets } from "@ykdz/template-content";
 import { canLinkNodePackageRoles } from "@ykdz/template-workspace/project-linking";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
@@ -53,7 +53,7 @@ function requireLinkableAddablePreset(): {
   readonly name: string;
   readonly consumerPath: string;
 } {
-  const presets = templateContent.filter((content) => "kind" in content);
+  const presets = templatePresets.map((member) => member.definition);
   for (const preset of presets) {
     if (
       !preset.operations.includes("init") ||
@@ -179,14 +179,9 @@ void describe("template CLI command control", () => {
       assert.match(output.stdout(), /^内置预设/mu);
       assert.equal(output.stdout(), repeat.stdout());
       assert.match(output.stdout(), /\n  [^:\s]+:/u);
-      const cliPreset = templateContent
-        .filter((content) => "kind" in content)
-        .find((preset) =>
-          Object.values(preset.nodes).some(
-            ({ reference }) =>
-              reference.manifest.name === "@ykdz/reference-ts-cli",
-          ),
-        );
+      const cliPreset = templatePresets.find(
+        (member) => member.identity.packageName === "@ykdz/preset-ts-cli",
+      )?.definition;
       if (cliPreset === undefined)
         throw new Error("Expected a CLI preset in the content collection");
       assert.ok(
@@ -204,9 +199,9 @@ void describe("template CLI command control", () => {
         kind: "data",
         variant: "listed",
         data: {
-          presets: templateContent
-            .filter((content) => "kind" in content)
-            .map((preset) => ({ name: preset.metadata.alias })),
+          presets: templatePresets.map((member) => ({
+            name: member.alias,
+          })),
         },
       });
       assert.equal(jsonOutput.stderr(), "");
@@ -599,8 +594,8 @@ void describe("template CLI command control", () => {
       path.join(tmpdir(), "template-cli-init-usage-"),
     );
     try {
-      const fixed = templateContent
-        .filter((content) => "kind" in content)
+      const fixed = templatePresets
+        .map((member) => member.definition)
         .find((preset) => Object.keys(preset.nodes).length !== 1)!;
       for (const args of [
         ["init", "unknown", "--preset", "missing-preset"],

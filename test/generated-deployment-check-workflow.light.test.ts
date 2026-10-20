@@ -19,7 +19,7 @@ async function renderDeploymentWorkflow(): Promise<{
   );
   try {
     for (const preset of templatePresets) {
-      const targetRoot = path.join(workspace, preset.metadata.alias);
+      const targetRoot = path.join(workspace, preset.alias);
       const receipt = await initializePreset({
         preset,
         targetRoot,

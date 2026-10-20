@@ -51,7 +51,7 @@ async function generatedRepository(
   );
   workspaces.push(repositoryRoot);
   const cliPreset = templatePresets.find(
-    (preset) => preset.owner?.packageName === "@ykdz/preset-ts-cli",
+    (preset) => preset.identity.packageName === "@ykdz/preset-ts-cli",
   );
   assert.ok(cliPreset);
   const result = await createGenerator({
@@ -59,7 +59,7 @@ async function generatedRepository(
     strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
   }).init({
     targetRoot: repositoryRoot,
-    selection: { roots: [{ preset: cliPreset }] },
+    selection: { roots: [{ preset: cliPreset.identity }] },
     strategyInput: {
       repositoryName: "demo-cli",
       defaultPackageScope: "demo",

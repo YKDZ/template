@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { templateContent } from "@ykdz/template-content";
+import { templatePresets } from "@ykdz/template-content";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 import { runInit, type ApplicationRuntime } from "../../src/application.ts";
@@ -25,14 +25,9 @@ void describe("init publication setup handoff", () => {
   void it("renders the one-time setup command only in the init terminal result", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-cli-init-"));
     try {
-      const publicationSetupPreset = templateContent
-        .filter((content) => "kind" in content)
-        .find((preset) =>
-          Object.values(preset.nodes).some(
-            ({ reference }) =>
-              reference.manifest.name === "@ykdz/reference-ts-cli",
-          ),
-        );
+      const publicationSetupPreset = templatePresets.find(
+        (member) => member.identity.packageName === "@ykdz/preset-ts-cli",
+      )?.definition;
       if (publicationSetupPreset === undefined)
         throw new Error("Expected a Built-in Preset with publication setup");
       const runtime = createRuntime(workspace);
@@ -79,8 +74,8 @@ void describe("init toolchain snapshot consumption", () => {
     );
     try {
       // 本业务需要一个共享库角色的初始包，从唯一内容集合中选取 Preset。
-      const snapshotInitPreset = templateContent
-        .filter((content) => "kind" in content)
+      const snapshotInitPreset = templatePresets
+        .map((member) => member.definition)
         .find((preset) =>
           Object.values(preset.nodes).some(
             ({ reference }) => reference.role === "shared-library",
