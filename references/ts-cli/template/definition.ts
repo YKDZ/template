@@ -1,17 +1,18 @@
 import path from "node:path";
 
-import {
-  isTsCliPublicCandidateCreationInput,
-  tsCliPublicCandidateCreationInput,
-  type TsCliCreationVariant,
-} from "@ykdz/reference-ts-cli/command-identity";
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
 import type { GenerationContext } from "@ykdz/template-workspace-authoring/generation-context";
 import { validateCliCommandName } from "@ykdz/template-workspace-authoring/package-contribution";
 import type { PackageLinkRequirement } from "@ykdz/template-workspace-authoring/project-requirements";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
-export type { TsCliCreationVariant } from "@ykdz/reference-ts-cli/command-identity";
+import {
+  isTsCliPublicCandidateCreationInput,
+  tsCliPublicCandidateCreationInput,
+  type TsCliCreationVariant,
+} from "./creation-input.ts";
+
+export type { TsCliCreationVariant } from "./creation-input.ts";
 export type TsCliCreationInput = PackageCreationInput<TsCliCreationVariant> & {
   /** 要连接的已选参考包节点；目标角色和来源条件由默认 workspace 策略校验。 */
   readonly linkToNodeIdentity?: string;
@@ -51,13 +52,9 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
   publicationIdentitySource: "src/cli-command-identity.ts",
   authoring: {
     dependencies: ["@ykdz/template-core", "@ykdz/template-workspace-authoring"],
-    exports: ["./command-identity"],
+    exports: ["./command-identity", "./creation-input"],
     scripts: ["build:template"],
-    resources: [
-      "template",
-      "tsconfig.template.json",
-      "tsconfig.command-identity-types.json",
-    ],
+    resources: ["template", "tsconfig.template.json"],
   },
   environmentNeeds: [],
   foundation: {

@@ -722,6 +722,7 @@ void describe("公开模板内容集合", () => {
       await readFile(path.join(cliRoot, "packages/cli/package.json"), "utf8"),
     ) as {
       files: string[];
+      exports?: Readonly<Record<string, unknown>>;
       scripts?: Readonly<Record<string, string>>;
     };
     assert.deepStrictEqual(cliManifest.files, ["dist"]);
@@ -729,10 +730,9 @@ void describe("公开模板内容集合", () => {
       cliManifest.scripts?.build,
       tsCli.manifest.scripts?.build,
     );
+    assert.strictEqual(cliManifest.exports?.["./creation-input"], undefined);
     await assert.rejects(
-      readFile(
-        path.join(cliRoot, "packages/cli/tsconfig.command-identity-types.json"),
-      ),
+      readFile(path.join(cliRoot, "packages/cli/template/creation-input.ts")),
       { code: "ENOENT" },
     );
     const publicationConfig = JSON.parse(

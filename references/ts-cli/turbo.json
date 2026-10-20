@@ -4,7 +4,6 @@
   "tasks": {
     "build:template": {
       "dependsOn": [
-        "build",
         "@ykdz/template-core#build",
         "@ykdz/template-workspace-authoring#build"
       ],

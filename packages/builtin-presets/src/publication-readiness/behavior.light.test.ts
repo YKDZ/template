@@ -246,6 +246,13 @@ async function runReadinessCaller(
         path.join(moduleRoot, "cli-command-identity.ts"),
       );
     })(),
+    cp(
+      resolveTemplateSource(
+        referencePackage.source("template/creation-input.ts"),
+        ".",
+      ),
+      path.join(moduleRoot, "cli-candidate-selection.ts"),
+    ),
   ]);
   const callerPath = path.join(
     repositoryRoot,

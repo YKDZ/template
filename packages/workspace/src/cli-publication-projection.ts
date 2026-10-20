@@ -82,6 +82,9 @@ function publicationOperations(
 ): RenderOperation[] {
   if (candidate === undefined) return [];
   const identitySource = tsCliReferencePackage.publicationIdentitySource;
+  const candidateSelectionSource = tsCliReferencePackage.source(
+    "template/creation-input.ts",
+  );
   if (identitySource === undefined) {
     throw new Error("公开 CLI 候选缺少原生身份资源");
   }
@@ -99,6 +102,7 @@ function publicationOperations(
           "RELEASING.md",
           "publication.config.json",
           "cli-command-identity.ts",
+          "cli-candidate-selection.ts",
         ].includes(path.posix.basename(operation.to)),
     ),
     ...copyWorkspaceDirectory(
@@ -120,6 +124,12 @@ function publicationOperations(
       source: identitySource,
       from: ".",
       to: "scripts/npm-publication/cli-command-identity.ts",
+    },
+    {
+      kind: "copyFile",
+      source: candidateSelectionSource,
+      from: ".",
+      to: "scripts/npm-publication/cli-candidate-selection.ts",
     },
     {
       kind: "setExecutable",
