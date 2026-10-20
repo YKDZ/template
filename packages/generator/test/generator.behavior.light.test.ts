@@ -550,6 +550,7 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
       );
     }
     const secondRecordPath = path.join(secondRoot, ".template/generation.json");
+    const secondTreeBeforeDryRun = await snapshotTree(secondRoot);
     const secondRecordBefore = await readFile(secondRecordPath, "utf8");
     const secondDryRun = await createDocumentationEngine({
       policyId: "test-policy:second",
@@ -588,6 +589,7 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
       await readFile(secondRecordPath, "utf8"),
       secondRecordBefore,
     );
+    assert.strictEqual(await snapshotTree(secondRoot), secondTreeBeforeDryRun);
 
     const secondAdd = await createDocumentationEngine({
       policyId: "test-policy:second",
