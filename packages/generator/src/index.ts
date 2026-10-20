@@ -162,7 +162,7 @@ function isPresetDefinition<
   Reference extends PresetReference,
   NodeLayout,
   CreationInput,
-  ProjectOptions extends PresetProjectOptions<unknown, unknown> | never,
+  ProjectOptions,
   ProjectContribution,
 >(
   value: unknown,
