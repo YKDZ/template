@@ -598,15 +598,18 @@ importers:
       '@ykdz/cli-contract':
         specifier: 'catalog:'
         version: 0.3.0
-      '@ykdz/template-builtin-presets':
+      '@ykdz/template-content':
         specifier: workspace:*
-        version: link:../builtin-presets
+        version: link:../content
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
       '@ykdz/template-environment':
         specifier: workspace:*
         version: link:../environment
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../generator
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../workspace
@@ -656,6 +659,9 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../../references/typescript-config
+      '@ykdz/template-builtin-presets':
+        specifier: workspace:*
+        version: link:../builtin-presets
       execa:
         specifier: 'catalog:'
         version: 10.1.1
