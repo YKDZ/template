@@ -38,6 +38,10 @@ void it("Vue 应用连续加包沿参考布局写入 apps", async () => {
       "success",
       JSON.stringify(initialized),
     );
+    assert.match(
+      await readFile(path.join(targetRoot, "pnpm-workspace.yaml"), "utf8"),
+      /overrides:\n  pinia>typescript: "-"\n  vue>typescript: "-"/u,
+    );
 
     const added = await generator.add({
       repositoryRoot: targetRoot,

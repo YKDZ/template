@@ -30,6 +30,11 @@
       "types": "./dist/project-github.d.ts",
       "default": "./dist/project-github.js"
     },
+    "./application-requirements": {
+      "source": "./src/application-requirements.ts",
+      "types": "./dist/application-requirements.d.ts",
+      "default": "./dist/application-requirements.js"
+    },
     "./workspace-resources": {
       "source": "./src/workspace-resources.ts",
       "types": "./dist/workspace-resources.d.ts",

@@ -130,6 +130,10 @@ void it("Vue-Hono 初始化先分配所有显式独立根再解析原生依赖",
       scripts: Record<string, string>;
       devDependencies: Record<string, string>;
     };
+    assert.match(
+      await readFile(path.join(targetRoot, "pnpm-workspace.yaml"), "utf8"),
+      /overrides:\n  pinia>typescript: "-"\n  vue>typescript: "-"/u,
+    );
     assert.strictEqual(rootManifest.scripts["test:e2e"], "playwright test");
     assert.strictEqual(
       rootManifest.devDependencies["@playwright/test"],
@@ -152,6 +156,20 @@ void it("Vue-Hono 初始化先分配所有显式独立根再解析原生依赖",
     assert.ok(
       (
         JSON.parse(
+          await readFile(path.join(targetRoot, "tsconfig.json"), "utf8"),
+        ) as { include: string[] }
+      ).include.includes("test/**/*.ts"),
+    );
+    assert.match(
+      await readFile(
+        path.join(targetRoot, ".github/workflows/check.yml"),
+        "utf8",
+      ),
+      /PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS:[^\n]*\n\s+\./u,
+    );
+    assert.ok(
+      (
+        JSON.parse(
           await readFile(
             path.join(targetRoot, ".template/environment-needs.json"),
             "utf8",
@@ -163,6 +181,20 @@ void it("Vue-Hono 初始化先分配所有显式独立根再解析原生依赖",
       await readFile(path.join(targetRoot, "apps/web/package.json"), "utf8"),
     ) as { dependencies: Record<string, string> };
     assert.strictEqual(webManifest.dependencies["@demo/api"], "workspace:*");
+    const apiManifest = JSON.parse(
+      await readFile(path.join(targetRoot, "apps/api/package.json"), "utf8"),
+    ) as {
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+    assert.strictEqual(
+      apiManifest.dependencies["@demo/typescript-config"],
+      "workspace:*",
+    );
+    assert.strictEqual(
+      apiManifest.devDependencies["@demo/typescript-config"],
+      undefined,
+    );
     const generation = JSON.parse(
       await readFile(
         path.join(targetRoot, ".template/generation.json"),
