@@ -208,6 +208,29 @@ function includeRequestedLinkFromIntents(
   return assertDefaultProjectBlueprint({ ...blueprint, packageLinkIntents });
 }
 
+const supportedProjectRequirementKinds = new Set([
+  "package-link",
+  "vue-hono-joint-e2e",
+  "sqlite-database-preparation",
+  "application-container-with-database-migrations",
+]);
+
+function assertSupportedProjectRequirementKinds(
+  requirements: readonly unknown[],
+): void {
+  for (const requirement of requirements) {
+    const kind = isRecord(requirement) ? requirement.kind : undefined;
+    if (
+      typeof kind !== "string" ||
+      !supportedProjectRequirementKinds.has(kind)
+    ) {
+      throw new Error(
+        `默认工作区策略不支持项目要求：${typeof kind === "string" ? kind : "未命名"}`,
+      );
+    }
+  }
+}
+
 function workspaceResource(from: string, to: string): RenderOperation {
   return {
     kind: "copyFile",
@@ -400,6 +423,7 @@ function projectRequirements(
     (contribution) => contribution.projectRequirements ?? [],
   );
   declarations.push(...presetProjectContributions.flat());
+  assertSupportedProjectRequirementKinds(declarations);
   const joint = oneRequirement(declarations, "vue-hono-joint-e2e");
   const database = oneRequirement(declarations, "sqlite-database-preparation");
   const deployment = oneRequirement(
@@ -1206,9 +1230,9 @@ export function createDefaultWorkspaceStrategy<
         },
       });
       const definitionsById = new Map<string, PackageDefinition>(
-        packages.map((item) => [
-          item.definition.packageDefinitionId,
-          item.definition,
+        packages.map((packageRecord) => [
+          packageRecord.definition.packageDefinitionId,
+          packageRecord.definition,
         ]),
       );
       const existingContributions = packages.map((packageRecord) => {
@@ -1245,24 +1269,58 @@ export function createDefaultWorkspaceStrategy<
         };
         return existingContent.contribute(contributionOptions);
       });
-      const existingContributionsByPackageId = new Map(
+      const existingContributionByPackageId = new Map(
         packages.map((packageRecord, index) => [
           packageRecord.definition.packageDefinitionId,
           existingContributions[index]!,
         ]),
       );
+      for (const identity of nativeDependencyIdentities(
+        content,
+        contentByIdentity,
+      )) {
+        const provider = contentByIdentity.get(identity);
+        const existing = packages.filter(
+          (item) => item.contentIdentity === identity,
+        );
+        if (provider === undefined || existing.length !== 1) continue;
+        const providerRecord = existing[0]!;
+        const baseline = existingContributionByPackageId.get(
+          providerRecord.definition.packageDefinitionId,
+        );
+        if (baseline === undefined) {
+          throw new Error(
+            "生成记录缺少已选依赖的现行贡献：" + providerRecord.definition.path,
+          );
+        }
+        assertReusablePackageExposure({
+          repositoryRoot: targetRoot,
+          packagePath: providerRecord.definition.path,
+          expectedExports: baseline.exposure.exports,
+        });
+      }
+      return context;
+    },
+    validateAddition({
+      targetRoot,
+      contributions,
+      presetProjectContributions,
+    }) {
       const packageByName = new Map(
-        existingContributions.map((contribution) => [
+        contributions.map((contribution) => [
           contribution.definition.name,
           contribution,
         ]),
       );
-      const databasePreparations = existingContributions.flatMap(
-        (contribution) =>
-          (contribution.projectRequirements ?? []).filter(
-            (requirement): requirement is DatabasePreparationRequirement =>
-              requirement.kind === "sqlite-database-preparation",
-          ),
+      const requirements = [
+        ...contributions.flatMap(
+          (contribution) => contribution.projectRequirements ?? [],
+        ),
+        ...presetProjectContributions.flat(),
+      ];
+      const databasePreparations = requirements.filter(
+        (requirement): requirement is DatabasePreparationRequirement =>
+          requirement.kind === "sqlite-database-preparation",
       );
       if (databasePreparations.length > 1) {
         throw new Error(
@@ -1293,31 +1351,6 @@ export function createDefaultWorkspaceStrategy<
         packageByName,
         manifestTruthByPackagePath,
       });
-      for (const identity of nativeDependencyIdentities(
-        content,
-        contentByIdentity,
-      )) {
-        const provider = contentByIdentity.get(identity);
-        const existing = packages.filter(
-          (item) => item.contentIdentity === identity,
-        );
-        if (provider === undefined || existing.length !== 1) continue;
-        const providerRecord = existing[0]!;
-        const baseline = existingContributionsByPackageId.get(
-          providerRecord.definition.packageDefinitionId,
-        );
-        if (baseline === undefined) {
-          throw new Error(
-            "生成记录缺少已选依赖的现行贡献：" + providerRecord.definition.path,
-          );
-        }
-        assertReusablePackageExposure({
-          repositoryRoot: targetRoot,
-          packagePath: providerRecord.definition.path,
-          expectedExports: baseline.exposure.exports,
-        });
-      }
-      return context;
     },
     parseState(value) {
       if (!isRecord(value) || !isRecord(value.toolchain)) {

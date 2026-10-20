@@ -640,6 +640,23 @@ export function createGenerator<
     return [...selections.values()];
   }
 
+  function computePresetProjectContributions(
+    context: Context,
+    contributions: readonly Contribution[],
+    nodeInstances: GeneratorNodeInstances,
+    presetSelections: readonly PresetOwnerSelection[],
+  ): PresetProjectContribution[] {
+    return presetSelections.map((selection) => {
+      const preset = projectPresetsByOwner.get(presetOwnerKey(selection));
+      if (preset?.project === undefined) {
+        throw new Error(
+          `生成记录所选预设不可用：${selection.packageName}${selection.exportPath}`,
+        );
+      }
+      return preset.project({ context, contributions, nodeInstances });
+    });
+  }
+
   function project(
     context: Context,
     state: State,
@@ -650,19 +667,12 @@ export function createGenerator<
     presetSelections: readonly PresetOwnerSelection[],
   ) {
     const resolvedNodeInstances = resolveNodeInstances(records, nodeInstances);
-    const presetProjectContributions = presetSelections.map((selection) => {
-      const preset = projectPresetsByOwner.get(presetOwnerKey(selection));
-      if (preset?.project === undefined) {
-        throw new Error(
-          `生成记录所选预设不可用：${selection.packageName}${selection.exportPath}`,
-        );
-      }
-      return preset.project({
-        context,
-        contributions,
-        nodeInstances: resolvedNodeInstances,
-      });
-    });
+    const presetProjectContributions = computePresetProjectContributions(
+      context,
+      contributions,
+      resolvedNodeInstances,
+      presetSelections,
+    );
     const projection = options.strategy.project({
       context,
       state,
@@ -1116,13 +1126,31 @@ export function createGenerator<
       } catch (error) {
         return fail("metadata", error);
       }
-      for (const node of existingNodes) {
+      const existingContributions = existingNodes.map((node) =>
         createContribution(
           node,
           context,
           record.packages,
           currentNodeInstances,
-        );
+        ),
+      );
+      try {
+        const currentPresetProjectContributions =
+          computePresetProjectContributions(
+            context,
+            existingContributions,
+            currentNodeInstances,
+            record.presetSelections,
+          );
+        await options.strategy.validateAddition?.({
+          targetRoot: repositoryRoot,
+          packages: record.packages,
+          contributions: existingContributions,
+          nodeInstances: currentNodeInstances,
+          presetProjectContributions: currentPresetProjectContributions,
+        });
+      } catch (error) {
+        return fail("metadata", error);
       }
       const definition = options.strategy.createDefinition({
         context,
