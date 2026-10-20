@@ -66,6 +66,7 @@ import { browserTestDevelopmentContainerToolLayer } from "./development-containe
 import {
   assertReusablePackageExposure,
   readPackageAdditionVersionFacts,
+  WorkspacePackageAdditionFailure,
 } from "./package-addition-facts.ts";
 import {
   projectCheckWorkflow,
@@ -1246,6 +1247,12 @@ export function createDefaultWorkspaceStrategy<
 > {
   return {
     identity: "default",
+    diagnoseFailure(error) {
+      if (error instanceof WorkspacePackageAdditionFailure) {
+        return { message: error.message, suggestion: error.suggestion };
+      }
+      return undefined;
+    },
     initialize({ targetRoot, input, selection }) {
       const repositoryName =
         input.repositoryName ?? path.basename(path.resolve(targetRoot));
@@ -1366,6 +1373,7 @@ export function createDefaultWorkspaceStrategy<
       creationInput,
       packages,
       contributions,
+      getAdditionContributions,
       presetProjectContributions,
     }) {
       const requestedInput =
@@ -1411,6 +1419,12 @@ export function createDefaultWorkspaceStrategy<
         } as const;
       }
       if (linkFrom.length > 0) {
+        const addition = getAdditionContributions().find(
+          (contribution) => contribution.definition.path === definition.path,
+        );
+        if (addition === undefined) {
+          throw new Error("默认工作区校验缺少本次加包贡献：" + definition.path);
+        }
         const contributionByPath = new Map(
           contributions.map((contribution) => [
             contribution.definition.path,
@@ -1434,8 +1448,8 @@ export function createDefaultWorkspaceStrategy<
         });
         const unsupported =
           !canProvideSourceConditionPackageNameImportForRole(
-            content.role,
-            content.manifest,
+            definition.role,
+            addition.manifest,
           ) ||
           linkFrom.some((consumerPackagePath) => {
             const consumer = contributionByPath.get(consumerPackagePath);

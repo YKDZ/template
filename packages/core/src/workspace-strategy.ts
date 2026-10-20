@@ -116,6 +116,12 @@ export type WorkspaceStrategyValidationResult =
     }
   | void;
 
+/** 策略为自身失败附带、供命令层原样显示的结构化诊断。 */
+export type WorkspaceStrategyFailureDiagnostic = {
+  readonly message: string;
+  readonly suggestion: string;
+};
+
 /**
  * 工作区策略拥有自身持久事实、上下文解释和根投影。生成器不解释策略状态，
  * 只负责包实例、绑定、记录演化以及 Before/After 组合。
@@ -163,11 +169,17 @@ export type WorkspaceStrategy<
     readonly creationInput?: CreationInput;
     readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
     readonly contributions: readonly Contribution[];
+    /** 按需构造同次加包贡献，正式投影复用该结果。 */
+    readonly getAdditionContributions: () => readonly Contribution[];
     readonly nodeInstances: GeneratorNodeInstances;
     readonly presetProjectContributions: readonly PresetProjectContribution[];
   }):
     | WorkspaceStrategyValidationResult
     | Promise<WorkspaceStrategyValidationResult>;
+  /** 策略可将自身已知的错误转成面向调用方的诊断；生成器不解释其语义。 */
+  diagnoseFailure?(
+    error: unknown,
+  ): WorkspaceStrategyFailureDiagnostic | undefined;
   parseState(value: unknown): StrategyState;
   /** 策略把原生依赖声明映射为显式内容身份。 */
   dependencies(options: {
