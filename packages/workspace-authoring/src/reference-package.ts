@@ -11,6 +11,11 @@ import {
   type RenderOperation,
   type TemplateSourceHandle,
 } from "@ykdz/template-core/renderer";
+import type {
+  GeneratorNodeInstances,
+  GeneratorPackageCreatedBy,
+  PackageCreationInput,
+} from "@ykdz/template-core/workspace-strategy";
 import ignore, { type Ignore } from "ignore";
 import { parse, type ParseError } from "jsonc-parser";
 
@@ -30,19 +35,29 @@ export type ReferencePackageManifest = Readonly<Record<string, unknown>> & {
   readonly devDependencies?: Readonly<Record<string, string>>;
 };
 
-export type ReferenceContributionOptions = {
+export type ReferenceContributionOptions<
+  CreationInput extends PackageCreationInput = PackageCreationInput,
+> = {
   readonly context: GenerationContext;
   readonly definition: PackageDefinition;
   readonly bindings?: ReadonlyMap<string, PackageDefinition>;
+  /** 公开生成器传入的持久创建语义；旧调用适配器可暂时省略。 */
+  readonly createdBy?: GeneratorPackageCreatedBy;
+  readonly creationInput?: CreationInput;
+  readonly nodeInstances?: GeneratorNodeInstances;
+  /** 仅旧 BuiltIn 回放适配器使用，后续由新生成记录取代。 */
   readonly planningIdentity?: string;
   readonly creationOrigin?: "new" | "replay";
 };
 
-type Contextual<Value> =
-  | Value
-  | ((options: ReferenceContributionOptions) => Value);
+type Contextual<
+  Value,
+  CreationInput extends PackageCreationInput = PackageCreationInput,
+> = Value | ((options: ReferenceContributionOptions<CreationInput>) => Value);
 
-export type ReferencePackage = {
+export type ReferencePackage<
+  CreationInput extends PackageCreationInput = PackageCreationInput,
+> = {
   readonly identity: string;
   readonly instance: "shared" | "independent";
   readonly defaultLeafName: string;
@@ -54,12 +69,17 @@ export type ReferencePackage = {
   source(file: string): TemplateSourceHandle;
   operations(targetPath: string): CopyFileOperation[];
   payloadOperations(targetPath: string): CopyFileOperation[];
-  contribute(options: ReferenceContributionOptions): PackageContribution;
+  contribute(
+    options: ReferenceContributionOptions<CreationInput>,
+  ): PackageContribution;
 };
 
-function contextual<Value>(
-  value: Contextual<Value>,
-  options: ReferenceContributionOptions,
+function contextual<
+  Value,
+  CreationInput extends PackageCreationInput = PackageCreationInput,
+>(
+  value: Contextual<Value, CreationInput>,
+  options: ReferenceContributionOptions<CreationInput>,
 ): Value {
   return typeof value === "function"
     ? (value as (context: ReferenceContributionOptions) => Value)(options)
@@ -67,7 +87,9 @@ function contextual<Value>(
 }
 
 /** 原生包声明是生成事实源，描述只补充资源范围与局部差异。 */
-export function defineReferencePackage(options: {
+export function defineReferencePackage<
+  CreationInput extends PackageCreationInput = PackageCreationInput,
+>(options: {
   readonly packageName: string;
   readonly resolve: (specifier: string) => string;
   readonly identity: string;
@@ -84,15 +106,19 @@ export function defineReferencePackage(options: {
     readonly resources?: readonly string[];
   };
   readonly publicationIdentitySource?: string;
-  readonly foundation: Contextual<PackageContribution["foundation"]>;
+  readonly foundation: Contextual<
+    PackageContribution["foundation"],
+    CreationInput
+  >;
   readonly environmentNeeds: Contextual<
-    PackageContribution["environmentNeeds"]
+    PackageContribution["environmentNeeds"],
+    CreationInput
   >;
   readonly project?: (
     contribution: PackageContribution,
-    options: ReferenceContributionOptions,
+    options: ReferenceContributionOptions<CreationInput>,
   ) => PackageContribution;
-}): ReferencePackage {
+}): ReferencePackage<CreationInput> {
   const manifest = JSON.parse(
     readFileSync(
       fileURLToPath(options.resolve(`${options.packageName}/reference`)),

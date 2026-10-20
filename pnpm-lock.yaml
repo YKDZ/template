@@ -770,6 +770,9 @@ importers:
 
   packages/workspace:
     dependencies:
+      '@ykdz/reference-rust-bin':
+        specifier: workspace:*
+        version: link:../../references/rust-bin
       '@ykdz/reference-ts-cli':
         specifier: workspace:*
         version: link:../../references/ts-cli

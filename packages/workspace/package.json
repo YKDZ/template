@@ -91,6 +91,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
+    "@ykdz/reference-rust-bin": "workspace:*",
     "@ykdz/reference-ts-cli": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",

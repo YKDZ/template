@@ -40,6 +40,7 @@ import type {
 } from "@ykdz/template-workspace-authoring/project-requirements";
 import type { ReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
+import { projectCliPublication } from "./cli-publication-projection.ts";
 import {
   assertDefaultPackageDefinition,
   assertDefaultProjectBlueprint,
@@ -68,6 +69,11 @@ import {
   type WorkspaceRootInsertion,
 } from "./root-projection.ts";
 import {
+  initialRustVersion,
+  projectRustTarget,
+  rustVersionForAddition,
+} from "./rust-target-projection.ts";
+import {
   copyWorkspaceDirectory,
   copyWorkspaceResource,
 } from "./workspace-resources.ts";
@@ -84,6 +90,7 @@ export type DefaultWorkspaceState = {
     readonly nodeLtsMajor: string;
     readonly nodeVersion?: string;
     readonly packageManagerPin: string;
+    readonly rustVersion?: string;
   };
 };
 
@@ -140,6 +147,9 @@ function defaultContext(
         ? {}
         : { nodeVersion: state.toolchain.nodeVersion }),
       packageManagerPin: state.toolchain.packageManagerPin,
+      ...(state.toolchain.rustVersion === undefined
+        ? {}
+        : { rustVersion: state.toolchain.rustVersion }),
     },
   };
 }
@@ -335,6 +345,23 @@ function projectRequirements(
     "application-container-with-database-migrations",
   );
   const links: PackageLinkIntent[] = [];
+  for (const requirement of declarations) {
+    if (requirement.kind !== "package-link") continue;
+    const consumer = requireProjectPackage(
+      blueprint,
+      requirement.consumer,
+      requirement.kind,
+    );
+    const provider = requireProjectPackage(
+      blueprint,
+      requirement.provider,
+      requirement.kind,
+    );
+    links.push({
+      consumerPackagePath: consumer.path,
+      providerPackagePath: provider.path,
+    });
+  }
   const actualJoint =
     joint === undefined
       ? undefined
@@ -602,6 +629,16 @@ function projectOperations(options: {
     contributions,
   );
   const { blueprint, requirements } = projectState;
+  const cliPublication = projectCliPublication({
+    packages: options.packages,
+    contributions,
+  });
+  const rustProjection = projectRustTarget({
+    context,
+    packages: options.packages,
+    contributions,
+  });
+  const rust = rustProjection.toolchain;
   const hasDeployment = requirements.deploymentCheck !== undefined;
   const hasJointE2e = requirements.vueHonoJointE2e !== undefined;
   const configuration = contributions.find(
@@ -635,14 +672,25 @@ function projectOperations(options: {
     nodeDeclaration:
       context.toolchain.nodeVersion ?? context.toolchain.nodeLtsMajor,
     packageManagerPin: context.toolchain.packageManagerPin,
-    scriptInsertions: projectRootScriptInsertions(requirements),
-    ...(hasJointE2e
+    ...(cliPublication.imports === undefined
+      ? {}
+      : { imports: cliPublication.imports }),
+    scriptInsertions: [
+      ...cliPublication.scriptInsertions,
+      ...projectRootScriptInsertions(requirements),
+    ],
+    ...(hasJointE2e || cliPublication.candidate !== undefined
       ? {
           dependencyInsertions: [
-            {
-              before: "@types/node",
-              values: { "@playwright/test": "catalog:" },
-            },
+            ...(hasJointE2e
+              ? [
+                  {
+                    before: "@types/node",
+                    values: { "@playwright/test": "catalog:" },
+                  },
+                ]
+              : []),
+            ...cliPublication.dependencyInsertions,
           ],
         }
       : {}),
@@ -749,10 +797,15 @@ function projectOperations(options: {
     turboBoundaryTags: boundaryTags(contributions),
     rootTsconfigTemplate: readWorkspaceJson("tsconfig.json"),
     rootTsconfigCompilerOptions: {
+      ...cliPublication.tsconfigCompilerOptions,
       rewriteRelativeImportExtensions: false,
       allowImportingTsExtensions: true,
     },
-    rootTsconfigInclude: ["*.config.ts", "scripts/**/*.ts"],
+    rootTsconfigInclude: [
+      "*.config.ts",
+      "scripts/**/*.ts",
+      ...cliPublication.tsconfigInclude,
+    ],
     tsconfigConfigTemplate: readWorkspaceJson("tsconfig.config.json"),
   });
   const editorExtensions = {
@@ -794,6 +847,17 @@ function projectOperations(options: {
             pointer: "/build/args/NODE_VERSION",
           },
         },
+        ...(rust === undefined
+          ? []
+          : [
+              {
+                id: "rust-toolchain-build-arg",
+                location: {
+                  kind: "json-pointer" as const,
+                  pointer: "/build/args/RUST_TOOLCHAIN",
+                },
+              },
+            ]),
       ],
     },
     {
@@ -828,6 +892,7 @@ function projectOperations(options: {
     ),
     rootProjection.tsconfig,
     rootProjection.tsconfigConfig,
+    ...cliPublication.operations,
     {
       kind: "writeText",
       to: "oxlint.config.ts",
@@ -873,6 +938,9 @@ function projectOperations(options: {
       },
     },
     container.dockerfileOperation,
+    ...(rustProjection.operation === undefined
+      ? []
+      : [rustProjection.operation]),
     {
       kind: "writeText",
       to: ".github/workflows/check.yml",
@@ -964,11 +1032,12 @@ export function createDefaultWorkspaceStrategy<
 > {
   return {
     identity: "default",
-    initialize({ targetRoot, input }) {
+    initialize({ targetRoot, input, selection }) {
       const repositoryName =
         input.repositoryName ?? path.basename(path.resolve(targetRoot));
       const defaultPackageScope = input.defaultPackageScope ?? repositoryName;
       const nodeVersion = releaseToolchainSnapshot.nodeVersion;
+      const rustVersion = initialRustVersion(selection);
       const state: DefaultWorkspaceState = {
         repositoryName,
         defaultPackageScope,
@@ -976,6 +1045,7 @@ export function createDefaultWorkspaceStrategy<
           nodeLtsMajor: nodeVersion.slice(0, nodeVersion.indexOf(".")),
           nodeVersion,
           packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+          ...(rustVersion === undefined ? {} : { rustVersion }),
         },
       };
       return { state, context: defaultContext(targetRoot, state) };
@@ -989,9 +1059,17 @@ export function createDefaultWorkspaceStrategy<
       nodeInstances,
     }) {
       const current = readPackageAdditionVersionFacts(targetRoot);
+      const rustVersion = rustVersionForAddition({
+        targetRoot,
+        packages,
+        contentIdentity: content.identity,
+      });
       const context = defaultContext(targetRoot, {
         ...state,
-        toolchain: current.toolchain,
+        toolchain: {
+          ...current.toolchain,
+          ...(rustVersion === undefined ? {} : { rustVersion }),
+        },
       });
       const definitionsById = new Map<string, PackageDefinition>(
         packages.map((item) => [
@@ -1049,7 +1127,9 @@ export function createDefaultWorkspaceStrategy<
         typeof value.defaultPackageScope !== "string" ||
         typeof value.toolchain.nodeLtsMajor !== "string" ||
         typeof value.toolchain.nodeVersion !== "string" ||
-        typeof value.toolchain.packageManagerPin !== "string"
+        typeof value.toolchain.packageManagerPin !== "string" ||
+        (value.toolchain.rustVersion !== undefined &&
+          typeof value.toolchain.rustVersion !== "string")
       ) {
         throw new Error("默认工作区策略记录缺少必要事实");
       }
