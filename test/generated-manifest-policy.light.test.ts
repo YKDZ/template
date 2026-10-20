@@ -19,14 +19,14 @@ function generator() {
 
 void describe("生成项目包清单策略", () => {
   void it("公开预设通过正式生成保留私有包隔离与发布候选事实", async () => {
-    const nativeConfiguration = templateContent.find(
-      (member) =>
-        member.kind === "reference" &&
-        member.identity.packageName === "@ykdz/reference-typescript-config",
-    );
-    assert.ok(nativeConfiguration);
-    const nativeConfigurationManifest = nativeConfiguration.definition
-      .manifest as { readonly version: string };
+    const nativeConfigurationManifest = JSON.parse(
+      await readFile(
+        new URL(
+          import.meta.resolve("@ykdz/reference-typescript-config/reference"),
+        ),
+        "utf8",
+      ),
+    ) as { readonly version: string };
 
     for (const preset of templatePresets) {
       const workspace = await mkdtemp(
