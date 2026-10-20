@@ -20,6 +20,7 @@ export type AuthoredContentFixtureOptions = {
   readonly featureAlias?: string;
   readonly featureResourcePath?: string;
   readonly featurePackageName?: string;
+  readonly featureDependsOnTheme?: boolean;
   readonly includeTheme?: boolean;
   readonly includeAddon?: boolean;
 };
@@ -222,7 +223,10 @@ export async function createAuthoredContentFixture(
     alias: options.featureAlias ?? "feature",
     instance: "independent",
     resourcePath: featureResourcePath,
-    dependencies: { "@fixture/typescript-config": "workspace:*" },
+    dependencies:
+      options.featureDependsOnTheme === false
+        ? {}
+        : { "@fixture/typescript-config": "workspace:*" },
   });
   await writeReferencePackage({
     collectionRoot,

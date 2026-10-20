@@ -44,7 +44,12 @@ void describe("唯一内容集合的真实生成检查场景", () => {
           scenario,
           workspace,
         });
-        if (receipt.status === "not-applicable") continue;
+        assert.notEqual(receipt.status, "not-applicable", scenario.id);
+        if (receipt.status === "not-applicable") {
+          throw new Error(
+            `${scenario.id}: product matrix scenario was skipped`,
+          );
+        }
         assert.strictEqual(
           receipt.initialization.generationRecord.schemaVersion,
           3,
