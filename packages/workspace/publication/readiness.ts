@@ -879,13 +879,6 @@ async function addMetadataBlockers(options: {
     textFact(path.join(options.repositoryRoot, blueprintPath)),
     textFact(path.join(options.repositoryRoot, generationPath)),
   ]);
-  if (
-    metadataRootState === "absent" &&
-    blueprintFact.kind === "missing" &&
-    generationFact.kind === "missing"
-  ) {
-    return;
-  }
   if (metadataRootState === "invalid") {
     options.blockers.push(
       blocker({
@@ -909,8 +902,8 @@ async function addMetadataBlockers(options: {
           code: "local-template-metadata-missing",
           path: metadataPath,
           observed: "missing",
-          expected: "Complete Local Template Metadata when .template exists",
-          nextAction: "Restore both supported Local Template Metadata files.",
+          expected: "完整的本地模板元数据及其必需文件",
+          nextAction: "恢复项目蓝图与生成记录后重新检查发布就绪状态。",
         }),
       );
     } else if (fact.kind === "unreadable") {

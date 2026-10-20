@@ -6,6 +6,7 @@ import {
   readFile,
   rm,
   symlink,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -29,6 +30,14 @@ const metadataSnapshots = new Map<
 async function writeJson(filePath: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function snapshotFile(filePath: string) {
+  const [source, metadata] = await Promise.all([
+    readFile(filePath),
+    stat(filePath),
+  ]);
+  return { mode: metadata.mode & 0o777, source };
 }
 
 async function generatedRepository(
@@ -483,9 +492,39 @@ void describe("Generated Repository npm publication readiness", () => {
     }
   });
 
-  void it("接受完全缺席的本地模板元数据，并拒绝残缺或矛盾的所有者事实", async () => {
+  void it("缺少本地模板元数据时阻止就绪并拒绝矛盾的所有者事实", async () => {
     const repositoryRoot = await generatedRepository();
     await writeReadyFacts(repositoryRoot, "demo-cli");
+    const publicationConfigPath = path.join(
+      repositoryRoot,
+      "scripts/npm-publication/publication.config.json",
+    );
+    const publicationConfig = JSON.parse(
+      await readFile(publicationConfigPath, "utf8"),
+    ) as {
+      readonly packagePath?: unknown;
+      readonly packageDefinitionId?: unknown;
+      readonly creationInput?: unknown;
+    };
+    assert.strictEqual(publicationConfig.packagePath, "packages/cli");
+    assert.ok(
+      typeof publicationConfig.packageDefinitionId === "string" &&
+        publicationConfig.packageDefinitionId.length > 0,
+    );
+    assert.ok(
+      typeof publicationConfig.creationInput === "object" &&
+        publicationConfig.creationInput !== null,
+    );
+    const userReadmePath = path.join(repositoryRoot, "packages/cli/README.md");
+    const packageManifestPath = path.join(
+      repositoryRoot,
+      "packages/cli/package.json",
+    );
+    const beforeReadiness = await Promise.all([
+      snapshotFile(publicationConfigPath),
+      snapshotFile(packageManifestPath),
+      snapshotFile(userReadmePath),
+    ]);
     const { inspectNpmPublicationReadiness } =
       await import("@ykdz/template-workspace/publication/readiness");
 
@@ -497,7 +536,28 @@ void describe("Generated Repository npm publication readiness", () => {
       repositoryRoot,
       packagePath: "packages/cli",
     });
-    assert.strictEqual(absent.kind, "ready");
+    assert.strictEqual(absent.kind, "blocked");
+    if (absent.kind !== "blocked") throw new Error("Expected blockers");
+    assert.deepStrictEqual(
+      absent.blockers.map(({ code }) => code),
+      ["local-template-metadata-missing", "local-template-metadata-missing"],
+    );
+    const copiedCaller = await runReadinessCaller(repositoryRoot, [
+      "--require-ready",
+    ]);
+    assert.strictEqual(copiedCaller.exitCode, 1);
+    assert.ok(
+      copiedCaller.stdout.includes("BLOCKER local-template-metadata-missing"),
+      copiedCaller.all,
+    );
+    assert.deepStrictEqual(
+      await Promise.all([
+        snapshotFile(publicationConfigPath),
+        snapshotFile(packageManifestPath),
+        snapshotFile(userReadmePath),
+      ]),
+      beforeReadiness,
+    );
 
     await mkdir(path.join(repositoryRoot, ".template"));
     const partial = await inspectNpmPublicationReadiness({
