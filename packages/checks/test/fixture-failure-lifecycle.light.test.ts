@@ -868,6 +868,21 @@ void it(
       let stdout = "";
       let stderr = "";
       let ownedCommandPid: number | undefined;
+      const cliEnvironment: NodeJS.ProcessEnv = {
+        ...process.env,
+        PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
+        TEMPLATE_FIXTURE_WORKSPACE_DIR: workspaceRoot,
+      };
+      for (const name of [
+        "TEMPLATE_FIXTURE_EVIDENCE_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_READ",
+        "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
+        "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT",
+      ]) {
+        delete cliEnvironment[name];
+      }
       const cli = spawn(
         process.execPath,
         [
@@ -878,11 +893,7 @@ void it(
         ],
         {
           cwd: process.cwd(),
-          env: {
-            ...process.env,
-            PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
-            TEMPLATE_FIXTURE_WORKSPACE_DIR: workspaceRoot,
-          },
+          env: cliEnvironment,
           stdio: ["ignore", "pipe", "pipe"],
         },
       );
