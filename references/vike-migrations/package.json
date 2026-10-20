@@ -19,6 +19,7 @@
     }
   },
   "scripts": {
+    "check:author-planning-roles": "pnpm --workspace-root run check:author-planning-roles:workspace -- --owner-directory \"$PWD\"",
     "build": "tsc -p tsconfig.build.json --noEmit",
     "db:generate": "DATABASE_PROFILE=dev NODE_OPTIONS=--conditions=source drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
