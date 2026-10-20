@@ -4,8 +4,8 @@ import { beforeEach } from "node:test";
 
 const controller = new AbortController();
 const workerPidDirectory =
-  process.env.TEMPLATE_BUILTIN_PRESETS_INTEGRATION_WORKER_PID_DIRECTORY;
-const signalFile = process.env.TEMPLATE_BUILTIN_PRESETS_INTEGRATION_SIGNAL_FILE;
+  process.env.TEMPLATE_CHECKS_INTEGRATION_WORKER_PID_DIRECTORY;
+const signalFile = process.env.TEMPLATE_CHECKS_INTEGRATION_SIGNAL_FILE;
 
 function signalError(signal: NodeJS.Signals): Error {
   return new Error(`集成验收收到 ${signal}，正在停止当前安装型场景`);

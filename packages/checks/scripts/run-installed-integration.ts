@@ -13,7 +13,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const packageRoot = process.cwd();
 const ownerDirectory = await mkdtemp(
-  path.join(tmpdir(), "template-builtin-presets-integration-owner-"),
+  path.join(tmpdir(), "template-checks-integration-owner-"),
 );
 const signalFile = path.join(ownerDirectory, "signal.txt");
 const workerPidDirectory = path.join(ownerDirectory, "workers");
@@ -27,22 +27,21 @@ const runnerArguments = [
   "--experimental-strip-types",
   "--import=./test-support/setup.ts",
   "--test",
-  "--test-concurrency=2",
+  "--test-concurrency=1",
   "--test-timeout=300000",
   "--test-reporter=spec",
-  "--test-reporter=@ykdz/template-builtin-presets/node-test-count-reporter",
+  "--test-reporter=@ykdz/reference-typescript-config/reporter",
   "--test-reporter-destination=stdout",
   "--test-reporter-destination=stderr",
   ...forwardedArguments,
-  "src/**/*.integration.test.ts",
+  "test/**/*.integration.test.ts",
 ];
 const runner = spawn(process.execPath, runnerArguments, {
   cwd: packageRoot,
   env: {
     ...process.env,
-    TEMPLATE_BUILTIN_PRESETS_INTEGRATION_SIGNAL_FILE: signalFile,
-    TEMPLATE_BUILTIN_PRESETS_INTEGRATION_WORKER_PID_DIRECTORY:
-      workerPidDirectory,
+    TEMPLATE_CHECKS_INTEGRATION_SIGNAL_FILE: signalFile,
+    TEMPLATE_CHECKS_INTEGRATION_WORKER_PID_DIRECTORY: workerPidDirectory,
   },
   detached: process.platform !== "win32",
   stdio: "inherit",
@@ -173,9 +172,7 @@ try {
       completion.code ?? (completion.signal === "SIGINT" ? 130 : 1);
   }
 } catch (error) {
-  process.stderr.write(
-    `builtin-presets 原生集成测试 owner 失败：${String(error)}\n`,
-  );
+  process.stderr.write(`checks 原生集成测试入口失败：${String(error)}\n`);
   stopRunnerGroup("SIGKILL");
   process.exitCode = 1;
 } finally {

@@ -118,9 +118,9 @@ void describe("Template Repository native task model", () => {
     );
     for (const [name, tag] of [
       ["@ykdz/template", "template-cli"],
-      ["@ykdz/template-builtin-presets", "template-builtin-presets"],
       ["@ykdz/template-checks", "template-checks"],
       ["@ykdz/template-core", "template-core"],
+      ["@ykdz/template-workspace", "template-workspace"],
     ] as const)
       assert.ok(packageTags.get(name)?.includes(tag));
     assert.ok(packageTags.has("@ykdz/reference-vue-shared"));
@@ -144,9 +144,9 @@ void describe("Template Repository native task model", () => {
     );
     const buildIds = [
       "@ykdz/template#build",
-      "@ykdz/template-builtin-presets#build",
       "@ykdz/template-checks#build",
       "@ykdz/template-core#build",
+      "@ykdz/template-workspace#build",
     ];
     for (const taskId of buildIds) {
       const task = buildTasks.get(taskId);
@@ -154,12 +154,10 @@ void describe("Template Repository native task model", () => {
       assert.equal(task.resolvedTaskDefinition.cache, true);
       assert.deepEqual(task.resolvedTaskDefinition.outputs, ["dist/**"]);
       assert.ok(Object.hasOwn(task.inputs, "package.json"));
-      if (taskId !== "@ykdz/template-builtin-presets#build") {
-        assert.ok(Object.hasOwn(task.inputs, "tsconfig.build.json"));
-        assert.ok(
-          Object.keys(task.inputs).some((input) => input.startsWith("src/")),
-        );
-      }
+      assert.ok(Object.hasOwn(task.inputs, "tsconfig.build.json"));
+      assert.ok(
+        Object.keys(task.inputs).some((input) => input.startsWith("src/")),
+      );
       assert.ok(
         task.resolvedTaskDefinition.inputs.every(
           (input) => !input.startsWith("../"),
@@ -184,16 +182,6 @@ void describe("Template Repository native task model", () => {
           "@ykdz/template-core#build",
           "@ykdz/template-environment#build",
           "@ykdz/template-workspace#build",
-        ],
-      ],
-      [
-        "@ykdz/template-builtin-presets#build",
-        [
-          "@ykdz/template-core#build",
-          "@ykdz/template-environment#build",
-          "@ykdz/template-workspace#build",
-          "@ykdz/reference-vue-app#build:template",
-          "@ykdz/reference-rust-bin#build:template",
         ],
       ],
       [
@@ -262,14 +250,6 @@ void describe("Template Repository native task model", () => {
     );
     assert.match(scripts.test ?? "", /--test-concurrency=2/u);
 
-    const builtinPresetsManifest = await readJson<Manifest>(
-      "packages/builtin-presets/package.json",
-    );
-    assert.match(
-      builtinPresetsManifest.scripts.test ?? "",
-      /--test-concurrency=2/u,
-    );
-
     const cliManifest = await readJson<Manifest>("packages/cli/package.json");
     assert.match(cliManifest.scripts.test ?? "", /--test-concurrency=2/u);
 
@@ -292,7 +272,6 @@ void describe("Template Repository native task model", () => {
       assert.ok(script !== undefined);
       assert.ok(script.includes("scripts"));
       assert.ok(script.includes("test"));
-      assert.ok(!script.includes("packages/builtin-presets"));
     }
   });
 
@@ -333,11 +312,8 @@ void describe("Template Repository native task model", () => {
     assert.ok(!taskIds.includes("//#test:e2e"));
     assert.ok(taskIds.includes("@ykdz/template-core#format:check"));
     assert.ok(taskIds.includes("@ykdz/template-core#typecheck"));
-    assert.ok(
-      !actionGraph.tasks
-        .find(({ taskId }) => taskId === "@ykdz/template#lint")
-        ?.dependencies.includes("@ykdz/template-builtin-presets#build"),
-    );
+    assert.ok(taskIds.includes("@ykdz/template-workspace#test"));
+    assert.ok(taskIds.includes("@ykdz/template-checks#test"));
     assert.ok(
       !actionGraph.tasks
         .find(({ taskId }) => taskId === "@ykdz/template-checks#lint")
@@ -350,19 +326,10 @@ void describe("Template Repository native task model", () => {
   });
 
   void it("keeps registry and Template Source checks under the checks owner", async () => {
-    const [checks, builtInPresets] = await Promise.all([
-      readJson<Manifest>("packages/checks/package.json"),
-      readJson<Manifest>("packages/builtin-presets/package.json"),
-    ]);
+    const checks = await readJson<Manifest>("packages/checks/package.json");
 
     const templateCheckScript = checks.scripts["check:templates"];
     assert.ok(templateCheckScript !== undefined);
-    assert.ok(!templateCheckScript.includes("@ykdz/template-builtin-presets"));
-    assert.strictEqual(builtInPresets.scripts["check:templates"], undefined);
-    assert.strictEqual(
-      builtInPresets.scripts["check:templates:boundary"],
-      undefined,
-    );
 
     const result = await execa(
       "pnpm",
@@ -441,9 +408,9 @@ void describe("Template Repository native task model", () => {
     assert.ok(!taskIds.includes("//#build"));
     for (const packageName of [
       "@ykdz/template",
-      "@ykdz/template-builtin-presets",
       "@ykdz/template-checks",
       "@ykdz/template-core",
+      "@ykdz/template-workspace",
     ]) {
       assert.ok(taskIds.includes(`${packageName}#build`));
     }
@@ -457,7 +424,6 @@ void describe("Template Repository native task model", () => {
       "pnpm exec turbo run build --filter=.",
     );
     assert.ok(!cli.scripts.prepack.includes("@ykdz/template-core"));
-    assert.ok(!cli.scripts.prepack.includes("@ykdz/template-builtin-presets"));
 
     const result = await execa(
       "pnpm",
@@ -478,7 +444,7 @@ void describe("Template Repository native task model", () => {
     ).tasks.map(({ taskId }) => taskId);
     assert.ok(tasks.includes("@ykdz/template#build"));
     assert.ok(tasks.includes("@ykdz/template-core#build"));
-    assert.ok(!tasks.includes("@ykdz/template-builtin-presets#build"));
+    assert.ok(tasks.includes("@ykdz/template-workspace#build"));
   });
 
   void it("keeps source tests build-free and assigns full CLI journeys to the root", async () => {
