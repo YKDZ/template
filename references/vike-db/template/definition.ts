@@ -4,6 +4,8 @@ import { defineReferencePackage } from "@ykdz/template-workspace-authoring/refer
 
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vike-db",
+  // 私有原生清单未声明 npm 版本，给制品显式提供未发布坐标。
+  artifactVersion: "0.0.0",
   resolve: (specifier) => import.meta.resolve(specifier),
   resourceRoot: new URL("../", import.meta.url),
   alias: "vike-database",

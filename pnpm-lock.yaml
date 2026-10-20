@@ -683,9 +683,6 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 7.0.2004
-      tar:
-        specifier: 'catalog:'
-        version: 7.5.22
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
@@ -1207,9 +1204,6 @@ importers:
 
   packages/workspace-authoring:
     dependencies:
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../core
       '@ykdz/template-environment':
         specifier: workspace:*
         version: link:../environment
@@ -1229,6 +1223,9 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../../references/typescript-config
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../core
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0

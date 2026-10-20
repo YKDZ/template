@@ -472,11 +472,6 @@ void describe("Erasable TypeScript enforcement", () => {
         continue;
       }
       if (manifest.name === "@ykdz/template") {
-        assert.ok(manifest.bundleDependencies !== undefined);
-        assert.ok(
-          manifest.bundleDependencies.includes("@ykdz/template-core"),
-          "@ykdz/template owns the flattened runtime closure of its bundled private packages",
-        );
         assert.strictEqual((await compilerApiImports(packageRoot)).length, 0);
         continue;
       }
@@ -526,7 +521,6 @@ void describe("Erasable TypeScript enforcement", () => {
         "@typescript/old" in cliManifest.dependencies
       ),
     );
-    assert.ok(cliManifest?.bundleDependencies?.includes("@ykdz/template-core"));
     assert.ok(cliManifest?.bundleDependencies?.includes("typescript"));
   });
 });
