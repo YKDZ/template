@@ -10,6 +10,34 @@ export type ProjectCheckWorkflowDiagnosticOptions = {
   readonly diagnosticArtifacts?: readonly unknown[] | undefined;
 };
 
+export type PreparedProjectGithubTemplates = {
+  readonly checkWorkflow: string;
+  readonly dependabot: string;
+  readonly nextSteps: string;
+};
+
+/** GitHub 与下一步文档的原生模板由工作区 owner 在准备阶段读取。 */
+export function prepareProjectGithubTemplates(): PreparedProjectGithubTemplates {
+  const read = (file: string): string => {
+    try {
+      return readFileSync(
+        new URL(`../assets/${file}`, import.meta.url),
+        "utf8",
+      );
+    } catch (cause) {
+      throw new Error(
+        `工作区资源 @ykdz/template-workspace#./project-github prepare 阶段无法读取 ${file}`,
+        { cause },
+      );
+    }
+  };
+  return {
+    checkWorkflow: read("github/check.yml"),
+    dependabot: read("github/dependabot.yml"),
+    nextSteps: read("next-steps.md"),
+  };
+}
+
 /** 完整原生工作流拥有任务和工具设置；投影只选择已声明的能力。 */
 export function projectCheckWorkflow(
   options: ProjectCheckWorkflowDiagnosticOptions & {
@@ -17,6 +45,7 @@ export function projectCheckWorkflow(
       | { readonly environmentNeeds: readonly DeploymentEnvironmentNeed[] }
       | undefined;
   },
+  template: string,
 ): string {
   const hasDeployment = options.deploymentCheck !== undefined;
   if (
@@ -31,12 +60,7 @@ export function projectCheckWorkflow(
     packagePaths: options.packagePaths,
     declarations: options.diagnosticArtifacts ?? [],
   });
-  const workflow = parseDocument(
-    readFileSync(
-      new URL("../assets/github/check.yml", import.meta.url),
-      "utf8",
-    ),
-  );
+  const workflow = parseDocument(template);
   const steps = workflow.getIn(["jobs", "check", "steps"]) as YAMLSeq<
     YAMLMap<string>
   >;
@@ -90,13 +114,9 @@ type DependabotUpdate = Readonly<Record<string, unknown>> & {
 /** 版本维护政策保留在原生 YAML，描述只提供生态、目录与频率。 */
 export function projectDependabotConfig(
   policy: DependencyMaintenancePolicy,
+  template: string,
 ): string {
-  const document = parseDocument(
-    readFileSync(
-      new URL("../assets/github/dependabot.yml", import.meta.url),
-      "utf8",
-    ),
-  );
+  const document = parseDocument(template);
   const declarations = (document.toJS() as { updates: DependabotUpdate[] })
     .updates;
   const updates = policy.ecosystems.flatMap((ecosystem) => {
@@ -128,11 +148,9 @@ export function projectDependabotConfig(
 /** 文档正文是自然 Markdown，动态命令由已有正式计划提供。 */
 export function projectNextStepsDocument(
   instructions: readonly { readonly display: string }[],
+  template: string,
 ): string {
-  const introduction = readFileSync(
-    new URL("../assets/next-steps.md", import.meta.url),
-    "utf8",
-  ).trimEnd();
+  const introduction = template.trimEnd();
   const steps = instructions.map(
     (instruction, index) => `${index + 1}. \`${instruction.display}\``,
   );

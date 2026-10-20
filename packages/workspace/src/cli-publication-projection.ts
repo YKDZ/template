@@ -1,22 +1,45 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-import {
-  createTemplateSourceHandle,
-  type RenderOperation,
-} from "@ykdz/template-core/renderer";
+import type { RenderOperation } from "@ykdz/template-core/renderer";
 import type { GeneratorPackageState } from "@ykdz/template-core/workspace-strategy";
 import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 
 import type { WorkspaceRootInsertion } from "./root-projection.ts";
 import {
-  copyWorkspaceDirectory,
-  copyWorkspaceResource,
+  copyPreparedWorkspaceResource,
+  prepareWorkspaceResources,
+  type PreparedWorkspaceResources,
 } from "./workspace-resources.ts";
 
-const workspaceSource = createTemplateSourceHandle(
-  fileURLToPath(new URL("../", import.meta.url)),
-);
+const cliPublicationOwner =
+  "工作区公开 CLI 发布能力 @ykdz/template-workspace#./cli-publication";
+
+const cliPublicationFiles = [
+  "assets/.pnpmfile.mjs",
+  "publication/artifact.ts",
+  "publication/changelog.ts",
+  "publication/check-artifact.ts",
+  "publication/check-readiness.ts",
+  "publication/configuration.ts",
+  "publication/handoff.ts",
+  "publication/publish.ts",
+  "publication/readiness.ts",
+  "publication/release.ts",
+  "publication/RELEASING.md",
+  "resources/cli-publication/release.yml",
+  "publication-setup/README.md",
+  "publication-setup/assets/CHANGELOG.md.template",
+  "publication-setup/assets/LICENSE-APACHE-2.0.txt",
+  "publication-setup/assets/LICENSE-MIT.txt",
+  "publication-setup/assets/README.md.template",
+  "publication-setup/bridge.ts",
+  "publication-setup/setup.sh",
+] as const;
+
+/** 工作区 CLI owner 在策略准备阶段检查其有限发布资源。 */
+export function prepareCliPublicationResources(): PreparedWorkspaceResources {
+  return prepareWorkspaceResources(cliPublicationFiles, cliPublicationOwner);
+}
 
 export type CliPublicationProjection = {
   readonly candidate: PackageContribution | undefined;
@@ -78,6 +101,7 @@ function publicCliCandidate(
 
 function publicationOperations(
   candidate: PublicCliCandidate | undefined,
+  resources: PreparedWorkspaceResources,
 ): RenderOperation[] {
   if (candidate === undefined) return [];
   const publication = candidate.contribution.foundation.npmPublication;
@@ -89,28 +113,38 @@ function publicationOperations(
       `公开 CLI 候选 ${candidate.contribution.definition.name} 缺少所属发布资源事实`,
     );
   }
+  const copy = (
+    file: (typeof cliPublicationFiles)[number],
+    to: string,
+  ): RenderOperation =>
+    copyPreparedWorkspaceResource(resources, file, to, cliPublicationOwner);
   return [
-    {
-      kind: "copyFile",
-      source: workspaceSource,
-      from: "assets/.pnpmfile.mjs",
-      to: ".pnpmfile.mjs",
-    },
-    ...copyWorkspaceDirectory("publication", "scripts/npm-publication").filter(
-      (operation) =>
-        ![
-          "release.yml",
-          "RELEASING.md",
-          "publication.config.json",
-          "cli-command-identity.ts",
-          "cli-candidate-selection.ts",
-        ].includes(path.posix.basename(operation.to)),
-    ),
-    ...copyWorkspaceDirectory(
-      "publication-setup",
-      "scripts/npm-publication-setup",
-    ),
-    copyWorkspaceResource("publication/RELEASING.md", "RELEASING.md"),
+    copy("assets/.pnpmfile.mjs", ".pnpmfile.mjs"),
+    ...cliPublicationFiles
+      .filter(
+        (file) =>
+          file.startsWith("publication/") &&
+          file !== "publication/RELEASING.md" &&
+          file !== "resources/cli-publication/release.yml",
+      )
+      .map((file) =>
+        copy(
+          file,
+          path.posix.join("scripts/npm-publication", path.posix.basename(file)),
+        ),
+      ),
+    ...cliPublicationFiles
+      .filter((file) => file.startsWith("publication-setup/"))
+      .map((file) =>
+        copy(
+          file,
+          path.posix.join(
+            "scripts/npm-publication-setup",
+            path.posix.relative("publication-setup", file),
+          ),
+        ),
+      ),
+    copy("publication/RELEASING.md", "RELEASING.md"),
     {
       kind: "writeJson",
       to: "scripts/npm-publication/publication.config.json",
@@ -135,8 +169,8 @@ function publicationOperations(
       path: "scripts/npm-publication-setup/setup.sh",
       executable: true,
     },
-    copyWorkspaceResource(
-      "publication/release.yml",
+    copy(
+      "resources/cli-publication/release.yml",
       ".github/workflows/release.yml",
     ),
   ];
@@ -146,6 +180,7 @@ function publicationOperations(
 export function projectCliPublication(options: {
   readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
+  readonly resources: PreparedWorkspaceResources;
 }): CliPublicationProjection {
   const selected = publicCliCandidate(options.packages, options.contributions);
   if (selected === undefined) {
@@ -161,7 +196,7 @@ export function projectCliPublication(options: {
   }
   return {
     candidate: selected.contribution,
-    operations: publicationOperations(selected),
+    operations: publicationOperations(selected, options.resources),
     imports: { "#npm-publication/*": "./scripts/npm-publication/*.ts" },
     scriptInsertions: [
       {

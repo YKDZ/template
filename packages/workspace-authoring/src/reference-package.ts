@@ -118,6 +118,16 @@ export type ReferencePackage<
   readonly defaultLeafName: string;
   readonly defaultPath: string;
   readonly role: DefaultPackageRole;
+  /** 由参考包自身提供默认工作区实例身份，供外部调用者校验碰撞。 */
+  defaultIdentity(scope: string): {
+    readonly name: string;
+    readonly path: string;
+    readonly role: DefaultPackageRole;
+  };
+  /** 实际配置拥有者标记的有限工作区配置能力。 */
+  readonly workspaceConfiguration?: {
+    readonly kind: "typescript-workspace-configuration";
+  };
   /** 内容被选中时需要根策略准备 Rust 工具链事实。 */
   readonly requiresRootRustToolchain?: true;
   readonly manifest: ReferencePackageManifest;
@@ -231,6 +241,9 @@ export function defineReferencePackage<
   readonly defaultLeafName: string;
   readonly defaultPath?: string;
   readonly role: DefaultPackageRole;
+  readonly workspaceConfiguration?: {
+    readonly kind: "typescript-workspace-configuration";
+  };
   /** 内容被选中时需要根策略准备 Rust 工具链事实。 */
   readonly requiresRootRustToolchain?: true;
   readonly resources: readonly string[];
@@ -292,7 +305,17 @@ export function defineReferencePackage<
       Object.freeze({ ...dependency }),
     ),
   );
+  let normalizedDependencyUses: readonly ReferenceDependencyUse[] | undefined;
+  const dependencyUses = (): readonly ReferenceDependencyUse[] => {
+    normalizedDependencyUses ??= normalizeDependencyUses(
+      manifest,
+      templateDependencies,
+    );
+    return normalizedDependencyUses;
+  };
   const publicationIdentitySource = options.publicationIdentitySource;
+  const defaultPath =
+    options.defaultPath ?? `packages/${options.defaultLeafName}`;
   const inDeclaredResources = (file: string): boolean => {
     const normalized = path.posix.normalize(file);
     return normalizedResources.some(
@@ -348,11 +371,7 @@ export function defineReferencePackage<
   const prepare = (): ReferencePackagePreparation<OwnerFacts> => {
     if (preparation !== undefined) return preparation;
     try {
-      const dependencyUses = normalizeDependencyUses(
-        manifest,
-        templateDependencies,
-      );
-
+      const preparedDependencyUses = dependencyUses();
       type IgnoreScope = { readonly directory: string; readonly rules: Ignore };
       const scopes = new Map<string, IgnoreScope>();
       const scopeFor = (directory: string): IgnoreScope => {
@@ -484,7 +503,7 @@ export function defineReferencePackage<
       const preparedResourcePaths = new Set(preparedResourcesByPath.keys());
       const ownerFacts = options.prepare?.({
         manifest,
-        dependencyUses,
+        dependencyUses: preparedDependencyUses,
         resources,
         executionData,
         readText(resourcePath) {
@@ -513,7 +532,7 @@ export function defineReferencePackage<
         resources: Object.freeze(resources),
         executionData: Object.freeze(executionData),
         templateDependencies,
-        dependencyUses,
+        dependencyUses: preparedDependencyUses,
         ownerFacts: ownerFacts as OwnerFacts,
       });
       return preparation;
@@ -555,15 +574,25 @@ export function defineReferencePackage<
     resolve: options.resolve,
     instance: options.instance,
     defaultLeafName: options.defaultLeafName,
-    defaultPath: options.defaultPath ?? `packages/${options.defaultLeafName}`,
+    defaultPath,
     role: options.role,
+    defaultIdentity(scope) {
+      return {
+        name: `@${scope}/${options.defaultLeafName}`,
+        path: defaultPath,
+        role: options.role,
+      };
+    },
+    ...(options.workspaceConfiguration === undefined
+      ? {}
+      : { workspaceConfiguration: options.workspaceConfiguration }),
     ...(options.requiresRootRustToolchain === undefined
       ? {}
       : { requiresRootRustToolchain: options.requiresRootRustToolchain }),
     manifest,
     templateDependencies,
     get dependencyUses() {
-      return requirePreparation().dependencyUses;
+      return dependencyUses();
     },
     prepare,
     source,
@@ -735,7 +764,12 @@ export function defineReferencePackage<
           imports: (projected.imports ?? {}) as Record<string, unknown>,
         },
         operations: outputOperations,
-        foundation: contextual(options.foundation, input),
+        foundation: {
+          ...contextual(options.foundation, input),
+          ...(options.workspaceConfiguration === undefined
+            ? {}
+            : { workspaceConfiguration: options.workspaceConfiguration }),
+        },
         environmentNeeds: contextual(options.environmentNeeds, input),
         referenceSource: manifest.name,
         referenceBindings: Object.fromEntries(bindings),

@@ -165,24 +165,10 @@ export function canProvideSourceConditionPackageNameImportForRole(
 /** 读取显式连接端点已有的当前 package manifest，供正式连接计划复核。 */
 export function readProjectLinkManifestTruth(options: {
   readonly repositoryRoot: string;
-  readonly blueprint: ProjectBlueprint;
-  readonly contributions: readonly PackageContribution[];
+  readonly packagePaths: readonly string[];
 }): ReadonlyMap<string, PackageManifest> {
-  const definitionByPath = new Map(
-    options.contributions.map((contribution) => [
-      contribution.definition.path,
-      contribution.definition,
-    ]),
-  );
-  const endpointPaths = new Set(
-    (options.blueprint.packageLinkIntents ?? []).flatMap((intent) => [
-      intent.consumerPackagePath,
-      intent.providerPackagePath,
-    ]),
-  );
   const truth = new Map<string, PackageManifest>();
-  for (const packagePath of endpointPaths) {
-    if (!definitionByPath.has(packagePath)) continue;
+  for (const packagePath of new Set(options.packagePaths)) {
     let manifestText: string;
     try {
       manifestText = readFileSync(

@@ -5,6 +5,9 @@ export const referenceDefinition = {
   alias: "typescript-config",
   instance: "shared",
   defaultLeafName: "typescript-config",
+  workspaceConfiguration: {
+    kind: "typescript-workspace-configuration",
+  },
   role: "shared-library",
   resources: ["."],
   template: {
@@ -14,7 +17,6 @@ export const referenceDefinition = {
   },
   environmentNeeds: [],
   foundation: {
-    workspaceConfiguration: { kind: "typescript-workspace-configuration" },
     toolchains: {},
     editorCapabilities: ["oxc-format-lint"],
     dependencyMaintenance: {
