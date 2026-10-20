@@ -1,4 +1,4 @@
-import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-core/module-graph";
+import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-environment/module-graph";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
 export const referencePackage = defineReferencePackage({
@@ -13,6 +13,7 @@ export const referencePackage = defineReferencePackage({
   authoring: {
     dependencies: [
       "@ykdz/template-core",
+      "@ykdz/template-environment",
       "@ykdz/template-workspace-authoring",
       "typescript-7",
     ],

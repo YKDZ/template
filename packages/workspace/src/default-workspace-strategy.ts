@@ -7,9 +7,11 @@ import {
   selectTemplateDependencyCatalogEntries,
 } from "@ykdz/template-core/dependency-catalog";
 import type {
+  PackageLinkIntent,
   PackageDefinition,
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
+import { assertProjectBlueprint } from "@ykdz/template-core/project-blueprint";
 import type { ProjectProjectionReconciliation } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
@@ -18,6 +20,7 @@ import {
 } from "@ykdz/template-core/renderer";
 import type {
   GeneratorPackageRecord,
+  PackageCreationInput,
   WorkspaceProjection,
   WorkspaceStrategy,
 } from "@ykdz/template-core/workspace-strategy";
@@ -35,6 +38,12 @@ import {
 } from "@ykdz/template-environment/module-graph";
 import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
+import type {
+  DatabasePreparationRequirement,
+  DeploymentCheckRequirement,
+  ProjectRequirement,
+  VueHonoJointE2eRequirement,
+} from "@ykdz/template-workspace-authoring/project-requirements";
 import type { ReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
 import { browserTestDevelopmentContainerToolLayer } from "./development-container.ts";
@@ -46,13 +55,19 @@ import {
   projectCheckWorkflow,
   projectDependabotConfig,
 } from "./project-github.ts";
+import { planExplicitProjectLinks } from "./project-linking.ts";
 import {
   createWorkspaceRootManifest,
   packageConditionKeyOrder,
   packageManifestKeyOrder,
   projectToolchainMirrorManifest,
   projectPreparedWorkspaceRoot,
+  type WorkspaceRootInsertion,
 } from "./root-projection.ts";
+import {
+  copyWorkspaceDirectory,
+  copyWorkspaceResource,
+} from "./workspace-resources.ts";
 
 export type DefaultWorkspaceInput = {
   readonly repositoryName?: string;
@@ -190,10 +205,14 @@ function siblingPackagePath(defaultPath: string, leafName: string): string {
   );
 }
 
-function maintenancePolicy(contributions: readonly PackageContribution[]) {
+function maintenancePolicy(
+  contributions: readonly PackageContribution[],
+  hasDeployment: boolean,
+) {
   const ecosystems = [
     ...new Set([
       "devcontainers" as const,
+      ...(hasDeployment ? (["docker"] as const) : []),
       ...contributions.flatMap(
         (contribution) =>
           contribution.foundation.dependencyMaintenance.ecosystems,
@@ -244,6 +263,327 @@ function boundaryTags(
   return [...selected];
 }
 
+type WorkspaceProjectRequirements = {
+  readonly vueHonoJointE2e?: VueHonoJointE2eRequirement;
+  readonly databasePreparation?: DatabasePreparationRequirement;
+  readonly deploymentCheck?: DeploymentCheckRequirement;
+};
+
+function samePackageDefinition(
+  left: PackageDefinition,
+  right: PackageDefinition,
+): boolean {
+  const leftId = "packageDefinitionId" in left ? left.packageDefinitionId : undefined;
+  const rightId = "packageDefinitionId" in right ? right.packageDefinitionId : undefined;
+  return (
+    left.name === right.name &&
+    left.path === right.path &&
+    left.role === right.role &&
+    leftId === rightId
+  );
+}
+
+function requireProjectPackage(
+  blueprint: ProjectBlueprint,
+  definition: PackageDefinition,
+  capability: string,
+): PackageDefinition {
+  const actual = blueprint.packages.find((candidate) =>
+    samePackageDefinition(candidate, definition),
+  );
+  if (actual === undefined) {
+    throw new Error(
+      `${capability} 引用了当前蓝图之外的包实例：${definition.path}`,
+    );
+  }
+  return actual;
+}
+
+function oneRequirement<T extends ProjectRequirement["kind"]>(
+  requirements: readonly ProjectRequirement[],
+  kind: T,
+): Extract<ProjectRequirement, { readonly kind: T }> | undefined {
+  const matches = requirements.filter(
+    (requirement): requirement is Extract<ProjectRequirement, { kind: T }> =>
+      requirement.kind === kind,
+  );
+  if (matches.length > 1) {
+    throw new Error(`工作区项目能力只能声明一次：${kind}`);
+  }
+  return matches[0];
+}
+
+function projectRequirements(
+  blueprint: ProjectBlueprint,
+  contributions: readonly PackageContribution[],
+): {
+  readonly blueprint: ProjectBlueprint;
+  readonly requirements: WorkspaceProjectRequirements;
+} {
+  const declarations = contributions.flatMap(
+    (contribution) => contribution.projectRequirements ?? [],
+  );
+  const joint = oneRequirement(declarations, "vue-hono-joint-e2e");
+  const database = oneRequirement(declarations, "sqlite-database-preparation");
+  const deployment = oneRequirement(
+    declarations,
+    "application-container-with-database-migrations",
+  );
+  const links: PackageLinkIntent[] = [];
+  const actualJoint =
+    joint === undefined
+      ? undefined
+      : ({
+          kind: joint.kind,
+          web: requireProjectPackage(blueprint, joint.web, joint.kind),
+          api: requireProjectPackage(blueprint, joint.api, joint.kind),
+        } satisfies VueHonoJointE2eRequirement);
+  if (actualJoint !== undefined) {
+    if (
+      actualJoint.web.role !== "runtime-service" ||
+      actualJoint.api.role !== "runtime-service"
+    ) {
+      throw new Error("Vue-Hono 联合验收需要 web 与 API 服务实例");
+    }
+    links.push({
+      consumerPackagePath: actualJoint.web.path,
+      providerPackagePath: actualJoint.api.path,
+    });
+  }
+  const actualDatabase =
+    database === undefined
+      ? undefined
+      : ({
+          kind: database.kind,
+          web: requireProjectPackage(blueprint, database.web, database.kind),
+          database: requireProjectPackage(
+            blueprint,
+            database.database,
+            database.kind,
+          ),
+          migrations: requireProjectPackage(
+            blueprint,
+            database.migrations,
+            database.kind,
+          ),
+        } satisfies DatabasePreparationRequirement);
+  const actualDeployment =
+    deployment === undefined
+      ? undefined
+      : ({
+          kind: deployment.kind,
+          application: requireProjectPackage(
+            blueprint,
+            deployment.application,
+            deployment.kind,
+          ),
+          database: requireProjectPackage(
+            blueprint,
+            deployment.database,
+            deployment.kind,
+          ),
+          migrations: requireProjectPackage(
+            blueprint,
+            deployment.migrations,
+            deployment.kind,
+          ),
+          environmentNeeds: deployment.environmentNeeds,
+        } satisfies DeploymentCheckRequirement);
+  for (const requirement of [actualDatabase, actualDeployment]) {
+    if (requirement === undefined) continue;
+    const application =
+      requirement.kind === "sqlite-database-preparation"
+        ? requirement.web
+        : requirement.application;
+    if (
+      application.role !== "runtime-service" ||
+      requirement.database.role !== "shared-library" ||
+      requirement.migrations.role !== "shared-library"
+    ) {
+      throw new Error(
+        `${requirement.kind} 需要应用、数据库和迁移包的实际角色匹配`,
+      );
+    }
+    links.push(
+      {
+        consumerPackagePath: application.path,
+        providerPackagePath: requirement.database.path,
+      },
+      {
+        consumerPackagePath: requirement.migrations.path,
+        providerPackagePath: requirement.database.path,
+      },
+    );
+  }
+  if (
+    actualDatabase !== undefined &&
+    actualDeployment !== undefined &&
+    (!samePackageDefinition(actualDatabase.web, actualDeployment.application) ||
+      !samePackageDefinition(
+        actualDatabase.database,
+        actualDeployment.database,
+      ) ||
+      !samePackageDefinition(
+        actualDatabase.migrations,
+        actualDeployment.migrations,
+      ))
+  ) {
+    throw new Error("数据库准备与部署能力必须引用同一组实际包实例");
+  }
+  const seenLinks = new Set<string>();
+  const packageLinkIntents = [
+    ...(blueprint.packageLinkIntents ?? []),
+    ...links,
+  ].filter((link) => {
+    const identity = `${link.consumerPackagePath}\u0000${link.providerPackagePath}`;
+    if (seenLinks.has(identity)) return false;
+    seenLinks.add(identity);
+    return true;
+  });
+  return {
+    blueprint: assertProjectBlueprint(
+      packageLinkIntents.length === 0 &&
+        blueprint.packageLinkIntents === undefined
+        ? {
+            schemaVersion: blueprint.schemaVersion,
+            packages: blueprint.packages,
+          }
+        : { ...blueprint, packageLinkIntents },
+    ),
+    requirements: {
+      ...(actualJoint === undefined ? {} : { vueHonoJointE2e: actualJoint }),
+      ...(actualDatabase === undefined
+        ? {}
+        : { databasePreparation: actualDatabase }),
+      ...(actualDeployment === undefined
+        ? {}
+        : { deploymentCheck: actualDeployment }),
+    },
+  };
+}
+
+function databasePreparationScripts(
+  preparation: DatabasePreparationRequirement,
+): Readonly<Record<string, string>> {
+  const run = (
+    profile: "dev" | "test" | "e2e",
+    definition: PackageDefinition,
+    task: string,
+  ) =>
+    `DATABASE_PROFILE=${profile} pnpm --filter ${definition.name} run ${task}`;
+  return {
+    "database:prepare:dev": [
+      run("dev", preparation.migrations, "db:push"),
+      run("dev", preparation.database, "db:seed:example"),
+    ].join(" && "),
+    "database:prepare:test": [
+      run("test", preparation.database, "db:reset"),
+      run("test", preparation.migrations, "db:push"),
+      run("test", preparation.database, "db:seed:example"),
+    ].join(" && "),
+    "database:prepare:e2e": [
+      run("e2e", preparation.database, "db:reset"),
+      run("e2e", preparation.migrations, "db:push"),
+      run("e2e", preparation.database, "db:seed:example"),
+    ].join(" && "),
+  };
+}
+
+function projectResourceOperations(options: {
+  readonly requirements: WorkspaceProjectRequirements;
+}): RenderOperation[] {
+  const operations: RenderOperation[] = [];
+  const joint = options.requirements.vueHonoJointE2e;
+  if (joint !== undefined) {
+    operations.push(
+      copyWorkspaceResource(
+        "joint-e2e/playwright.config.ts",
+        "playwright.config.ts",
+      ),
+      {
+        kind: "writeJson",
+        to: "joint-e2e.json",
+        value: {
+          apiPackageName: joint.api.name,
+          webPackageName: joint.web.name,
+        },
+      },
+      ...copyWorkspaceDirectory("joint-e2e/test", "test"),
+    );
+  }
+  if (options.requirements.deploymentCheck !== undefined) {
+    const deployment = options.requirements.deploymentCheck;
+    operations.push(
+      copyWorkspaceResource("deployment/Dockerfile", "Dockerfile"),
+      copyWorkspaceResource("deployment/.dockerignore", ".dockerignore"),
+      copyWorkspaceResource(
+        "deployment/scripts/check-standalone-deployment.ts",
+        "scripts/check-standalone-deployment.ts",
+      ),
+      copyWorkspaceResource(
+        "deployment/scripts/container-entrypoint.sh",
+        "scripts/container-entrypoint.sh",
+      ),
+      {
+        kind: "writeJson",
+        to: "deployment.json",
+        value: {
+          application: {
+            name: deployment.application.name,
+            path: deployment.application.path,
+          },
+          database: {
+            name: deployment.database.name,
+            path: deployment.database.path,
+          },
+          migrations: {
+            name: deployment.migrations.name,
+            path: deployment.migrations.path,
+          },
+        },
+      },
+    );
+  }
+  return operations;
+}
+
+function projectRootScriptInsertions(
+  requirements: WorkspaceProjectRequirements,
+): WorkspaceRootInsertion[] {
+  const insertions: WorkspaceRootInsertion[] = [];
+  const database = requirements.databasePreparation;
+  if (database !== undefined) {
+    insertions.push({
+      before: "fix",
+      values: databasePreparationScripts(database),
+    });
+  }
+  if (requirements.deploymentCheck !== undefined) {
+    insertions.push({
+      before: "fix",
+      values: {
+        deployment:
+          "node --conditions=source scripts/check-standalone-deployment.ts",
+      },
+    });
+  }
+  if (database !== undefined) {
+    insertions.push({
+      before: "fix",
+      values: {
+        dev: `pnpm run database:prepare:dev && turbo watch dev --filter=${database.web.name}`,
+      },
+    });
+  }
+  if (requirements.vueHonoJointE2e !== undefined) {
+    insertions.push({
+      before: "typecheck",
+      values: { "test:e2e": "playwright test" },
+    });
+  }
+  return insertions;
+}
+
 function projectOperations(options: {
   readonly context: GenerationContext;
   readonly state: DefaultWorkspaceState;
@@ -251,7 +591,11 @@ function projectOperations(options: {
   readonly packages: readonly GeneratorPackageRecord[];
   readonly contributions: readonly PackageContribution[];
 }): WorkspaceProjection {
-  const { context, blueprint, contributions } = options;
+  const { context, contributions } = options;
+  const projectState = projectRequirements(options.blueprint, contributions);
+  const { blueprint, requirements } = projectState;
+  const hasDeployment = requirements.deploymentCheck !== undefined;
+  const hasJointE2e = requirements.vueHonoJointE2e !== undefined;
   const configuration = contributions.find(
     (contribution) =>
       contribution.definition.name ===
@@ -260,12 +604,50 @@ function projectOperations(options: {
   if (configuration === undefined) {
     throw new Error("默认策略缺少共享 TypeScript 配置内容");
   }
+  const rootAutomationPaths = [
+    "*.json",
+    "pnpm-workspace.yaml",
+    "pnpm-lock.yaml",
+    "*.config.ts",
+    ".pnpmfile.mjs",
+    ".gitignore",
+    ".dockerignore",
+    "Dockerfile",
+    "TODO.md",
+    "rust-toolchain.toml",
+    ".vscode",
+    ".github",
+    ".devcontainer",
+    "scripts",
+    ...(hasJointE2e ? ["test"] : []),
+  ].join(" ");
   const rootManifest = createWorkspaceRootManifest({
     name: context.repositoryName,
     typescriptConfigurationPackageName: configuration.definition.name,
     nodeDeclaration:
       context.toolchain.nodeVersion ?? context.toolchain.nodeLtsMajor,
     packageManagerPin: context.toolchain.packageManagerPin,
+    scriptInsertions: projectRootScriptInsertions(requirements),
+    ...(hasJointE2e
+      ? {
+          dependencyInsertions: [
+            {
+              before: "@types/node",
+              values: { "@playwright/test": "catalog:" },
+            },
+          ],
+        }
+      : {}),
+    ...(hasDeployment || hasJointE2e
+      ? {
+          scriptOverrides: {
+            "format:check": `oxfmt --list-different --no-error-on-unmatched-pattern ${rootAutomationPaths}`,
+            "format:write": `oxfmt --write --no-error-on-unmatched-pattern ${rootAutomationPaths}`,
+            lint: `${hasDeployment ? "shellcheck scripts/container-entrypoint.sh && " : ""}oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts${hasJointE2e ? " test" : ""}`,
+            "lint:fix": `oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts${hasJointE2e ? " test" : ""} --fix`,
+          },
+        }
+      : {}),
   });
   const dependencyCatalog = selectTemplateDependencyCatalogEntries(
     collectGeneratedManifestCatalogReferences([
@@ -290,14 +672,8 @@ function projectOperations(options: {
       (contribution) => contribution.foundation.editorCapabilities,
     ),
   );
-  const deploymentEnvironmentNeeds = contributions.flatMap(
-    (contribution) =>
-      contribution.foundation.deploymentCheck?.environmentNeeds ?? [],
-  );
-  const hasDeployment = deploymentEnvironmentNeeds.length > 0;
-  const hasJointE2e = contributions.some(
-    (contribution) => contribution.foundation.vueHonoJointE2e !== undefined,
-  );
+  const deploymentEnvironmentNeeds =
+    requirements.deploymentCheck?.environmentNeeds ?? [];
   const checkEnvironmentNeeds = [
     ...contributions.flatMap((contribution) => contribution.environmentNeeds),
     ...(hasJointE2e
@@ -494,13 +870,18 @@ function projectOperations(options: {
       to: ".github/workflows/check.yml",
       text: projectCheckWorkflow({
         packagePaths,
+        ...(requirements.deploymentCheck === undefined
+          ? {}
+          : { deploymentCheck: requirements.deploymentCheck }),
         diagnosticArtifacts: artifacts,
       }),
     },
     {
       kind: "writeText",
       to: ".github/dependabot.yml",
-      text: projectDependabotConfig(maintenancePolicy(contributions)),
+      text: projectDependabotConfig(
+        maintenancePolicy(contributions, hasDeployment),
+      ),
     },
     {
       kind: "writeJson",
@@ -508,13 +889,41 @@ function projectOperations(options: {
       value: environmentNeeds,
     },
   ];
+  const linkPlan = planExplicitProjectLinks({
+    blueprint,
+    contributions,
+  });
   const packageOperations = contributions.flatMap((contribution) =>
     contribution.operations.map((operation) =>
       operation.kind === "writeJson" &&
       operation.to === contribution.definition.path + "/package.json"
         ? {
             ...operation,
-            value: contribution.manifest,
+            value: (() => {
+              const patch = linkPlan.manifestPatchesByPackagePath.get(
+                contribution.definition.path,
+              );
+              if (patch === undefined) return contribution.manifest;
+              return {
+                ...contribution.manifest,
+                dependencies: {
+                  ...(isRecord(contribution.manifest.dependencies)
+                    ? contribution.manifest.dependencies
+                    : {}),
+                  ...patch.dependencies,
+                },
+                ...(patch.dependenciesMeta === undefined
+                  ? {}
+                  : {
+                      dependenciesMeta: {
+                        ...(isRecord(contribution.manifest.dependenciesMeta)
+                          ? contribution.manifest.dependenciesMeta
+                          : {}),
+                        ...patch.dependenciesMeta,
+                      },
+                    }),
+              };
+            })(),
             multilineArrays: ["files"],
             keyOrder: packageManifestKeyOrder,
             nestedKeyOrder: packageConditionKeyOrder,
@@ -523,9 +932,11 @@ function projectOperations(options: {
     ),
   );
   return {
+    blueprint,
     operations: [
       ...packageOperations,
       ...defaultOperations,
+      ...projectResourceOperations({ requirements }),
       { kind: "writeJson", to: ".template/blueprint.json", value: blueprint },
     ],
     reconciliation,
@@ -533,11 +944,14 @@ function projectOperations(options: {
 }
 
 /** 创建拥有 Node、pnpm、catalog、Turbo 与根任务政策的默认工作区策略。 */
-export function createDefaultWorkspaceStrategy(): WorkspaceStrategy<
+export function createDefaultWorkspaceStrategy<
+  CreationInput extends PackageCreationInput = PackageCreationInput,
+>(): WorkspaceStrategy<
   GenerationContext,
   DefaultWorkspaceInput,
   DefaultWorkspaceState,
   PackageContribution,
+  CreationInput,
   ReferencePackage
 > {
   return {
@@ -564,6 +978,7 @@ export function createDefaultWorkspaceStrategy(): WorkspaceStrategy<
       content,
       contentByIdentity,
       packages,
+      nodeInstances,
     }) {
       const current = readPackageAdditionVersionFacts(targetRoot);
       const context = defaultContext(targetRoot, {
@@ -598,11 +1013,17 @@ export function createDefaultWorkspaceStrategy(): WorkspaceStrategy<
           }
           providerDefinitions.set(providerIdentity, definition);
         }
-        const baseline = provider.contribute({
+        const contributionOptions = {
           context,
           definition: providerRecord.definition,
           bindings: nativeBindings(contentByIdentity, providerDefinitions),
-        });
+          createdBy: providerRecord.createdBy,
+          nodeInstances,
+          ...(providerRecord.creationInput === undefined
+            ? {}
+            : { creationInput: providerRecord.creationInput }),
+        };
+        const baseline = provider.contribute(contributionOptions);
         assertReusablePackageExposure({
           repositoryRoot: targetRoot,
           packagePath: providerRecord.definition.path,
@@ -632,18 +1053,13 @@ export function createDefaultWorkspaceStrategy(): WorkspaceStrategy<
     bindings({ contentByIdentity, providers }) {
       return nativeBindings(contentByIdentity, providers);
     },
-    createDefinition({
-      context,
-      content,
-      leafName,
-      packagePath: explicitPath,
-    }) {
-      const selectedLeaf = leafName ?? content.defaultLeafName;
+    createDefinition({ context, content, creationInput }) {
+      const selectedLeaf = creationInput?.leafName ?? content.defaultLeafName;
       return {
         name: "@" + context.defaultPackageScope + "/" + selectedLeaf,
         path:
-          explicitPath ??
-          (leafName === undefined
+          creationInput?.packagePath ??
+          (creationInput?.leafName === undefined
             ? content.defaultPath
             : siblingPackagePath(content.defaultPath, selectedLeaf)),
         role: content.role,

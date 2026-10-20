@@ -2,28 +2,8 @@ import { readFileSync } from "node:fs";
 
 import { composeCiDiagnosticArtifacts } from "@ykdz/template-environment/ci-diagnostic-artifact";
 import type { DeploymentEnvironmentNeed } from "@ykdz/template-environment/module-graph";
+import type { DependencyMaintenancePolicy } from "@ykdz/template-workspace-authoring/project-requirements";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
-
-export type DependencyEcosystem =
-  | "npm"
-  | "cargo"
-  | "github-actions"
-  | "docker"
-  | "devcontainers"
-  | "rust-toolchain";
-
-export type DependabotDirectory = `/${string}`;
-
-export type DependencyMaintenancePolicy = {
-  readonly ecosystems: readonly DependencyEcosystem[];
-  readonly directories?: Partial<
-    Record<DependencyEcosystem, DependabotDirectory>
-  >;
-  readonly extraDirectories?: Partial<
-    Record<DependencyEcosystem, readonly DependabotDirectory[]>
-  >;
-  readonly interval: "weekly";
-};
 
 export type ProjectCheckWorkflowDiagnosticOptions = {
   readonly packagePaths: readonly string[];
@@ -102,8 +82,8 @@ export function projectCheckWorkflow(
 }
 
 type DependabotUpdate = Readonly<Record<string, unknown>> & {
-  readonly "package-ecosystem": DependencyEcosystem;
-  readonly directory: DependabotDirectory;
+  readonly "package-ecosystem": DependencyMaintenancePolicy["ecosystems"][number];
+  readonly directory: `/${string}`;
   readonly schedule: Readonly<Record<string, unknown>>;
 };
 

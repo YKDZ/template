@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { rustToolchainEnvironmentNeed } from "@ykdz/template-core/module-graph";
 import type { RenderOperation } from "@ykdz/template-core/renderer";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
 import { rustDevelopmentContainerToolLayer } from "@ykdz/template-environment/development-environment";
+import { rustToolchainEnvironmentNeed } from "@ykdz/template-environment/module-graph";
 import {
   defineReferencePackage,
   type ReferencePackage,

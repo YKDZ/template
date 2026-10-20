@@ -4,15 +4,16 @@ import { describe, it } from "node:test";
 import {
   composeCiDiagnosticArtifacts,
   type CiDiagnosticArtifactDeclaration,
-} from "@ykdz/template-core/ci-diagnostic-artifact";
+} from "@ykdz/template-environment/ci-diagnostic-artifact";
 import {
-  projectCheckWorkflowTemplateSource,
-  projectCheckWorkflowTemplateReplacements,
-} from "@ykdz/template-core/project-github";
+  dockerEngineEnvironmentNeed,
+  type DeploymentEnvironmentNeed,
+} from "@ykdz/template-environment/module-graph";
 import {
   assertPackageContribution,
   type PackageContribution,
 } from "@ykdz/template-workspace-authoring/package-contribution";
+import { projectCheckWorkflow } from "@ykdz/template-workspace/project-github";
 
 const playwright = (path: string): CiDiagnosticArtifactDeclaration => ({
   kind: "playwright",
@@ -43,8 +44,8 @@ function packageContribution(
   };
 }
 
-void describe("CI Diagnostic Artifact contract", () => {
-  void it("returns only ordered, deduplicated closed declarations", () => {
+void describe("CI 诊断产物合同", () => {
+  void it("只返回排序且去重的封闭声明", () => {
     assert.deepStrictEqual(
       composeCiDiagnosticArtifacts({
         packagePaths: ["apps/web", "apps/admin"],
@@ -67,7 +68,7 @@ void describe("CI Diagnostic Artifact contract", () => {
     );
   });
 
-  void it("rejects unrecognized kinds, unsafe paths, unknown owners, and extra upload fields", () => {
+  void it("拒绝未知类型、不安全路径、未知所有者与额外上传字段", () => {
     const packagePaths = ["apps/web"];
     for (const declaration of [
       {
@@ -90,45 +91,28 @@ void describe("CI Diagnostic Artifact contract", () => {
     }
   });
 
-  void it("derives only ordered owner facts from actual Package Boundary paths", () => {
+  void it("工作流只投影实际包边界中的诊断所有者", () => {
     const packagePaths = ["apps/web"];
-    assert.strictEqual(
-      projectCheckWorkflowTemplateSource({
-        packagePaths,
-        diagnosticArtifacts: [playwright("apps/web")],
-      }),
-      ".github/workflows/check-diagnostics.yml",
-    );
-    assert.deepStrictEqual(
-      projectCheckWorkflowTemplateReplacements({
-        packagePaths,
-        diagnosticArtifacts: [
-          playwright("apps/web"),
-          vitestBrowser("apps/web"),
-        ],
-      }),
-      {
-        PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: "apps/web",
-        VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "apps/web",
-      },
-    );
+    const workflow = projectCheckWorkflow({
+      packagePaths,
+      diagnosticArtifacts: [playwright("apps/web"), vitestBrowser("apps/web")],
+    });
+    assert.match(workflow, /PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS/u);
+    assert.match(workflow, /VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS/u);
+    assert.match(workflow, /apps\/web/u);
   });
 
-  void it("requires exact Package Boundary membership at every public workflow entrypoint", () => {
-    for (const entrypoint of [
-      () =>
-        projectCheckWorkflowTemplateSource({
-          packagePaths: ["apps/web"],
-          diagnosticArtifacts: [playwright("apps/admin")],
-        }),
-      () =>
-        projectCheckWorkflowTemplateReplacements({
-          packagePaths: ["apps/web"],
-          diagnosticArtifacts: [playwright("services/private")],
-        }),
+  void it("要求工作流声明的诊断所有者属于真实包边界", () => {
+    for (const declaration of [
+      playwright("apps/admin"),
+      playwright("services/private"),
     ]) {
       assert.throws(
-        entrypoint,
+        () =>
+          projectCheckWorkflow({
+            packagePaths: ["apps/web"],
+            diagnosticArtifacts: [declaration],
+          }),
         (error) =>
           error instanceof Error &&
           error.message.includes(
@@ -138,44 +122,48 @@ void describe("CI Diagnostic Artifact contract", () => {
     }
   });
 
-  void it("rejects unsafe owners at every public workflow entrypoint", () => {
+  void it("部署工作流必须声明 Docker 环境需求", () => {
+    const packagePaths = ["apps/web"];
+    assert.throws(() =>
+      projectCheckWorkflow({
+        packagePaths,
+        deploymentCheck: {
+          environmentNeeds: [] as DeploymentEnvironmentNeed[],
+        },
+      }),
+    );
+    assert.match(
+      projectCheckWorkflow({
+        packagePaths,
+        deploymentCheck: {
+          environmentNeeds: [dockerEngineEnvironmentNeed()],
+        },
+      }),
+      /prepare-deployment/u,
+    );
+  });
+
+  void it("拒绝不安全的诊断所有者", () => {
     const declarationWithPath = {
       ...playwright("apps/web"),
       paths: [".env", "**/*"],
     };
 
-    for (const entrypoint of [
-      () =>
-        projectCheckWorkflowTemplateSource({
-          packagePaths: ["apps/web"],
-          diagnosticArtifacts: [declarationWithPath],
-        }),
-      () =>
-        projectCheckWorkflowTemplateSource({
-          packagePaths: ["apps/web"],
-          diagnosticArtifacts: [playwright("node_modules/private")],
-        }),
-      () =>
-        projectCheckWorkflowTemplateReplacements({
-          packagePaths: ["apps/web"],
-          diagnosticArtifacts: [playwright("node_modules/private")],
-        }),
-      () =>
-        projectCheckWorkflowTemplateSource({
-          packagePaths: ["node_modules/private"],
-          diagnosticArtifacts: [playwright("node_modules/private")],
-        }),
-      () =>
-        projectCheckWorkflowTemplateReplacements({
-          packagePaths: ["node_modules/private"],
-          diagnosticArtifacts: [playwright("node_modules/private")],
-        }),
-    ]) {
-      assert.throws(entrypoint);
-    }
+    assert.throws(() =>
+      projectCheckWorkflow({
+        packagePaths: ["apps/web"],
+        diagnosticArtifacts: [declarationWithPath],
+      }),
+    );
+    assert.throws(() =>
+      projectCheckWorkflow({
+        packagePaths: ["node_modules/private"],
+        diagnosticArtifacts: [playwright("node_modules/private")],
+      }),
+    );
   });
 
-  void it("requires every Package Contribution diagnostic owner to be its boundary", () => {
+  void it("每个包贡献的诊断所有者必须属于自身边界", () => {
     assert.throws(
       () =>
         assertPackageContribution(

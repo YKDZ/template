@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
+import {
+  assertPackageContribution,
+  type PackageContribution,
+} from "@ykdz/template-core/package-contribution";
 import {
   assertProjectBlueprint,
   type PackageDefinition,
@@ -20,27 +23,38 @@ import {
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import type {
   GeneratorContent,
+  GeneratorNodeInstanceIds,
+  GeneratorNodeInstances,
   GeneratorPackageRecord,
+  GeneratorSelectionRoot,
+  PackageCreationInput,
   WorkspaceStrategy,
 } from "@ykdz/template-core/workspace-strategy";
 
-type GeneratorRecord = {
+type GeneratorRecord<CreationInput extends PackageCreationInput> = {
   readonly schemaVersion: 1;
   readonly strategyIdentity: string;
   readonly strategyState: unknown;
-  readonly packages: readonly GeneratorPackageRecord[];
+  readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
+  readonly nodeInstances: GeneratorNodeInstanceIds;
 };
 
 type PackageNode<
   Context,
   Contribution extends PackageContribution,
-  Content extends GeneratorContent<Context, Contribution>,
+  CreationInput extends PackageCreationInput,
+  Content extends GeneratorContent<Context, Contribution, CreationInput>,
 > = {
   readonly content: Content;
-  readonly definition: PackageDefinition;
+  definition: PackageDefinition;
+  readonly nodeIdentity?: string;
   readonly createdBy: GeneratorPackageRecord["createdBy"];
-  readonly providers: Map<string, PackageNode<Context, Contribution, Content>>;
-  record?: GeneratorPackageRecord;
+  readonly creationInput?: CreationInput;
+  readonly providers: Map<
+    string,
+    PackageNode<Context, Contribution, CreationInput, Content>
+  >;
+  record?: GeneratorPackageRecord<CreationInput>;
   contribution?: Contribution;
 };
 
@@ -68,18 +82,22 @@ export type GeneratorResult =
       readonly error: { readonly message: string };
     };
 
-export type Generator<Input> = {
+export type Generator<
+  Input,
+  CreationInput extends PackageCreationInput = PackageCreationInput,
+> = {
   init(options: {
     readonly targetRoot: string;
-    readonly selection: { readonly contentIdentity: string };
+    readonly selection: {
+      readonly roots: readonly GeneratorSelectionRoot<CreationInput>[];
+    };
     readonly strategyInput: Input;
     readonly dryRun?: boolean;
   }): Promise<GeneratorResult>;
   add(options: {
     readonly repositoryRoot: string;
     readonly contentIdentity: string;
-    readonly leafName: string;
-    readonly packagePath?: string;
+    readonly creationInput?: CreationInput;
     readonly dryRun?: boolean;
   }): Promise<GeneratorResult>;
 };
@@ -104,7 +122,9 @@ function readJson(value: unknown, label: string): Record<string, unknown> {
   return value;
 }
 
-function parseGeneratorRecord(value: unknown): GeneratorRecord {
+function parseGeneratorRecord<CreationInput extends PackageCreationInput>(
+  value: unknown,
+): GeneratorRecord<CreationInput> {
   const record = readJson(value, "生成记录");
   if (
     record.schemaVersion !== 1 ||
@@ -129,13 +149,32 @@ function parseGeneratorRecord(value: unknown): GeneratorRecord {
     ) {
       throw new Error("生成记录的包项无效：" + index);
     }
-    return packageRecord as unknown as GeneratorPackageRecord;
+    return packageRecord as unknown as GeneratorPackageRecord<CreationInput>;
   });
+  const nodeInstances =
+    record.nodeInstances === undefined
+      ? {}
+      : readJson(record.nodeInstances, "生成记录节点实例");
+  for (const [nodeIdentity, packageDefinitionId] of Object.entries(
+    nodeInstances,
+  )) {
+    if (
+      nodeIdentity.length === 0 ||
+      typeof packageDefinitionId !== "string" ||
+      !packages.some(
+        (packageRecord) =>
+          packageRecord.definition.packageDefinitionId === packageDefinitionId,
+      )
+    ) {
+      throw new Error("生成记录的节点实例映射无效");
+    }
+  }
   return {
     schemaVersion: 1,
     strategyIdentity: record.strategyIdentity,
     strategyState: record.strategyState,
     packages,
+    nodeInstances: nodeInstances as GeneratorNodeInstanceIds,
   };
 }
 
@@ -172,7 +211,8 @@ export function createGenerator<
   Input,
   State,
   Contribution extends PackageContribution,
-  Content extends GeneratorContent<Context, Contribution>,
+  CreationInput extends PackageCreationInput,
+  Content extends GeneratorContent<Context, Contribution, CreationInput>,
 >(options: {
   readonly content: readonly Content[];
   readonly strategy: WorkspaceStrategy<
@@ -180,9 +220,10 @@ export function createGenerator<
     Input,
     State,
     Contribution,
+    CreationInput,
     Content
   >;
-}): Generator<Input> {
+}): Generator<Input, CreationInput> {
   const contentByIdentity = new Map(
     options.content.map((content) => [content.identity, content]),
   );
@@ -199,9 +240,9 @@ export function createGenerator<
   }
 
   function findByPackageId(
-    records: readonly GeneratorPackageRecord[],
+    records: readonly GeneratorPackageRecord<CreationInput>[],
     id: string,
-  ): GeneratorPackageRecord {
+  ): GeneratorPackageRecord<CreationInput> {
     const record = records.find(
       (candidate) => candidate.definition.packageDefinitionId === id,
     );
@@ -211,10 +252,24 @@ export function createGenerator<
     return record;
   }
 
+  function resolveNodeInstances(
+    records: readonly GeneratorPackageRecord<CreationInput>[],
+    nodeInstances: GeneratorNodeInstanceIds,
+  ): GeneratorNodeInstances {
+    return new Map(
+      Object.entries(nodeInstances).map(
+        ([nodeIdentity, packageDefinitionId]) => [
+          nodeIdentity,
+          findByPackageId(records, packageDefinitionId).definition,
+        ],
+      ),
+    );
+  }
+
   function addRecordNodes(
-    records: readonly GeneratorPackageRecord[],
+    records: readonly GeneratorPackageRecord<CreationInput>[],
     blueprint: ProjectBlueprint,
-  ): PackageNode<Context, Contribution, Content>[] {
+  ): PackageNode<Context, Contribution, CreationInput, Content>[] {
     return records.map((record) => {
       const definition = blueprint.packages.find(
         (candidate) =>
@@ -228,6 +283,9 @@ export function createGenerator<
         content: requireContent(record.contentIdentity),
         definition,
         createdBy: record.createdBy,
+        ...(record.creationInput === undefined
+          ? {}
+          : { creationInput: record.creationInput }),
         providers: new Map(),
         record,
       };
@@ -235,9 +293,10 @@ export function createGenerator<
   }
 
   function createContribution(
-    node: PackageNode<Context, Contribution, Content>,
+    node: PackageNode<Context, Contribution, CreationInput, Content>,
     context: Context,
-    allRecords: readonly GeneratorPackageRecord[],
+    allRecords: readonly GeneratorPackageRecord<CreationInput>[],
+    nodeInstances: GeneratorNodeInstances,
   ): Contribution {
     if (node.contribution !== undefined) return node.contribution;
     const providerDefinitions = new Map<string, PackageDefinition>();
@@ -260,23 +319,52 @@ export function createGenerator<
       contentByIdentity,
       providers: providerDefinitions,
     });
-    node.contribution = node.content.contribute({
+    const contributionOptions = {
       context,
       definition: node.definition,
       bindings: nativeBindings,
-    });
+      createdBy: node.createdBy,
+      nodeInstances,
+      ...(node.creationInput === undefined
+        ? {}
+        : { creationInput: node.creationInput }),
+    };
+    const contribution = node.content.contribute(contributionOptions);
+    const contributionDefinition = contribution.definition;
+    if (
+      contributionDefinition.name !== node.definition.name ||
+      contributionDefinition.path !== node.definition.path ||
+      contributionDefinition.role !== node.definition.role ||
+      ("packageDefinitionId" in contributionDefinition &&
+        contributionDefinition.packageDefinitionId !==
+          node.record?.definition.packageDefinitionId)
+    ) {
+      throw new Error(
+        `内容 ${node.content.identity} 返回的包定义与已分配实例不一致：${node.definition.path}`,
+      );
+    }
+    assertPackageContribution(
+      {
+        definition: node.definition,
+        operations: contribution.operations,
+      },
+      { definitionName: node.content.identity, planner: "内容贡献" },
+    );
+    node.contribution = contribution;
     return node.contribution;
   }
 
   function storedRecord(
     state: State,
-    records: readonly GeneratorPackageRecord[],
-  ): GeneratorRecord {
+    records: readonly GeneratorPackageRecord<CreationInput>[],
+    nodeInstances: GeneratorNodeInstanceIds,
+  ): GeneratorRecord<CreationInput> {
     return {
       schemaVersion: 1,
       strategyIdentity: options.strategy.identity,
       strategyState: state,
       packages: records,
+      nodeInstances,
     };
   }
 
@@ -284,23 +372,28 @@ export function createGenerator<
     context: Context,
     state: State,
     blueprint: ProjectBlueprint,
-    records: readonly GeneratorPackageRecord[],
+    records: readonly GeneratorPackageRecord<CreationInput>[],
     contributions: readonly Contribution[],
+    nodeInstances: GeneratorNodeInstanceIds,
   ) {
+    const resolvedNodeInstances = resolveNodeInstances(records, nodeInstances);
     const projection = options.strategy.project({
       context,
       state,
       blueprint,
       packages: records,
       contributions,
+      nodeInstances: resolvedNodeInstances,
     });
+    const projectedBlueprint = projection.blueprint ?? blueprint;
     return {
+      blueprint: projectedBlueprint,
       operations: [
         ...projection.operations,
         {
           kind: "writeJson" as const,
           to: ".template/generation.json",
-          value: storedRecord(state, records),
+          value: storedRecord(state, records, nodeInstances),
         },
       ],
       reconciliation: projection.reconciliation,
@@ -308,19 +401,31 @@ export function createGenerator<
   }
 
   function hydrateNewNodes(options_: {
-    readonly roots: readonly PackageNode<Context, Contribution, Content>[];
-    readonly existing: readonly PackageNode<Context, Contribution, Content>[];
+    readonly roots: readonly PackageNode<
+      Context,
+      Contribution,
+      CreationInput,
+      Content
+    >[];
+    readonly existing: readonly PackageNode<
+      Context,
+      Contribution,
+      CreationInput,
+      Content
+    >[];
     readonly context: Context;
     readonly occupiedIds: Set<PackageDefinitionId>;
-  }): PackageNode<Context, Contribution, Content>[] {
+  }): PackageNode<Context, Contribution, CreationInput, Content>[] {
     const newNodes = new Map<
       string,
-      PackageNode<Context, Contribution, Content>
+      PackageNode<Context, Contribution, CreationInput, Content>
     >();
     const visiting = new Set<string>();
     const expanded = new Set<string>();
 
-    const visit = (node: PackageNode<Context, Contribution, Content>): void => {
+    const visit = (
+      node: PackageNode<Context, Contribution, CreationInput, Content>,
+    ): void => {
       const key = node.content.identity + "\u0000" + node.definition.path;
       if (node.record !== undefined) return;
       if (visiting.has(key)) {
@@ -373,6 +478,31 @@ export function createGenerator<
       expanded.add(key);
     };
 
+    const explicitByContent = new Set<string>();
+    const explicitByPath = new Set<string>();
+    const explicitByNode = new Set<string>();
+    for (const root of options_.roots) {
+      const key = root.content.identity + "\u0000" + root.definition.path;
+      if (explicitByNode.has(root.nodeIdentity ?? "")) {
+        throw new Error("显式初始化节点身份重复：" + root.nodeIdentity);
+      }
+      explicitByNode.add(root.nodeIdentity ?? "");
+      if (
+        root.content.instance === "independent" &&
+        explicitByContent.has(root.content.identity)
+      ) {
+        throw new Error(
+          "同一独立内容不能重复作为显式根：" + root.content.identity,
+        );
+      }
+      explicitByContent.add(root.content.identity);
+      if (explicitByPath.has(root.definition.path)) {
+        throw new Error("显式初始化根路径重复：" + root.definition.path);
+      }
+      explicitByPath.add(root.definition.path);
+      newNodes.set(key, root);
+    }
+
     for (const root of options_.roots) visit(root);
     const nodes = [...newNodes.values()];
     for (const node of nodes) {
@@ -386,10 +516,14 @@ export function createGenerator<
         }),
       };
       options_.occupiedIds.add(persisted.packageDefinitionId);
+      node.definition = persisted;
       node.record = {
         contentIdentity: node.content.identity,
         createdBy: node.createdBy,
         definition: persisted,
+        ...(node.creationInput === undefined
+          ? {}
+          : { creationInput: node.creationInput }),
         bindings: {},
       };
     }
@@ -408,46 +542,96 @@ export function createGenerator<
   }
 
   function persistedContributions(
-    nodes: readonly PackageNode<Context, Contribution, Content>[],
+    nodes: readonly PackageNode<
+      Context,
+      Contribution,
+      CreationInput,
+      Content
+    >[],
     context: Context,
-    records: readonly GeneratorPackageRecord[],
+    records: readonly GeneratorPackageRecord<CreationInput>[],
+    nodeInstances: GeneratorNodeInstances,
   ): Contribution[] {
-    return nodes.map((node) => createContribution(node, context, records));
+    return nodes.map((node) =>
+      createContribution(node, context, records, nodeInstances),
+    );
   }
 
   async function init(initOptions: {
     readonly targetRoot: string;
-    readonly selection: { readonly contentIdentity: string };
+    readonly selection: {
+      readonly roots: readonly GeneratorSelectionRoot<CreationInput>[];
+    };
     readonly strategyInput: Input;
     readonly dryRun?: boolean;
   }): Promise<GeneratorResult> {
     try {
-      const primaryContent = requireContent(
-        initOptions.selection.contentIdentity,
-      );
+      if (initOptions.selection.roots.length === 0) {
+        throw new Error("初始化至少需要一个显式内容根");
+      }
+      const rootsByIdentity = new Set<string>();
+      for (const root of initOptions.selection.roots) {
+        if (root.nodeIdentity.length === 0) {
+          throw new Error("显式初始化节点身份不能为空");
+        }
+        if (rootsByIdentity.has(root.nodeIdentity)) {
+          throw new Error("显式初始化节点身份重复：" + root.nodeIdentity);
+        }
+        rootsByIdentity.add(root.nodeIdentity);
+        requireContent(root.contentIdentity);
+      }
       const prepared = options.strategy.initialize({
         targetRoot: initOptions.targetRoot,
         input: initOptions.strategyInput,
-        selection: primaryContent.identity,
+        selection: initOptions.selection.roots,
       });
-      const definition = options.strategy.createDefinition({
-        context: prepared.context,
-        content: primaryContent,
+      const roots: PackageNode<
+        Context,
+        Contribution,
+        CreationInput,
+        Content
+      >[] = initOptions.selection.roots.map((root) => {
+        const content = requireContent(root.contentIdentity);
+        const definition = options.strategy.createDefinition({
+          context: prepared.context,
+          content,
+          ...(root.creationInput === undefined
+            ? {}
+            : { creationInput: root.creationInput }),
+        });
+        return {
+          content,
+          definition,
+          nodeIdentity: root.nodeIdentity,
+          createdBy: "initialization" as const,
+          ...(root.creationInput === undefined
+            ? {}
+            : { creationInput: root.creationInput }),
+          providers: new Map<
+            string,
+            PackageNode<Context, Contribution, CreationInput, Content>
+          >(),
+        };
       });
-      const primary: PackageNode<Context, Contribution, Content> = {
-        content: primaryContent,
-        definition,
-        createdBy: "initialization",
-        providers: new Map(),
-      };
       const nodes = hydrateNewNodes({
-        roots: [primary],
+        roots,
         existing: [],
         context: prepared.context,
         occupiedIds: new Set(),
       });
       const records = nodes.flatMap((node) =>
         node.record === undefined ? [] : [node.record],
+      );
+      const nodeInstances = Object.fromEntries(
+        roots.map((root) => {
+          if (root.record === undefined) {
+            throw new Error("显式初始化节点没有持久实例：" + root.nodeIdentity);
+          }
+          return [
+            root.nodeIdentity,
+            root.record.definition.packageDefinitionId,
+          ];
+        }),
       );
       const blueprint = assertProjectBlueprint({
         schemaVersion: 3,
@@ -457,6 +641,7 @@ export function createGenerator<
         nodes,
         prepared.context,
         records,
+        resolveNodeInstances(records, nodeInstances),
       );
       const projectPlan = project(
         prepared.context,
@@ -464,6 +649,7 @@ export function createGenerator<
         blueprint,
         records,
         contributions,
+        nodeInstances,
       );
       await materializeProjectProjection({
         operations: projectPlan.operations,
@@ -478,7 +664,7 @@ export function createGenerator<
       return {
         status: "success",
         dryRun: initOptions.dryRun ?? false,
-        blueprint,
+        blueprint: projectPlan.blueprint,
         actions: [],
       };
     } catch (error) {
@@ -489,8 +675,7 @@ export function createGenerator<
   async function add(addOptions: {
     readonly repositoryRoot: string;
     readonly contentIdentity: string;
-    readonly leafName: string;
-    readonly packagePath?: string;
+    readonly creationInput?: CreationInput;
     readonly dryRun?: boolean;
   }): Promise<GeneratorResult> {
     try {
@@ -502,7 +687,7 @@ export function createGenerator<
         ),
       ) as unknown;
       const blueprint = assertProjectBlueprint(blueprintValue);
-      const record = parseGeneratorRecord(
+      const record = parseGeneratorRecord<CreationInput>(
         JSON.parse(
           await readFile(
             path.join(repositoryRoot, ".template/generation.json"),
@@ -516,6 +701,10 @@ export function createGenerator<
       const state = options.strategy.parseState(record.strategyState);
       const selected = requireContent(addOptions.contentIdentity);
       const existingNodes = addRecordNodes(record.packages, blueprint);
+      const currentNodeInstances = resolveNodeInstances(
+        record.packages,
+        record.nodeInstances,
+      );
       let context: Context;
       try {
         context = await options.strategy.prepareAddition({
@@ -524,20 +713,25 @@ export function createGenerator<
           content: selected,
           contentByIdentity,
           packages: record.packages,
+          nodeInstances: currentNodeInstances,
         });
       } catch (error) {
         return fail("metadata", error);
       }
       for (const node of existingNodes) {
-        createContribution(node, context, record.packages);
+        createContribution(
+          node,
+          context,
+          record.packages,
+          currentNodeInstances,
+        );
       }
       const definition = options.strategy.createDefinition({
         context,
         content: selected,
-        leafName: addOptions.leafName,
-        ...(addOptions.packagePath === undefined
+        ...(addOptions.creationInput === undefined
           ? {}
-          : { packagePath: addOptions.packagePath }),
+          : { creationInput: addOptions.creationInput }),
       });
       const conflicting = blueprint.packages.find(
         (candidate) =>
@@ -570,10 +764,18 @@ export function createGenerator<
           actions: [],
         };
       }
-      const requested: PackageNode<Context, Contribution, Content> = {
+      const requested: PackageNode<
+        Context,
+        Contribution,
+        CreationInput,
+        Content
+      > = {
         content: selected,
         definition,
         createdBy: "addition",
+        ...(addOptions.creationInput === undefined
+          ? {}
+          : { creationInput: addOptions.creationInput }),
         providers: new Map(),
       };
       const newNodes = hydrateNewNodes({
@@ -601,12 +803,14 @@ export function createGenerator<
         existingNodes,
         context,
         record.packages,
+        resolveNodeInstances(record.packages, record.nodeInstances),
       );
       const afterNodes = [...existingNodes, ...additions];
       const afterContributions = persistedContributions(
         afterNodes,
         context,
         allRecords,
+        resolveNodeInstances(allRecords, record.nodeInstances),
       );
       const before = project(
         context,
@@ -614,6 +818,7 @@ export function createGenerator<
         blueprint,
         record.packages,
         beforeContributions,
+        record.nodeInstances,
       );
       const after = project(
         context,
@@ -621,7 +826,9 @@ export function createGenerator<
         afterBlueprint,
         allRecords,
         afterContributions,
+        record.nodeInstances,
       );
+      const projectedBlueprint = after.blueprint;
       const preconditions: ProjectProjectionPathPrecondition[] = additions.map(
         (node) => ({
           path: node.definition.path,
@@ -656,7 +863,7 @@ export function createGenerator<
       return {
         status: "success",
         dryRun: addOptions.dryRun ?? false,
-        blueprint: afterBlueprint,
+        blueprint: projectedBlueprint,
         actions: reconciliation.actions,
       };
     } catch (error) {

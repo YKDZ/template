@@ -1,8 +1,8 @@
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import {
   dockerEngineEnvironmentNeed,
   playwrightBrowserAssetsEnvironmentNeed,
-} from "@ykdz/template-core/module-graph";
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+} from "@ykdz/template-environment/module-graph";
 import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
