@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type {
   PackageDefinition,
   PersistedPackageDefinition,
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
+import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 import { planExplicitProjectLinks } from "@ykdz/template-workspace/project-linking";
 
 function contribution(

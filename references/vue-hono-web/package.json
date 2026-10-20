@@ -49,6 +49,7 @@
     "@vitest/browser-playwright": "catalog:",
     "@vue/tsconfig": "catalog:",
     "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/template-workspace-authoring": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

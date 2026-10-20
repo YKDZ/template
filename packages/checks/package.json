@@ -43,6 +43,7 @@
     "@ykdz/template-builtin-presets": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
+    "@ykdz/template-workspace-authoring": "workspace:*",
     "execa": "catalog:",
     "yaml": "catalog:"
   },

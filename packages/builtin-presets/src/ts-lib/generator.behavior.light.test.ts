@@ -13,8 +13,8 @@ import { describe, it } from "node:test";
 
 import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
 import { referenceDefinition as configurationDefinition } from "@ykdz/reference-typescript-config/template";
-import { defineReferencePackage } from "@ykdz/template-core/reference-package";
 import { createGenerator } from "@ykdz/template-generator";
+import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
 const configuration = defineReferencePackage(configurationDefinition);

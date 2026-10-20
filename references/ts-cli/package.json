@@ -18,6 +18,11 @@
       "source": "./template/definition.ts",
       "types": "./template-dist/definition.d.ts",
       "default": "./template-dist/definition.js"
+    },
+    "./command-identity": {
+      "source": "./src/cli-command-identity.ts",
+      "types": "./dist/cli-command-identity.d.ts",
+      "default": "./dist/cli-command-identity.js"
     }
   },
   "scripts": {
@@ -42,6 +47,7 @@
     "@types/node": "catalog:",
     "@ykdz/reference-typescript-config": "link:../typescript-config",
     "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-workspace-authoring": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

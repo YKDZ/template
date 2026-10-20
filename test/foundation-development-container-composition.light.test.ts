@@ -12,12 +12,6 @@ import {
   planGeneratedRepositoryPackageAddition,
   type BuiltInPresetDefinition,
 } from "@ykdz/template-builtin-presets";
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
-import {
-  definePackageContributionReplayAdapter,
-  type PackageContributionReplayAdapter,
-  type PlannedPackageContribution,
-} from "@ykdz/template-core/preset-definition";
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
@@ -25,6 +19,12 @@ import {
   renderNewProject,
 } from "@ykdz/template-core/renderer";
 import type { DevelopmentContainerToolLayer } from "@ykdz/template-environment/development-container-tool-layer";
+import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
+import {
+  definePackageContributionReplayAdapter,
+  type PackageContributionReplayAdapter,
+  type PlannedPackageContribution,
+} from "@ykdz/template-workspace-authoring/preset-definition";
 
 const fixtureSource = createTemplateSourceHandle(
   path.join(process.cwd(), "test/fixtures/development-container-tool-layers"),

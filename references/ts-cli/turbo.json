@@ -3,7 +3,10 @@
   "tags": ["app"],
   "tasks": {
     "build:template": {
-      "dependsOn": ["@ykdz/template-core#build"],
+      "dependsOn": [
+        "@ykdz/template-core#build",
+        "@ykdz/template-workspace-authoring#build"
+      ],
       "inputs": [],
       "outputs": ["template-dist/**"],
       "tags": ["quality:light"]

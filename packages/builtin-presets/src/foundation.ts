@@ -29,20 +29,6 @@ import {
   shellCheckEnvironmentNeed,
 } from "@ykdz/template-core/module-graph";
 import {
-  assertPackageContribution,
-  assertPackageContributionCommandNames,
-  type FoundationContribution,
-  type PackageContribution,
-} from "@ykdz/template-core/package-contribution";
-import type {
-  BuiltInPresetDefinition,
-  GenerationContext,
-  InitialPackageDefinitionLookup,
-  PackageContributionReplayAdapter,
-  PlannedPackageContribution,
-  ResolvedPrimaryPackageIdentity,
-} from "@ykdz/template-core/preset-definition";
-import {
   assertProjectBlueprint,
   assertProjectBlueprintDraft,
   isValidNewNpmPackageName,
@@ -69,6 +55,20 @@ import {
   type TemplateSourceHandle,
 } from "@ykdz/template-core/renderer";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
+import {
+  assertPackageContribution,
+  assertPackageContributionCommandNames,
+  type FoundationContribution,
+  type PackageContribution,
+} from "@ykdz/template-workspace-authoring/package-contribution";
+import type {
+  BuiltInPresetDefinition,
+  GenerationContext,
+  InitialPackageDefinitionLookup,
+  PackageContributionReplayAdapter,
+  PlannedPackageContribution,
+  ResolvedPrimaryPackageIdentity,
+} from "@ykdz/template-workspace-authoring/preset-definition";
 import {
   assertReusablePackageExposure,
   readPackageAdditionVersionFacts,
@@ -140,10 +140,10 @@ export type {
   PersistedPackageDefinition,
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
-export type { PackageContribution } from "@ykdz/template-core/package-contribution";
+export type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 
 export type BuiltInGenerationContext = GenerationContext;
-export type { BuiltInPresetDefinition } from "@ykdz/template-core/preset-definition";
+export type { BuiltInPresetDefinition } from "@ykdz/template-workspace-authoring/preset-definition";
 
 export type NextStepInstruction = {
   readonly display: string;
@@ -2937,6 +2937,16 @@ function publicCliCandidate(
   return candidate;
 }
 
+function publicationIdentitySource(): TemplateSourceHandle {
+  const source = requireReferencePackage(
+    "@ykdz/reference-ts-cli",
+  ).publicationIdentitySource;
+  if (source === undefined) {
+    throw new Error("公开 CLI 候选缺少原生 CLI 身份资源");
+  }
+  return source;
+}
+
 function foundationPlan(options: {
   readonly definition: BuiltInPresetDefinition;
   readonly context: BuiltInGenerationContext;
@@ -3553,9 +3563,7 @@ function foundationPlan(options: {
           },
           {
             kind: "copyFile" as const,
-            source: requireReferencePackage("@ykdz/reference-ts-cli").source(
-              "src/cli-command-identity.ts",
-            ),
+            source: publicationIdentitySource(),
             from: ".",
             to: "scripts/npm-publication/cli-command-identity.ts",
           },

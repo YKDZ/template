@@ -1,12 +1,13 @@
-import type { PackageContribution } from "./package-contribution.ts";
 import type {
   PackageDefinition,
   PackageRole,
   ProjectBlueprintDraft,
-} from "./project-blueprint.ts";
-import type { TemplateSourceHandle } from "./renderer.ts";
+} from "@ykdz/template-core/project-blueprint";
+import type { TemplateSourceHandle } from "@ykdz/template-core/renderer";
 
-/** Stable, preset-agnostic input supplied after toolchain resolution. */
+import type { PackageContribution } from "./package-contribution.ts";
+
+/** 工具链事实解析后提供的稳定、与预设无关的输入。 */
 export type GenerationContext = {
   readonly targetDir: string;
   readonly repositoryName: string;
@@ -33,12 +34,12 @@ export type GenerationContext = {
   };
 };
 
-/** An in-memory plan tagged with the stable adapter that can replay it. */
+/** 标记了稳定回放适配器的内存计划。 */
 export type PlannedPackageContribution = PackageContribution & {
   readonly planningIdentity: string;
 };
 
-/** Narrow access to initial sibling packages, keyed by stable adapter identity. */
+/** 通过稳定适配器身份访问初始化时的同级包。 */
 export type InitialPackageDefinitionLookup = {
   require(identity: string): PackageDefinition;
 };
@@ -59,8 +60,8 @@ export type PackageContributionReplayAdapter = {
 };
 
 /**
- * Declares one stable replay semantic. Persisted provenance selection and
- * diagnostics stay with the Foundation instead of leaking into Presets.
+ * 声明一种稳定的回放语义。持久化来源的选择和诊断由 Foundation 负责，
+ * 不泄漏到 Preset。
  */
 export function definePackageContributionReplayAdapter(options: {
   readonly identity: string;
@@ -83,7 +84,7 @@ export type ResolvedPrimaryPackageIdentity = {
   readonly definition: PackageDefinition;
 };
 
-/** Optional behavior owned only by Presets with a configurable initial package. */
+/** 仅由可配置初始包的 Preset 持有的可选行为。 */
 export type InitialPrimaryPackageCapability = {
   readonly defaultLeafName: string;
   readonly role: PackageRole;
@@ -100,13 +101,13 @@ type BuiltInPresetDefinitionBase = {
     readonly title: string;
     readonly description: string;
   };
-  /** The Definition owns its Preset-local Self-Checking Template Source. */
+  /** Definition 持有预设本地的自检模板源码。 */
   readonly source: TemplateSourceHandle;
-  /** The owned planner source inspected by the Template Boundary Check. */
+  /** 由模板边界检查审查的规划器源码。 */
   readonly plannerSourceFile: string;
-  /** Stable semantics used to replay persisted Package Definitions. */
+  /** 用于回放持久化 Package Definition 的稳定语义。 */
   readonly packageContributionReplayAdapters: readonly PackageContributionReplayAdapter[];
-  /** Package layout is Preset-owned even when callers omit --path. */
+  /** 即使调用方省略 --path，包布局仍由 Preset 持有。 */
   defaultPackagePath?(options: {
     readonly context: GenerationContext;
     readonly packageLeafName: string;
@@ -130,13 +131,13 @@ type FixedTopologyPresetDefinition = BuiltInPresetDefinitionBase & {
   readonly initialPrimaryPackage?: never;
   blueprint(context: GenerationContext): ProjectBlueprintDraft;
   planInitialization(context: GenerationContext): PlannedPackageContribution;
-  /** Multi-package Definitions expose their complete owned topology directly. */
+  /** 多包 Definition 直接公开其完整拥有拓扑。 */
   planInitializationContributions?(
     context: GenerationContext,
   ): readonly PlannedPackageContribution[];
 };
 
-/** A side-effect-free Built-in Preset planner. */
+/** 无副作用的内置 Preset 规划器。 */
 export type BuiltInPresetDefinition =
   | ConfigurablePrimaryPackagePresetDefinition
   | FixedTopologyPresetDefinition;

@@ -1,9 +1,9 @@
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import {
   assertProjectBlueprint,
   type PackageRole,
   type ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
+import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 
 type PackageManifest = Readonly<Record<string, unknown>>;
 

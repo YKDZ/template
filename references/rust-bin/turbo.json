@@ -11,7 +11,8 @@
     "build:template": {
       "dependsOn": [
         "@ykdz/template-core#build",
-        "@ykdz/template-environment#build"
+        "@ykdz/template-environment#build",
+        "@ykdz/template-workspace-authoring#build"
       ],
       "inputs": [],
       "outputs": ["template-dist/**"],

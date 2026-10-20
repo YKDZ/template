@@ -70,6 +70,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
+    "@ykdz/reference-ts-cli": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
     "yaml": "catalog:"
@@ -79,8 +80,8 @@
     "@types/node": "catalog:",
     "@types/semver": "catalog:",
     "@types/spdx-expression-parse": "catalog:",
-    "@ykdz/reference-ts-cli": "workspace:*",
     "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/template-workspace-authoring": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

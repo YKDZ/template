@@ -2,9 +2,9 @@ import {
   dockerEngineEnvironmentNeed,
   playwrightBrowserAssetsEnvironmentNeed,
 } from "@ykdz/template-core/module-graph";
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
-import { defineReferencePackage } from "@ykdz/template-core/reference-package";
+import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
+import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vike-web",
@@ -20,6 +20,7 @@ export const referencePackage = defineReferencePackage({
     dependencies: [
       "@ykdz/template-core",
       "@ykdz/template-environment",
+      "@ykdz/template-workspace-authoring",
       "typescript-7",
     ],
     scripts: ["build:template", "typecheck:template"],

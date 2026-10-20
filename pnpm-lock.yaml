@@ -377,6 +377,9 @@ importers:
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:packages/workspace
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:packages/workspace-authoring
       execa:
         specifier: 'catalog:'
         version: 10.1.1
@@ -422,6 +425,9 @@ importers:
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../workspace
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../workspace-authoring
       jsonc-parser:
         specifier: 'catalog:'
         version: 3.3.1
@@ -540,6 +546,9 @@ importers:
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../workspace
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../workspace-authoring
       execa:
         specifier: 'catalog:'
         version: 10.1.1
@@ -598,6 +607,9 @@ importers:
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../workspace
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../workspace-authoring
       hosted-git-info:
         specifier: 'catalog:'
         version: 10.1.1
@@ -758,6 +770,9 @@ importers:
 
   packages/workspace:
     dependencies:
+      '@ykdz/reference-ts-cli':
+        specifier: workspace:*
+        version: link:../../references/ts-cli
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
@@ -780,12 +795,12 @@ importers:
       '@types/spdx-expression-parse':
         specifier: 'catalog:'
         version: 4.0.0
-      '@ykdz/reference-ts-cli':
-        specifier: workspace:*
-        version: link:../../references/ts-cli
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../../references/typescript-config
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../workspace-authoring
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -811,6 +826,37 @@ importers:
         specifier: 'catalog:'
         version: typescript@7.0.2
 
+  packages/workspace-authoring:
+    dependencies:
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../core
+      ignore:
+        specifier: 'catalog:'
+        version: 7.0.12
+      jsonc-parser:
+        specifier: 'catalog:'
+        version: 3.3.1
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/reference-typescript-config':
+        specifier: workspace:*
+        version: link:../../references/typescript-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
   references/hono-api:
     dependencies:
       '@hono/node-server':
@@ -829,6 +875,9 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../packages/workspace-authoring
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -856,6 +905,9 @@ importers:
       '@ykdz/template-environment':
         specifier: workspace:*
         version: link:../../packages/environment
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../packages/workspace-authoring
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -893,6 +945,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../packages/workspace-authoring
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -921,6 +976,9 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../packages/workspace-authoring
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -967,6 +1025,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../packages/workspace-authoring
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1001,6 +1062,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../packages/workspace-authoring
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1068,6 +1132,9 @@ importers:
       '@ykdz/template-environment':
         specifier: workspace:*
         version: link:../../packages/environment
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../packages/workspace-authoring
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1135,6 +1202,9 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../packages/workspace-authoring
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1199,6 +1269,9 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../packages/workspace-authoring
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1269,6 +1342,9 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../packages/workspace-authoring
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
