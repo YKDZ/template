@@ -3,8 +3,7 @@
   "private": true,
   "files": [
     "drizzle.config.ts",
-    "drizzle/migrations",
-    "template-dist"
+    "drizzle/migrations"
   ],
   "type": "module",
   "imports": {
