@@ -2,11 +2,9 @@ import { createHash } from "node:crypto";
 import {
   copyFile,
   chmod,
-  lstat,
   mkdir,
   mkdtemp,
   readFile,
-  readdir,
   rm,
   symlink,
   writeFile,
@@ -491,120 +489,35 @@ function parsePackOutput(stdout: string): string {
 
 async function packNativeProject(
   project: WorkspaceProject,
-  artifacts: ReadonlyMap<string, PreparedNativeContentArtifact>,
-  workspace: ReadonlyMap<string, WorkspaceProject>,
-  root: string,
   destination: string,
   workspaceRoot: string,
   commandLog: string[],
 ): Promise<PackedArtifact> {
-  const nativeManifest = JSON.parse(
-    await readFile(path.join(project.path, "package.json"), "utf8"),
-  ) as Record<string, unknown>;
-  const resolved = await resolvedVersions(
-    [project.name],
+  if (project.version === undefined) {
+    throw new Error(`pnpm未返回原生SDK坐标：${project.name}`);
+  }
+  await mkdir(destination, { recursive: true });
+  const stdout = await runPnpm(
+    [
+      "--filter",
+      project.name,
+      "pack",
+      "--json",
+      "--pack-destination",
+      destination,
+    ],
     workspaceRoot,
     commandLog,
   );
-  const projectedManifest: Record<string, unknown> = { ...nativeManifest };
-  delete projectedManifest.private;
-  delete projectedManifest.devDependencies;
-  delete projectedManifest.scripts;
-  for (const field of [
-    "dependencies",
-    "optionalDependencies",
-    "peerDependencies",
-  ] as const) {
-    const declarations = nativeManifest[field];
-    if (typeof declarations !== "object" || declarations === null) continue;
-    const projected: Record<string, string> = {};
-    for (const [name, specifier] of Object.entries(
-      declarations as Record<string, unknown>,
-    )) {
-      if (typeof specifier !== "string") continue;
-      projected[name] = versionForDependency(
-        name,
-        specifier,
-        artifacts,
-        workspace,
-        resolved.versions,
-      );
-    }
-    projectedManifest[field] = projected;
+  const tarball = parsePackOutput(stdout);
+  if (tarball.length === 0) {
+    throw new Error(`SDK包 ${project.name} 的原生 pnpm pack 未返回制品路径`);
   }
-
-  const files = nativeManifest.files;
-  if (!Array.isArray(files) || files.some((file) => typeof file !== "string")) {
-    throw new Error(`SDK包 ${project.name} 必须以原生files声明发布范围`);
-  }
-  const installRoot = path.join(root, "sdk", project.name.replaceAll("/", "+"));
-  await rm(installRoot, { recursive: true, force: true });
-  await mkdir(installRoot, { recursive: true });
-  for (const file of files as string[]) {
-    if (/[*?{}[\]]/u.test(file)) {
-      throw new Error(
-        `SDK包 ${project.name} 的发布范围需使用原生目录项：${file}`,
-      );
-    }
-    const relativePath = safePath(file);
-    if (relativePath === ".") {
-      throw new Error(`SDK包 ${project.name} 的发布范围不能包含整个作者目录`);
-    }
-    const source = path.resolve(project.path, relativePath);
-    const destinationPath = path.join(installRoot, relativePath);
-    const sourceStat = await lstat(source);
-    if (sourceStat.isSymbolicLink()) {
-      throw new Error(`SDK包 ${project.name} 的发布文件包含符号链接：${file}`);
-    }
-    if (sourceStat.isDirectory()) {
-      const visit = async (
-        directory: string,
-        target: string,
-      ): Promise<void> => {
-        await mkdir(target, { recursive: true });
-        const children = await readdir(directory, { withFileTypes: true });
-        for (const child of children) {
-          const childSource = path.join(directory, child.name);
-          const childTarget = path.join(target, child.name);
-          const childStat = await lstat(childSource);
-          if (childStat.isSymbolicLink()) {
-            throw new Error(
-              `SDK包 ${project.name} 的发布文件包含符号链接：${path.relative(project.path, childSource)}`,
-            );
-          }
-          if (childStat.isDirectory()) {
-            await visit(childSource, childTarget);
-          } else {
-            await mkdir(path.dirname(childTarget), { recursive: true });
-            await copyFile(childSource, childTarget);
-            await chmod(childTarget, childStat.mode & 0o777);
-          }
-        }
-      };
-      await visit(source, destinationPath);
-    } else if (sourceStat.isFile()) {
-      await mkdir(path.dirname(destinationPath), { recursive: true });
-      await copyFile(source, destinationPath);
-      await chmod(destinationPath, sourceStat.mode & 0o777);
-    } else {
-      throw new Error(`SDK包 ${project.name} 的发布项不是文件或目录：${file}`);
-    }
-  }
-  const version =
-    typeof nativeManifest.version === "string"
-      ? nativeManifest.version
-      : project.version;
-  if (version === undefined) {
-    throw new Error(`pnpm未返回原生SDK坐标：${project.name}`);
-  }
-  if (typeof nativeManifest.version !== "string") {
-    projectedManifest.version = version;
-  }
-  await writeFile(
-    path.join(installRoot, "package.json"),
-    `${JSON.stringify(projectedManifest, null, 2)}\n`,
+  return packedArtifact(
+    project.name,
+    project.version,
+    path.isAbsolute(tarball) ? tarball : path.resolve(workspaceRoot, tarball),
   );
-  return await packPreparedRoot(installRoot, destination, commandLog);
 }
 
 async function packedArtifact(
@@ -988,13 +901,6 @@ export async function prepareContentCollection(
     }
     const packed = await packNativeProject(
       project,
-      new Map(
-        [...artifactsByName].map(
-          ([name, values]) => [name, values[0]!] as const,
-        ),
-      ),
-      workspace,
-      root,
       archiveRoot,
       workspaceRoot,
       commandLog,

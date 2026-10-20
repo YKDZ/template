@@ -275,6 +275,7 @@ async function writePresetPackage(options: {
       "    manifest: presetManifest,",
       '    resourceRoot: new URL("../", import.meta.url),',
       '    exportPath: "./template",',
+      '    executionDependencies: ["@ykdz/template-workspace-authoring"],',
       "  },",
       ");",
       "",

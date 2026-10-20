@@ -345,7 +345,13 @@ void describe("原生内容制品安装链", () => {
         "const libraryDefinition = initialized.blueprint.packages.find((definition) => definition.packageDefinitionId === libraryRecord.packageDefinitionId);",
         "assert.ok(libraryDefinition);",
         'const generated = await readFile(`${targetRoot}/${libraryDefinition.path}/src/index.ts`, "utf8");',
-        "await writeFile(resultPath, JSON.stringify({ generationRecord: initialized.generationRecord, blueprint: initialized.blueprint, generated }));",
+        'const addition = await generator.add({ repositoryRoot: targetRoot, contentIdentity: { alias: "library", namespace: "ykdz" }, creationInput: { leafName: "fresh-library" } });',
+        'assert.equal(addition.status, "success", JSON.stringify(addition));',
+        'if (addition.status !== "success") process.exit(3);',
+        'const freshLibrary = addition.blueprint.packages.find((definition) => definition.path === "packages/fresh-library");',
+        "assert.ok(freshLibrary);",
+        'const freshGenerated = await readFile(`${targetRoot}/${freshLibrary.path}/src/index.ts`, "utf8");',
+        "await writeFile(resultPath, JSON.stringify({ generationRecord: initialized.generationRecord, blueprint: initialized.blueprint, generated, addition, freshLibrary, freshGenerated }));",
       ].join("\n"),
     );
 
@@ -377,6 +383,23 @@ void describe("原生内容制品安装链", () => {
         }[];
       };
       readonly generated: string;
+      readonly addition: {
+        readonly status: string;
+        readonly generationRecord: {
+          readonly packages: readonly {
+            readonly contentIdentity: { readonly packageName: string };
+            readonly packageDefinitionId: string;
+          }[];
+        };
+        readonly blueprint: {
+          readonly packages: readonly {
+            readonly name: string;
+            readonly path: string;
+          }[];
+        };
+      };
+      readonly freshLibrary: { readonly path: string };
+      readonly freshGenerated: string;
     };
     assert.deepEqual(
       result.generationRecord.presetSelections.map(
@@ -384,12 +407,25 @@ void describe("原生内容制品安装链", () => {
       ),
       ["@ykdz/preset-ts-lib"],
     );
+    assert.equal(result.addition.status, "success");
+    assert.ok(
+      result.addition.generationRecord.packages.filter(
+        ({ contentIdentity }) =>
+          contentIdentity.packageName === "@ykdz/reference-ts-lib",
+      ).length >= 2,
+    );
+    assert.ok(
+      result.addition.blueprint.packages.some(
+        ({ path: packagePath }) => packagePath === "packages/fresh-library",
+      ),
+    );
     assert.ok(
       result.blueprint.packages.some(
         (definition) => definition.path === "packages/typescript-config",
       ),
     );
     assert.match(result.generated, /export function/u);
+    assert.match(result.freshGenerated, /export function/u);
     assert.deepEqual(
       await Promise.all(
         authorRoots.map(async (authorRoot) => (await stat(authorRoot)).mtimeMs),
@@ -443,6 +479,11 @@ void describe("原生内容制品安装链", () => {
               ({ path: packagePath }) => packagePath,
             ),
             generated: result.generated,
+            freshAdd: result.addition.status,
+            freshReplayPackagePaths: result.addition.blueprint.packages.map(
+              ({ path: packagePath }) => packagePath,
+            ),
+            freshGenerated: result.freshGenerated,
           },
         },
         null,
@@ -612,6 +653,18 @@ void describe("原生内容制品安装链", () => {
         "@fixture/preset",
         "@fixture/typescript-config",
       ].sort(),
+    );
+    const presetOwner = prepared.owners.find(
+      (owner) => owner.member.identity.packageName === "@fixture/preset",
+    );
+    assert.ok(presetOwner);
+    assert.ok(
+      presetOwner.artifact.dependencies.some(
+        (dependency) =>
+          dependency.name === "@ykdz/template-workspace-authoring" &&
+          dependency.purposes.includes("template-execution"),
+      ),
+      "原创预设制品应声明其运行definition所需的authoring SDK",
     );
     for (const owner of prepared.owners) {
       assert.deepEqual(owner.packed.provider?.identity, owner.member.identity);
@@ -794,6 +847,19 @@ void describe("原生内容制品安装链", () => {
       ...authorRoots,
     ]);
     const installed = closure.packages;
+    const installedPreset = installed.find(
+      ({ name }) => name === "@fixture/preset",
+    );
+    assert.ok(installedPreset);
+    const presetManifest = JSON.parse(
+      await readFile(path.join(installedPreset.path, "package.json"), "utf8"),
+    ) as { readonly dependencies?: Readonly<Record<string, string>> };
+    assert.ok(
+      Object.hasOwn(
+        presetManifest.dependencies ?? {},
+        "@ykdz/template-workspace-authoring",
+      ),
+    );
     for (const archive of [
       ...prepared.sdkPackages,
       ...prepared.owners.map((owner) => owner.packed),
