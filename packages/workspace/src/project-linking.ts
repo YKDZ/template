@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { type ProjectBlueprint } from "@ykdz/template-core/project-blueprint";
 import { isDefaultPackageRole } from "@ykdz/template-workspace-authoring/default-package-role";
 import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
@@ -135,6 +138,50 @@ export function canProvideSourceConditionPackageNameImport(
     contribution.definition.role !== "native-package" &&
     exposesSourceCondition(manifest)
   );
+}
+
+/** 读取显式连接端点已有的当前 package manifest，供正式连接计划复核。 */
+export function readProjectLinkManifestTruth(options: {
+  readonly repositoryRoot: string;
+  readonly blueprint: ProjectBlueprint;
+  readonly contributions: readonly PackageContribution[];
+}): ReadonlyMap<string, PackageManifest> {
+  const definitionByPath = new Map(
+    options.contributions.map((contribution) => [
+      contribution.definition.path,
+      contribution.definition,
+    ]),
+  );
+  const endpointPaths = new Set(
+    (options.blueprint.packageLinkIntents ?? []).flatMap((intent) => [
+      intent.consumerPackagePath,
+      intent.providerPackagePath,
+    ]),
+  );
+  const truth = new Map<string, PackageManifest>();
+  for (const packagePath of endpointPaths) {
+    if (!definitionByPath.has(packagePath)) continue;
+    let manifestText: string;
+    try {
+      manifestText = readFileSync(
+        path.join(options.repositoryRoot, packagePath, "package.json"),
+        "utf8",
+      );
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        continue;
+      }
+      throw error;
+    }
+    const parsed: unknown = JSON.parse(manifestText);
+    truth.set(packagePath, isRecord(parsed) ? parsed : {});
+  }
+  return truth;
 }
 
 function exposesImportablePackageRoot(manifest: PackageManifest): boolean {
