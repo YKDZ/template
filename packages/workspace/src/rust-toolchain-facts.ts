@@ -26,8 +26,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** 已有 Rust 仓库的加包版本由根 rust-toolchain.toml 当前 channel 拥有。 */
-export function readRootRustToolchainChannel(repositoryRoot: string): string {
+/** 已有 Rust 仓库的加包版本和待保留字节均由根声明拥有。 */
+export function readRootRustToolchainDeclaration(repositoryRoot: string): {
+  readonly channel: string;
+  readonly declaration: string;
+} {
   const filePath = path.join(repositoryRoot, rootRustDeclarationFileName);
   if (!existsSync(filePath)) {
     throw new RustToolchainDeclarationFailure(
@@ -36,9 +39,11 @@ export function readRootRustToolchainChannel(repositoryRoot: string): string {
       `请先创建根 ${rootRustDeclarationFileName}，在 [toolchain] 表内声明 channel 再加包。`,
     );
   }
+  let declarationText: string;
   let declaration: unknown;
   try {
-    declaration = parseToml(readFileSync(filePath, "utf8"));
+    declarationText = readFileSync(filePath, "utf8");
+    declaration = parseToml(declarationText);
   } catch (error) {
     throw new RustToolchainDeclarationFailure(
       "是有效 TOML 声明",
@@ -55,7 +60,12 @@ export function readRootRustToolchainChannel(repositoryRoot: string): string {
       `请先在根 ${rootRustDeclarationFileName} 的 [toolchain] 表内写入 channel 再加包。`,
     );
   }
-  return channel;
+  return { channel, declaration: declarationText };
+}
+
+/** 已有 Rust 仓库的加包版本由根 rust-toolchain.toml 当前 channel 拥有。 */
+export function readRootRustToolchainChannel(repositoryRoot: string): string {
+  return readRootRustToolchainDeclaration(repositoryRoot).channel;
 }
 
 export type RustToolchainChannelReading =

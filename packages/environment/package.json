@@ -32,9 +32,7 @@
       "source": "./src/development-environment.ts",
       "types": "./dist/development-environment.d.ts",
       "default": "./dist/development-environment.js"
-    },
-    "./assets/*": "./assets/*",
-    "./assets": "./assets"
+    }
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",

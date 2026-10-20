@@ -13,7 +13,7 @@ import {
 import { isNodeBrokenPipe } from "@ykdz/cli-contract/node";
 import * as v from "valibot";
 
-import type { CliCommandIdentity } from "./cli-command-identity.ts";
+import type { CliCommandIdentity } from "./publication/cli-command-identity.ts";
 
 export type CliRuntime = {
   readonly argv: readonly string[];

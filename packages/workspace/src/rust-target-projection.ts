@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -10,7 +10,6 @@ import type {
   LoadedContentMember,
 } from "@ykdz/template-core/content-identity";
 import type { RenderOperation } from "@ykdz/template-core/renderer";
-import { resolveTemplateSource } from "@ykdz/template-core/renderer";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
 import type {
   GeneratorPackageState,
@@ -21,20 +20,23 @@ import type { PackageContribution } from "@ykdz/template-workspace-authoring/pac
 
 import { releaseToolchainSnapshot } from "./release-toolchain-snapshot.ts";
 import {
-  readRootRustToolchainChannel,
+  readRootRustToolchainDeclaration,
   rootRustDeclarationFileName,
 } from "./rust-toolchain-facts.ts";
 
 type RustToolchain = NonNullable<
   PackageContribution["foundation"]["toolchains"]["rust"]
+> & {
+  readonly configurationText: string;
+};
+
+type RustContent = LoadedContentMember<
+  { readonly requiresRootRustToolchain?: true },
+  "reference"
 >;
 
-type RustContent = LoadedContentMember;
-
-const rustModuleURL = import.meta.resolve("@ykdz/reference-rust-bin/template");
-
 function isRustContent(content: RustContent | undefined): boolean {
-  return content?.source.moduleURL === rustModuleURL;
+  return content?.definition.requiresRootRustToolchain === true;
 }
 
 /** 默认策略从被选中的原生 Rust 内容初始化其根工具链版本。 */
@@ -53,13 +55,16 @@ export function initialRustVersion(
     : undefined;
 }
 
-/** 默认策略加 Rust 包时沿用现行根事实或发布快照。 */
-export function rustVersionForAddition(options: {
+/** 加包准备读取现有根声明一次，投影只消费声明快照。 */
+export function prepareRustTargetAddition(options: {
   readonly targetRoot: string;
   readonly packages: readonly GeneratorPackageState[];
   readonly contentIdentity: ContentIdentity;
   readonly contentByIdentity: ReadonlyMap<string, RustContent>;
-}): string | undefined {
+}): {
+  readonly rustVersion?: string;
+  readonly existingDeclaration?: string;
+} {
   const hasRustPackage = options.packages.some((record) =>
     isRustContent(
       options.contentByIdentity.get(contentIdentityKey(record.contentIdentity)),
@@ -68,16 +73,20 @@ export function rustVersionForAddition(options: {
   const addsRustPackage = isRustContent(
     options.contentByIdentity.get(contentIdentityKey(options.contentIdentity)),
   );
-  if (!hasRustPackage && !addsRustPackage) return undefined;
+  if (!hasRustPackage && !addsRustPackage) return {};
 
   const declarationPath = path.join(
     options.targetRoot,
     rootRustDeclarationFileName,
   );
   if (hasRustPackage || existsSync(declarationPath)) {
-    return readRootRustToolchainChannel(options.targetRoot);
+    const declaration = readRootRustToolchainDeclaration(options.targetRoot);
+    return {
+      rustVersion: declaration.channel,
+      existingDeclaration: declaration.declaration,
+    };
   }
-  return releaseToolchainSnapshot.rustVersion;
+  return { rustVersion: releaseToolchainSnapshot.rustVersion };
 }
 
 function rustToolchain(
@@ -85,16 +94,17 @@ function rustToolchain(
 ): RustToolchain | undefined {
   const declarations = contributions.flatMap((contribution) => {
     const rust = contribution.foundation.toolchains.rust;
-    return rust === undefined ? [] : [rust];
+    if (rust === undefined) return [];
+    if (typeof rust.configurationText !== "string") {
+      throw new Error("Rust 工具链能力缺少 prepare 阶段配置文本");
+    }
+    return [{ ...rust, configurationText: rust.configurationText }];
   });
   const fingerprints = declarations.map((rust) =>
     JSON.stringify({
       toolchain: rust.toolchain,
       components: [...new Set(rust.components)].toSorted(),
-      configurationSource: resolveTemplateSource(
-        rust.configurationSource.source,
-        rust.configurationSource.from,
-      ),
+      configurationText: rust.configurationText,
     }),
   );
   if (new Set(fingerprints).size > 1) {
@@ -103,9 +113,11 @@ function rustToolchain(
   return declarations[0];
 }
 
-/** 默认策略投影 Rust 根声明，并在已有 Rust 仓库加包时保留原始字节。 */
+/** 默认策略纯投影 Rust 根声明，并在已有 Rust 仓库加包时保留原始字节。 */
 export function projectRustTarget(options: {
-  readonly context: GenerationContext;
+  readonly context: GenerationContext & {
+    readonly existingRustDeclaration?: string;
+  };
   readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
 }): {
@@ -118,26 +130,14 @@ export function projectRustTarget(options: {
   const wasAddition = options.packages.some(
     (record) => record.createdBy === "addition",
   );
-  const existingDeclarationPath = path.join(
-    options.context.targetDir,
-    rootRustDeclarationFileName,
-  );
-  const existingDeclaration =
-    wasAddition && existsSync(existingDeclarationPath)
-      ? readFileSync(existingDeclarationPath, "utf8")
-      : undefined;
+  const existingDeclaration = wasAddition
+    ? options.context.existingRustDeclaration
+    : undefined;
   const text =
     existingDeclaration ??
-    projectTomlStringValues(
-      readFileSync(
-        resolveTemplateSource(
-          toolchain.configurationSource.source,
-          toolchain.configurationSource.from,
-        ),
-        "utf8",
-      ),
-      [{ path: ["toolchain", "channel"], value: toolchain.toolchain }],
-    );
+    projectTomlStringValues(toolchain.configurationText, [
+      { path: ["toolchain", "channel"], value: toolchain.toolchain },
+    ]);
   return {
     toolchain,
     operation: {

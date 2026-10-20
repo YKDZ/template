@@ -14,8 +14,8 @@
     "scripts/**/*.ts",
     "publication/**/*.ts",
     "publication-setup/**/*.ts",
-    "deployment/**/*.ts",
-    "joint-e2e/**/*.ts",
+    "resources/deployment/**/*.ts",
+    "resources/joint-e2e/**/*.ts",
     "*.config.ts"
   ]
 }

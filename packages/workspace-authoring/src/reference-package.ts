@@ -63,6 +63,7 @@ export type ReferencePackagePreparationInput = {
   readonly manifest: ReferencePackageManifest;
   readonly dependencyUses: readonly ReferenceDependencyUse[];
   readonly resources: readonly PreparedReferenceResource[];
+  readonly executionData: readonly PreparedReferenceResource[];
   readText(path: string): string;
 };
 
@@ -74,6 +75,8 @@ export type ReferencePackagePreparation<OwnerFacts = unknown> = {
   };
   readonly manifest: ReferencePackageManifest;
   readonly resources: readonly PreparedReferenceResource[];
+  /** 模板执行阶段会读取的数据；它可以与目标排除资源重叠。 */
+  readonly executionData: readonly PreparedReferenceResource[];
   readonly templateDependencies: readonly ReferenceTemplateDependency[];
   readonly dependencyUses: readonly ReferenceDependencyUse[];
   readonly ownerFacts: OwnerFacts;
@@ -115,6 +118,8 @@ export type ReferencePackage<
   readonly defaultLeafName: string;
   readonly defaultPath: string;
   readonly role: DefaultPackageRole;
+  /** 内容被选中时需要根策略准备 Rust 工具链事实。 */
+  readonly requiresRootRustToolchain?: true;
   readonly manifest: ReferencePackageManifest;
   readonly templateDependencies: readonly ReferenceTemplateDependency[];
   /** prepare 后可供策略和贡献共同消费的用途归一化事实。 */
@@ -226,6 +231,8 @@ export function defineReferencePackage<
   readonly defaultLeafName: string;
   readonly defaultPath?: string;
   readonly role: DefaultPackageRole;
+  /** 内容被选中时需要根策略准备 Rust 工具链事实。 */
+  readonly requiresRootRustToolchain?: true;
   readonly resources: readonly string[];
   readonly resourceIgnore?: string;
   readonly template: {
@@ -233,6 +240,8 @@ export function defineReferencePackage<
     readonly exports?: readonly string[];
     readonly scripts: readonly string[];
     readonly resources?: readonly string[];
+    /** 模板执行会读取的数据资源；与生成目标排除规则分开声明。 */
+    readonly executionData?: readonly string[];
   };
   readonly prepare?: (options: ReferencePackagePreparationInput) => OwnerFacts;
   readonly publicationIdentitySource?: string;
@@ -273,6 +282,9 @@ export function defineReferencePackage<
   const normalizedResources = options.resources.map(normalizeOwnedResource);
   const resourceRoot = path.resolve(fileURLToPath(options.resourceRoot));
   const templateResources = (options.template.resources ?? []).map(
+    normalizeOwnedResource,
+  );
+  const executionDataPaths = (options.template.executionData ?? []).map(
     normalizeOwnedResource,
   );
   const templateDependencies = Object.freeze(
@@ -435,6 +447,15 @@ export function defineReferencePackage<
       preparedResourcesByPath = new Map(
         resources.map((resource) => [resource.path, resource]),
       );
+      const executionData = executionDataPaths.map((resourcePath) => {
+        const resource = preparedResourcesByPath.get(resourcePath);
+        if (resource === undefined) {
+          throw new Error(
+            `模板执行数据未包含在参考资源范围中：${resourcePath}`,
+          );
+        }
+        return resource;
+      });
       for (const resource of templateResources) {
         if (
           !resources.some(
@@ -465,9 +486,13 @@ export function defineReferencePackage<
         manifest,
         dependencyUses,
         resources,
+        executionData,
         readText(resourcePath) {
           const normalized = path.posix.normalize(resourcePath);
-          if (!preparedResourcePaths.has(normalized)) {
+          if (
+            !preparedResourcePaths.has(normalized) ||
+            !executionDataPaths.includes(normalized)
+          ) {
             throw new Error(
               `所属准备请求了未声明或缺失的文本资源：${resourcePath}`,
             );
@@ -486,6 +511,7 @@ export function defineReferencePackage<
         }),
         manifest,
         resources: Object.freeze(resources),
+        executionData: Object.freeze(executionData),
         templateDependencies,
         dependencyUses,
         ownerFacts: ownerFacts as OwnerFacts,
@@ -531,6 +557,9 @@ export function defineReferencePackage<
     defaultLeafName: options.defaultLeafName,
     defaultPath: options.defaultPath ?? `packages/${options.defaultLeafName}`,
     role: options.role,
+    ...(options.requiresRootRustToolchain === undefined
+      ? {}
+      : { requiresRootRustToolchain: options.requiresRootRustToolchain }),
     manifest,
     templateDependencies,
     get dependencyUses() {

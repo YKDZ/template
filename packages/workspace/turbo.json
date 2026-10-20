@@ -7,7 +7,6 @@
         "@ykdz/template-core#build",
         "@ykdz/template-environment#build",
         "@ykdz/template-workspace-authoring#build",
-        "@ykdz/reference-rust-bin#build:template",
         "@ykdz/reference-ts-cli#build:template",
         "@ykdz/reference-typescript-config#build:template"
       ],

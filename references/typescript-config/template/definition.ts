@@ -14,6 +14,7 @@ export const referenceDefinition = {
   },
   environmentNeeds: [],
   foundation: {
+    workspaceConfiguration: { kind: "typescript-workspace-configuration" },
     toolchains: {},
     editorCapabilities: ["oxc-format-lint"],
     dependencyMaintenance: {

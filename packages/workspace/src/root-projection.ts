@@ -69,7 +69,7 @@ function insertBefore(
 
 export function createWorkspaceRootManifest(options: {
   readonly name: string;
-  readonly typescriptConfigurationPackageName: string;
+  readonly typescriptConfigurationPackageName?: string;
   readonly nodeDeclaration: string;
   readonly packageManagerPin: string;
   readonly imports?: Readonly<Record<string, string>>;
@@ -96,7 +96,11 @@ export function createWorkspaceRootManifest(options: {
   };
   const developmentDependencies = insertBefore(
     {
-      [options.typescriptConfigurationPackageName]: "workspace:*",
+      ...(options.typescriptConfigurationPackageName === undefined
+        ? {}
+        : {
+            [options.typescriptConfigurationPackageName]: "workspace:*",
+          }),
       "@types/node": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",

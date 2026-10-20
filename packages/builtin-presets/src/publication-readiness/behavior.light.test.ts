@@ -13,10 +13,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 
-import { referencePackage } from "@ykdz/reference-ts-cli/template";
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import { templateContent, templatePresets } from "@ykdz/template-content";
-import { resolveTemplateSource } from "@ykdz/template-core/renderer";
 import { createGenerator } from "@ykdz/template-generator";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 import { execa } from "execa";
@@ -228,33 +226,16 @@ async function runReadinessCaller(
 ) {
   const moduleRoot = path.join(repositoryRoot, "scripts/npm-publication");
   await mkdir(moduleRoot, { recursive: true });
-  await Promise.all([
-    ...["readiness", "changelog", "check-readiness", "configuration"].map(
-      (name) =>
-        cp(
-          new URL(
-            import.meta.resolve(`@ykdz/template-workspace/publication/${name}`),
-          ),
-          path.join(moduleRoot, `${name}.ts`),
+  await Promise.all(
+    ["readiness", "changelog", "check-readiness", "configuration"].map((name) =>
+      cp(
+        new URL(
+          import.meta.resolve(`@ykdz/template-workspace/publication/${name}`),
         ),
-    ),
-    (() => {
-      referencePackage.prepare();
-      const source = referencePackage.publicationIdentitySource;
-      assert.ok(source);
-      return cp(
-        resolveTemplateSource(source, "."),
-        path.join(moduleRoot, "cli-command-identity.ts"),
-      );
-    })(),
-    cp(
-      resolveTemplateSource(
-        referencePackage.source("template/creation-input.ts"),
-        ".",
+        path.join(moduleRoot, `${name}.ts`),
       ),
-      path.join(moduleRoot, "cli-candidate-selection.ts"),
     ),
-  ]);
+  );
   await useStandalonePublicationRuntime(repositoryRoot);
   const callerPath = path.join(
     repositoryRoot,
