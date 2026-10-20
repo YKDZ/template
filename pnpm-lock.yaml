@@ -683,6 +683,9 @@ importers:
       '@ykdz/preset-ts-lib':
         specifier: workspace:*
         version: link:../preset-ts-lib
+      '@ykdz/preset-vike-app':
+        specifier: workspace:*
+        version: link:../preset-vike-app
       '@ykdz/preset-vue-app':
         specifier: workspace:*
         version: link:../preset-vue-app
@@ -704,6 +707,15 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../../references/typescript-config
+      '@ykdz/reference-vike-db':
+        specifier: workspace:*
+        version: link:../../references/vike-db
+      '@ykdz/reference-vike-migrations':
+        specifier: workspace:*
+        version: link:../../references/vike-migrations
+      '@ykdz/reference-vike-web':
+        specifier: workspace:*
+        version: link:../../references/vike-web
       '@ykdz/reference-vue-app':
         specifier: workspace:*
         version: link:../../references/vue-app
@@ -972,6 +984,9 @@ importers:
       '@ykdz/template-environment':
         specifier: workspace:*
         version: link:../environment
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../workspace-authoring
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -991,9 +1006,6 @@ importers:
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../workspace
-      '@ykdz/template-workspace-authoring':
-        specifier: workspace:*
-        version: link:../workspace-authoring
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0

@@ -403,7 +403,7 @@ void describe("Vue-Hono 组合预设公开行为", () => {
       JSON.stringify(added),
     );
     if (added.status === "operation-failure") {
-      assert.strictEqual(added.phase, "reconciliation");
+      assert.strictEqual(added.phase, "metadata");
       assert.match(added.error.message, /api/u);
     }
     assert.deepStrictEqual(await snapshotTree(targetRoot), before);

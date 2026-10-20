@@ -15,7 +15,7 @@ import presetPackage from "../package.json" with { type: "json" };
 
 const templateExportPath = Object.entries(presetPackage.exports).find(
   ([exportPath, definition]) =>
-    exportPath.startsWith("./") &&
+    (exportPath === "." || exportPath.startsWith("./")) &&
     typeof definition === "object" &&
     definition !== null &&
     "source" in definition &&
