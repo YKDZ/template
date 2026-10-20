@@ -20,7 +20,7 @@ const temporaryDirectories: string[] = [];
 
 function presetFor(packageName: string) {
   const preset = templatePresets.find(
-    (candidate) => candidate.owner?.packageName === packageName,
+    (candidate) => candidate.identity.packageName === packageName,
   );
   assert.ok(preset, `缺少公开预设：${packageName}`);
   return preset;
@@ -42,7 +42,9 @@ async function createWorkspace() {
   const generator = workspaceGenerator();
   const initialized = await generator.init({
     targetRoot: repositoryRoot,
-    selection: { roots: [{ preset: presetFor("@ykdz/preset-ts-lib") }] },
+    selection: {
+      roots: [{ preset: presetFor("@ykdz/preset-ts-lib").identity }],
+    },
     strategyInput: {
       repositoryName: "demo",
       defaultPackageScope: "demo",
@@ -94,7 +96,7 @@ async function addTsLibrary(
 ) {
   return await generator.add({
     repositoryRoot,
-    preset: presetFor("@ykdz/preset-ts-lib"),
+    preset: presetFor("@ykdz/preset-ts-lib").identity,
     creationInput: {
       leafName,
       packagePath: `packages/${leafName}`,
@@ -242,7 +244,7 @@ void describe("Node 与 Rust 根工具链镜像", () => {
     const rustPreset = presetFor("@ykdz/preset-rust-bin");
     const first = await generator.add({
       repositoryRoot,
-      preset: rustPreset,
+      preset: rustPreset.identity,
       creationInput: { leafName: "native", packagePath: "packages/native" },
     });
     assert.strictEqual(first.status, "success", JSON.stringify(first));
@@ -266,7 +268,7 @@ void describe("Node 与 Rust 根工具链镜像", () => {
     await writeFile(toolchainPath, customToolchain);
     const second = await generator.add({
       repositoryRoot,
-      preset: rustPreset,
+      preset: rustPreset.identity,
       creationInput: {
         leafName: "second-native",
         packagePath: "packages/second-native",

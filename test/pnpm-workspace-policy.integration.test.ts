@@ -27,7 +27,7 @@ async function generateNodeOnlyProject(prefix: string): Promise<string> {
   const workspace = await mkdtemp(path.join(tmpdir(), prefix));
   const projectDir = path.join(workspace, "demo-lib");
   const nodeOnlyPreset = templatePresets.find(
-    (preset) => preset.owner?.packageName === "@ykdz/preset-ts-lib",
+    (preset) => preset.identity.packageName === "@ykdz/preset-ts-lib",
   );
   if (nodeOnlyPreset === undefined) {
     throw new Error("内容集合缺少 TypeScript 库预设");
@@ -41,7 +41,7 @@ async function generateNodeOnlyProject(prefix: string): Promise<string> {
       "init",
       projectDir,
       "--preset",
-      nodeOnlyPreset.metadata.alias,
+      nodeOnlyPreset.alias,
     ],
     { cwd: repoRoot },
   );

@@ -752,6 +752,8 @@ void describe("公开模板内容集合", () => {
     });
 
     assert.strictEqual(cliResult.status, "success", JSON.stringify(cliResult));
+    const cliNode = tsCliPreset.definition.nodes.cli;
+    assert.ok(cliNode?.creationInput);
     const cliManifest = JSON.parse(
       await readFile(path.join(cliRoot, "packages/cli/package.json"), "utf8"),
     ) as {
@@ -782,7 +784,7 @@ void describe("公开模板内容集合", () => {
     assert.strictEqual(publicationConfig.packagePath, "packages/cli");
     assert.deepStrictEqual(
       publicationConfig.creationInput,
-      tsCliPreset.definition.nodes.cli.creationInput.init,
+      cliNode.creationInput.init,
     );
     const blueprint = JSON.parse(
       await readFile(path.join(cliRoot, ".template/blueprint.json"), "utf8"),

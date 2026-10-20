@@ -19,7 +19,7 @@ import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default
 
 function presetFor(packageName: string) {
   const preset = templatePresets.find(
-    (candidate) => candidate.owner?.packageName === packageName,
+    (candidate) => candidate.identity.packageName === packageName,
   );
   assert.ok(preset, `缺少公开预设：${packageName}`);
   return preset;
@@ -34,7 +34,7 @@ async function initialize(
     strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
   }).init({
     targetRoot,
-    selection: { roots: [{ preset }] },
+    selection: { roots: [{ preset: preset.identity }] },
     strategyInput: {
       repositoryName: "generated-repository",
       defaultPackageScope: "generated",
@@ -89,10 +89,7 @@ void describe("生成任务公共入口", () => {
 
     try {
       for (const preset of templatePresets) {
-        const targetRoot = path.join(
-          workspace,
-          preset.owner?.packageName ?? preset.metadata.alias,
-        );
+        const targetRoot = path.join(workspace, preset.identity.packageName);
         await initialize(targetRoot, preset);
 
         const rootManifest = JSON.parse(

@@ -4,17 +4,33 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { preset } from "@ykdz/preset-rust-bin/template";
-import { referencePackage as rust } from "@ykdz/reference-rust-bin/template";
-import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
-import { referenceDefinition as configurationDefinition } from "@ykdz/reference-typescript-config/template";
 import { createGenerator } from "@ykdz/template-generator";
+import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 import { execa } from "execa";
 
-const configuration = defineReferencePackage(configurationDefinition);
-const content = [rust, library, configuration, preset];
+const content = await loadContentSource({
+  namespace: "ykdz",
+  resolve: (specifier) => import.meta.resolve(specifier),
+  members: [
+    "@ykdz/reference-rust-bin/template",
+    "@ykdz/reference-ts-lib/template",
+    "@ykdz/reference-typescript-config/template",
+    "@ykdz/preset-rust-bin/template",
+  ],
+  prepareReferenceDefinition(definition) {
+    return defineReferencePackage(
+      definition as Parameters<typeof defineReferencePackage>[0],
+    );
+  },
+});
+const preset = content.find(
+  (member) =>
+    member.kind === "preset" &&
+    member.identity.packageName === "@ykdz/preset-rust-bin",
+);
+assert.ok(preset);
 
 void describe("Rust 二进制公开预设任务", () => {
   void it(
@@ -34,7 +50,7 @@ void describe("Rust 二进制公开预设任务", () => {
         strategy: createDefaultWorkspaceStrategy(),
       }).init({
         targetRoot,
-        selection: { roots: [{ preset }] },
+        selection: { roots: [{ preset: preset.identity }] },
         strategyInput: {
           repositoryName: "demo-rust",
           defaultPackageScope: "demo",
