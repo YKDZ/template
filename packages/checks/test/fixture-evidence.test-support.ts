@@ -16,22 +16,6 @@ import path from "node:path";
 import { afterEach, mock } from "node:test";
 import { isDeepStrictEqual } from "node:util";
 
-import {
-  builtInPresetRegistry,
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-  loadLocalTemplateMetadata,
-  planGeneratedRepositoryPackageAddition,
-  resolveBuiltInTemplateSource,
-  type BuiltInPresetDefinition,
-  type GeneratedRepositoryPlan,
-} from "@ykdz/template-builtin-presets";
-import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
-import {
-  createTemplateSourceHandle,
-  renderNewProject,
-} from "@ykdz/template-core/renderer";
-import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
 
 import { findFixtureEvidenceArchitectureFindings } from "../src/check-fixture-evidence-architecture.ts";
@@ -75,10 +59,12 @@ import {
   type FixtureEvidenceStorage,
   writeGeneratedRepositoryTree,
 } from "../src/fixture-evidence/kernel/index.ts";
+import { materializeGeneratedScenario } from "../src/generated-content.ts";
 import {
   validatePlanDependencyCatalog,
   validatePlanSources,
 } from "../src/registry-checks.ts";
+import { sourceGeneratedScenarioRuntime } from "../src/source-generated-runtime.ts";
 afterEach(() => mock.restoreAll());
 
 async function temporaryRepository(prefix: string): Promise<string> {
@@ -481,67 +467,36 @@ type MatrixScenario = Awaited<ReturnType<typeof generatedScenariosFor>>[number];
 async function renderMatrixScenario(options: {
   readonly scenario: MatrixScenario;
   readonly workspace: string;
-  readonly addition?: BuiltInPresetDefinition;
 }): Promise<{
   readonly generatedContentIdentity: string;
-  readonly plan: GeneratedRepositoryPlan;
+  readonly receipt: import("../src/generated-content.ts").GeneratedScenarioReceipt;
 }> {
-  const projectDir = path.join(options.workspace, options.scenario.id);
-  const context = createGenerationContext({
-    targetDir: projectDir,
-    defaultPackageScope: "fixture",
-    toolchain: {
-      nodeLtsMajor: "24",
-      packageManagerPin: "pnpm@11.11.0",
-      nodeVersion: releaseToolchainSnapshot.nodeVersion,
-    },
+  const receipt = await materializeGeneratedScenario({
+    runtime: sourceGeneratedScenarioRuntime,
+    scenario: options.scenario,
+    workspace: options.workspace,
   });
-  const initialization = planGeneratedRepositoryInitialization({
-    definition: options.scenario.base,
-    context,
-  });
-  await validatePlanSources({
-    definition: options.scenario.base,
-    plan: initialization,
-  });
-  await validatePlanDependencyCatalog(initialization);
-  await renderNewProject({
-    targetRoot: projectDir,
-    operations: [...initialization.operations],
-  });
-  await initializeFixtureGitRepository({ repositoryRoot: projectDir });
-  await writeGeneratedRepositoryTree({ repositoryRoot: projectDir });
-
-  let plan: GeneratedRepositoryPlan = initialization;
-  const addition = options.addition ?? options.scenario.addition;
-  if (addition !== undefined) {
-    const additionPlan = planGeneratedRepositoryPackageAddition({
-      definition: addition,
-      localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-      packageLeafName: `fixture-${addition.metadata.name}`,
-      ...(options.scenario.linkFrom === undefined
-        ? {}
-        : { linkFrom: options.scenario.linkFrom }),
-    });
-    await validatePlanSources({ definition: addition, plan: additionPlan });
-    await validatePlanDependencyCatalog(additionPlan);
-    const result = await reconcileAndApplyProjectProjections({
-      targetRoot: projectDir,
-      ...additionPlan.projectProjections,
-    });
-    if (!result.ok) {
-      throw new Error(
-        `Generated Package Addition reconciliation conflicted: ${JSON.stringify(result.conflicts)}`,
-      );
-    }
-    plan = additionPlan;
+  if (receipt.status === "not-applicable") {
+    throw new Error(
+      `${options.scenario.id}: not applicable for matrix rendering`,
+    );
   }
+  await validatePlanSources({
+    receipt,
+    runtime: sourceGeneratedScenarioRuntime,
+  });
+  await validatePlanDependencyCatalog(
+    receipt.result,
+    receipt.projectDir,
+    receipt.scenario.id,
+  );
+  await initializeFixtureGitRepository({ repositoryRoot: receipt.projectDir });
 
   return {
     generatedContentIdentity: await writeGeneratedRepositoryTree({
-      repositoryRoot: projectDir,
+      repositoryRoot: receipt.projectDir,
     }),
-    plan,
+    receipt,
   };
 }
 export {
@@ -550,16 +505,13 @@ export {
   access,
   afterEach,
   assert,
-  builtInPresetRegistry,
   checkFixtureEvidenceHealth,
   chmod,
   cp,
   createBlockedConcurrencyProbe,
   createBlockedWorkProbe,
   createFixtureEvidenceScheduler,
-  createGenerationContext,
   createSuccessfulFixturePhaseExecutor,
-  createTemplateSourceHandle,
   deriveFixtureGateContractIdentity,
   deriveFocusedPackageLinkContractIdentity,
   deriveFocusedPackageLinkPlanInput,
@@ -578,23 +530,16 @@ export {
   initializeFixtureGitRepository,
   isDeepStrictEqual,
   isolatedFixtureEnvironment,
-  loadLocalTemplateMetadata,
   materializeFocusedProviderBuild,
   mkdir,
   mkdtemp,
   normalizedFocusedPackageLinkPlan,
   path,
-  planGeneratedRepositoryInitialization,
-  planGeneratedRepositoryPackageAddition,
   readFile,
   readdir,
-  reconcileAndApplyProjectProjections,
   recordSuccessfulFixturePhase,
   releaseAfterActive,
-  releaseToolchainSnapshot,
   renderMatrixScenario,
-  renderNewProject,
-  resolveBuiltInTemplateSource,
   rm,
   runFixtureEvidenceGate,
   runGeneratedRegistryCli,
@@ -613,7 +558,6 @@ export {
 };
 
 export type {
-  BuiltInPresetDefinition,
   FixtureActivityRecorder,
   FixtureCommandRunner,
   FixtureEvidenceActivityLedger,
@@ -626,6 +570,5 @@ export type {
   FixtureEvidenceScenarioDiagnostics,
   FixtureEvidenceSchedulerFactory,
   FixtureEvidenceStorage,
-  GeneratedRepositoryPlan,
   MatrixScenario,
 };

@@ -8,14 +8,12 @@ import {
   FileFixtureEvidenceActivityLedger,
   FileFixtureEvidenceStorage,
   assert,
-  builtInPresetRegistry,
   checkFixtureEvidenceHealth,
   chmod,
   cp,
   createBlockedConcurrencyProbe,
   createBlockedWorkProbe,
   createFixtureEvidenceScheduler,
-  createGenerationContext,
   createSuccessfulFixturePhaseExecutor,
   deriveFixtureGateContractIdentity,
   deriveGeneratedRootQualityContractIdentity,
@@ -33,12 +31,11 @@ import {
   isolatedFixtureEnvironment,
   mkdir,
   path,
-  planGeneratedRepositoryInitialization,
   readFile,
   readdir,
   recordSuccessfulFixturePhase,
-  releaseToolchainSnapshot,
   rm,
+  renderMatrixScenario,
   runFixtureEvidenceGate,
   successfulRootEvidence,
   symlink,
@@ -55,144 +52,133 @@ import type {
 
 void describe("Fixture Verification Evidence", () => {
   void it("invalidates Root proof when its covered Deployment contract changes", async () => {
-    const definition = builtInPresetRegistry.all().find(
-      (candidate) =>
-        planGeneratedRepositoryInitialization({
-          definition: candidate,
-          context: createGenerationContext({
-            targetDir: path.join("generated-repository", "deployment-contract"),
-            toolchain: {
-              nodeLtsMajor: "24",
-              packageManagerPin: "pnpm@11.11.0",
-              nodeVersion: releaseToolchainSnapshot.nodeVersion,
-            },
-          }),
-        }).deploymentCheck !== undefined,
-    );
-    assert.notStrictEqual(definition, undefined);
-    const plan = planGeneratedRepositoryInitialization({
-      definition: definition!,
-      context: createGenerationContext({
-        targetDir: path.join("generated-repository", "deployment-contract"),
-        toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.11.0",
-          nodeVersion: releaseToolchainSnapshot.nodeVersion,
-        },
-      }),
-    });
-    const deployment = deriveDeploymentQualityPlanInput(plan);
-    assert.notStrictEqual(deployment, undefined);
-    const deploymentContractIdentity =
-      await deriveDeploymentQualityContractIdentity(deployment!);
-    const changedDeploymentContractIdentity =
-      await deriveDeploymentQualityContractIdentity({
-        plan: {
-          ...deployment!.plan,
-          deploymentCheck: {
-            ...deployment!.plan.deploymentCheck,
+    const workspace = await temporaryRepository("fixture-deployment-contract-");
+    try {
+      const selectedScenario = (await generatedScenariosFor("deployment"))[0]!;
+      const rendered = await renderMatrixScenario({
+        scenario: selectedScenario,
+        workspace,
+      });
+      const result = rendered.receipt.result;
+      const deployment = deriveDeploymentQualityPlanInput(
+        result,
+        selectedScenario.id,
+      );
+      assert.notStrictEqual(deployment, undefined);
+      const deploymentContractIdentity =
+        await deriveDeploymentQualityContractIdentity(deployment!);
+      const changedDeploymentContractIdentity =
+        await deriveDeploymentQualityContractIdentity({
+          scenarioId: deployment!.scenarioId,
+          requirement: {
+            ...deployment!.requirement,
             environmentNeeds: [],
           },
-        },
-      });
-    const rootContractIdentity =
-      await deriveGeneratedRootQualityContractIdentity(plan, {
+        });
+      const rootContractIdentity =
+        await deriveGeneratedRootQualityContractIdentity(result, {
+          deploymentContractIdentity,
+        });
+      const changedRootContractIdentity =
+        await deriveGeneratedRootQualityContractIdentity(result, {
+          deploymentContractIdentity: changedDeploymentContractIdentity,
+        });
+
+      assert.notStrictEqual(
+        changedDeploymentContractIdentity,
         deploymentContractIdentity,
+      );
+      assert.notStrictEqual(changedRootContractIdentity, rootContractIdentity);
+
+      const evidenceScenario = {
+        id: "deployment-contract-invalidation",
+        label: "deployment contract invalidation",
+        presetIdentities: [selectedScenario.base.metadata.alias],
+      };
+      const generatedContentIdentity = "a".repeat(40);
+      const rootEvidence = await runFixtureEvidenceGate({
+        gate: "generated-root-quality",
+        generatedContentIdentity,
+        contractIdentity: rootContractIdentity,
+        coversDeploymentContractIdentity: deploymentContractIdentity,
+        scenario: evidenceScenario,
+        producerCommit: "test",
+        readEnabled: false,
+        writeEnabled: false,
+        execute: async () => undefined,
       });
-    const changedRootContractIdentity =
-      await deriveGeneratedRootQualityContractIdentity(plan, {
-        deploymentContractIdentity: changedDeploymentContractIdentity,
+      const changedRootEvidence = await runFixtureEvidenceGate({
+        gate: "generated-root-quality",
+        generatedContentIdentity,
+        contractIdentity: changedRootContractIdentity,
+        coversDeploymentContractIdentity: changedDeploymentContractIdentity,
+        scenario: evidenceScenario,
+        producerCommit: "test",
+        readEnabled: false,
+        writeEnabled: false,
+        execute: async () => undefined,
+      });
+      const focusedContractIdentity = "b".repeat(64);
+      const focusedEvidence = await runFixtureEvidenceGate({
+        gate: "focused-package-link",
+        rootEvidence,
+        generatedContentIdentity,
+        contractIdentity: focusedContractIdentity,
+        scenario: evidenceScenario,
+        producerCommit: "test",
+        readEnabled: false,
+        writeEnabled: false,
+        execute: async () => undefined,
+      });
+      const changedFocusedEvidence = await runFixtureEvidenceGate({
+        gate: "focused-package-link",
+        rootEvidence: changedRootEvidence,
+        generatedContentIdentity,
+        contractIdentity: focusedContractIdentity,
+        scenario: evidenceScenario,
+        producerCommit: "test",
+        readEnabled: false,
+        writeEnabled: false,
+        execute: async () => undefined,
+      });
+      const deploymentEvidence = await runFixtureEvidenceGate({
+        gate: "deployment-quality",
+        rootEvidence,
+        generatedContentIdentity,
+        contractIdentity: deploymentContractIdentity,
+        scenario: evidenceScenario,
+        producerCommit: "test",
+        readEnabled: false,
+        writeEnabled: false,
+        execute: async () => undefined,
+      });
+      const changedDeploymentEvidence = await runFixtureEvidenceGate({
+        gate: "deployment-quality",
+        rootEvidence: changedRootEvidence,
+        generatedContentIdentity,
+        contractIdentity: changedDeploymentContractIdentity,
+        scenario: evidenceScenario,
+        producerCommit: "test",
+        readEnabled: false,
+        writeEnabled: false,
+        execute: async () => undefined,
       });
 
-    assert.notStrictEqual(
-      changedDeploymentContractIdentity,
-      deploymentContractIdentity,
-    );
-    assert.notStrictEqual(changedRootContractIdentity, rootContractIdentity);
-
-    const scenario = {
-      id: "deployment-contract-invalidation",
-      label: "deployment contract invalidation",
-      presetIdentities: [definition!.metadata.name],
-    };
-    const generatedContentIdentity = "a".repeat(40);
-    const rootEvidence = await runFixtureEvidenceGate({
-      gate: "generated-root-quality",
-      generatedContentIdentity,
-      contractIdentity: rootContractIdentity,
-      coversDeploymentContractIdentity: deploymentContractIdentity,
-      scenario,
-      producerCommit: "test",
-      readEnabled: false,
-      writeEnabled: false,
-      execute: async () => undefined,
-    });
-    const changedRootEvidence = await runFixtureEvidenceGate({
-      gate: "generated-root-quality",
-      generatedContentIdentity,
-      contractIdentity: changedRootContractIdentity,
-      coversDeploymentContractIdentity: changedDeploymentContractIdentity,
-      scenario,
-      producerCommit: "test",
-      readEnabled: false,
-      writeEnabled: false,
-      execute: async () => undefined,
-    });
-    const focusedContractIdentity = "b".repeat(64);
-    const focusedEvidence = await runFixtureEvidenceGate({
-      gate: "focused-package-link",
-      rootEvidence,
-      generatedContentIdentity,
-      contractIdentity: focusedContractIdentity,
-      scenario,
-      producerCommit: "test",
-      readEnabled: false,
-      writeEnabled: false,
-      execute: async () => undefined,
-    });
-    const changedFocusedEvidence = await runFixtureEvidenceGate({
-      gate: "focused-package-link",
-      rootEvidence: changedRootEvidence,
-      generatedContentIdentity,
-      contractIdentity: focusedContractIdentity,
-      scenario,
-      producerCommit: "test",
-      readEnabled: false,
-      writeEnabled: false,
-      execute: async () => undefined,
-    });
-    const deploymentEvidence = await runFixtureEvidenceGate({
-      gate: "deployment-quality",
-      rootEvidence,
-      generatedContentIdentity,
-      contractIdentity: deploymentContractIdentity,
-      scenario,
-      producerCommit: "test",
-      readEnabled: false,
-      writeEnabled: false,
-      execute: async () => undefined,
-    });
-    const changedDeploymentEvidence = await runFixtureEvidenceGate({
-      gate: "deployment-quality",
-      rootEvidence: changedRootEvidence,
-      generatedContentIdentity,
-      contractIdentity: changedDeploymentContractIdentity,
-      scenario,
-      producerCommit: "test",
-      readEnabled: false,
-      writeEnabled: false,
-      execute: async () => undefined,
-    });
-
-    assert.notStrictEqual(changedRootEvidence.identity, rootEvidence.identity);
-    assert.notStrictEqual(
-      changedFocusedEvidence.identity,
-      focusedEvidence.identity,
-    );
-    assert.notStrictEqual(
-      changedDeploymentEvidence.identity,
-      deploymentEvidence.identity,
-    );
+      assert.notStrictEqual(
+        changedRootEvidence.identity,
+        rootEvidence.identity,
+      );
+      assert.notStrictEqual(
+        changedFocusedEvidence.identity,
+        focusedEvidence.identity,
+      );
+      assert.notStrictEqual(
+        changedDeploymentEvidence.identity,
+        deploymentEvidence.identity,
+      );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   void it("accepts a complete writable miss only for its current run activity", async () => {
@@ -2562,42 +2548,39 @@ void describe("Fixture Verification Evidence", () => {
   });
 
   void it("classifies Root Quality browser resources from real Check Environment Needs", async () => {
-    const classifications = (await generatedScenariosFor("init")).map(
-      (scenario) => {
-        const plan = planGeneratedRepositoryInitialization({
-          definition: scenario.base,
-          context: createGenerationContext({
-            targetDir: path.join("/tmp/resource-classification", scenario.id),
-            defaultPackageScope: "fixture",
-            toolchain: {
-              nodeLtsMajor: "24",
-              packageManagerPin: "pnpm@11.11.0",
-              nodeVersion: releaseToolchainSnapshot.nodeVersion,
-            },
-          }),
-        });
-        return {
-          hasBrowserNeed: plan.environmentNeeds.some(
-            (need) => need.kind === "playwright-browser-assets",
-          ),
-          resources: generatedRootQualityExecutionResources(plan),
-        };
-      },
-    );
-
-    assert.strictEqual(
-      classifications.some(({ hasBrowserNeed }) => hasBrowserNeed),
-      true,
-    );
-    assert.strictEqual(
-      classifications.some(({ hasBrowserNeed }) => !hasBrowserNeed),
-      true,
-    );
-    for (const classification of classifications) {
-      assert.deepStrictEqual(
-        classification.resources,
-        classification.hasBrowserNeed ? ["browser"] : [],
+    const workspace = await temporaryRepository("resource-classification-");
+    try {
+      const classifications = await Promise.all(
+        (await generatedScenariosFor("init")).map(async (scenario) => {
+          const rendered = await renderMatrixScenario({ scenario, workspace });
+          const result = rendered.receipt.result;
+          const hasBrowserNeed =
+            result.projection.ownerFacts.environmentNeeds.check.some(
+              (need) => need.kind === "playwright-browser-assets",
+            );
+          return {
+            hasBrowserNeed,
+            resources: generatedRootQualityExecutionResources(result),
+          };
+        }),
       );
+
+      assert.strictEqual(
+        classifications.some(({ hasBrowserNeed }) => hasBrowserNeed),
+        true,
+      );
+      assert.strictEqual(
+        classifications.some(({ hasBrowserNeed }) => !hasBrowserNeed),
+        true,
+      );
+      for (const classification of classifications) {
+        assert.deepStrictEqual(
+          classification.resources,
+          classification.hasBrowserNeed ? ["browser"] : [],
+        );
+      }
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
     }
   });
 
@@ -3897,22 +3880,16 @@ void describe("Fixture Verification Evidence", () => {
 
   void it("owns the normalized Generated Root Quality contract and complete executor", async () => {
     const root = await temporaryRepository("fixture-root-contract-");
-    const definition = builtInPresetRegistry.all()[0]!;
-    const plan = planGeneratedRepositoryInitialization({
-      definition,
-      context: createGenerationContext({
-        targetDir: "/different/temporary/paths/do-not-identify-contracts",
-        defaultPackageScope: "fixture",
-        toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.11.0",
-        },
-      }),
-    });
     const calls: Array<{ command: string; args: readonly string[] }> = [];
     try {
-      const contractIdentity =
-        await deriveGeneratedRootQualityContractIdentity(plan);
+      const scenario = (await generatedScenariosFor("init"))[0]!;
+      const rendered = await renderMatrixScenario({
+        scenario,
+        workspace: root,
+      });
+      const contractIdentity = await deriveGeneratedRootQualityContractIdentity(
+        rendered.receipt.result,
+      );
       assert.match(contractIdentity, /^[0-9a-f]{64}$/u);
 
       await executeGeneratedRootQuality({

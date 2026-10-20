@@ -141,8 +141,10 @@
     },
     "check:templates": {
       "dependsOn": [
-        "@ykdz/template-builtin-presets#build",
-        "@ykdz/template-core#build"
+        "@ykdz/template-content#build",
+        "@ykdz/template-core#build",
+        "@ykdz/template-generator#build",
+        "@ykdz/template-workspace#build"
       ],
       "tags": ["quality:light"],
       "cache": true,
@@ -152,8 +154,10 @@
     },
     "check:templates:github-yaml": {
       "dependsOn": [
-        "@ykdz/template-builtin-presets#build",
-        "@ykdz/template-core#build"
+        "@ykdz/template-content#build",
+        "@ykdz/template-core#build",
+        "@ykdz/template-generator#build",
+        "@ykdz/template-workspace#build"
       ],
       "tags": ["quality:light"],
       "cache": true,
