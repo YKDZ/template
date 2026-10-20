@@ -1,6 +1,7 @@
 import { describe, it, mock } from "node:test";
 
 import { findFixtureEvidenceArchitectureFindings } from "../src/check-fixture-evidence-architecture.ts";
+import { sourceGeneratedScenarioRuntime } from "../src/source-generated-runtime.ts";
 import {
   FileFixtureEvidenceActivityLedger,
   FileFixtureEvidenceStorage,
@@ -10,8 +11,6 @@ import {
   chmod,
   createBlockedConcurrencyProbe,
   createFixtureEvidenceScheduler,
-  createGenerationContext,
-  createTemplateSourceHandle,
   deriveFocusedPackageLinkContractIdentity,
   deriveFocusedPackageLinkPlanInput,
   deriveGeneratedRootQualityContractIdentity,
@@ -26,13 +25,10 @@ import {
   mkdir,
   normalizedFocusedPackageLinkPlan,
   path,
-  planGeneratedRepositoryInitialization,
   readFile,
   readdir,
   releaseAfterActive,
-  releaseToolchainSnapshot,
   renderMatrixScenario,
-  resolveBuiltInTemplateSource,
   rm,
   runFixtureEvidenceGate,
   runGeneratedRegistryCli,
@@ -41,9 +37,9 @@ import {
   temporaryRepository,
   textBelow,
   writeFile,
+  writeGeneratedRepositoryTree,
 } from "./fixture-evidence.test-support.ts";
 import type {
-  BuiltInPresetDefinition,
   FixtureEvidenceActivityLedger,
   FixtureEvidenceExecutionResource,
   FixtureEvidenceLifecycleEvent,
@@ -83,11 +79,11 @@ void describe("Fixture Verification Evidence", () => {
           rootProjection.generatedContentIdentity,
         );
         const rootContract = await deriveGeneratedRootQualityContractIdentity(
-          rootProjection.plan,
+          rootProjection.receipt.result,
           { rootGate: "check", includeFix: false },
         );
         const matrixContract = await deriveGeneratedRootQualityContractIdentity(
-          matrixProjection.plan,
+          matrixProjection.receipt.result,
           { includeFix: true },
         );
         assert.notStrictEqual(matrixContract, rootContract);
@@ -98,7 +94,7 @@ void describe("Fixture Verification Evidence", () => {
           scenario: {
             id: scenario.id,
             label: scenario.label,
-            presetIdentities: [scenario.base.metadata.name],
+            presetIdentities: [scenario.base.metadata.alias],
           },
           producerCommit: "same-run",
           storage,
@@ -115,7 +111,7 @@ void describe("Fixture Verification Evidence", () => {
           scenario: {
             id: matrixScenario!.id,
             label: matrixScenario!.label,
-            presetIdentities: [matrixScenario!.base.metadata.name],
+            presetIdentities: [matrixScenario!.base.metadata.alias],
           },
           producerCommit: "same-run",
           storage,
@@ -686,8 +682,8 @@ void describe("Fixture Verification Evidence", () => {
                 }),
             ),
           );
-          const browserConstrained = renderedScenarios.filter(({ plan }) =>
-            generatedRootQualityExecutionResources(plan, {
+          const browserConstrained = renderedScenarios.filter(({ receipt }) =>
+            generatedRootQualityExecutionResources(receipt.result, {
               rootGate:
                 scenarioSet === "init" || scenarioSet === "focused"
                   ? "check"
@@ -727,45 +723,24 @@ void describe("Fixture Verification Evidence", () => {
     },
   );
 
-  void it("derives the Focused contract from the normalized consumer and provider plan", async () => {
+  void it("derives the Focused contract from actual blueprint intents and manifests", async () => {
     const workspace = await temporaryRepository("fixture-focused-contract-");
     try {
       const scenario = (await generatedScenariosFor("focused"))[0]!;
       const rendered = await renderMatrixScenario({ scenario, workspace });
-      const consumerPackagePath = scenario.linkFrom![0]!;
-      const providerPackagePath =
-        rendered.plan.blueprint.packageLinkIntents!.find(
-          (intent) =>
-            intent.consumerPackagePath === consumerPackagePath &&
-            !planGeneratedRepositoryInitialization({
-              definition: scenario.base,
-              context: createGenerationContext({
-                targetDir: path.join(workspace, scenario.id),
-                defaultPackageScope: "focused",
-                toolchain: {
-                  nodeLtsMajor: "24",
-                  packageManagerPin: "pnpm@11.11.0",
-                  nodeVersion: releaseToolchainSnapshot.nodeVersion,
-                },
-              }),
-            }).blueprint.packages.some(
-              (definition) => definition.path === intent.providerPackagePath,
-            ),
-        )!.providerPackagePath;
-      const input = {
-        plan: rendered.plan,
-        consumerPackagePath,
-        providerPackagePath,
-      } as const;
+      const input = await deriveFocusedPackageLinkPlanInput({
+        receipt: rendered.receipt,
+        consumerPackagePaths: rendered.receipt.linkFrom,
+      });
 
       const normalized = normalizedFocusedPackageLinkPlan(input);
       assert.partialDeepStrictEqual(normalized, {
         gate: "focused-package-link",
-        consumer: { path: consumerPackagePath },
-        provider: { path: providerPackagePath },
+        consumer: { path: input.consumer.path },
+        provider: { path: input.provider.path },
         intent: {
-          consumerPackagePath,
-          providerPackagePath,
+          consumerPackagePath: input.consumer.path,
+          providerPackagePath: input.provider.path,
         },
       });
       assert.ok(
@@ -805,67 +780,26 @@ void describe("Fixture Verification Evidence", () => {
     }
   });
 
-  void it("selects the Focused provider from the final Package Link Intent when addition also creates a helper package", async () => {
+  void it("selects the newly added provider from the actual final Package Link Intent", async () => {
     const workspace = await temporaryRepository(
       "fixture-focused-provider-intent-",
     );
     try {
       const scenario = (await generatedScenariosFor("focused"))[0]!;
       const rendered = await renderMatrixScenario({ scenario, workspace });
-      const consumerPackagePath = scenario.linkFrom![0]!;
-      const expectedIntent = rendered.plan.blueprint.packageLinkIntents?.find(
-        (intent) =>
-          intent.consumerPackagePath === consumerPackagePath &&
-          !planGeneratedRepositoryInitialization({
-            definition: scenario.base,
-            context: createGenerationContext({
-              targetDir: path.join(workspace, scenario.id),
-              defaultPackageScope: "fixture",
-              toolchain: {
-                nodeLtsMajor: "24",
-                packageManagerPin: "pnpm@11.11.0",
-                nodeVersion: releaseToolchainSnapshot.nodeVersion,
-              },
-            }),
-          }).blueprint.packages.some(
-            (definition) => definition.path === intent.providerPackagePath,
-          ),
+      const input = await deriveFocusedPackageLinkPlanInput({
+        receipt: rendered.receipt,
+        consumerPackagePaths: rendered.receipt.linkFrom,
+      });
+      assert.ok(
+        rendered.receipt.result.blueprint.packages.some(
+          (definition) => definition.path === input.provider.path,
+        ),
       );
-      assert.notStrictEqual(expectedIntent, undefined);
-      const finalPlan = {
-        ...rendered.plan,
-        blueprint: {
-          ...rendered.plan.blueprint,
-          packages: [
-            ...rendered.plan.blueprint.packages,
-            {
-              name: "@fixture/addition-helper",
-              packageDefinitionId: `package-${"f".repeat(64)}` as const,
-              path: "packages/addition-helper",
-              role: "shared-library" as const,
-            },
-          ],
-        },
-      };
-
-      assert.strictEqual(
-        deriveFocusedPackageLinkPlanInput({
-          initialPlan: planGeneratedRepositoryInitialization({
-            definition: scenario.base,
-            context: createGenerationContext({
-              targetDir: path.join(workspace, "initial"),
-              defaultPackageScope: "fixture",
-              toolchain: {
-                nodeLtsMajor: "24",
-                packageManagerPin: "pnpm@11.11.0",
-                nodeVersion: releaseToolchainSnapshot.nodeVersion,
-              },
-            }),
-          }),
-          finalPlan,
-          consumerPackagePaths: [consumerPackagePath],
-        }).providerPackagePath,
-        expectedIntent!.providerPackagePath,
+      assert.ok(
+        !rendered.receipt.initialization.blueprint.packages.some(
+          (definition) => definition.path === input.provider.path,
+        ),
       );
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -1766,7 +1700,8 @@ void describe("Fixture Verification Evidence", () => {
             generation.packages
               .map(({ definitionName }) => definitionName)
               .includes(
-                scenario.addition?.metadata.name ?? scenario.base.metadata.name,
+                scenario.addition?.metadata.alias ??
+                  scenario.base.metadata.alias,
               ),
           );
           assert.ok(
@@ -1977,27 +1912,10 @@ void describe("Fixture Verification Evidence", () => {
           "package-addition-matrix",
         );
         const candidate = scenarios.find(
-          (scenario) => scenario.addition?.planPackageAddition !== undefined,
+          (scenario) => scenario.addition !== undefined,
         );
-        assert.ok(candidate?.addition?.planPackageAddition !== undefined);
+        assert.ok(candidate?.addition !== undefined);
         const selectedAddition = candidate.addition;
-        const changedAddition: BuiltInPresetDefinition = {
-          ...selectedAddition,
-          planPackageAddition(options) {
-            const contribution = selectedAddition.planPackageAddition!(options);
-            return {
-              ...contribution,
-              operations: [
-                ...contribution.operations,
-                {
-                  kind: "writeText",
-                  to: `${options.packagePath}/fixture-evidence-change.txt`,
-                  text: "Preset-local fixture evidence change\n",
-                },
-              ],
-            };
-          },
-        };
 
         const baseline = new Map<
           string,
@@ -2012,9 +1930,12 @@ void describe("Fixture Verification Evidence", () => {
             workspace: path.join(root, "cold"),
           });
           const contractIdentity =
-            await deriveGeneratedRootQualityContractIdentity(rendered.plan, {
-              includeFix: true,
-            });
+            await deriveGeneratedRootQualityContractIdentity(
+              rendered.receipt.result,
+              {
+                includeFix: true,
+              },
+            );
           baseline.set(scenario.id, {
             generatedContentIdentity: rendered.generatedContentIdentity,
             contractIdentity,
@@ -2027,10 +1948,10 @@ void describe("Fixture Verification Evidence", () => {
               id: scenario.id,
               label: scenario.label,
               presetIdentities: [
-                scenario.base.metadata.name,
+                scenario.base.metadata.alias,
                 ...(scenario.addition === undefined
                   ? []
-                  : [scenario.addition.metadata.name]),
+                  : [scenario.addition.metadata.alias]),
               ],
             },
             producerCommit: "cold-producer",
@@ -2085,20 +2006,30 @@ void describe("Fixture Verification Evidence", () => {
           const rendered = await renderMatrixScenario({
             scenario,
             workspace: path.join(root, "preset-local-change"),
-            ...(usesChangedAddition ? { addition: changedAddition } : {}),
           });
+          if (usesChangedAddition) {
+            await writeFile(
+              path.join(
+                rendered.receipt.projectDir,
+                "fixture-evidence-change.txt",
+              ),
+              "Generated content changed for fixture evidence\n",
+            );
+          }
+          const generatedContentIdentity = usesChangedAddition
+            ? await writeGeneratedRepositoryTree({
+                repositoryRoot: rendered.receipt.projectDir,
+              })
+            : rendered.generatedContentIdentity;
           const previous = baseline.get(scenario.id)!;
-          if (
-            rendered.generatedContentIdentity !==
-            previous.generatedContentIdentity
-          ) {
+          if (generatedContentIdentity !== previous.generatedContentIdentity) {
             changedTrees.push(scenario.id);
           }
           const result = await runFixtureEvidenceGate({
             gate: "generated-root-quality",
-            generatedContentIdentity: rendered.generatedContentIdentity,
+            generatedContentIdentity,
             contractIdentity: await deriveGeneratedRootQualityContractIdentity(
-              rendered.plan,
+              rendered.receipt.result,
               {
                 includeFix: true,
               },
@@ -2133,65 +2064,31 @@ void describe("Fixture Verification Evidence", () => {
     },
   );
 
-  void it("preserves a changed public copy source through native dependency recomposition", async () => {
-    const root = await temporaryRepository("fixture-source-override-");
+  void it("checks copied bytes against the actual projection source handle", async () => {
+    const root = await temporaryRepository("fixture-source-handle-");
     try {
       const scenario = (
         await generatedScenariosFor("package-addition-matrix")
-      ).find(
-        (candidate) => candidate.addition?.planPackageAddition !== undefined,
-      );
-      assert.ok(scenario?.addition?.planPackageAddition !== undefined);
-      const addition = scenario.addition;
-      const baseline = await renderMatrixScenario({
+      ).find((candidate) => candidate.addition !== undefined);
+      assert.ok(scenario?.addition !== undefined);
+      const rendered = await renderMatrixScenario({
         scenario,
-        workspace: path.join(root, "baseline"),
+        workspace: path.join(root, "generated"),
       });
-      const copy = baseline.plan.operations.find(
+      const copy = rendered.receipt.result.projection.operations.find(
         (operation) =>
-          operation.kind === "copyFile" &&
-          operation.to.includes(`/fixture-${addition.metadata.name}/`) &&
-          operation.to.endsWith(".ts"),
+          operation.kind === "copyFile" && operation.to.endsWith(".ts"),
       );
       assert.ok(copy?.kind === "copyFile");
       const original = await readFile(
-        resolveBuiltInTemplateSource(copy.source, copy.from),
+        sourceGeneratedScenarioRuntime.resolveTemplateSource(
+          copy.source,
+          copy.from,
+        ),
       );
-      const changedFile = path.join(root, "changed-reference-source.ts");
-      const changedBytes = Buffer.concat([
-        original,
-        Buffer.from("\n// Changed public source\n"),
-      ]);
-      await writeFile(changedFile, changedBytes);
-      const changedSource = createTemplateSourceHandle(changedFile);
-      const changed = await renderMatrixScenario({
-        scenario,
-        workspace: path.join(root, "changed"),
-        addition: {
-          ...addition,
-          planPackageAddition(options) {
-            const contribution = addition.planPackageAddition!(options);
-            return {
-              ...contribution,
-              operations: contribution.operations.map((operation) =>
-                operation.kind === "copyFile" && operation.to === copy.to
-                  ? { ...operation, source: changedSource, from: "." }
-                  : operation,
-              ),
-            };
-          },
-        },
-      });
       assert.deepEqual(
-        await readFile(path.join(root, "changed", scenario.id, copy.to)),
-        Buffer.concat([
-          await readFile(path.join(root, "baseline", scenario.id, copy.to)),
-          Buffer.from("\n// Changed public source\n"),
-        ]),
-      );
-      assert.notEqual(
-        changed.generatedContentIdentity,
-        baseline.generatedContentIdentity,
+        await readFile(path.join(rendered.receipt.projectDir, copy.to)),
+        original,
       );
     } finally {
       await rm(root, { recursive: true, force: true });

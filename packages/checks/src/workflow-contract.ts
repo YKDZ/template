@@ -1,5 +1,6 @@
-import type { GeneratedRepositoryPlan } from "@ykdz/template-builtin-presets";
 import { parseDocument, isScalar, visit } from "yaml";
+
+import type { GeneratedScenarioReceipt } from "./generated-content.ts";
 
 type WorkflowOracle = {
   readonly deployment: boolean;
@@ -7,6 +8,10 @@ type WorkflowOracle = {
     Record<"playwright" | "vitest-browser", readonly string[]>
   >;
 };
+
+function ownerFacts(receipt: GeneratedScenarioReceipt) {
+  return receipt.result.projection.ownerFacts;
+}
 
 function hasExactKeys(
   value: Record<string, unknown>,
@@ -24,15 +29,15 @@ function hasExactKeys(
   );
 }
 
-function workflowOracle(plan: GeneratedRepositoryPlan): WorkflowOracle {
+function workflowOracle(receipt: GeneratedScenarioReceipt): WorkflowOracle {
   const packagePaths = new Set(
-    plan.blueprint.packages.map((definition) => definition.path),
+    receipt.result.blueprint.packages.map((definition) => definition.path),
   );
   const diagnosticOwnerPaths = {
     playwright: new Set<string>(),
     "vitest-browser": new Set<string>(),
   };
-  for (const declaration of plan.ciDiagnosticArtifacts) {
+  for (const declaration of ownerFacts(receipt).diagnosticArtifacts) {
     if (
       typeof declaration !== "object" ||
       declaration === null ||
@@ -88,10 +93,11 @@ function workflowOracle(plan: GeneratedRepositoryPlan): WorkflowOracle {
     diagnosticOwnerPaths[declaration.kind].add(ownerPath.path);
   }
 
-  const deployment = plan.deploymentCheck !== undefined;
+  const deployment =
+    ownerFacts(receipt).requirements.deploymentCheck !== undefined;
   if (
     deployment &&
-    !plan.deploymentCheck.environmentNeeds.some(
+    !ownerFacts(receipt).requirements.deploymentCheck?.environmentNeeds.some(
       (need) => need.kind === "docker-engine",
     )
   ) {
@@ -118,18 +124,14 @@ type ParsedObject = Record<string, unknown>;
 
 /** Publication is a ts-cli capability. */
 export function assertPublicationWorkflowContract(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
   source: string,
   workflow: ParsedWorkflow,
 ): void {
   assertActionReferences(source);
-  const candidate = plan.packageContributions.filter(
-    (contribution) =>
-      contribution.foundation.npmPublication?.kind === "public-cli-candidate",
-  );
-  if (candidate.length === 0) {
+  if (ownerFacts(receipt).publication.candidate === null) {
     failPublicationWorkflow(
-      plan,
+      receipt,
       "non-candidate preset projected a release workflow",
     );
   }
@@ -155,7 +157,7 @@ export function assertPublicationWorkflowContract(
     !hasExactKeys(workflow.jobs, ["verify", "publish", "release"])
   ) {
     failPublicationWorkflow(
-      plan,
+      receipt,
       "manual dispatch, empty permissions, or fixed concurrency diverges",
     );
   }
@@ -168,16 +170,16 @@ export function assertPublicationWorkflowContract(
     !isParsedObject(release)
   ) {
     failPublicationWorkflow(
-      plan,
+      receipt,
       "verify, publish, and release jobs are required",
     );
   }
-  assertPublicationJob(plan, verify, {
+  assertPublicationJob(receipt, verify, {
     keys: ["name", "runs-on", "timeout-minutes", "permissions", "steps"],
     permissions: { contents: "read" },
     needs: undefined,
   });
-  assertPublicationJob(plan, publish, {
+  assertPublicationJob(receipt, publish, {
     keys: [
       "name",
       "needs",
@@ -189,7 +191,7 @@ export function assertPublicationWorkflowContract(
     permissions: { contents: "read", "id-token": "write" },
     needs: "verify",
   });
-  assertPublicationJob(plan, release, {
+  assertPublicationJob(receipt, release, {
     keys: [
       "name",
       "needs",
@@ -201,20 +203,20 @@ export function assertPublicationWorkflowContract(
     permissions: { contents: "write" },
     needs: "publish",
   });
-  assertPublicationVerifySteps(plan, verify.steps);
-  assertPublicationPublishSteps(plan, publish.steps);
-  assertPublicationReleaseSteps(plan, release.steps);
+  assertPublicationVerifySteps(receipt, verify.steps);
+  assertPublicationPublishSteps(receipt, publish.steps);
+  assertPublicationReleaseSteps(receipt, release.steps);
 }
 
 function failPublicationWorkflow(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
   message: string,
 ): never {
-  throw new Error(`${plan.definitionName}: publication workflow ${message}`);
+  throw new Error(`${receipt.scenario.id}: publication workflow ${message}`);
 }
 
 function assertPublicationJob(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
   job: ParsedObject,
   expected: {
     readonly keys: readonly string[];
@@ -231,25 +233,28 @@ function assertPublicationJob(
     !Array.isArray(job.steps)
   ) {
     failPublicationWorkflow(
-      plan,
+      receipt,
       "job permissions, ordering, or runner diverges",
     );
   }
 }
 
 function step(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
   value: unknown,
   name: string,
 ): ParsedObject {
   if (!isParsedObject(value)) {
-    failPublicationWorkflow(plan, `missing ${name} step`);
+    failPublicationWorkflow(receipt, `missing ${name} step`);
   }
   return value;
 }
 
-function assertNodeSetup(plan: GeneratedRepositoryPlan, value: unknown): void {
-  const value_ = step(plan, value, "Set up Node.js");
+function assertNodeSetup(
+  receipt: GeneratedScenarioReceipt,
+  value: unknown,
+): void {
+  const value_ = step(receipt, value, "Set up Node.js");
   if (
     !hasExactKeys(value_, ["name", "uses", "with"]) ||
     !matchesAction(value_.uses, "actions/setup-node") ||
@@ -257,11 +262,14 @@ function assertNodeSetup(plan: GeneratedRepositoryPlan, value: unknown): void {
     !hasExactKeys(value_.with, ["node-version-file"]) ||
     value_.with["node-version-file"] !== "package.json"
   )
-    failPublicationWorkflow(plan, "Node setup must use package.json only");
+    failPublicationWorkflow(receipt, "Node setup must use package.json only");
 }
 
-function assertCheckout(plan: GeneratedRepositoryPlan, value: unknown): void {
-  const value_ = step(plan, value, "Checkout source");
+function assertCheckout(
+  receipt: GeneratedScenarioReceipt,
+  value: unknown,
+): void {
+  const value_ = step(receipt, value, "Checkout source");
   if (
     !hasExactKeys(value_, ["name", "uses", "with"]) ||
     !matchesAction(value_.uses, "actions/checkout") ||
@@ -272,22 +280,22 @@ function assertCheckout(plan: GeneratedRepositoryPlan, value: unknown): void {
     value_.with["fetch-depth"] !== 1
   )
     failPublicationWorkflow(
-      plan,
+      receipt,
       "checkout must be immutable, exact SHA, and credential-free",
     );
 }
 
 function assertPublicationVerifySteps(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
   steps: unknown,
 ): void {
   if (!Array.isArray(steps) || steps.length !== 9) {
     failPublicationWorkflow(
-      plan,
+      receipt,
       "verify must have the closed nine-step sequence",
     );
   }
-  const gate = step(plan, steps[0], "Require the default branch dispatch");
+  const gate = step(receipt, steps[0], "Require the default branch dispatch");
   if (
     !hasExactKeys(gate, ["name", "run", "env"]) ||
     typeof gate.run !== "string" ||
@@ -299,18 +307,22 @@ function assertPublicationVerifySteps(
       "${{ github.event.repository.default_branch }}"
   ) {
     failPublicationWorkflow(
-      plan,
+      receipt,
       "verify must reject a non-default ref before checkout",
     );
   }
-  assertCheckout(plan, steps[1]);
-  assertNodeSetup(plan, steps[2]);
-  const pnpm = step(plan, steps[3], "Set up pnpm");
-  const install = step(plan, steps[4], "Install dependencies");
-  const staging = step(plan, steps[5], "Create publication staging directory");
-  const check = step(plan, steps[6], "Run Full Check once");
-  const artifact = step(plan, steps[7], "Verify publication artifact");
-  const upload = step(plan, steps[8], "Upload verified npm artifact");
+  assertCheckout(receipt, steps[1]);
+  assertNodeSetup(receipt, steps[2]);
+  const pnpm = step(receipt, steps[3], "Set up pnpm");
+  const install = step(receipt, steps[4], "Install dependencies");
+  const staging = step(
+    receipt,
+    steps[5],
+    "Create publication staging directory",
+  );
+  const check = step(receipt, steps[6], "Run Full Check once");
+  const artifact = step(receipt, steps[7], "Verify publication artifact");
+  const upload = step(receipt, steps[8], "Upload verified npm artifact");
   if (
     !hasExactKeys(pnpm, ["name", "uses", "with"]) ||
     !matchesAction(pnpm.uses, "pnpm/action-setup") ||
@@ -346,24 +358,24 @@ function assertPublicationVerifySteps(
     upload.with["if-no-files-found"] !== "error"
   )
     failPublicationWorkflow(
-      plan,
+      receipt,
       "verify must persist and upload the one Root Check artifact",
     );
 }
 
 function assertPublicationPublishSteps(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
   steps: unknown,
 ): void {
   if (!Array.isArray(steps) || steps.length !== 4) {
     failPublicationWorkflow(
-      plan,
+      receipt,
       "publish must have the closed four-step sequence",
     );
   }
-  assertCheckout(plan, steps[0]);
-  const download = step(plan, steps[2], "Download verified npm artifact");
-  const caller = step(plan, steps[3], "Publish the verified tgz with OIDC");
+  assertCheckout(receipt, steps[0]);
+  const download = step(receipt, steps[2], "Download verified npm artifact");
+  const caller = step(receipt, steps[3], "Publish the verified tgz with OIDC");
   if (
     !hasExactKeys(download, ["name", "uses", "with"]) ||
     !matchesAction(download.uses, "actions/download-artifact") ||
@@ -380,25 +392,25 @@ function assertPublicationPublishSteps(
       "${{ runner.temp }}/npm-publication-download"
   )
     failPublicationWorkflow(
-      plan,
+      receipt,
       "publish must download the same artifact then invoke the direct caller",
     );
-  assertNodeSetup(plan, steps[1]);
+  assertNodeSetup(receipt, steps[1]);
 }
 
 function assertPublicationReleaseSteps(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
   steps: unknown,
 ): void {
   if (!Array.isArray(steps) || steps.length !== 4) {
     failPublicationWorkflow(
-      plan,
+      receipt,
       "release must have the closed four-step sequence",
     );
   }
-  assertCheckout(plan, steps[0]);
-  const download = step(plan, steps[2], "Download verified npm artifact");
-  const caller = step(plan, steps[3], "Create immutable GitHub Release");
+  assertCheckout(receipt, steps[0]);
+  const download = step(receipt, steps[2], "Download verified npm artifact");
+  const caller = step(receipt, steps[3], "Create immutable GitHub Release");
   if (
     !hasExactKeys(download, ["name", "uses", "with"]) ||
     !matchesAction(download.uses, "actions/download-artifact") ||
@@ -422,11 +434,11 @@ function assertPublicationReleaseSteps(
     caller.env.GH_TOKEN !== "${{ github.token }}"
   ) {
     failPublicationWorkflow(
-      plan,
+      receipt,
       "release must consume the same artifact with only its GitHub credential",
     );
   }
-  assertNodeSetup(plan, steps[1]);
+  assertNodeSetup(receipt, steps[1]);
 }
 
 type WorkflowActionContract = {
@@ -616,7 +628,7 @@ function diagnosticStepContracts(
 }
 
 function assertDiagnosticSteps(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
   stageStep: unknown,
   uploadStep: unknown,
   oracle: WorkflowOracle,
@@ -633,7 +645,7 @@ function assertDiagnosticSteps(
     stageStep.run !== contract.stage.run
   ) {
     throw new Error(
-      `${plan.definitionName}: Check diagnostics must stage only closed native evidence before upload`,
+      `${receipt.scenario.id}: Check diagnostics must stage only closed native evidence before upload`,
     );
   }
   const withValues = isParsedObject(uploadStep) ? uploadStep.with : undefined;
@@ -659,7 +671,7 @@ function assertDiagnosticSteps(
     withValues["retention-days"] !== 7
   ) {
     throw new Error(
-      `${plan.definitionName}: Check diagnostic upload must retain only aggregate native evidence`,
+      `${receipt.scenario.id}: Check diagnostic upload must retain only aggregate native evidence`,
     );
   }
 }
@@ -673,7 +685,7 @@ function isWorkflowStepName(value: unknown): value is string {
 }
 
 function assertGeneratedCheckWorkflowContract(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
   workflow: ParsedWorkflow,
   oracle: WorkflowOracle,
 ): void {
@@ -682,7 +694,7 @@ function assertGeneratedCheckWorkflowContract(
     !hasExactKeys(workflow.jobs, ["check"])
   ) {
     throw new Error(
-      `${plan.definitionName}: Root Check workflow has unexpected jobs`,
+      `${receipt.scenario.id}: Root Check workflow has unexpected jobs`,
     );
   }
   const job = workflow.jobs.check;
@@ -691,7 +703,7 @@ function assertGeneratedCheckWorkflowContract(
     !isParsedObject(job) ||
     !hasExactKeys(job, ["name", "runs-on", "timeout-minutes", "steps"])
   ) {
-    throw new Error(`${plan.definitionName}: Check job has unexpected fields`);
+    throw new Error(`${receipt.scenario.id}: Check job has unexpected fields`);
   }
   const diagnostic = diagnosticStepContracts(oracle, deployment);
   const diagnosticStart = deployment ? 7 : 6;
@@ -700,7 +712,7 @@ function assertGeneratedCheckWorkflowContract(
     job.steps.length !== diagnosticStart + (diagnostic === undefined ? 0 : 2)
   ) {
     throw new Error(
-      `${plan.definitionName}: Check has an unexpected step count`,
+      `${receipt.scenario.id}: Check has an unexpected step count`,
     );
   }
   if (
@@ -714,7 +726,7 @@ function assertGeneratedCheckWorkflowContract(
         ? workflowPolicy.deploymentJob.timeoutMinutes
         : workflowPolicy.rootJob.timeoutMinutes)
   ) {
-    throw new Error(`${plan.definitionName}: Check job identity is not stable`);
+    throw new Error(`${receipt.scenario.id}: Check job identity is not stable`);
   }
   for (const [index, actionKey] of rootActionKeys.entries()) {
     const contract = workflowPolicy.actions[actionKey];
@@ -727,7 +739,7 @@ function assertGeneratedCheckWorkflowContract(
       stableJson(step.with) !== stableJson(contract.with)
     ) {
       throw new Error(
-        `${plan.definitionName}: Check ${contract.name} step diverges from its capability contract`,
+        `${receipt.scenario.id}: Check ${contract.name} step diverges from its capability contract`,
       );
     }
   }
@@ -743,7 +755,7 @@ function assertGeneratedCheckWorkflowContract(
       step.run !== contract.command
     ) {
       throw new Error(
-        `${plan.definitionName}: Check ${contract.name} step diverges from its capability contract`,
+        `${receipt.scenario.id}: Check ${contract.name} step diverges from its capability contract`,
       );
     }
   }
@@ -759,7 +771,7 @@ function assertGeneratedCheckWorkflowContract(
       !matchesAction(buildx.uses, contract.action)
     ) {
       throw new Error(
-        `${plan.definitionName}: Check ${contract.name} step diverges from its capability contract`,
+        `${receipt.scenario.id}: Check ${contract.name} step diverges from its capability contract`,
       );
     }
     heavyCheckIndex += 1;
@@ -773,11 +785,11 @@ function assertGeneratedCheckWorkflowContract(
     heavyCheck.run !== heavyContract.command
   ) {
     throw new Error(
-      `${plan.definitionName}: Check ${heavyContract.name} step diverges from its capability contract`,
+      `${receipt.scenario.id}: Check ${heavyContract.name} step diverges from its capability contract`,
     );
   }
   assertDiagnosticSteps(
-    plan,
+    receipt,
     job.steps[diagnosticStart],
     job.steps[diagnosticStart + 1],
     oracle,
@@ -786,16 +798,16 @@ function assertGeneratedCheckWorkflowContract(
 }
 
 export function assertWorkflowContract(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
   generatedPath: string,
   source: string,
   workflow: ParsedWorkflow,
 ): void {
   assertActionReferences(source);
-  const oracle = workflowOracle(plan);
+  const oracle = workflowOracle(receipt);
   if (generatedPath !== workflowPolicy.generatedPath) {
     throw new Error(
-      `${plan.definitionName}: Check workflow has unexpected generated path ${generatedPath}`,
+      `${receipt.scenario.id}: Check workflow has unexpected generated path ${generatedPath}`,
     );
   }
   if (
@@ -809,42 +821,46 @@ export function assertWorkflowContract(
     ])
   ) {
     throw new Error(
-      `${plan.definitionName}: Check workflow has unexpected top-level execution configuration`,
+      `${receipt.scenario.id}: Check workflow has unexpected top-level execution configuration`,
     );
   }
   const job = isParsedObject(workflow.jobs)
     ? workflow.jobs[workflowPolicy.rootJob.id]
     : undefined;
   if (!isParsedObject(job)) {
-    throw new Error(`${plan.definitionName}: Root Check job is missing`);
+    throw new Error(`${receipt.scenario.id}: Root Check job is missing`);
   }
   const steps = job?.steps;
   if (!Array.isArray(steps)) {
-    throw new Error(`${plan.definitionName}: Root Check has no steps`);
+    throw new Error(`${receipt.scenario.id}: Root Check has no steps`);
   }
   if (stableJson(workflow.on) !== stableJson(workflowPolicy.triggers)) {
     throw new Error(
-      `${plan.definitionName}: unexpected Check workflow triggers`,
+      `${receipt.scenario.id}: unexpected Check workflow triggers`,
     );
   }
   if (
     stableJson(workflow.permissions) !== stableJson(workflowPolicy.permissions)
   ) {
     throw new Error(
-      `${plan.definitionName}: Check permissions are not contents-read`,
+      `${receipt.scenario.id}: Check permissions are not contents-read`,
     );
   }
   if (
     stableJson(workflow.concurrency) !== stableJson(workflowPolicy.concurrency)
   ) {
     throw new Error(
-      `${plan.definitionName}: Check concurrency is not same-ref cancellation`,
+      `${receipt.scenario.id}: Check concurrency is not same-ref cancellation`,
     );
   }
-  assertGeneratedCheckWorkflowContract(plan, workflow, oracle);
-  if (!plan.dependencyMaintenancePolicy.ecosystems.includes("github-actions")) {
+  assertGeneratedCheckWorkflowContract(receipt, workflow, oracle);
+  if (
+    !ownerFacts(receipt).dependencyMaintenance.ecosystems.includes(
+      "github-actions",
+    )
+  ) {
     throw new Error(
-      `${plan.definitionName}: Check action SHAs are outside the Dependency Maintenance Policy`,
+      `${receipt.scenario.id}: Check action SHAs are outside the Dependency Maintenance Policy`,
     );
   }
 }
@@ -878,32 +894,27 @@ function dependabotUpdateKey(update: DependabotUpdateOracle): string {
 }
 
 function dependabotOracle(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
 ): readonly DependabotUpdateOracle[] {
-  const declarations = plan.packageContributions.map(
-    (contribution) => contribution.foundation.dependencyMaintenance,
-  );
+  const policy = ownerFacts(receipt).dependencyMaintenance;
+  const hasDeployment =
+    ownerFacts(receipt).requirements.deploymentCheck !== undefined;
   const ecosystems = [
     ...new Set([
       "devcontainers" as const,
-      ...declarations.flatMap((declaration) => declaration.ecosystems),
-      ...(plan.deploymentCheck === undefined ? [] : (["docker"] as const)),
+      ...policy.ecosystems,
+      ...(hasDeployment ? (["docker"] as const) : []),
     ]),
   ];
   return ecosystems.flatMap((ecosystem) => {
     const declaredDirectories = [
       ...new Set([
         ...(ecosystem === "docker" ? (["/.devcontainer"] as const) : []),
-        ...declarations.flatMap((declaration) => {
-          const primary = declaration.directories?.[ecosystem];
-          return [
-            ...(primary === undefined ? [] : [primary]),
-            ...(declaration.extraDirectories?.[ecosystem] ?? []),
-          ];
-        }),
-        ...(ecosystem === "docker" && plan.deploymentCheck !== undefined
-          ? (["/"] as const)
-          : []),
+        ...(policy.directories?.[ecosystem] === undefined
+          ? []
+          : [policy.directories[ecosystem]!]),
+        ...(policy.extraDirectories?.[ecosystem] ?? []),
+        ...(ecosystem === "docker" && hasDeployment ? (["/"] as const) : []),
       ]),
     ];
     const directories: readonly `/${string}`[] =
@@ -933,7 +944,7 @@ function assertExactStringMembers(
 }
 
 function assertWeeklySchedule(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
   update: ParsedObject,
   oracle: DependabotUpdateOracle,
 ): void {
@@ -942,7 +953,7 @@ function assertWeeklySchedule(
     update.schedule.interval !== dependabotInterval
   ) {
     throw new Error(
-      `${plan.definitionName}: ${oracle.ecosystem} ${oracle.directory} must retain a weekly update schedule`,
+      `${receipt.scenario.id}: ${oracle.ecosystem} ${oracle.directory} must retain a weekly update schedule`,
     );
   }
 }
@@ -961,16 +972,16 @@ function dependabotIgnoreUpdateTypes(
 }
 
 function assertDependabotUpdateSemantics(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
   update: ParsedObject,
   oracle: DependabotUpdateOracle,
 ): void {
-  assertWeeklySchedule(plan, update, oracle);
+  assertWeeklySchedule(receipt, update, oracle);
   if (oracle.ecosystem === "npm") {
     assertExactStringMembers(
       dependabotIgnoreUpdateTypes(update, packageManagerDependency),
       allSemverUpdateTypes,
-      `${plan.definitionName}: ${packageManagerDependency} ignore update types diverge from policy`,
+      `${receipt.scenario.id}: ${packageManagerDependency} ignore update types diverge from policy`,
     );
     return;
   }
@@ -978,19 +989,19 @@ function assertDependabotUpdateSemantics(
     assertExactStringMembers(
       dependabotIgnoreUpdateTypes(update, devcontainerImage),
       [majorUpdateType],
-      `${plan.definitionName}: ${devcontainerImage} ignore update types diverge from policy`,
+      `${receipt.scenario.id}: ${devcontainerImage} ignore update types diverge from policy`,
     );
   }
 }
 
 export function assertDependabotContract(
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
   generatedPath: string,
   parsed: unknown,
 ): void {
   if (generatedPath !== dependabotGeneratedPath) {
     throw new Error(
-      `${plan.definitionName}: Dependabot has unexpected generated path ${generatedPath}`,
+      `${receipt.scenario.id}: Dependabot has unexpected generated path ${generatedPath}`,
     );
   }
   if (
@@ -998,16 +1009,16 @@ export function assertDependabotContract(
     !hasExactKeys(parsed, ["version", "updates"])
   ) {
     throw new Error(
-      `${plan.definitionName}: Dependabot must contain only version and updates`,
+      `${receipt.scenario.id}: Dependabot must contain only version and updates`,
     );
   }
   if (parsed.version !== 2 || !Array.isArray(parsed.updates)) {
     throw new Error(
-      `${plan.definitionName}: Dependabot version 2 updates are required`,
+      `${receipt.scenario.id}: Dependabot version 2 updates are required`,
     );
   }
 
-  const expectedUpdates = dependabotOracle(plan);
+  const expectedUpdates = dependabotOracle(receipt);
   const expectedByKey = new Map(
     expectedUpdates.map((update) => [dependabotUpdateKey(update), update]),
   );
@@ -1020,7 +1031,7 @@ export function assertDependabotContract(
       !update.directory.startsWith("/")
     ) {
       throw new Error(
-        `${plan.definitionName}: Dependabot update ${index + 1} has no valid ecosystem and absolute directory`,
+        `${receipt.scenario.id}: Dependabot update ${index + 1} has no valid ecosystem and absolute directory`,
       );
     }
     const actual = {
@@ -1034,32 +1045,32 @@ export function assertDependabotContract(
         (candidate) => candidate.ecosystem === actual.ecosystem,
       );
       throw new Error(
-        `${plan.definitionName}: unexpected ${actual.ecosystem} ${actual.directory} update${expectedSameEcosystem === undefined ? "" : `; expected ${expectedSameEcosystem.ecosystem} ${expectedSameEcosystem.directory} update`}`,
+        `${receipt.scenario.id}: unexpected ${actual.ecosystem} ${actual.directory} update${expectedSameEcosystem === undefined ? "" : `; expected ${expectedSameEcosystem.ecosystem} ${expectedSameEcosystem.directory} update`}`,
       );
     }
     if (seen.has(key)) {
       throw new Error(
-        `${plan.definitionName}: duplicate ${oracle.ecosystem} ${oracle.directory} update`,
+        `${receipt.scenario.id}: duplicate ${oracle.ecosystem} ${oracle.directory} update`,
       );
     }
     seen.add(key);
-    assertDependabotUpdateSemantics(plan, update, oracle);
+    assertDependabotUpdateSemantics(receipt, update, oracle);
   }
   const missing = expectedUpdates.find(
     (update) => !seen.has(dependabotUpdateKey(update)),
   );
   if (missing !== undefined) {
     throw new Error(
-      `${plan.definitionName}: missing ${missing.ecosystem} ${missing.directory} update`,
+      `${receipt.scenario.id}: missing ${missing.ecosystem} ${missing.directory} update`,
     );
   }
 }
 
 export function policyOracleIdentity(
   kind: "workflow" | "dependabot",
-  plan: GeneratedRepositoryPlan,
+  receipt: GeneratedScenarioReceipt,
 ): string {
   return stableJson(
-    kind === "workflow" ? workflowOracle(plan) : dependabotOracle(plan),
+    kind === "workflow" ? workflowOracle(receipt) : dependabotOracle(receipt),
   );
 }

@@ -40,8 +40,10 @@
     "check:capabilities": "node --conditions=source src/check-fixture-evidence-architecture.ts && node --conditions=source src/check-generated-registry.ts capabilities"
   },
   "dependencies": {
-    "@ykdz/template-builtin-presets": "workspace:*",
+    "@ykdz/reference-ts-cli": "workspace:*",
+    "@ykdz/template-content": "workspace:*",
     "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*",
     "execa": "catalog:",

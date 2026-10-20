@@ -3,8 +3,9 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { GeneratedRepositoryPlan } from "@ykdz/template-builtin-presets";
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 
+import type { GeneratedScenarioReceipt } from "../../../generated-content.ts";
 import {
   deriveFixtureGateContractIdentity,
   normalizedFixtureDependencyInstallationPlan,
@@ -18,25 +19,27 @@ type FocusedProviderManifest = {
 };
 
 export type FocusedPackageLinkPlanInput = {
-  readonly plan: GeneratedRepositoryPlan;
-  readonly consumerPackagePath: string;
-  readonly providerPackagePath: string;
+  readonly scenarioId: string;
+  readonly consumer: PackageDefinition;
+  readonly provider: PackageDefinition;
+  readonly consumerManifest: Readonly<Record<string, unknown>>;
+  readonly providerManifest: Readonly<Record<string, unknown>>;
 };
 
-export function deriveFocusedPackageLinkPlanInput(options: {
-  readonly initialPlan: GeneratedRepositoryPlan;
-  readonly finalPlan: GeneratedRepositoryPlan;
+export async function deriveFocusedPackageLinkPlanInput(options: {
+  readonly receipt: GeneratedScenarioReceipt;
   readonly consumerPackagePaths: readonly string[];
-}): FocusedPackageLinkPlanInput {
+}): Promise<FocusedPackageLinkPlanInput> {
   const consumerPackagePath = options.consumerPackagePaths[0];
+  const finalResult = options.receipt.result;
   const initialIntents = new Set(
-    (options.initialPlan.blueprint.packageLinkIntents ?? []).map(
+    (options.receipt.initialization.blueprint.packageLinkIntents ?? []).map(
       (intent) =>
         `${intent.consumerPackagePath}\u0000${intent.providerPackagePath}`,
     ),
   );
   const matchingIntents = (
-    options.finalPlan.blueprint.packageLinkIntents ?? []
+    finalResult.blueprint.packageLinkIntents ?? []
   ).filter(
     (intent) =>
       intent.consumerPackagePath === consumerPackagePath &&
@@ -53,74 +56,46 @@ export function deriveFocusedPackageLinkPlanInput(options: {
       "Focused Package Link plan must identify exactly one consumer and one new final Package Link Intent",
     );
   }
+  const consumer = finalResult.blueprint.packages.find(
+    (candidate) => candidate.path === consumerPackagePath,
+  );
+  const providerPackagePath = matchingIntents[0]!.providerPackagePath;
+  const provider = finalResult.blueprint.packages.find(
+    (candidate) => candidate.path === providerPackagePath,
+  );
+  if (consumer === undefined || provider === undefined) {
+    throw new Error(
+      "Focused Package Link endpoints are absent from the actual final Project Blueprint",
+    );
+  }
+  const readManifest = async (definition: PackageDefinition) =>
+    JSON.parse(
+      await readFile(
+        path.join(options.receipt.projectDir, definition.path, "package.json"),
+        "utf8",
+      ),
+    ) as Readonly<Record<string, unknown>>;
+  const consumerManifest = await readManifest(consumer);
+  const providerManifest = await readManifest(provider);
   return {
-    plan: options.finalPlan,
-    consumerPackagePath,
-    providerPackagePath: matchingIntents[0]!.providerPackagePath,
+    scenarioId: options.receipt.scenario.id,
+    consumer,
+    provider,
+    consumerManifest,
+    providerManifest,
   };
-}
-
-function packageDefinition(
-  options: FocusedPackageLinkPlanInput,
-  packagePath: string,
-  kind: "consumer" | "provider",
-) {
-  const definition = options.plan.blueprint.packages.find(
-    (candidate) => candidate.path === packagePath,
-  );
-  if (definition === undefined) {
-    throw new Error(
-      `Focused Package Link ${kind} ${packagePath} is absent from the final Project Blueprint`,
-    );
-  }
-  return definition;
-}
-
-function packageManifest(
-  plan: GeneratedRepositoryPlan,
-  packageName: string,
-): Readonly<Record<string, unknown>> {
-  const manifest = plan.manifests.find(
-    (candidate) => candidate.name === packageName,
-  );
-  if (manifest === undefined) {
-    throw new Error(
-      `Focused Package Link package ${packageName} has no planned manifest`,
-    );
-  }
-  return manifest;
 }
 
 export function normalizedFocusedPackageLinkPlan(
   options: FocusedPackageLinkPlanInput,
 ): unknown {
-  const consumer = packageDefinition(
-    options,
-    options.consumerPackagePath,
-    "consumer",
-  );
-  const provider = packageDefinition(
-    options,
-    options.providerPackagePath,
-    "provider",
-  );
   const intent = {
-    consumerPackagePath: options.consumerPackagePath,
-    providerPackagePath: options.providerPackagePath,
+    consumerPackagePath: options.consumer.path,
+    providerPackagePath: options.provider.path,
   };
-  if (
-    !options.plan.blueprint.packageLinkIntents?.some(
-      (candidate) =>
-        candidate.consumerPackagePath === intent.consumerPackagePath &&
-        candidate.providerPackagePath === intent.providerPackagePath,
-    )
-  ) {
-    throw new Error(
-      `Focused Package Link Intent ${intent.consumerPackagePath} -> ${intent.providerPackagePath} is absent from the final Project Blueprint`,
-    );
-  }
-  const consumerManifest = packageManifest(options.plan, consumer.name);
-  const providerManifest = packageManifest(options.plan, provider.name);
+  const { consumer, provider } = options;
+  const consumerManifest = options.consumerManifest;
+  const providerManifest = options.providerManifest;
   const dependencies = consumerManifest.dependencies as
     | Readonly<Record<string, unknown>>
     | undefined;

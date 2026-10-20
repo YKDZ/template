@@ -3,11 +3,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import formatterConfig from "@ykdz/reference-typescript-config/oxfmt";
-import {
-  loadLocalTemplateMetadata,
-  type GeneratedRepositoryPlan,
-} from "@ykdz/template-builtin-presets";
 import { format } from "oxfmt";
+
+import type {
+  GeneratedScenarioRuntime,
+  SuccessfulScenarioResult,
+} from "../src/generated-content.ts";
 
 const sharedSource = "@ykdz/reference-vue-shared";
 
@@ -16,13 +17,34 @@ export type SharedVueCustomization = {
   readonly contents: string;
 };
 
-/** 在已有共同组件中加入真实定制，随后由新旧应用的正式浏览器入口观察。 */
+function referenceIdentity(
+  runtime: GeneratedScenarioRuntime,
+  packageName: string,
+): string {
+  const reference = runtime.content.find(
+    (member) =>
+      typeof member === "object" &&
+      member !== null &&
+      "manifest" in member &&
+      member.manifest.name === packageName,
+  );
+  if (reference === undefined || !("identity" in reference)) {
+    throw new Error(`唯一内容集合未公开 ${packageName} reference`);
+  }
+  return reference.identity;
+}
+
+/** 在实际生成的共同组件中加入定制，供后续真实浏览器入口观察。 */
 export async function customizeSharedVue(
-  plan: GeneratedRepositoryPlan,
+  result: SuccessfulScenarioResult,
   projectDir: string,
+  runtime: GeneratedScenarioRuntime,
 ): Promise<SharedVueCustomization> {
-  const shared = plan.packageContributions.find(
-    (item) => item.referenceSource === sharedSource,
+  const identity = referenceIdentity(runtime, sharedSource);
+  const shared = result.generationRecord.packages.find(
+    (item) =>
+      item.createdBy === "shared-dependency" &&
+      item.contentIdentity === identity,
   );
   assert.ok(shared);
   const file = path.join(
@@ -43,41 +65,46 @@ export async function customizeSharedVue(
 }
 
 export async function verifySharedVueCombination(options: {
-  readonly initialPlan: GeneratedRepositoryPlan;
-  readonly finalPlan: GeneratedRepositoryPlan;
+  readonly initialization: SuccessfulScenarioResult;
+  readonly result: SuccessfulScenarioResult;
   readonly projectDir: string;
+  readonly runtime: GeneratedScenarioRuntime;
   readonly customization?: SharedVueCustomization;
 }): Promise<void> {
-  const initial = options.initialPlan.generationRecord.packages.filter(
-    (item) => item.referenceSource === sharedSource,
+  const identity = referenceIdentity(options.runtime, sharedSource);
+  const initial = options.initialization.generationRecord.packages.filter(
+    (item) =>
+      item.createdBy === "shared-dependency" &&
+      item.contentIdentity === identity,
   );
-  loadLocalTemplateMetadata(options.projectDir);
   const record = JSON.parse(
     await readFile(
       path.join(options.projectDir, ".template/generation.json"),
       "utf8",
     ),
-  ) as GeneratedRepositoryPlan["generationRecord"];
+  ) as SuccessfulScenarioResult["generationRecord"];
   const shared = record.packages.filter(
-    (item) => item.referenceSource === sharedSource,
+    (item) =>
+      item.createdBy === "shared-dependency" &&
+      item.contentIdentity === identity,
   );
   assert.equal(shared.length, 1);
   const provider = shared[0]!;
   if (initial.length > 0) {
-    assert.equal(provider.packageDefinitionId, initial[0]!.packageDefinitionId);
-    assert.equal(provider.path, initial[0]!.path);
+    assert.equal(
+      provider.definition.packageDefinitionId,
+      initial[0]!.definition.packageDefinitionId,
+    );
+    assert.equal(provider.definition.path, initial[0]!.definition.path);
   }
-  const consumers = options.finalPlan.packageContributions.filter(
-    (item) => item.referenceBindings?.[sharedSource] !== undefined,
+  const consumers = options.result.generationRecord.packages.filter(
+    (item) => item.bindings[identity] !== undefined,
   );
   assert.equal(consumers.length, initial.length === 0 ? 1 : 2);
   for (const consumer of consumers) {
-    const consumerRecord = record.packages.find(
-      (item) => item.path === consumer.definition.path,
-    )!;
     assert.equal(
-      consumerRecord.dependencyBindings?.[sharedSource],
-      provider.packageDefinitionId,
+      consumer.bindings[identity],
+      provider.definition.packageDefinitionId,
     );
   }
   if (options.customization === undefined) return;
@@ -98,9 +125,14 @@ test("新旧应用复用已有共同组件并保留定制", async ({ page }) => 
   );
   assert.equal(observer.errors.length, 0);
   for (const consumer of consumers) {
+    const definition = options.result.blueprint.packages.find(
+      (item) =>
+        item.packageDefinitionId === consumer.definition.packageDefinitionId,
+    );
+    assert.ok(definition);
     const directory = path.join(
       options.projectDir,
-      consumer.definition.path,
+      definition.path,
       "test/e2e",
     );
     await mkdir(directory, { recursive: true });

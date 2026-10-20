@@ -134,7 +134,7 @@ void describe("deployment quality gate", () => {
         assert.deepStrictEqual(
           (await generatedScenariosFor("deployment")).map(({ id }) => id),
           (await generatedScenariosFor("init"))
-            .filter((scenario) => scenario.base.metadata.name === "vike-app")
+            .filter((scenario) => scenario.base.metadata.alias === "vike-app")
             .map(({ id }) => id),
         );
         await runGeneratedScenarioSet("deployment", {

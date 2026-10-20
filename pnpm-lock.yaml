@@ -537,12 +537,18 @@ importers:
 
   packages/checks:
     dependencies:
-      '@ykdz/template-builtin-presets':
+      '@ykdz/reference-ts-cli':
         specifier: workspace:*
-        version: link:../builtin-presets
+        version: link:../../references/ts-cli
+      '@ykdz/template-content':
+        specifier: workspace:*
+        version: link:../content
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../generator
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../workspace

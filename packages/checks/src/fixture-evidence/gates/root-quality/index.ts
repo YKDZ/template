@@ -1,7 +1,6 @@
 import { fileURLToPath } from "node:url";
 
-import type { GeneratedRepositoryPlan } from "@ykdz/template-builtin-presets";
-
+import type { SuccessfulScenarioResult } from "../../../generated-content.ts";
 import {
   deriveFixtureGateContractIdentity,
   normalizedFixtureDependencyInstallationPlan,
@@ -11,11 +10,11 @@ import {
 } from "../../kernel/index.ts";
 
 export function generatedRootQualityExecutionResources(
-  plan: GeneratedRepositoryPlan,
+  result: SuccessfulScenarioResult,
   options: { readonly rootGate?: "check" | "check:full" } = {},
 ): readonly FixtureEvidenceExecutionResource[] {
   if (options.rootGate === "check") return [];
-  return plan.environmentNeeds.some(
+  return result.projection.ownerFacts.environmentNeeds.check.some(
     (need) => need.kind === "playwright-browser-assets",
   )
     ? ["browser"]
@@ -23,7 +22,7 @@ export function generatedRootQualityExecutionResources(
 }
 
 export function normalizedGeneratedRootQualityPlan(
-  plan: GeneratedRepositoryPlan,
+  result: SuccessfulScenarioResult,
   options: {
     readonly rootGate?: "check" | "check:full";
     readonly includeFix?: boolean;
@@ -35,11 +34,11 @@ export function normalizedGeneratedRootQualityPlan(
     ...(options.deploymentContractIdentity === undefined
       ? {}
       : { deploymentContractIdentity: options.deploymentContractIdentity }),
-    executionResources: generatedRootQualityExecutionResources(plan, options),
+    executionResources: generatedRootQualityExecutionResources(result, options),
     dependencyInstallation: normalizedFixtureDependencyInstallationPlan(),
     developmentContainer: {
       lockfileWrites: false,
-      probes: plan.developmentContainer.probes.map((probe) => ({
+      probes: result.projection.ownerFacts.container.probes.map((probe) => ({
         identity: probe.identity,
         command: probe.command,
         args: [...(probe.args ?? [])],
@@ -69,7 +68,7 @@ export function normalizedGeneratedRootQualityPlan(
 }
 
 export async function deriveGeneratedRootQualityContractIdentity(
-  plan: GeneratedRepositoryPlan,
+  result: SuccessfulScenarioResult,
   options: {
     readonly rootGate?: "check" | "check:full";
     readonly includeFix?: boolean;
@@ -77,7 +76,7 @@ export async function deriveGeneratedRootQualityContractIdentity(
   } = {},
 ): Promise<string> {
   return await deriveFixtureGateContractIdentity({
-    normalizedPlan: normalizedGeneratedRootQualityPlan(plan, options),
+    normalizedPlan: normalizedGeneratedRootQualityPlan(result, options),
     sourceProjections: [
       {
         name: "generated-root-quality",
