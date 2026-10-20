@@ -61,6 +61,8 @@ import type {
   ResolvedPrimaryPackageIdentity,
 } from "@ykdz/template-workspace-authoring/preset-definition";
 import type { DependencyMaintenancePolicy } from "@ykdz/template-workspace-authoring/project-requirements";
+import { assertDatabasePreparationManifestTruth as assertSharedDatabasePreparationManifestTruth } from "@ykdz/template-workspace/application-requirements";
+import { projectDependencyMaintenancePolicy } from "@ykdz/template-workspace/application-requirements";
 import {
   assertDefaultProjectBlueprint,
   assertDefaultProjectBlueprintDraft,
@@ -86,6 +88,7 @@ import {
   canLinkNodePackageRoles,
   canProvideSourceConditionPackageNameImport,
   planExplicitProjectLinks,
+  promoteInjectedProviderRuntimeDependencies,
 } from "@ykdz/template-workspace/project-linking";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import {
@@ -1456,47 +1459,7 @@ function assertDatabasePreparationManifestTruth(options: {
     | ReadonlyMap<string, Readonly<Record<string, unknown>>>
     | undefined;
 }): void {
-  const { preparation, packageByName, manifestTruthByPackagePath } = options;
-  if (preparation === undefined || manifestTruthByPackagePath === undefined) {
-    return;
-  }
-  const expectedTasks = [
-    [preparation.databasePackageName, "build"],
-    [preparation.databasePackageName, "db:reset"],
-    [preparation.databasePackageName, "db:seed:example"],
-    [preparation.databasePackageName, "test"],
-    [preparation.migrationPackageName, "db:push"],
-    [preparation.migrationPackageName, "typecheck"],
-    [preparation.consumers["application-dev"], "dev"],
-    [preparation.consumers["application-dev"], "typecheck"],
-    [preparation.consumers["application-e2e"], "build"],
-    [preparation.consumers["application-e2e"], "test:e2e"],
-  ] as const;
-  for (const [packageName, taskName] of expectedTasks) {
-    const contribution = requireContributionByName(
-      packageByName,
-      packageName,
-      "Database Preparation",
-    );
-    const manifest = requireManifestTruth(
-      manifestTruthByPackagePath,
-      contribution,
-      "Database Preparation",
-    );
-    const actualScripts = manifest.scripts;
-    const expectedScripts = contribution.manifest.scripts;
-    const actual = isRecord(actualScripts)
-      ? actualScripts[taskName]
-      : undefined;
-    const expected = isRecord(expectedScripts)
-      ? expectedScripts[taskName]
-      : undefined;
-    if (actual !== expected) {
-      throw new Error(
-        `Database Preparation requires exact ${packageName} script ${taskName}`,
-      );
-    }
-  }
+  assertSharedDatabasePreparationManifestTruth(options);
 }
 
 type DeploymentCheck = NonNullable<
@@ -2772,56 +2735,6 @@ function normalizeRustToolchain(
   return declarations.at(0);
 }
 
-function composeDependencyMaintenancePolicy(
-  contributions: readonly PackageContribution[],
-  deploymentCheck: DeploymentCheck | undefined,
-): DependencyMaintenancePolicy {
-  const ecosystems = [
-    ...new Set([
-      "devcontainers" as const,
-      ...contributions.flatMap(
-        (contribution) =>
-          contribution.foundation.dependencyMaintenance.ecosystems,
-      ),
-      ...(deploymentCheck === undefined ? [] : (["docker"] as const)),
-    ]),
-  ];
-  const directories: NonNullable<DependencyMaintenancePolicy["directories"]> =
-    {};
-  const extraDirectories: NonNullable<
-    DependencyMaintenancePolicy["extraDirectories"]
-  > = {};
-
-  for (const ecosystem of ecosystems) {
-    const candidates = [
-      ...new Set([
-        ...(ecosystem === "docker" ? (["/.devcontainer"] as const) : []),
-        ...contributions.flatMap((contribution) => {
-          const policy = contribution.foundation.dependencyMaintenance;
-          const primary = policy.directories?.[ecosystem];
-          return [
-            ...(primary === undefined ? [] : [primary]),
-            ...(policy.extraDirectories?.[ecosystem] ?? []),
-          ];
-        }),
-        ...(ecosystem === "docker" && deploymentCheck !== undefined
-          ? (["/"] as const)
-          : []),
-      ]),
-    ];
-    const [primary, ...extra] = candidates;
-    if (primary !== undefined) directories[ecosystem] = primary;
-    if (extra.length > 0) extraDirectories[ecosystem] = extra;
-  }
-
-  return {
-    ecosystems,
-    ...(Object.keys(directories).length === 0 ? {} : { directories }),
-    ...(Object.keys(extraDirectories).length === 0 ? {} : { extraDirectories }),
-    interval: "weekly",
-  };
-}
-
 function publicCliCandidate(
   contributions: readonly PackageContribution[],
 ): PackageContribution | undefined {
@@ -2896,14 +2809,6 @@ function foundationPlan(options: {
           manifestTruthByPackagePath: options.manifestTruthByPackagePath,
         }),
   });
-  const injectedProviderNames = new Set(
-    [...initialProjectLinkPlan.manifestPatchesByPackagePath.values()].flatMap(
-      (patch) =>
-        Object.entries(patch.dependenciesMeta ?? {})
-          .filter(([, metadata]) => metadata.injected)
-          .map(([name]) => name),
-    ),
-  );
   const configPackageName =
     options.context.foundationPackages.typescriptConfiguration.name;
   if (configDefinition.name !== configPackageName) {
@@ -2912,33 +2817,9 @@ function foundationPlan(options: {
     );
   }
   const publicationCandidate = publicCliCandidate(options.contributions);
-  const packageContributions = options.contributions.map((contribution) => {
-    if (contribution.referenceSource !== undefined) {
-      if (!injectedProviderNames.has(contribution.definition.name))
-        return contribution;
-      const devDependencies = {
-        ...(isRecord(contribution.manifest.devDependencies)
-          ? contribution.manifest.devDependencies
-          : {}),
-      };
-      const dependencies = {
-        ...(isRecord(contribution.manifest.dependencies)
-          ? contribution.manifest.dependencies
-          : {}),
-      };
-      for (const definition of Object.values(
-        contribution.referenceBindings ?? {},
-      )) {
-        if (devDependencies[definition.name] === undefined) continue;
-        dependencies[definition.name] = "workspace:*";
-        delete devDependencies[definition.name];
-      }
-      return {
-        ...contribution,
-        manifest: { ...contribution.manifest, dependencies, devDependencies },
-      };
-    }
-    return contribution;
+  const packageContributions = promoteInjectedProviderRuntimeDependencies({
+    contributions: options.contributions,
+    linkPlan: initialProjectLinkPlan,
   });
   const requiresPackingHook = packageContributions.some((contribution) => {
     const developmentDependencies = contribution.manifest.devDependencies;
@@ -3166,10 +3047,10 @@ function foundationPlan(options: {
       (contribution) => contribution.foundation.editorCapabilities,
     ),
   );
-  const dependencyMaintenancePolicy = composeDependencyMaintenancePolicy(
+  const dependencyMaintenancePolicy = projectDependencyMaintenancePolicy({
     contributions,
-    deploymentCheck,
-  );
+    hasDeployment: deploymentCheck !== undefined,
+  });
   const rootOwnedE2e = vueHonoJointE2e !== undefined;
   const rootAutomationPaths = rootOwnedE2e ? "scripts test" : "scripts";
   const scriptInsertions: WorkspaceRootInsertion[] = [

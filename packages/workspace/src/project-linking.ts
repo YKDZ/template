@@ -24,6 +24,10 @@ export type ExplicitProjectLinkPlan = {
   readonly hasBuildOrdering: boolean;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export function canConsumeNodePackageNameImport(
   contribution: PackageContribution,
   manifest: PackageManifest = contribution.manifest,
@@ -260,4 +264,55 @@ export function planExplicitProjectLinks(options: {
     manifestPatchesByPackagePath: manifestPatches,
     hasBuildOrdering: manifestPatches.size > 0,
   };
+}
+
+type RuntimePromotedContribution<Contribution extends PackageContribution> =
+  Omit<Contribution, "manifest"> & {
+    readonly manifest: PackageContribution["manifest"];
+  };
+
+/** 被注入的参考包将其绑定的 TypeScript 配置作为运行时依赖携带。 */
+export function promoteInjectedProviderRuntimeDependencies<
+  Contribution extends PackageContribution,
+>(options: {
+  readonly contributions: readonly Contribution[];
+  readonly linkPlan: ExplicitProjectLinkPlan;
+}): readonly RuntimePromotedContribution<Contribution>[] {
+  const injectedProviderNames = new Set(
+    [...options.linkPlan.manifestPatchesByPackagePath.values()].flatMap(
+      (patch) =>
+        Object.entries(patch.dependenciesMeta ?? {})
+          .filter(([, metadata]) => metadata.injected)
+          .map(([name]) => name),
+    ),
+  );
+  return options.contributions.map((contribution) => {
+    if (
+      contribution.referenceSource === undefined ||
+      !injectedProviderNames.has(contribution.definition.name)
+    ) {
+      return contribution;
+    }
+    const devDependencies = {
+      ...(isRecord(contribution.manifest.devDependencies)
+        ? contribution.manifest.devDependencies
+        : {}),
+    };
+    const dependencies = {
+      ...(isRecord(contribution.manifest.dependencies)
+        ? contribution.manifest.dependencies
+        : {}),
+    };
+    for (const definition of Object.values(
+      contribution.referenceBindings ?? {},
+    )) {
+      if (devDependencies[definition.name] === undefined) continue;
+      dependencies[definition.name] = "workspace:*";
+      delete devDependencies[definition.name];
+    }
+    return {
+      ...contribution,
+      manifest: { ...contribution.manifest, dependencies, devDependencies },
+    };
+  });
 }
