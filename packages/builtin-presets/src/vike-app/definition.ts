@@ -2,15 +2,15 @@ import { fileURLToPath } from "node:url";
 
 import { databasePreparation } from "@ykdz/reference-vike-db/template";
 import { deploymentCheck } from "@ykdz/reference-vike-web/template";
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
+import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 import {
   definePackageContributionReplayAdapter,
   type BuiltInPresetDefinition,
   type GenerationContext,
   type InitialPackageDefinitionLookup,
-} from "@ykdz/template-core/preset-definition";
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
-import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
+} from "@ykdz/template-workspace-authoring/preset-definition";
 
 import { requireReferencePackage } from "../reference-composition.ts";
 const web = requireReferencePackage("@ykdz/reference-vike-web");

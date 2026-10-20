@@ -5,7 +5,7 @@ import {
   assertPackageContributionCommandNames,
   validateCliCommandName,
   type PackageContribution,
-} from "@ykdz/template-core/package-contribution";
+} from "@ykdz/template-workspace-authoring/package-contribution";
 
 function contribution(options: {
   readonly name: string;

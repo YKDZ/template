@@ -26,7 +26,8 @@
     "node_modules/@ykdz/template-builtin-presets",
     "!**/node_modules/**/node_modules",
     "node_modules/@ykdz/template-environment",
-    "node_modules/@ykdz/template-workspace"
+    "node_modules/@ykdz/template-workspace",
+    "node_modules/@ykdz/template-workspace-authoring"
   ],
   "type": "module",
   "imports": {
@@ -69,6 +70,7 @@
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
+    "@ykdz/template-workspace-authoring": "workspace:*",
     "hosted-git-info": "catalog:",
     "ignore": "catalog:",
     "lru-cache": "catalog:",
@@ -99,6 +101,7 @@
     "@ykdz/template-core",
     "@ykdz/template-environment",
     "@ykdz/template-workspace",
+    "@ykdz/template-workspace-authoring",
     "hosted-git-info",
     "ignore",
     "lru-cache",

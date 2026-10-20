@@ -12,8 +12,8 @@ import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { defineReferencePackage } from "../src/reference-package.ts";
-import { renderProject } from "../src/renderer.ts";
+import { renderProject } from "@ykdz/template-core/renderer";
+import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
 async function fixture(
   context: TestContext,

@@ -3,20 +3,23 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
-import ignore, { type Ignore } from "ignore";
-import { parse, type ParseError } from "jsonc-parser";
-
-import type { PackageContribution } from "./package-contribution.ts";
-import { mapPackageNamesInJson } from "./package-name-projection.ts";
-import type { GenerationContext } from "./preset-definition.ts";
-import type { PackageDefinition, PackageRole } from "./project-blueprint.ts";
+import { mapPackageNamesInJson } from "@ykdz/template-core/package-name-projection";
+import type {
+  PackageDefinition,
+  PackageRole,
+} from "@ykdz/template-core/project-blueprint";
 import {
   createTemplateSourceHandle,
   type CopyFileOperation,
   type RenderOperation,
   type TemplateSourceHandle,
-} from "./renderer.ts";
-import { resourceIgnoreSnapshot } from "./workspace-policy-snapshot.ts";
+} from "@ykdz/template-core/renderer";
+import { resourceIgnoreSnapshot } from "@ykdz/template-core/workspace-policy-snapshot";
+import ignore, { type Ignore } from "ignore";
+import { parse, type ParseError } from "jsonc-parser";
+
+import type { PackageContribution } from "./package-contribution.ts";
+import type { GenerationContext } from "./preset-definition.ts";
 
 export type ReferencePackageManifest = Readonly<Record<string, unknown>> & {
   readonly name: string;
@@ -47,6 +50,7 @@ export type ReferencePackage = {
   readonly role: PackageRole;
   readonly manifest: ReferencePackageManifest;
   readonly authoringDependencies: readonly string[];
+  readonly publicationIdentitySource?: TemplateSourceHandle;
   source(file: string): TemplateSourceHandle;
   operations(targetPath: string): CopyFileOperation[];
   payloadOperations(targetPath: string): CopyFileOperation[];
@@ -75,9 +79,11 @@ export function defineReferencePackage(options: {
   readonly resourceIgnore?: string;
   readonly authoring: {
     readonly dependencies: readonly string[];
+    readonly exports?: readonly string[];
     readonly scripts: readonly string[];
     readonly resources?: readonly string[];
   };
+  readonly publicationIdentitySource?: string;
   readonly foundation: Contextual<PackageContribution["foundation"]>;
   readonly environmentNeeds: Contextual<
     PackageContribution["environmentNeeds"]
@@ -200,6 +206,11 @@ export function defineReferencePackage(options: {
     role: options.role,
     manifest,
     authoringDependencies: options.authoring.dependencies,
+    ...(options.publicationIdentitySource === undefined
+      ? {}
+      : {
+          publicationIdentitySource: source(options.publicationIdentitySource),
+        }),
     source,
     operations,
     payloadOperations: (targetPath) => collectOperations(targetPath, true),
@@ -216,7 +227,13 @@ export function defineReferencePackage(options: {
       const exports = {
         ...(projected.exports as Record<string, unknown> | undefined),
       };
-      for (const key of ["./reference", "./assets", "./assets/*", "./template"])
+      for (const key of [
+        "./reference",
+        "./assets",
+        "./assets/*",
+        "./template",
+        ...(options.authoring.exports ?? []),
+      ])
         delete exports[key];
       const scripts = { ...manifest.scripts };
       for (const script of options.authoring.scripts) delete scripts[script];

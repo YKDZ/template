@@ -1,6 +1,6 @@
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
-import { defineReferencePackage } from "@ykdz/template-core/reference-package";
+import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
+import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vike-db",
@@ -13,7 +13,7 @@ export const referencePackage = defineReferencePackage({
   resources: ["."],
   authoring: {
     resources: ["template", "template-dist", "tsconfig.template.json"],
-    dependencies: ["@ykdz/template-core"],
+    dependencies: ["@ykdz/template-core", "@ykdz/template-workspace-authoring"],
     scripts: ["build:template", "typecheck:template"],
   },
   foundation: ({ definition }) => ({

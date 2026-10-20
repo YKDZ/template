@@ -1,5 +1,5 @@
 import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-core/module-graph";
-import { defineReferencePackage } from "@ykdz/template-core/reference-package";
+import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vue-app",
@@ -11,7 +11,11 @@ export const referencePackage = defineReferencePackage({
   role: "runtime-service",
   resources: ["."],
   authoring: {
-    dependencies: ["@ykdz/template-core", "typescript-7"],
+    dependencies: [
+      "@ykdz/template-core",
+      "@ykdz/template-workspace-authoring",
+      "typescript-7",
+    ],
     scripts: ["build:template"],
     resources: ["template", "template-dist", "tsconfig.template.json"],
   },

@@ -6,14 +6,11 @@ import {
   collectGeneratedManifestCatalogReferences,
   selectTemplateDependencyCatalogEntries,
 } from "@ykdz/template-core/dependency-catalog";
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
-import type { GenerationContext } from "@ykdz/template-core/preset-definition";
 import type {
   PackageDefinition,
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
 import type { ProjectProjectionReconciliation } from "@ykdz/template-core/project-projection";
-import type { ReferencePackage } from "@ykdz/template-core/reference-package";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
   createTemplateSourceHandle,
@@ -36,6 +33,9 @@ import {
   playwrightBrowserAssetsEnvironmentNeed,
   shellCheckEnvironmentNeed,
 } from "@ykdz/template-environment/module-graph";
+import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
+import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
+import type { ReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
 import { browserTestDevelopmentContainerToolLayer } from "./development-container.ts";
 import {

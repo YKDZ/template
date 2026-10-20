@@ -17,8 +17,8 @@ import {
   planGeneratedRepositoryInitialization,
 } from "@ykdz/template-builtin-presets";
 import { renderGeneratedPnpmWorkspaceYaml } from "@ykdz/template-core/dependency-catalog";
-import type { GenerationContext } from "@ykdz/template-core/preset-definition";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
 import { execa } from "execa";
 
 const packageManagerPin = "pnpm@11.11.0";

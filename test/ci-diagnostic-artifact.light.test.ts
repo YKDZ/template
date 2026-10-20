@@ -6,13 +6,13 @@ import {
   type CiDiagnosticArtifactDeclaration,
 } from "@ykdz/template-core/ci-diagnostic-artifact";
 import {
-  assertPackageContribution,
-  type PackageContribution,
-} from "@ykdz/template-core/package-contribution";
-import {
   projectCheckWorkflowTemplateSource,
   projectCheckWorkflowTemplateReplacements,
 } from "@ykdz/template-core/project-github";
+import {
+  assertPackageContribution,
+  type PackageContribution,
+} from "@ykdz/template-workspace-authoring/package-contribution";
 
 const playwright = (path: string): CiDiagnosticArtifactDeclaration => ({
   kind: "playwright",

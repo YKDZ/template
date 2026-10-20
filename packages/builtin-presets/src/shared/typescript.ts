@@ -1,9 +1,9 @@
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 import {
   definePackageContributionReplayAdapter,
   type GenerationContext,
-} from "@ykdz/template-core/preset-definition";
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+} from "@ykdz/template-workspace-authoring/preset-definition";
 
 import { typescriptReferencePackage } from "../reference-composition.ts";
 

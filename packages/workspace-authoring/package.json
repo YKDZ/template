@@ -1,0 +1,47 @@
+{
+  "name": "@ykdz/template-workspace-authoring",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    "./package-contribution": {
+      "source": "./src/package-contribution.ts",
+      "types": "./dist/package-contribution.d.ts",
+      "default": "./dist/package-contribution.js"
+    },
+    "./preset-definition": {
+      "source": "./src/preset-definition.ts",
+      "types": "./dist/preset-definition.d.ts",
+      "default": "./dist/preset-definition.js"
+    },
+    "./reference-package": {
+      "source": "./src/reference-package.ts",
+      "types": "./dist/reference-package.d.ts",
+      "default": "./dist/reference-package.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@ykdz/template-core": "workspace:*",
+    "ignore": "catalog:",
+    "jsonc-parser": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@ykdz/reference-typescript-config": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  }
+}
