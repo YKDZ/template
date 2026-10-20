@@ -359,6 +359,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/reference-ts-cli':
+        specifier: workspace:*
+        version: link:references/ts-cli
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:references/typescript-config
@@ -368,12 +371,18 @@ importers:
       '@ykdz/template-checks':
         specifier: workspace:*
         version: link:packages/checks
+      '@ykdz/template-content':
+        specifier: workspace:*
+        version: link:packages/content
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:packages/core
       '@ykdz/template-environment':
         specifier: workspace:*
         version: link:packages/environment
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:packages/generator
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:packages/workspace
