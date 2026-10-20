@@ -66,6 +66,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/template-core": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
