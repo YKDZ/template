@@ -13,7 +13,7 @@ export const tsCliPublicCandidateCreationInput = {
   variant: "public-candidate",
 } as const satisfies TsCliPublicCandidateCreationInput;
 
-/** The CLI reference owns the persisted input that marks an init candidate. */
+/** CLI 参考包负责声明用于标记初始化发布候选的持久化输入。 */
 export function isTsCliPublicCandidateCreationInput(
   value: unknown,
 ): value is TsCliPublicCandidateCreationInput {

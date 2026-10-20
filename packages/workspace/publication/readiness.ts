@@ -217,10 +217,8 @@ async function readCandidateSelection(options: {
           : fact.kind === "unreadable"
             ? fact.reason
             : display(config),
-      expected:
-        "Generated publication configuration selecting one public CLI init record",
-      nextAction:
-        "Restore the publication configuration projected from the public CLI candidate.",
+      expected: "由生成的发布配置选出的公开 CLI 初始化记录。",
+      nextAction: "恢复从公开 CLI 候选投影得到的发布配置。",
     }),
   };
 }
@@ -967,8 +965,7 @@ async function addMetadataBlockers(options: {
         code: "local-template-metadata-invalid",
         path: generationPath,
         observed: "Unreadable Generation Record publication facts",
-        expected:
-          "Generation Record schema version 1 with default workspace facts and package records",
+        expected: "Generation Record schema 1，包含默认工作区事实和包记录。",
         nextAction: "Restore the canonical Generation Record.",
       }),
     );
@@ -1075,9 +1072,9 @@ async function addMetadataBlockers(options: {
           strategyState: generation.strategyState,
         }),
         expected:
-          "One init public CLI candidate selected by the generated package ID and matching the Blueprint and workspace facts",
+          "唯一的初始化公开 CLI 候选，其包定义 ID 与 Blueprint 及工作区事实一致。",
         nextAction:
-          "Restore the matching Blueprint, Generation Record, and public CLI selection facts.",
+          "恢复匹配的 Blueprint、Generation Record 与公开 CLI 选择事实。",
       }),
     );
   }
