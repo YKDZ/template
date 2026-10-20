@@ -34,7 +34,6 @@ import {
   type FoundationContribution,
   type PackageContribution,
 } from "@ykdz/template-core/package-contribution";
-import { mapPackageNamesInJson } from "@ykdz/template-core/package-name-projection";
 import type {
   BuiltInPresetDefinition,
   GenerationContext,
@@ -70,7 +69,11 @@ import {
   type TemplateSourceHandle,
 } from "@ykdz/template-core/renderer";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
-import { workspaceInstallPolicySnapshot } from "@ykdz/template-core/workspace-policy-snapshot";
+import {
+  assertReusablePackageExposure,
+  readPackageAdditionVersionFacts,
+  WorkspacePackageAdditionFailure,
+} from "@ykdz/template-workspace/package-addition-facts";
 import {
   projectCheckWorkflow,
   projectDependabotConfig,
@@ -81,9 +84,16 @@ import {
   canProvideSourceConditionPackageNameImport,
   planExplicitProjectLinks,
 } from "@ykdz/template-workspace/project-linking";
+import {
+  createWorkspaceRootManifest,
+  packageConditionKeyOrder,
+  packageManifestKeyOrder,
+  projectPreparedWorkspaceRoot,
+  projectToolchainMirrorManifest,
+  type WorkspaceRootInsertion,
+} from "@ykdz/template-workspace/root-projection";
 import { parse as parseToml } from "smol-toml";
 import ts from "typescript";
-import { stringify as stringifyYaml } from "yaml";
 
 import {
   isValidDefaultPackageScope,
@@ -275,28 +285,6 @@ export type PublicationSetupHandoff = null | {
 
 const environmentNeedsPath = ".template/environment-needs.json";
 
-const packageManifestKeyOrder = [
-  "name",
-  "version",
-  "private",
-  "bin",
-  "files",
-  "type",
-  "types",
-  "imports",
-  "exports",
-  "publishConfig",
-  "scripts",
-  "dependencies",
-  "devDependencies",
-  "dependenciesMeta",
-  "peerDependencies",
-  "optionalDependencies",
-  "engines",
-  "packageManager",
-] as const;
-const packageConditionKeyOrder = ["source", "types", "default"] as const;
-
 /**
  * The Foundation persists the non-rendering half of every Package
  * Contribution with the Generated Repository.  Package Addition cannot infer
@@ -461,15 +449,6 @@ function readGenerationRecord(options: {
 }
 
 /**
- * Package Addition 的目标根 package.json 允许两种 Node 声明：旧仓库的纯大版本
- * （"24"）与精确版本（"24.16.0"），两者都能派生大版本；范围表达式与两段版本拒绝。
- */
-const nodeMajorOrExactVersionPattern = /^(\d+)(?:\.(\d+)\.(\d+))?$/u;
-
-/** 与 npm packageManager 字段一致的精确 pnpm pin（可带预发布或构建元数据）。 */
-const exactPnpmPinPattern = /^pnpm@\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u;
-
-/**
  * 目标根现行版本声明缺失或形状错误时的显式带形状内部失败：点名文件与字段、实际值与修正动作，
  * 由 Package Addition 准备边界传递给命令层；其他 metadata 错误保持通用。
  */
@@ -490,63 +469,6 @@ class PackageAdditionTargetDeclarationFailure extends Error {
     this.field = field;
     this.suggestion = suggestion;
   }
-}
-
-/**
- * Package Addition 的版本上下文来自目标仓库根 package.json 的当前声明，因此升级过
- * Node 或 pnpm 的仓库会继续按自身版本加包；Generation Record 的 toolchain 只保留为
- * 初始化历史。
- */
-function readPackageAdditionVersionFacts(repositoryRoot: string): {
-  readonly toolchain: BuiltInGenerationContext["toolchain"];
-  readonly rootNodeDeclaration: string;
-} {
-  const manifest = readRepositoryJsonRecord({
-    repositoryRoot,
-    relativePath: "package.json",
-    label: "root Manifest",
-  });
-  const nodeDeclaration = isRecord(manifest.engines)
-    ? manifest.engines.node
-    : undefined;
-  const nodeDeclarationMatch =
-    typeof nodeDeclaration === "string"
-      ? nodeMajorOrExactVersionPattern.exec(nodeDeclaration)
-      : undefined;
-  const nodeLtsMajor = nodeDeclarationMatch?.[1];
-  if (nodeLtsMajor === undefined || typeof nodeDeclaration !== "string") {
-    throw new PackageAdditionTargetDeclarationFailure(
-      "package.json",
-      "engines.node",
-      '声明单个 Node 大版本（"24"）或精确 Node 版本（"24.16.0"）',
-      JSON.stringify(nodeDeclaration ?? null),
-      "请先修改根 package.json 的 engines.node 声明再加包。",
-    );
-  }
-  const packageManagerDeclaration = manifest.packageManager;
-  if (
-    typeof packageManagerDeclaration !== "string" ||
-    !exactPnpmPinPattern.test(packageManagerDeclaration)
-  ) {
-    throw new PackageAdditionTargetDeclarationFailure(
-      "package.json",
-      "packageManager",
-      '声明精确 pnpm 版本（"pnpm@11.21.0"）',
-      JSON.stringify(packageManagerDeclaration ?? null),
-      "请先修改根 package.json 的 packageManager 声明再加包。",
-    );
-  }
-  // 根只声明大版本时没有诚实的精确 patch 可传，保持缺省而不伪造。
-  return {
-    toolchain: {
-      nodeLtsMajor,
-      packageManagerPin: packageManagerDeclaration,
-      ...(nodeDeclarationMatch?.[2] === undefined
-        ? {}
-        : { nodeVersion: nodeDeclaration }),
-    },
-    rootNodeDeclaration: nodeDeclaration,
-  };
 }
 
 /** 生成仓库根 Rust 声明的唯一文件名；所有权判定与投影保留都只经这个接缝引用它。 */
@@ -3015,20 +2937,6 @@ function publicCliCandidate(
   return candidate;
 }
 
-function toolchainMirrorSlots(
-  reconciliation: readonly ProjectProjectionReconciliation[],
-) {
-  return reconciliation.flatMap((policy) =>
-    policy.driver === "canonical"
-      ? []
-      : (policy.mirrorSlots ?? []).map((slot) => ({
-          id: slot.id,
-          path: policy.path,
-          location: slot.location,
-        })),
-  );
-}
-
 function foundationPlan(options: {
   readonly definition: BuiltInPresetDefinition;
   readonly context: BuiltInGenerationContext;
@@ -3348,10 +3256,87 @@ function foundationPlan(options: {
   );
   const rootOwnedE2e = vueHonoJointE2e !== undefined;
   const rootAutomationPaths = rootOwnedE2e ? "scripts test" : "scripts";
-  const rootManifest = {
+  const scriptInsertions: WorkspaceRootInsertion[] = [
+    ...(rustToolchain === undefined
+      ? []
+      : [
+          {
+            before: "boundaries",
+            values: { "toolchain:prepare": "cargo --version" },
+          },
+        ]),
+    ...(databasePreparation === undefined
+      ? []
+      : [
+          {
+            before: "fix",
+            values: databasePreparationCommands(databasePreparation),
+          },
+        ]),
+    ...(publicationCandidate === undefined
+      ? []
+      : [
+          {
+            before: "fix",
+            values: {
+              "publication:readiness":
+                "node --conditions=source scripts/npm-publication/check-readiness.ts",
+              "publication:artifact":
+                "node --conditions=source scripts/npm-publication/check-artifact.ts",
+            },
+          },
+        ]),
+    ...(deploymentCheck === undefined
+      ? []
+      : [
+          {
+            before: "fix",
+            values: {
+              deployment:
+                "node --conditions=source scripts/check-standalone-deployment.ts",
+            },
+          },
+        ]),
+    ...(rootOwnedE2e
+      ? [{ before: "fix", values: { "test:e2e": "playwright test" } }]
+      : []),
+  ];
+  const dependencyInsertions: WorkspaceRootInsertion[] = [
+    ...(rootOwnedE2e
+      ? [
+          {
+            before:
+              publicationCandidate === undefined ? "oxfmt" : "@types/semver",
+            values: { "@playwright/test": "catalog:" },
+          },
+        ]
+      : []),
+    ...(publicationCandidate === undefined
+      ? []
+      : [
+          {
+            before: "oxfmt",
+            values: {
+              "@types/semver": "catalog:",
+              "@types/spdx-expression-parse": "catalog:",
+            },
+          },
+          {
+            before: "turbo",
+            values: {
+              semver: "catalog:",
+              "spdx-expression-parse": "catalog:",
+              npm: "catalog:",
+              tar: "catalog:",
+            },
+          },
+        ]),
+  ];
+  const rootManifest = createWorkspaceRootManifest({
     name: options.context.repositoryName,
-    private: true,
-    type: "module",
+    typescriptConfigurationPackageName: configDefinition.name,
+    nodeDeclaration: options.rootNodeDeclaration,
+    packageManagerPin: options.context.toolchain.packageManagerPin,
     ...(publicationCandidate === undefined
       ? {}
       : {
@@ -3359,36 +3344,7 @@ function foundationPlan(options: {
             "#npm-publication/*": "./scripts/npm-publication/*.ts",
           },
         }),
-    scripts: {
-      check: "node --conditions=source scripts/task-gates.ts check",
-      "check:heavy":
-        "node --conditions=source scripts/task-gates.ts check:heavy",
-      "check:full": "node --conditions=source scripts/task-gates.ts check:full",
-      // Cargo 会在首次代理调用时按根 rust-toolchain.toml 安装版本与组件；先经唯一根任务完成解析，再并行运行各 Rust 包的 Cargo 检查。
-      ...(rustToolchain === undefined
-        ? {}
-        : { "toolchain:prepare": "cargo --version" }),
-      boundaries:
-        "node --conditions=source scripts/run-turbo-boundaries.ts && node --conditions=source scripts/check-toolchain-versions.ts",
-      ...(databasePreparation === undefined
-        ? {}
-        : databasePreparationCommands(databasePreparation)),
-      ...(publicationCandidate === undefined
-        ? {}
-        : {
-            "publication:readiness":
-              "node --conditions=source scripts/npm-publication/check-readiness.ts",
-            "publication:artifact":
-              "node --conditions=source scripts/npm-publication/check-artifact.ts",
-          }),
-      ...(deploymentCheck === undefined
-        ? {}
-        : {
-            deployment:
-              "node --conditions=source scripts/check-standalone-deployment.ts",
-          }),
-      ...(rootOwnedE2e ? { "test:e2e": "playwright test" } : {}),
-      fix: "node --conditions=source scripts/task-gates.ts fix",
+    scriptOverrides: {
       "format:check": `oxfmt --list-different --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer ${rootAutomationPaths}`,
       "format:write": `oxfmt --write --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer ${rootAutomationPaths}`,
       lint:
@@ -3396,36 +3352,10 @@ function foundationPlan(options: {
           ? `oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs ${rootAutomationPaths}`
           : `shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs ${rootAutomationPaths}`,
       "lint:fix": `oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs ${rootAutomationPaths} --fix`,
-      typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
     },
-    devDependencies: {
-      [configDefinition.name]: "workspace:*",
-      "@types/node": "catalog:",
-      ...(rootOwnedE2e ? { "@playwright/test": "catalog:" } : {}),
-      ...(publicationCandidate === undefined
-        ? {}
-        : {
-            "@types/semver": "catalog:",
-            "@types/spdx-expression-parse": "catalog:",
-          }),
-      oxfmt: "catalog:",
-      oxlint: "catalog:",
-      "oxlint-tsgolint": "catalog:",
-      "smol-toml": "catalog:",
-      ...(publicationCandidate === undefined
-        ? {}
-        : {
-            semver: "catalog:",
-            "spdx-expression-parse": "catalog:",
-            npm: "catalog:",
-            tar: "catalog:",
-          }),
-      turbo: "catalog:",
-      "typescript-7": "catalog:",
-    },
-    engines: { node: options.rootNodeDeclaration },
-    packageManager: options.context.toolchain.packageManagerPin,
-  };
+    scriptInsertions,
+    dependencyInsertions,
+  });
   const dependencyCatalog = selectTemplateDependencyCatalogEntries(
     collectGeneratedManifestCatalogReferences([
       ...contributions.map((contribution) => contribution.manifest),
@@ -3437,16 +3367,6 @@ function foundationPlan(options: {
     Object.hasOwn(dependencyCatalog, "pinia")
       ? vuePnpmDependencyOverrides
       : {}),
-  };
-  const workspaceOperation: RenderOperation = {
-    kind: "writeText",
-    to: "pnpm-workspace.yaml",
-    text: stringifyYaml({
-      ...workspaceInstallPolicySnapshot,
-      packages: workspacePackageGlobs,
-      overrides: dependencyOverrides,
-      catalog: dependencyCatalog,
-    }),
   };
   const workflowOperations: RenderOperation[] = [
     {
@@ -3522,7 +3442,8 @@ function foundationPlan(options: {
     { path: ".template/generation.json", driver: "canonical" },
   ];
   // 票 26 清单单源：生成检查器携带的槽位清单是上面声明的投影，不是第二份真源。
-  const toolchainMirrorSlotManifest = toolchainMirrorSlots(reconciliation);
+  const toolchainMirrorOperation =
+    projectToolchainMirrorManifest(reconciliation);
   const referenceNames = new Map(
     contributions.flatMap((contribution) =>
       contribution.referenceSource === undefined
@@ -3535,77 +3456,49 @@ function foundationPlan(options: {
           ],
     ),
   );
-  const rootTurbo = mapPackageNamesInJson(
-    readWorkspaceJson("assets/turbo.json"),
+  const rootProjection = projectPreparedWorkspaceRoot({
+    rootManifest,
+    packageGlobs: workspacePackageGlobs,
+    dependencyCatalog,
+    dependencyOverrides,
+    turboTemplate: readWorkspaceJson("assets/turbo.json"),
     referenceNames,
-  ) as {
-    tasks: Record<string, unknown>;
-    boundaries?: { tags: Record<string, unknown> };
-  };
-  rootTurbo.tasks = Object.fromEntries(
-    Object.entries(rootTurbo.tasks).filter(
-      ([task]) =>
-        task.startsWith("//#") &&
-        Object.hasOwn(rootManifest.scripts, task.slice(3)),
-    ),
-  );
-  if (rootTurbo.boundaries !== undefined)
-    rootTurbo.boundaries.tags = Object.fromEntries(
-      Object.entries(rootTurbo.boundaries.tags).filter(([tag]) =>
-        turboBoundaryTags.includes(tag as "app" | "library"),
-      ),
-    );
-  const rootTsconfig = readWorkspaceJson("assets/tsconfig.json");
-  rootTsconfig.compilerOptions = {
-    ...(rootTsconfig.compilerOptions as Record<string, unknown>),
-    ...(requiresPackingHook ? { allowJs: true, checkJs: true } : {}),
-    rewriteRelativeImportExtensions: false,
-    allowImportingTsExtensions: true,
-  };
-  rootTsconfig.include = [
-    "*.config.ts",
-    "scripts/**/*.ts",
-    ...(vueHonoJointE2e === undefined ? [] : ["test/**/*.ts"]),
-    ...(requiresPackingHook ? [".pnpmfile.mjs"] : []),
-  ];
-  const initializationFoundationOperations: RenderOperation[] = [
-    {
-      kind: "writeJson",
-      to: "package.json",
-      value: rootManifest,
-      keyOrder: packageManifestKeyOrder,
-      nestedKeyOrder: packageConditionKeyOrder,
+    turboBoundaryTags,
+    rootTsconfigTemplate: readWorkspaceJson("assets/tsconfig.json"),
+    rootTsconfigCompilerOptions: {
+      ...(requiresPackingHook ? { allowJs: true, checkJs: true } : {}),
+      rewriteRelativeImportExtensions: false,
+      allowImportingTsExtensions: true,
     },
-    workspaceOperation,
+    rootTsconfigInclude: [
+      "*.config.ts",
+      "scripts/**/*.ts",
+      ...(vueHonoJointE2e === undefined ? [] : ["test/**/*.ts"]),
+      ...(requiresPackingHook ? [".pnpmfile.mjs"] : []),
+    ],
+    tsconfigConfigTemplate: readWorkspaceJson("assets/tsconfig.config.json"),
+  });
+  const initializationFoundationOperations: RenderOperation[] = [
+    rootProjection.manifest,
+    rootProjection.workspace,
     ...(requiresPackingHook
       ? [copyWorkspaceResource("assets/.pnpmfile.mjs", ".pnpmfile.mjs")]
       : []),
     copyWorkspaceResource("assets/gitignore", ".gitignore"),
     copyWorkspaceResource("assets/agent-instructions.md", "AGENTS.md"),
-    { kind: "writeJson", to: "turbo.json", value: rootTurbo },
+    rootProjection.turbo,
     copyWorkspaceResource(
       "scripts/check-toolchain-versions.ts",
       "scripts/check-toolchain-versions.ts",
     ),
-    {
-      kind: "writeJson",
-      to: "scripts/toolchain-mirrors.json",
-      value: toolchainMirrorSlotManifest,
-    },
+    toolchainMirrorOperation,
     copyWorkspaceResource("scripts/task-gates.ts", "scripts/task-gates.ts"),
     copyWorkspaceResource(
       "scripts/run-turbo-boundaries.ts",
       "scripts/run-turbo-boundaries.ts",
     ),
-    { kind: "writeJson", to: "tsconfig.json", value: rootTsconfig },
-    {
-      kind: "writeJson",
-      to: "tsconfig.config.json",
-      value: mapPackageNamesInJson(
-        readWorkspaceJson("assets/tsconfig.config.json"),
-        referenceNames,
-      ) as Record<string, unknown>,
-    },
+    rootProjection.tsconfig,
+    rootProjection.tsconfigConfig,
     {
       kind: "writeText",
       to: "oxlint.config.ts",
@@ -4698,31 +4591,12 @@ function planGeneratedRepositoryPackageAdditionFromPreparedContribution(options:
         throw new ReferenceCompositionFailure(
           `共同包 ${provider.path} 缺少有效 manifest，不能复用。`,
         );
-      for (const exportName of Object.keys(baseline.exposure.exports)) {
-        const target = isRecord(actual.exports)
-          ? actual.exports[exportName]
-          : undefined;
-        // 明确缺失、禁用或非法标量可以在写入前拒绝；条件和回退数组仍由 Node 解释。
-        if (
-          typeof target !== "string" &&
-          !isRecord(target) &&
-          !Array.isArray(target)
-        )
-          throw new ReferenceCompositionFailure(
-            `共同包 ${provider.path} 缺少可用的公开接口 ${exportName}。`,
-          );
-        if (typeof target === "string") {
-          try {
-            if (!target.startsWith("./"))
-              throw new Error("公开资源必须属于该包");
-            readFileSync(path.join(context.targetDir, provider.path, target));
-          } catch {
-            throw new ReferenceCompositionFailure(
-              `共同包 ${provider.path} 的公开接口 ${exportName} 不可读取。`,
-            );
-          }
-        }
-      }
+      assertReusablePackageExposure({
+        repositoryRoot: context.targetDir,
+        packagePath: provider.path,
+        expectedExports: baseline.exposure.exports,
+        actualManifest: actual,
+      });
     }
   }
   const generationRecord: GenerationRecord = {
@@ -4924,6 +4798,7 @@ export function prepareGeneratedRepositoryPackageAddition(options: {
   } catch (error) {
     if (
       error instanceof PackageAdditionTargetDeclarationFailure ||
+      error instanceof WorkspacePackageAdditionFailure ||
       error instanceof ReferenceCompositionFailure
     ) {
       return {
@@ -5011,6 +4886,7 @@ export function prepareGeneratedRepositoryPackageAddition(options: {
     } catch (error) {
       if (
         error instanceof PackageAdditionTargetDeclarationFailure ||
+        error instanceof WorkspacePackageAdditionFailure ||
         error instanceof ReferenceCompositionFailure
       ) {
         return {
@@ -5086,7 +4962,10 @@ export function prepareGeneratedRepositoryPackageAddition(options: {
     if (error instanceof PackageAdditionBusinessConflict) {
       return { status: "conflict", conflict: error };
     }
-    if (error instanceof ReferenceCompositionFailure) {
+    if (
+      error instanceof ReferenceCompositionFailure ||
+      error instanceof WorkspacePackageAdditionFailure
+    ) {
       return {
         status: "operation-failure",
         phase: "planning",

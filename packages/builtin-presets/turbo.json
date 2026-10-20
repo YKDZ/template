@@ -6,6 +6,7 @@
       "dependsOn": [
         "@ykdz/template-core#build",
         "@ykdz/template-environment#build",
+        "@ykdz/template-generator#build",
         "@ykdz/template-workspace#build",
         "@ykdz/reference-hono-api#build:template",
         "@ykdz/reference-rust-bin#build:template",

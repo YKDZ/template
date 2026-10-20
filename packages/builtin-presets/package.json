@@ -37,6 +37,7 @@
   "dependencies": {
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
+    "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "jsonc-parser": "catalog:",
     "npm-package-arg": "catalog:",
