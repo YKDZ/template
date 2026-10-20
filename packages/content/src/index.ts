@@ -2,6 +2,7 @@ import {
   loadTemplateContent,
   type LoadedTemplateContentMember,
 } from "./collection.ts";
+import type { TemplateContentTypes } from "./template-content-types.ts";
 import { deriveTemplateMembers as deriveContentMembers } from "./template-members.ts";
 
 /** 所有可选择内容只在这里登记一次，并从原生公开入口装载。 */
@@ -30,19 +31,14 @@ export const templateContent = (await loadTemplateContent({
 })) as readonly LoadedTemplateContentMember[];
 
 export type { ContentKind } from "./collection.ts";
-export type TemplateContentMember = (typeof templateContent)[number];
+type ContentTypes = TemplateContentTypes<typeof templateContent>;
+export type TemplateContentMember = ContentTypes["member"];
 
 /** 从唯一内容集合派生的可选择预设成员。 */
-export type TemplatePreset = Extract<
-  TemplateContentMember,
-  { readonly kind: "preset" }
->;
+export type TemplatePreset = ContentTypes["preset"];
 
 /** 从唯一内容集合派生的原生参考包闭包。 */
-export type TemplateReferencePackage = Extract<
-  TemplateContentMember,
-  { readonly kind: "reference" }
->;
+export type TemplateReferencePackage = ContentTypes["reference"];
 
 export { deriveTemplateMembers } from "./template-members.ts";
 
