@@ -416,6 +416,9 @@ importers:
       '@ykdz/template-environment':
         specifier: workspace:*
         version: link:../environment
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../generator
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../workspace
@@ -728,11 +731,36 @@ importers:
         specifier: 'catalog:'
         version: typescript@7.0.2
 
+  packages/generator:
+    dependencies:
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
   packages/workspace:
     dependencies:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../environment
       yaml:
         specifier: 'catalog:'
         version: 2.9.1
@@ -755,9 +783,6 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../../references/typescript-config
-      '@ykdz/template-environment':
-        specifier: workspace:*
-        version: link:../environment
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
