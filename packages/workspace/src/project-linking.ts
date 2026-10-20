@@ -1,9 +1,9 @@
-import type { PackageContribution } from "./package-contribution.ts";
+import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import {
   assertProjectBlueprint,
   type PackageRole,
   type ProjectBlueprint,
-} from "./project-blueprint.ts";
+} from "@ykdz/template-core/project-blueprint";
 
 type PackageManifest = Readonly<Record<string, unknown>>;
 

@@ -24,6 +24,11 @@
       "source": "./src/project-github.ts",
       "types": "./dist/project-github.d.ts",
       "default": "./dist/project-github.js"
+    },
+    "./project-linking": {
+      "source": "./src/project-linking.ts",
+      "types": "./dist/project-linking.d.ts",
+      "default": "./dist/project-linking.js"
     }
   },
   "scripts": {

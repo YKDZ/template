@@ -7,7 +7,7 @@ import type {
   PersistedPackageDefinition,
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
-import { planExplicitProjectLinks } from "@ykdz/template-core/project-linking-v2";
+import { planExplicitProjectLinks } from "@ykdz/template-workspace/project-linking";
 
 function contribution(
   definition: PackageDefinition,
