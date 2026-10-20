@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   assertPackageContribution,
@@ -29,23 +30,21 @@ import {
 } from "@ykdz/template-core/project-projection";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import type {
+  GenerationRecord,
   GeneratorContent,
   GeneratorNodeInstanceIds,
   GeneratorNodeInstances,
   GeneratorPackageRecord,
   GeneratorSelectionRoot,
   PackageCreationInput,
+  WorkspaceProjection,
   WorkspaceStrategy,
 } from "@ykdz/template-core/workspace-strategy";
 
-type GeneratorRecord<CreationInput extends PackageCreationInput> = {
-  readonly schemaVersion: 1;
-  readonly strategyIdentity: string;
-  readonly strategyState: unknown;
-  readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
-  readonly nodeInstances: GeneratorNodeInstanceIds;
-  readonly presetSelections: readonly PresetOwnerSelection[];
-};
+export type { GenerationRecord } from "@ykdz/template-core/workspace-strategy";
+
+type GeneratorRecord<CreationInput extends PackageCreationInput> =
+  GenerationRecord<CreationInput>;
 
 type PackageNode<
   Context,
@@ -66,11 +65,17 @@ type PackageNode<
   contribution?: Contribution;
 };
 
-export type GeneratorResult =
+export type GeneratorResult<
+  CreationInput extends PackageCreationInput = PackageCreationInput,
+  OwnerFacts = unknown,
+> =
   | {
       readonly status: "success";
       readonly dryRun: boolean;
       readonly blueprint: ProjectBlueprint;
+      readonly generationRecord: GenerationRecord<CreationInput>;
+      /** 无动作幂等结果没有新的投影。 */
+      readonly projection: WorkspaceProjection<OwnerFacts> | null;
       readonly actions: readonly ProjectProjectionAction[];
     }
   | {
@@ -98,6 +103,7 @@ export type Generator<
   Context = unknown,
   Contribution extends PackageContribution = PackageContribution,
   PresetProjectContribution = unknown,
+  OwnerFacts = unknown,
 > = {
   init(options: {
     readonly targetRoot: string;
@@ -113,7 +119,7 @@ export type Generator<
     };
     readonly strategyInput: Input;
     readonly dryRun?: boolean;
-  }): Promise<GeneratorResult>;
+  }): Promise<GeneratorResult<CreationInput, OwnerFacts>>;
   add(
     options: {
       readonly repositoryRoot: string;
@@ -131,7 +137,7 @@ export type Generator<
           >;
         }
     ),
-  ): Promise<GeneratorResult>;
+  ): Promise<GeneratorResult<CreationInput, OwnerFacts>>;
 };
 
 type GeneratorSelectionInput<
@@ -188,7 +194,11 @@ function mergeCreationInput<CreationInput extends PackageCreationInput>(
 function fail(
   phase: "metadata" | "planning" | "render" | "reconciliation",
   error: unknown,
-): GeneratorResult {
+): {
+  readonly status: "operation-failure";
+  readonly phase: "metadata" | "planning" | "render" | "reconciliation";
+  readonly error: { readonly message: string };
+} {
   return {
     status: "operation-failure",
     phase,
@@ -229,9 +239,9 @@ function parsePresetSelections(value: unknown): PresetOwnerSelection[] {
   });
 }
 
-function parseGeneratorRecord<CreationInput extends PackageCreationInput>(
-  value: unknown,
-): GeneratorRecord<CreationInput> {
+export function parseGenerationRecord<
+  CreationInput extends PackageCreationInput = PackageCreationInput,
+>(value: unknown): GenerationRecord<CreationInput> {
   const record = readJson(value, "生成记录");
   if (
     record.schemaVersion !== 1 ||
@@ -323,6 +333,7 @@ export function createGenerator<
   Content extends GeneratorContent<Context, Contribution, CreationInput>,
   NodeLayout,
   PresetProjectContribution = unknown,
+  OwnerFacts = unknown,
 >(options: {
   readonly content: readonly (
     | Content
@@ -342,7 +353,8 @@ export function createGenerator<
     CreationInput,
     Content,
     NodeLayout,
-    PresetProjectContribution
+    PresetProjectContribution,
+    OwnerFacts
   >;
 }): Generator<
   Input,
@@ -351,7 +363,8 @@ export function createGenerator<
   NodeLayout,
   Context,
   Contribution,
-  PresetProjectContribution
+  PresetProjectContribution,
+  OwnerFacts
 > {
   const contentMembers = options.content.filter(
     (content): content is Content =>
@@ -691,17 +704,24 @@ export function createGenerator<
     if (allocatedDefinitions.size > 0) {
       throw new Error("策略蓝图遗漏了已分配的包实例");
     }
+    const generationRecord = storedRecord(
+      state,
+      records,
+      nodeInstances,
+      presetSelections,
+    );
     return {
+      ...projection,
       blueprint: projectedBlueprint,
       operations: [
         ...projection.operations,
         {
           kind: "writeJson" as const,
           to: ".template/generation.json",
-          value: storedRecord(state, records, nodeInstances, presetSelections),
+          value: generationRecord,
         },
       ],
-      reconciliation: projection.reconciliation,
+      generationRecord,
     };
   }
 
@@ -876,7 +896,7 @@ export function createGenerator<
     };
     readonly strategyInput: Input;
     readonly dryRun?: boolean;
-  }): Promise<GeneratorResult> {
+  }): Promise<GeneratorResult<CreationInput, OwnerFacts>> {
     try {
       const selectedProjectPresets: PresetOwnerSelection[] = [];
       for (const root of initOptions.selection.roots) {
@@ -1000,6 +1020,8 @@ export function createGenerator<
         status: "success",
         dryRun: initOptions.dryRun ?? false,
         blueprint: projectPlan.blueprint,
+        generationRecord: projectPlan.generationRecord,
+        projection: projectPlan,
         actions: [],
       };
     } catch (error) {
@@ -1024,7 +1046,7 @@ export function createGenerator<
           >;
         }
     ),
-  ): Promise<GeneratorResult> {
+  ): Promise<GeneratorResult<CreationInput, OwnerFacts>> {
     try {
       const repositoryRoot = path.resolve(addOptions.repositoryRoot);
       const blueprintValue = JSON.parse(
@@ -1034,7 +1056,7 @@ export function createGenerator<
         ),
       ) as unknown;
       const blueprint = assertProjectBlueprint(blueprintValue);
-      const record = parseGeneratorRecord<CreationInput>(
+      const record = parseGenerationRecord<CreationInput>(
         JSON.parse(
           await readFile(
             path.join(repositoryRoot, ".template/generation.json"),
@@ -1089,6 +1111,7 @@ export function createGenerator<
           contentByIdentity,
           packages: record.packages,
           nodeInstances: currentNodeInstances,
+          ...(creationInput === undefined ? {} : { creationInput }),
         });
       } catch (error) {
         return fail("metadata", error);
@@ -1123,19 +1146,28 @@ export function createGenerator<
         if (
           prior?.contentIdentity === selected.identity &&
           prior.definition.name === definition.name &&
-          prior.definition.path === definition.path
+          prior.definition.path === definition.path &&
+          isDeepStrictEqual(prior.creationInput, selectionRoot.creationInput)
         ) {
           return {
             status: "success",
             dryRun: addOptions.dryRun ?? false,
             blueprint,
+            generationRecord: record,
+            projection: null,
             actions: [],
           };
         }
+        const samePackageIdentity =
+          prior?.contentIdentity === selected.identity &&
+          prior.definition.name === definition.name &&
+          prior.definition.path === definition.path;
         return {
           status: "conflict",
           dryRun: addOptions.dryRun ?? false,
-          reason: "目标包名称或路径已被其他实例占用。",
+          reason: samePackageIdentity
+            ? "已存在的包实例不能接受不同的加包输入。"
+            : "目标包名称或路径已被其他实例占用。",
           conflicts: [],
           actions: [],
         };
@@ -1267,6 +1299,8 @@ export function createGenerator<
         status: "success",
         dryRun: addOptions.dryRun ?? false,
         blueprint: projectedBlueprint,
+        generationRecord: after.generationRecord,
+        projection: after,
         actions: reconciliation.actions,
       };
     } catch (error) {

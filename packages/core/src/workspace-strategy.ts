@@ -1,4 +1,5 @@
 import type { PackageContribution } from "./package-contribution.ts";
+import type { PresetOwnerSelection } from "./preset-definition.ts";
 import type {
   PackageDefinition,
   PackageDefinitionId,
@@ -66,6 +67,16 @@ export type GeneratorPackageRecord<CreationInput = PackageCreationInput> = {
   readonly bindings: Readonly<Record<string, string>>;
 };
 
+/** 当前记录合同的实际公开形状；其持久化格式仍为 generator schema 1。 */
+export type GenerationRecord<CreationInput = PackageCreationInput> = {
+  readonly schemaVersion: 1;
+  readonly strategyIdentity: string;
+  readonly strategyState: unknown;
+  readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
+  readonly nodeInstances: GeneratorNodeInstanceIds;
+  readonly presetSelections: readonly PresetOwnerSelection[];
+};
+
 /** 持久化节点表仅引用蓝图已有的包实例身份。 */
 export type GeneratorNodeInstanceIds = Readonly<
   Record<string, PackageDefinitionId>
@@ -74,11 +85,13 @@ export type GeneratorNodeInstanceIds = Readonly<
 /** 策略计算看到的节点实例是解析后的真实 Definition。 */
 export type GeneratorNodeInstances = ReadonlyMap<string, PackageDefinition>;
 
-export type WorkspaceProjection = {
+export type WorkspaceProjection<OwnerFacts = unknown> = {
   /** 策略拥有并封闭管理、并入当前蓝图的项目关系。 */
   readonly blueprint?: ProjectBlueprint;
   readonly operations: readonly RenderOperation[];
   readonly reconciliation: readonly ProjectProjectionReconciliation[];
+  /** 所属策略为本次消费者提供的有限检查事实；生成器只原样透传。 */
+  readonly ownerFacts?: OwnerFacts;
 };
 
 /**
@@ -95,6 +108,7 @@ export type WorkspaceStrategy<
     GeneratorContent<Context, Contribution, CreationInput>,
   NodeLayout = unknown,
   PresetProjectContribution = unknown,
+  OwnerFacts = unknown,
 > = {
   readonly identity: string;
   initialize(options: {
@@ -112,6 +126,8 @@ export type WorkspaceStrategy<
     readonly contentByIdentity: ReadonlyMap<string, Content>;
     readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
     readonly nodeInstances: GeneratorNodeInstances;
+    /** 本次加包原始输入由策略解释，生成器只透传。 */
+    readonly creationInput?: CreationInput;
   }): Context | Promise<Context>;
   parseState(value: unknown): StrategyState;
   /** 策略把原生依赖声明映射为显式内容身份。 */
@@ -140,5 +156,5 @@ export type WorkspaceStrategy<
     readonly nodeInstances: GeneratorNodeInstances;
     /** 各已选预设计算的封闭项目贡献由策略解释。 */
     readonly presetProjectContributions: readonly PresetProjectContribution[];
-  }): WorkspaceProjection;
+  }): WorkspaceProjection<OwnerFacts>;
 };
