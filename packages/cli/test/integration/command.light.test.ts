@@ -146,7 +146,7 @@ void describe("template CLI command control", () => {
     assert.equal(output.stderr(), "");
   });
 
-  void it("serializes the complete schema3 record for a public CLI candidate", async () => {
+  void it("公开 CLI 候选完整序列化 schema3 生成记录", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-cli-generation-record-"),
     );
