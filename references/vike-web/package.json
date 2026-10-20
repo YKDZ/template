@@ -30,6 +30,7 @@
     }
   },
   "scripts": {
+    "check:author-planning-roles": "pnpm --workspace-root run author-planning-roles:workspace -- --owner-directory \"$PWD\"",
     "browser:prepare": "playwright install chromium",
     "build": "vike build",
     "dev": "DATABASE_PROFILE=dev NODE_OPTIONS=--conditions=source vike dev",

@@ -21,7 +21,7 @@ export const referencePackage = defineReferencePackage({
       },
       { name: "typescript-7", purpose: "template-execution" },
     ],
-    scripts: ["build:template"],
+    scripts: ["build:template", "check:author-planning-roles"],
     resources: ["template", "tsconfig.template.json"],
   },
   foundation: ({ definition }) => ({

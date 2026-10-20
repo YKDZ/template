@@ -12,7 +12,7 @@ export const referenceDefinition = {
   resources: ["."],
   template: {
     dependencies: [],
-    scripts: ["build:template"],
+    scripts: ["build:template", "check:author-planning-roles"],
     resources: ["template", "tsconfig.template.json"],
   },
   environmentNeeds: [],
