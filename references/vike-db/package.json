@@ -53,7 +53,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "check:author-planning-roles": "pnpm --workspace-root run check:author-planning-roles:workspace -- --owner-directory \"$PWD\"",
+    "check:author-planning-roles": "pnpm --workspace-root run author-planning-roles:workspace -- --owner-directory \"$PWD\"",
     "build": "tsc -p tsconfig.build.json --pretty false",
     "db:reset": "node --conditions=source scripts/reset.ts",
     "db:seed:example": "node --conditions=source scripts/seed-example.ts",

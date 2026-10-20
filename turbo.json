@@ -270,7 +270,7 @@
     "//#check:heavy": {
       "tags": ["quality:entry"]
     },
-    "//#check:author-planning-roles:workspace": {
+    "//#author-planning-roles:workspace": {
       "cache": false,
       "outputs": [],
       "tags": ["work:on-demand"]

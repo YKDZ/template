@@ -5,7 +5,7 @@
   "scripts": {
     "boundaries": "node --conditions=source scripts/run-turbo-boundaries.ts",
     "check": "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check",
-    "check:author-planning-roles:workspace": "node --conditions=source --experimental-strip-types scripts/check-author-planning-roles.ts",
+    "author-planning-roles:workspace": "node --conditions=source --experimental-strip-types scripts/check-author-planning-roles.ts",
     "check:full": "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:full",
     "check:heavy": "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
     "fix": "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts fix",
