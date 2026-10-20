@@ -53,6 +53,14 @@
       "outputs": [],
       "persistent": false
     },
+    "test:integration": {
+      "dependsOn": [],
+      "tags": ["quality:heavy"],
+      "cache": false,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "persistent": false
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "tags": ["quality:light"],

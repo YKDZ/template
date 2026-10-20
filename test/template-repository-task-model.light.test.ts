@@ -197,7 +197,15 @@ void describe("Template Repository native task model", () => {
       ],
       [
         "@ykdz/template-checks#build",
-        ["@ykdz/template-core#build", "@ykdz/template-builtin-presets#build"],
+        [
+          "@ykdz/reference-ts-cli#build",
+          "@ykdz/reference-typescript-config#build",
+          "@ykdz/template-content#build",
+          "@ykdz/template-core#build",
+          "@ykdz/template-generator#build",
+          "@ykdz/template-workspace#build",
+          "@ykdz/template-workspace-authoring#build",
+        ],
       ],
     ] as const)
       for (const dependency of dependencies)

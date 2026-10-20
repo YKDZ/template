@@ -8,16 +8,6 @@
   ],
   "type": "module",
   "exports": {
-    ".": {
-      "source": "./src/index.ts",
-      "types": "./dist/src/index.d.ts",
-      "default": "./dist/src/index.js"
-    },
-    "./development-environment": {
-      "source": "./src/shared/development-container.ts",
-      "types": "./dist/src/shared/development-container.d.ts",
-      "default": "./dist/src/shared/development-container.js"
-    },
     "./node-test-count-reporter": {
       "source": "./scripts/node-test-count-reporter.ts",
       "types": "./scripts/node-test-count-reporter.ts",

@@ -5,6 +5,7 @@ import {
   readFile,
   readdir,
   stat,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -375,6 +376,54 @@ void describe("TypeScript 库公开预设", () => {
         "utf8",
       ),
       before,
+    );
+  });
+
+  void it("加包时不恢复未链接既有库的缺失 manifest", async () => {
+    const targetRoot = path.join(
+      await mkdtemp(path.join(tmpdir(), "template-ts-lib-missing-manifest-")),
+      "demo",
+    );
+    const generator = createGenerator({
+      content,
+      strategy: createDefaultWorkspaceStrategy(),
+    });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { roots: [{ preset }] },
+      strategyInput: { defaultPackageScope: "demo" },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+
+    const existingManifest = path.join(targetRoot, "packages/lib/package.json");
+    await unlink(existingManifest);
+
+    const added = await generator.add({
+      repositoryRoot: targetRoot,
+      preset,
+      creationInput: { leafName: "utilities" },
+    });
+
+    assert.strictEqual(added.status, "success", JSON.stringify(added));
+    if (added.status !== "success") throw new Error("加包应成功");
+    assert.ok(
+      !added.actions.some(
+        (action) => action.path === "packages/lib/package.json",
+      ),
+    );
+    await assert.rejects(stat(existingManifest), { code: "ENOENT" });
+    assert.strictEqual(
+      JSON.parse(
+        await readFile(
+          path.join(targetRoot, "packages/utilities/package.json"),
+          "utf8",
+        ),
+      ).name,
+      "@demo/utilities",
     );
   });
 
