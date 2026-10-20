@@ -74,6 +74,8 @@ type PackageNode<
   >;
   record?: GeneratorPackageRecord<CreationInput>;
   contribution?: Contribution;
+  preparation?: unknown;
+  preparationComplete?: boolean;
 };
 
 export type GeneratorResult<
@@ -267,6 +269,14 @@ function fail(
   };
 }
 
+class AdditionPlanningFailure extends Error {
+  constructor(error: unknown) {
+    super(error instanceof Error ? error.message : String(error), {
+      cause: error,
+    });
+  }
+}
+
 function readJson(value: unknown, label: string): Record<string, unknown> {
   if (!isRecord(value)) throw new Error(label + " must be an object");
   return value;
@@ -412,6 +422,17 @@ export function createGenerator<
       content,
     ]),
   );
+  const preparations = new WeakMap<object, unknown>();
+  const preparedDefinitions = new WeakSet<object>();
+  const prepareContent = (content: Content): unknown => {
+    const definition = content.definition;
+    if (preparedDefinitions.has(definition))
+      return preparations.get(definition);
+    const preparation = definition.prepare?.();
+    preparations.set(definition, preparation);
+    preparedDefinitions.add(definition);
+    return preparation;
+  };
   type LoadedPreset = LoadedContentMember<
     PresetDefinition<
       Content["definition"],
@@ -657,6 +678,7 @@ export function createGenerator<
       bindings: nativeBindings,
       createdBy: node.createdBy,
       nodeInstances,
+      ...(node.preparationComplete ? { preparation: node.preparation } : {}),
       ...(node.creationInput === undefined
         ? {}
         : { creationInput: node.creationInput }),
@@ -856,6 +878,8 @@ export function createGenerator<
       if (expanded.has(key)) return;
       visiting.add(key);
       newNodes.set(key, node);
+      node.preparation = prepareContent(node.content);
+      node.preparationComplete = true;
       const dependencies = options.strategy.dependencies({
         content: node.content,
         contentByIdentity,
@@ -1239,6 +1263,15 @@ export function createGenerator<
         packageStates,
         record.nodeInstances,
       );
+      try {
+        for (const node of existingNodes) {
+          node.preparation = prepareContent(node.content);
+          node.preparationComplete = true;
+        }
+        prepareContent(selected);
+      } catch (error) {
+        return fail("planning", error);
+      }
       let context: Context;
       try {
         context = await options.strategy.prepareAddition({
@@ -1300,63 +1333,66 @@ export function createGenerator<
         | undefined;
       const prepareAdditionNodes = (): NonNullable<typeof preparedAddition> => {
         if (preparedAddition !== undefined) return preparedAddition;
-        const nodes = hydrateNewNodes({
-          roots: [requested],
-          existing: existingNodes,
-          context,
-          occupiedIds: new Set(
-            record.packages.map((item) => item.packageDefinitionId),
-          ),
-        });
-        const records = nodes.flatMap((node) =>
-          node.record === undefined ? [] : [node.record],
-        );
-        const allRecords = [...record.packages, ...records];
-        const afterBlueprint: ProjectBlueprint = {
-          ...blueprint,
-          packages: [
-            ...blueprint.packages,
-            ...nodes.map(
-              (node) => node.definition as PersistedPackageDefinition,
-            ),
-          ],
-        };
-        const packages = resolvePackageStates(allRecords, afterBlueprint);
-        validateRequiredBindings(packages);
-        const nodeInstanceIds: Record<string, PackageDefinitionId> = {
-          ...record.nodeInstances,
-        };
-        if (
-          addedProjectPreset !== undefined &&
-          !Object.hasOwn(nodeInstanceIds, selectionRoot.nodeIdentity)
-        ) {
-          const addedRoot = nodes.find(
-            (node) => node.nodeIdentity === selectionRoot.nodeIdentity,
-          );
-          if (addedRoot?.record === undefined) {
-            throw new Error(
-              "加包预设节点没有持久实例：" + selectionRoot.nodeIdentity,
-            );
-          }
-          nodeInstanceIds[selectionRoot.nodeIdentity] =
-            addedRoot.record.packageDefinitionId;
-        }
-        const nodeInstances = resolveNodeInstances(packages, nodeInstanceIds);
-        const prepared = {
-          nodes,
-          records,
-          packages,
-          blueprint: afterBlueprint,
-          nodeInstances,
-          contributions: persistedContributions(
-            nodes,
+        try {
+          const nodes = hydrateNewNodes({
+            roots: [requested],
+            existing: existingNodes,
             context,
+            occupiedIds: new Set(
+              record.packages.map((item) => item.packageDefinitionId),
+            ),
+          });
+          const records = nodes.flatMap((node) =>
+            node.record === undefined ? [] : [node.record],
+          );
+          const allRecords = [...record.packages, ...records];
+          const afterBlueprint: ProjectBlueprint = {
+            ...blueprint,
+            packages: [
+              ...blueprint.packages,
+              ...nodes.map(
+                (node) => node.definition as PersistedPackageDefinition,
+              ),
+            ],
+          };
+          const packages = resolvePackageStates(allRecords, afterBlueprint);
+          validateRequiredBindings(packages);
+          const nodeInstanceIds: Record<string, PackageDefinitionId> = {
+            ...record.nodeInstances,
+          };
+          if (
+            addedProjectPreset !== undefined &&
+            !Object.hasOwn(nodeInstanceIds, selectionRoot.nodeIdentity)
+          ) {
+            const addedRoot = nodes.find(
+              (node) => node.nodeIdentity === selectionRoot.nodeIdentity,
+            );
+            if (addedRoot?.record === undefined) {
+              throw new Error(
+                "加包预设节点没有持久实例：" + selectionRoot.nodeIdentity,
+              );
+            }
+            nodeInstanceIds[selectionRoot.nodeIdentity] =
+              addedRoot.record.packageDefinitionId;
+          }
+          const nodeInstances = resolveNodeInstances(packages, nodeInstanceIds);
+          preparedAddition = {
+            nodes,
+            records,
             packages,
+            blueprint: afterBlueprint,
             nodeInstances,
-          ),
-        };
-        preparedAddition = prepared;
-        return prepared;
+            contributions: persistedContributions(
+              nodes,
+              context,
+              packages,
+              nodeInstances,
+            ),
+          };
+          return preparedAddition;
+        } catch (error) {
+          throw new AdditionPlanningFailure(error);
+        }
       };
       try {
         const currentPresetProjectContributions =
@@ -1390,6 +1426,9 @@ export function createGenerator<
           };
         }
       } catch (error) {
+        if (error instanceof AdditionPlanningFailure) {
+          return fail("planning", error);
+        }
         return fail(
           "metadata",
           error,
@@ -1546,7 +1585,12 @@ export function createGenerator<
         actions: reconciliation.actions,
       };
     } catch (error) {
-      return fail("reconciliation", error);
+      return fail(
+        error instanceof AdditionPlanningFailure
+          ? "planning"
+          : "reconciliation",
+        error,
+      );
     }
   }
 

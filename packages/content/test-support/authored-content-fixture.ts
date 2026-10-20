@@ -16,6 +16,7 @@ const definePresetURL = import.meta
 export type AuthoredContentFixtureOptions = {
   readonly namespace: string;
   readonly marker: string;
+  readonly featureMarker?: string;
   readonly featureAlias?: string;
   readonly featureResourcePath?: string;
   readonly featurePackageName?: string;
@@ -26,6 +27,7 @@ export type AuthoredContentFixtureOptions = {
 export type AuthoredContentFixture = {
   readonly root: string;
   readonly members: readonly LoadedSourceMember[];
+  readonly resolve: (specifier: string) => string;
   readonly load: (namespace: string) => Promise<readonly LoadedSourceMember[]>;
   readonly close: () => Promise<void>;
 };
@@ -45,7 +47,6 @@ function packageManifest(
         source: "./template/definition.mjs",
         default: "./template/definition.mjs",
       },
-      "./assets/*": "./*",
     },
     dependencies,
     devDependencies: {
@@ -68,13 +69,14 @@ function referenceDefinition(options: {
     "export const referencePackage = defineReferencePackage({",
     `  packageName: ${JSON.stringify(options.packageName)},`,
     "  resolve: (specifier) => import.meta.resolve(specifier),",
+    '  resourceRoot: new URL("../", import.meta.url),',
     `  alias: ${JSON.stringify(options.alias)},`,
     `  instance: ${JSON.stringify(options.instance)},`,
     `  defaultLeafName: ${JSON.stringify(options.defaultLeafName)},`,
     '  role: "shared-library",',
     `  resources: [${JSON.stringify(resourceDirectory)}],`,
-    "  authoring: {",
-    '    dependencies: ["@ykdz/template-workspace-authoring"],',
+    "  template: {",
+    '    dependencies: [{ name: "@ykdz/template-workspace-authoring", purpose: "template-execution" }],',
     "    scripts: [],",
     "    resources: [],",
     "  },",
@@ -216,7 +218,7 @@ export async function createAuthoredContentFixture(
     authorsRoot,
     leafName: "feature",
     packageName: featurePackageName,
-    marker: `${options.marker}:feature`,
+    marker: `${options.featureMarker ?? options.marker}:feature`,
     alias: options.featureAlias ?? "feature",
     instance: "independent",
     resourcePath: featureResourcePath,
@@ -287,6 +289,7 @@ export async function createAuthoredContentFixture(
   return {
     root,
     members,
+    resolve,
     load,
     close: async () => await rm(root, { recursive: true, force: true }),
   };

@@ -187,6 +187,19 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
         "owner-note.txt",
       );
       await writeFile(movedPackageNote, "首包更新事实\n");
+      const firstPackageManifestPath = path.join(
+        movedRoot,
+        featureDefinition.path,
+        "package.json",
+      );
+      const changedFirstPackageManifest = JSON.parse(
+        await readFile(firstPackageManifestPath, "utf8"),
+      ) as Record<string, unknown>;
+      changedFirstPackageManifest.name = `@renamed-${namespace}/feature`;
+      await writeFile(
+        firstPackageManifestPath,
+        `${JSON.stringify(changedFirstPackageManifest, null, 2)}\n`,
+      );
 
       const addition = await replayGenerator.add({
         repositoryRoot: movedRoot,
@@ -217,7 +230,12 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       };
       assert.equal(strategyState.repositoryName, `${namespace}-fixture`);
       assert.equal(strategyState.defaultPackageScope, namespace);
+      assert.equal(addonDefinition.name, `@${namespace}/addon-extra`);
       assert.equal(await readFile(movedPackageNote, "utf8"), "首包更新事实\n");
+      assert.deepEqual(
+        JSON.parse(await readFile(firstPackageManifestPath, "utf8")),
+        changedFirstPackageManifest,
+      );
       assert.equal((await stat(movedPackageNote)).mode & 0o777, 0o600);
       assert.equal(
         await readFile(
@@ -482,27 +500,33 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       );
       assert.ok(featureRecord);
       assert.ok(themeRecord);
+      const featureDefinition = initialized.blueprint.packages.find(
+        (definition) =>
+          definition.packageDefinitionId === featureRecord.packageDefinitionId,
+      );
+      const themeDefinition = initialized.blueprint.packages.find(
+        (definition) =>
+          definition.packageDefinitionId === themeRecord.packageDefinitionId,
+      );
+      assert.ok(featureDefinition);
+      assert.ok(themeDefinition);
       assert.equal(
         featureRecord.bindings[contentIdentityKey(themeIdentity)],
-        themeRecord.definition.packageDefinitionId,
+        themeRecord.packageDefinitionId,
       );
       const marker = fixture.members[0]!.identity.namespace.endsWith("alpha")
         ? "A"
         : "B";
       assert.equal(
         await readFile(
-          path.join(
-            targetRoot,
-            featureRecord.definition.path,
-            "src/content.ts",
-          ),
+          path.join(targetRoot, featureDefinition.path, "src/content.ts"),
           "utf8",
         ),
         `export const fixtureOrigin = ${JSON.stringify(`${marker}:feature`)};\n`,
       );
       assert.equal(
         await readFile(
-          path.join(targetRoot, themeRecord.definition.path, "src/theme.ts"),
+          path.join(targetRoot, themeDefinition.path, "src/theme.ts"),
           "utf8",
         ),
         `export const fixtureOrigin = ${JSON.stringify(`${marker}:theme`)};\n`,
@@ -563,6 +587,10 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     const originalFeature = identityFor(original, "@fixture/feature");
     const movedFeature = identityFor(moved, "@fixture/feature");
     assert.deepEqual(movedFeature, originalFeature);
+    assert.throws(
+      () => moved.resolve("@fixture/feature/assets/lib/renamed-content.ts"),
+      { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" },
+    );
     assert.notEqual(
       original.members.find(
         (member) => member.identity.packageName === "@fixture/feature",
@@ -594,18 +622,144 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
         contentIdentityKey(movedFeature),
     );
     assert.ok(featureRecord);
-    assert.equal(featureRecord.definition.path, "packages/renamed-feature");
+    const featureDefinition = generated.blueprint.packages.find(
+      (definition) =>
+        definition.packageDefinitionId === featureRecord.packageDefinitionId,
+    );
+    assert.ok(featureDefinition);
+    assert.equal(featureDefinition.path, "packages/renamed-feature");
     assert.equal(
       await readFile(
-        path.join(
-          targetRoot,
-          featureRecord.definition.path,
-          "lib/renamed-content.ts",
-        ),
+        path.join(targetRoot, featureDefinition.path, "lib/renamed-content.ts"),
         "utf8",
       ),
       'export const fixtureOrigin = "two:feature";\n',
     );
+
+    const freshGenerator = createGenerator({
+      content: moved.members,
+      strategy: createDefaultWorkspaceStrategy(),
+    });
+    const added = await freshGenerator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: identityFor(moved, "@fixture/addon"),
+    });
+    assert.equal(added.status, "success", JSON.stringify(added));
+    assert.equal(
+      await readFile(
+        path.join(targetRoot, featureDefinition.path, "lib/renamed-content.ts"),
+        "utf8",
+      ),
+      'export const fixtureOrigin = "two:feature";\n',
+    );
+    assert.equal(
+      await readFile(
+        path.join(targetRoot, "packages/addon/src/addon.ts"),
+        "utf8",
+      ),
+      'export const fixtureOrigin = "two:addon";\n',
+    );
+  });
+
+  void it("拥有者源码变化传播到本包生成内容而不改共享参考事实", async () => {
+    const original = await createFixture({
+      namespace: "source-propagation",
+      marker: "shared-fact",
+      featureMarker: "before",
+    });
+    const changed = await createFixture({
+      namespace: "source-propagation",
+      marker: "shared-fact",
+      featureMarker: "after",
+    });
+    const generatedRoots = await Promise.all([
+      createWorkspace().then((workspace) => path.join(workspace, "original")),
+      createWorkspace().then((workspace) => path.join(workspace, "changed")),
+    ]);
+    const generated = await Promise.all(
+      [original, changed].map(async (fixture, index) => {
+        const result = await createGenerator({
+          content: fixture.members,
+          strategy: createDefaultWorkspaceStrategy(),
+        }).init({
+          targetRoot: generatedRoots[index]!,
+          selection: {
+            roots: [
+              {
+                preset: {
+                  alias: "authored",
+                  namespace: "source-propagation",
+                },
+              },
+            ],
+          },
+          strategyInput: {
+            repositoryName: "source-propagation",
+            defaultPackageScope: "demo",
+          },
+        });
+        assert.equal(result.status, "success", JSON.stringify(result));
+        if (result.status !== "success") return undefined;
+        return {
+          blueprint: result.blueprint,
+          record: result.generationRecord,
+        };
+      }),
+    );
+    assert.ok(generated[0]);
+    assert.ok(generated[1]);
+
+    for (const [index, expected] of [
+      "before:feature",
+      "after:feature",
+    ].entries()) {
+      const { blueprint, record } = generated[index]!;
+      const feature = record.packages.find(
+        (pkg) =>
+          contentIdentityKey(pkg.contentIdentity) ===
+          contentIdentityKey(
+            identityFor(index === 0 ? original : changed, "@fixture/feature"),
+          ),
+      );
+      const theme = record.packages.find(
+        (pkg) =>
+          pkg.contentIdentity.packageName === "@fixture/typescript-config",
+      );
+      assert.ok(feature);
+      assert.ok(theme);
+      const featureDefinition = blueprint.packages.find(
+        (definition) =>
+          definition.packageDefinitionId === feature.packageDefinitionId,
+      );
+      const themeDefinition = blueprint.packages.find(
+        (definition) =>
+          definition.packageDefinitionId === theme.packageDefinitionId,
+      );
+      assert.ok(featureDefinition);
+      assert.ok(themeDefinition);
+      assert.equal(
+        await readFile(
+          path.join(
+            generatedRoots[index]!,
+            featureDefinition.path,
+            "src/content.ts",
+          ),
+          "utf8",
+        ),
+        `export const fixtureOrigin = ${JSON.stringify(expected)};\n`,
+      );
+      assert.equal(
+        await readFile(
+          path.join(
+            generatedRoots[index]!,
+            themeDefinition.path,
+            "src/theme.ts",
+          ),
+          "utf8",
+        ),
+        'export const fixtureOrigin = "shared-fact:theme";\n',
+      );
+    }
   });
 
   void it("公开包名变更产生新身份，旧身份不会映射到新成员", async () => {
@@ -644,9 +798,14 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
         contentIdentityKey(newIdentity),
     );
     assert.ok(newFeature);
+    const newFeatureDefinition = generated.blueprint.packages.find(
+      (definition) =>
+        definition.packageDefinitionId === newFeature.packageDefinitionId,
+    );
+    assert.ok(newFeatureDefinition);
     assert.equal(
       await readFile(
-        path.join(newTargetRoot, newFeature.definition.path, "src/content.ts"),
+        path.join(newTargetRoot, newFeatureDefinition.path, "src/content.ts"),
         "utf8",
       ),
       'export const fixtureOrigin = "new:feature";\n',
