@@ -43,10 +43,11 @@ const journey: CliJourney = {
     const snapshotPath = path.join(context.workDir, "binding-before-add.json");
     const commands: CliJourneyCommand[] = [
       {
-        name: "缺少所属模板资源时运行实际 CLI 初始化进程",
+        name: "缺少所属模板执行数据时运行实际 CLI 初始化进程",
         executable: process.execPath,
         cwd: context.packageRoot,
         args: [
+          ...(context.mode === "source" ? ["--conditions=source"] : []),
           "--experimental-strip-types",
           path.join(
             context.packageRoot,
@@ -123,7 +124,7 @@ const journey: CliJourney = {
     assert.equal(resourceEnvelope.data.phase, "planning");
     assert.match(
       resourceEnvelope.data.error.message,
-      /@ykdz\/reference-ts-lib.*prepare 阶段失败.*tsconfig\.template\.json/u,
+      /@ykdz\/reference-ts-cli.*prepare 阶段失败.*模板执行数据未包含在参考资源范围中：src\/publication\/cli-command-identity\.ts/u,
     );
     assert.match(resourceEnvelope.data.error.suggestion, /声明资源/u);
     assert.doesNotMatch(
