@@ -228,24 +228,32 @@ void describe("TypeScript 库公开预设", () => {
     );
   });
 
-  void it("有效布局只声明一次并贯穿初始化、加包和真实回放", async () => {
-    const relocatedLibrary = { ...library, defaultPath: "packages/archive" };
-    const relocatedPreset = definePreset({
+  void it("节点布局和操作输入贯穿初始化、连续加包和真实回放", async () => {
+    const layoutPreset = definePreset({
       metadata: preset.metadata,
       operations: preset.operations,
-      nodes: { library: { reference: relocatedLibrary } },
+      nodes: {
+        library: {
+          reference: library,
+          layout: { packageDirectory: "modules" },
+          creationInput: {
+            init: { leafName: "archive" },
+            add: { leafName: "fallback" },
+          },
+        },
+      },
     });
     const targetRoot = path.join(
       await mkdtemp(path.join(tmpdir(), "template-ts-lib-layout-")),
       "demo",
     );
     const generator = createGenerator({
-      content: [relocatedLibrary, configuration, relocatedPreset],
+      content: [library, configuration, layoutPreset],
       strategy: createDefaultWorkspaceStrategy(),
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: relocatedPreset }] },
+      selection: { roots: [{ preset: layoutPreset }] },
       strategyInput: { defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -256,24 +264,41 @@ void describe("TypeScript 库公开预设", () => {
     assert.strictEqual(
       JSON.parse(
         await readFile(
-          path.join(targetRoot, "packages/archive/package.json"),
+          path.join(targetRoot, "modules/archive/package.json"),
           "utf8",
         ),
       ).name,
-      "@demo/lib",
+      "@demo/archive",
+    );
+    const fallback = await generator.add({
+      repositoryRoot: targetRoot,
+      preset: layoutPreset,
+    });
+    assert.strictEqual(fallback.status, "success", JSON.stringify(fallback));
+    assert.strictEqual(
+      JSON.parse(
+        await readFile(
+          path.join(targetRoot, "modules/fallback/package.json"),
+          "utf8",
+        ),
+      ).name,
+      "@demo/fallback",
     );
 
-    for (const leafName of ["second", "third"]) {
+    for (const [index, leafName] of ["second", "second", "third"].entries()) {
       const result = await generator.add({
         repositoryRoot: targetRoot,
-        preset: relocatedPreset,
+        preset: layoutPreset,
         creationInput: { leafName },
       });
       assert.strictEqual(result.status, "success", JSON.stringify(result));
+      if (index === 1 && result.status === "success") {
+        assert.deepStrictEqual(result.actions, []);
+      }
       assert.strictEqual(
         JSON.parse(
           await readFile(
-            path.join(targetRoot, `packages/${leafName}/package.json`),
+            path.join(targetRoot, `modules/${leafName}/package.json`),
             "utf8",
           ),
         ).name,
@@ -286,12 +311,14 @@ void describe("TypeScript 库公开预设", () => {
     assert.deepStrictEqual(
       blueprint.packages.map((item) => item.path).toSorted(),
       [
-        "packages/archive",
-        "packages/second",
-        "packages/third",
+        "modules/archive",
+        "modules/fallback",
+        "modules/second",
+        "modules/third",
         "packages/typescript-config",
       ].toSorted(),
     );
+    await assert.rejects(stat(path.join(targetRoot, "packages/lib")));
   });
 
   void it("缺少原生共享依赖或新增路径冲突时保持目标不变", async () => {

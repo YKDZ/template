@@ -9,6 +9,11 @@ void describe("预设声明", () => {
       identity: "library",
       instance: "independent" as const,
     };
+    const layout = { packageDirectory: "modules" };
+    const creationInput = {
+      init: { variant: "published" },
+      add: { variant: "private" },
+    };
     const preset = definePreset({
       metadata: {
         alias: "ts-lib",
@@ -16,11 +21,13 @@ void describe("预设声明", () => {
         description: "严格 TypeScript 库。",
       },
       operations: ["init", "add"],
-      nodes: { library: { reference: library } },
+      nodes: { library: { reference: library, layout, creationInput } },
     });
 
     assert.strictEqual(preset.kind, "preset");
     assert.strictEqual(preset.nodes.library?.reference, library);
+    assert.strictEqual(preset.nodes.library?.layout, layout);
+    assert.strictEqual(preset.nodes.library?.creationInput, creationInput);
     assert.deepStrictEqual(preset.operations, ["init", "add"]);
   });
 
@@ -68,6 +75,20 @@ void describe("预设声明", () => {
           },
         }),
       /重复选择独立参考/u,
+    );
+    assert.throws(
+      () =>
+        definePreset({
+          metadata,
+          operations: ["init"],
+          nodes: {
+            library: {
+              reference: library,
+              creationInput: { add: { variant: "private" } },
+            },
+          },
+        }),
+      /创建输入操作无效/u,
     );
   });
 });

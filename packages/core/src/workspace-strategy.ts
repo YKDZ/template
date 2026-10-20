@@ -17,11 +17,16 @@ export type PackageCreationInput<Variant = unknown> = {
   readonly variant?: Variant;
 };
 
-export type GeneratorSelectionRoot<CreationInput = PackageCreationInput> = {
+export type GeneratorSelectionRoot<
+  CreationInput = PackageCreationInput,
+  NodeLayout = unknown,
+> = {
   /** 在本次组合中稳定的节点身份，用于把策略计算连到持久包实例。 */
   readonly nodeIdentity: string;
   readonly contentIdentity: string;
   readonly creationInput?: CreationInput;
+  /** 仅由拥有策略解释；通用生成器不解析布局内容。 */
+  readonly layout?: NodeLayout;
 };
 
 export type GeneratorPackageCreatedBy =
@@ -88,12 +93,16 @@ export type WorkspaceStrategy<
   CreationInput extends PackageCreationInput = PackageCreationInput,
   Content extends GeneratorContent<Context, Contribution, CreationInput> =
     GeneratorContent<Context, Contribution, CreationInput>,
+  NodeLayout = unknown,
 > = {
   readonly identity: string;
   initialize(options: {
     readonly targetRoot: string;
     readonly input: Input;
-    readonly selection: readonly GeneratorSelectionRoot<CreationInput>[];
+    readonly selection: readonly GeneratorSelectionRoot<
+      CreationInput,
+      NodeLayout
+    >[];
   }): { readonly context: Context; readonly state: StrategyState };
   prepareAddition(options: {
     readonly targetRoot: string;
@@ -119,6 +128,7 @@ export type WorkspaceStrategy<
     readonly context: Context;
     readonly content: Content;
     readonly creationInput?: CreationInput;
+    readonly layout?: NodeLayout;
   }): PackageDefinition;
   project(options: {
     readonly context: Context;

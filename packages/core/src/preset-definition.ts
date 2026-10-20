@@ -5,18 +5,53 @@ export type PresetReference = {
   readonly instance: "shared" | "independent";
 };
 
-export type PresetNode<Reference extends PresetReference> = {
+export type PresetNode<
+  Reference extends PresetReference,
+  Layout = never,
+  CreationInput = never,
+> = {
   readonly reference: Reference;
+  /** 由工作区策略解释的节点布局覆盖。 */
+  readonly layout?: Layout;
+  /** 按操作应用、并可由单次调用补充的原生创建输入。 */
+  readonly creationInput?: Partial<Record<PresetOperation, CreationInput>>;
 };
 
 type PresetNodeMap = Readonly<
-  Record<string, { readonly reference: PresetReference }>
+  Record<
+    string,
+    {
+      readonly reference: PresetReference;
+      readonly layout?: unknown;
+      readonly creationInput?: Partial<Record<PresetOperation, unknown>>;
+    }
+  >
 >;
 
 type NodeReference<Nodes extends PresetNodeMap> =
   Nodes[keyof Nodes]["reference"];
 
-export type PresetDefinition<Reference extends PresetReference> = {
+type NodeLayout<Nodes extends PresetNodeMap> =
+  Nodes[keyof Nodes] extends infer Node
+    ? Node extends { readonly layout: infer Layout }
+      ? Layout
+      : never
+    : never;
+
+type NodeCreationInput<Nodes extends PresetNodeMap> =
+  Nodes[keyof Nodes] extends infer Node
+    ? Node extends { readonly creationInput: infer Inputs }
+      ? Inputs extends object
+        ? Inputs[keyof Inputs]
+        : never
+      : never
+    : never;
+
+export type PresetDefinition<
+  Reference extends PresetReference,
+  Layout = never,
+  CreationInput = never,
+> = {
   readonly kind: "preset";
   readonly metadata: {
     readonly alias: string;
@@ -24,7 +59,9 @@ export type PresetDefinition<Reference extends PresetReference> = {
     readonly description: string;
   };
   readonly operations: readonly PresetOperation[];
-  readonly nodes: Readonly<Record<string, PresetNode<Reference>>>;
+  readonly nodes: Readonly<
+    Record<string, PresetNode<Reference, Layout, CreationInput>>
+  >;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -42,7 +79,11 @@ export function definePreset<const Nodes extends PresetNodeMap>(options: {
   readonly metadata: PresetDefinition<NodeReference<Nodes>>["metadata"];
   readonly operations: readonly PresetOperation[];
   readonly nodes: Nodes;
-}): PresetDefinition<NodeReference<Nodes>> & { readonly nodes: Nodes } {
+}): PresetDefinition<
+  NodeReference<Nodes>,
+  NodeLayout<Nodes>,
+  NodeCreationInput<Nodes>
+> & { readonly nodes: Nodes } {
   requireText(options.metadata.alias, "别名");
   requireText(options.metadata.title, "标题");
   requireText(options.metadata.description, "说明");
@@ -64,7 +105,10 @@ export function definePreset<const Nodes extends PresetNodeMap>(options: {
     throw new Error("预设至少声明一个节点");
   }
   const independentReferences = new Set<string>();
-  const nodes: Record<string, PresetNode<NodeReference<Nodes>>> = {};
+  const nodes: Record<
+    string,
+    PresetNode<NodeReference<Nodes>, unknown, unknown>
+  > = {};
   for (const [identity, value] of nodeEntries) {
     if (!/^[a-z][a-z0-9-]*$/u.test(identity)) {
       throw new Error(`预设节点身份无效：${identity}`);
@@ -85,12 +129,37 @@ export function definePreset<const Nodes extends PresetNodeMap>(options: {
       }
       independentReferences.add(reference.identity);
     }
-    nodes[identity] = Object.freeze({ reference });
+    if (value.creationInput !== undefined) {
+      if (!isRecord(value.creationInput)) {
+        throw new Error(`预设节点创建输入无效：${identity}`);
+      }
+      for (const operation of Object.keys(value.creationInput)) {
+        if (
+          (operation !== "init" && operation !== "add") ||
+          !options.operations.includes(operation)
+        ) {
+          throw new Error(`预设节点创建输入操作无效：${identity}/${operation}`);
+        }
+        if (!isRecord(value.creationInput[operation])) {
+          throw new Error(
+            `预设节点创建输入必须是对象：${identity}/${operation}`,
+          );
+        }
+      }
+    }
+    nodes[identity] = Object.freeze({
+      ...value,
+      reference,
+    });
   }
   return Object.freeze({
     kind: "preset",
     metadata: Object.freeze({ ...options.metadata }),
     operations: Object.freeze(operations),
     nodes: Object.freeze(nodes) as Nodes,
-  });
+  }) as unknown as PresetDefinition<
+    NodeReference<Nodes>,
+    NodeLayout<Nodes>,
+    NodeCreationInput<Nodes>
+  > & { readonly nodes: Nodes };
 }

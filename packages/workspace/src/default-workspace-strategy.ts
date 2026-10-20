@@ -100,6 +100,11 @@ export type DefaultWorkspaceState = {
   };
 };
 
+/** 默认策略把单个包节点放入指定目录，并按参考包名派生其默认叶名。 */
+export type DefaultWorkspaceNodeLayout = {
+  readonly packageDirectory: string;
+};
+
 const workspaceSource = createTemplateSourceHandle(
   fileURLToPath(new URL("../", import.meta.url)),
 );
@@ -942,7 +947,8 @@ export function createDefaultWorkspaceStrategy<
   DefaultWorkspaceState,
   PackageContribution,
   CreationInput,
-  ReferencePackage
+  ReferencePackage,
+  DefaultWorkspaceNodeLayout
 > {
   return {
     identity: "default",
@@ -1110,15 +1116,19 @@ export function createDefaultWorkspaceStrategy<
     bindings({ contentByIdentity, providers }) {
       return nativeBindings(contentByIdentity, providers);
     },
-    createDefinition({ context, content, creationInput }) {
+    createDefinition({ context, content, creationInput, layout }) {
       const selectedLeaf = creationInput?.leafName ?? content.defaultLeafName;
+      const defaultPath =
+        layout === undefined
+          ? content.defaultPath
+          : path.posix.join(layout.packageDirectory, content.defaultLeafName);
       return assertDefaultPackageDefinition({
         name: "@" + context.defaultPackageScope + "/" + selectedLeaf,
         path:
           creationInput?.packagePath ??
           (creationInput?.leafName === undefined
-            ? content.defaultPath
-            : siblingPackagePath(content.defaultPath, selectedLeaf)),
+            ? defaultPath
+            : siblingPackagePath(defaultPath, selectedLeaf)),
         role: content.role,
       });
     },

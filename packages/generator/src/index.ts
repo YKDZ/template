@@ -8,6 +8,7 @@ import {
 } from "@ykdz/template-core/package-contribution";
 import type {
   PresetDefinition,
+  PresetNode,
   PresetReference,
 } from "@ykdz/template-core/preset-definition";
 import {
@@ -90,13 +91,15 @@ export type Generator<
   Input,
   CreationInput extends PackageCreationInput = PackageCreationInput,
   Reference extends PresetReference = PresetReference,
+  NodeLayout = unknown,
 > = {
   init(options: {
     readonly targetRoot: string;
     readonly selection: {
       readonly roots: readonly GeneratorSelectionInput<
         Reference,
-        CreationInput
+        CreationInput,
+        NodeLayout
       >[];
     };
     readonly strategyInput: Input;
@@ -109,7 +112,13 @@ export type Generator<
       readonly dryRun?: boolean;
     } & (
       | { readonly contentIdentity: string }
-      | { readonly preset: PresetDefinition<Reference> }
+      | {
+          readonly preset: PresetDefinition<
+            Reference,
+            NodeLayout,
+            CreationInput
+          >;
+        }
     ),
   ): Promise<GeneratorResult>;
 };
@@ -117,10 +126,11 @@ export type Generator<
 type GeneratorSelectionInput<
   Reference extends PresetReference,
   CreationInput extends PackageCreationInput,
+  NodeLayout,
 > =
-  | GeneratorSelectionRoot<CreationInput>
+  | GeneratorSelectionRoot<CreationInput, NodeLayout>
   | {
-      readonly preset: PresetDefinition<Reference>;
+      readonly preset: PresetDefinition<Reference, NodeLayout, CreationInput>;
       readonly creationInput?: CreationInput;
     };
 
@@ -128,10 +138,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isPresetDefinition<Reference extends PresetReference>(
+function isPresetDefinition<
+  Reference extends PresetReference,
+  NodeLayout,
+  CreationInput,
+>(
   value: unknown,
-): value is PresetDefinition<Reference> {
+): value is PresetDefinition<Reference, NodeLayout, CreationInput> {
   return isRecord(value) && value.kind === "preset" && isRecord(value.nodes);
+}
+
+function mergeCreationInput<CreationInput extends PackageCreationInput>(
+  defaults: CreationInput | undefined,
+  supplied: CreationInput | undefined,
+): CreationInput | undefined {
+  if (defaults === undefined) return supplied;
+  if (supplied === undefined) return defaults;
+  return { ...defaults, ...supplied } as CreationInput;
 }
 
 function fail(
@@ -241,21 +264,29 @@ export function createGenerator<
   Contribution extends PackageContribution,
   CreationInput extends PackageCreationInput,
   Content extends GeneratorContent<Context, Contribution, CreationInput>,
+  NodeLayout,
 >(options: {
-  readonly content: readonly (Content | PresetDefinition<Content>)[];
+  readonly content: readonly (
+    | Content
+    | PresetDefinition<Content, NoInfer<NodeLayout>, NoInfer<CreationInput>>
+  )[];
   readonly strategy: WorkspaceStrategy<
     Context,
     Input,
     State,
     Contribution,
     CreationInput,
-    Content
+    Content,
+    NodeLayout
   >;
-}): Generator<Input, CreationInput, Content> {
+}): Generator<Input, CreationInput, Content, NodeLayout> {
   const contentMembers = options.content.filter(
-    (content): content is Content => !isPresetDefinition<Content>(content),
+    (content): content is Content =>
+      !isPresetDefinition<Content, NodeLayout, CreationInput>(content),
   );
-  const presetMembers = options.content.filter(isPresetDefinition<Content>);
+  const presetMembers = options.content.filter(
+    isPresetDefinition<Content, NodeLayout, CreationInput>,
+  );
   const contentByIdentity = new Map(
     contentMembers.map((content) => [content.identity, content]),
   );
@@ -286,27 +317,35 @@ export function createGenerator<
   }
 
   function expandPreset(options_: {
-    readonly preset: PresetDefinition<Content>;
+    readonly preset: PresetDefinition<Content, NodeLayout, CreationInput>;
     readonly operation: "init" | "add";
     readonly creationInput?: CreationInput;
-  }): GeneratorSelectionRoot<CreationInput>[] {
+  }): GeneratorSelectionRoot<CreationInput, NodeLayout>[] {
     if (!presets.has(options_.preset)) {
       throw new Error("所选预设未由显式内容集合提供");
     }
     if (!options_.preset.operations.includes(options_.operation)) {
       throw new Error(`预设不支持${options_.operation}操作`);
     }
-    const nodes = Object.entries(options_.preset.nodes);
+    const nodes = Object.entries(options_.preset.nodes) as [
+      string,
+      PresetNode<Content, NodeLayout, CreationInput>,
+    ][];
     if (options_.creationInput !== undefined && nodes.length !== 1) {
       throw new Error("多节点预设不能接收单一包创建输入");
     }
-    return nodes.map(([nodeIdentity, node]) => ({
-      nodeIdentity,
-      contentIdentity: node.reference.identity,
-      ...(options_.creationInput === undefined
-        ? {}
-        : { creationInput: options_.creationInput }),
-    }));
+    return nodes.map(([nodeIdentity, node]) => {
+      const creationInput = mergeCreationInput(
+        node.creationInput?.[options_.operation],
+        options_.creationInput,
+      );
+      return {
+        nodeIdentity,
+        contentIdentity: node.reference.identity,
+        ...(node.layout === undefined ? {} : { layout: node.layout }),
+        ...(creationInput === undefined ? {} : { creationInput }),
+      };
+    });
   }
 
   function findByPackageId(
@@ -663,7 +702,8 @@ export function createGenerator<
     readonly selection: {
       readonly roots: readonly GeneratorSelectionInput<
         Content,
-        CreationInput
+        CreationInput,
+        NodeLayout
       >[];
     };
     readonly strategyInput: Input;
@@ -710,6 +750,7 @@ export function createGenerator<
         const definition = options.strategy.createDefinition({
           context: prepared.context,
           content,
+          ...(root.layout === undefined ? {} : { layout: root.layout }),
           ...(root.creationInput === undefined
             ? {}
             : { creationInput: root.creationInput }),
@@ -794,7 +835,9 @@ export function createGenerator<
       readonly dryRun?: boolean;
     } & (
       | { readonly contentIdentity: string }
-      | { readonly preset: PresetDefinition<Content> }
+      | {
+          readonly preset: PresetDefinition<Content, NodeLayout, CreationInput>;
+        }
     ),
   ): Promise<GeneratorResult> {
     try {
@@ -874,6 +917,9 @@ export function createGenerator<
       const definition = options.strategy.createDefinition({
         context,
         content: selected,
+        ...(selectionRoot.layout === undefined
+          ? {}
+          : { layout: selectionRoot.layout }),
         ...(creationInput === undefined ? {} : { creationInput }),
       });
       const conflicting = blueprint.packages.find(
