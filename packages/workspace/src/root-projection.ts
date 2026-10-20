@@ -1,8 +1,9 @@
-import { mapPackageNamesInJson } from "@ykdz/template-core/package-name-projection";
 import type { ProjectProjectionReconciliation } from "@ykdz/template-core/project-projection";
 import type { RenderOperation } from "@ykdz/template-core/renderer";
-import { workspaceInstallPolicySnapshot } from "@ykdz/template-core/workspace-policy-snapshot";
+import { mapPackageNamesInJson } from "@ykdz/template-workspace-authoring/package-name-projection";
 import { stringify as stringifyYaml } from "yaml";
+
+import { workspaceInstallPolicySnapshot } from "./workspace-policy-snapshot.ts";
 
 export const packageManifestKeyOrder = [
   "name",

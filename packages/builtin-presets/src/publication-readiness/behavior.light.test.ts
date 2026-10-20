@@ -13,8 +13,8 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 
 import { referencePackage } from "@ykdz/reference-ts-cli/template";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { resolveTemplateSource } from "@ykdz/template-core/renderer";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
 
 const workspaces: string[] = [];

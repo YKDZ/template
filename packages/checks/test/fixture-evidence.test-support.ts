@@ -27,11 +27,11 @@ import {
   type GeneratedRepositoryPlan,
 } from "@ykdz/template-builtin-presets";
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
   createTemplateSourceHandle,
   renderNewProject,
 } from "@ykdz/template-core/renderer";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
 
 import { findFixtureEvidenceArchitectureFindings } from "../src/check-fixture-evidence-architecture.ts";

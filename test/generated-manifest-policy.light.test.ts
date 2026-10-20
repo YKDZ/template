@@ -13,8 +13,8 @@ import {
   planGeneratedRepositoryInitialization,
 } from "@ykdz/template-builtin-presets";
 import { materializeProjectProjection } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 // 直接规划新建初始化会派生新建公开 ts-cli 候选，需要发版快照的精确三段版本。
 const toolchain = {

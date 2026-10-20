@@ -7,12 +7,12 @@ import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
 } from "@ykdz/template-builtin-presets";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
   canConsumeNodePackageNameImport,
   canLinkNodePackageRoles,
   canProvideSourceConditionPackageNameImport,
 } from "@ykdz/template-workspace/project-linking";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
 
 import type { CliJourney } from "../journey.ts";

@@ -16,7 +16,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
-import { generatedJsonPrintWidth } from "./workspace-policy-snapshot.ts";
+import { generatedJsonPrintWidth } from "./renderer-policy-snapshot.ts";
 
 export type RenderOperationProvenance = {
   readonly definitionName: string;

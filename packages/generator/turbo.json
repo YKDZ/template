@@ -2,6 +2,14 @@
   "extends": ["//"],
   "tags": ["template-generator"],
   "tasks": {
+    "test": {
+      "dependsOn": [],
+      "tags": ["quality:light"],
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "persistent": false
+    },
     "build": {
       "dependsOn": ["@ykdz/template-core#build"],
       "tags": ["quality:light"],

@@ -18,12 +18,12 @@ import {
   reconcileProjectProjections,
   type ProjectProjection,
 } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
   createTemplateSourceHandle,
   renderNewProject,
 } from "@ykdz/template-core/renderer";
 import { assertPackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 import {
   deriveFixtureMatrix,

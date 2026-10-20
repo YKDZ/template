@@ -22,8 +22,8 @@ import {
   type BuiltInPresetDefinition,
 } from "@ykdz/template-builtin-presets";
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { parse } from "yaml";
 
 const toolchain = { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" };

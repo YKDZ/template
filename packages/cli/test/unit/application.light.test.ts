@@ -8,7 +8,7 @@ import {
   builtInPresetRegistry,
   prepareGeneratedRepositoryInitialization,
 } from "@ykdz/template-builtin-presets";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 import { runInit, type ApplicationRuntime } from "../../src/application.ts";
 

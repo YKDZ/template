@@ -97,10 +97,10 @@ function projectSnapshot(
     )
   )
     throw new Error(
-      "packages/core/src/release-toolchain-snapshot.ts: 无法解析静态快照语法",
+      "packages/workspace/src/release-toolchain-snapshot.ts: 无法解析静态快照语法",
     );
   const source = ts.createSourceFile(
-    "packages/core/src/release-toolchain-snapshot.ts",
+    "packages/workspace/src/release-toolchain-snapshot.ts",
     contents,
     ts.ScriptTarget.Latest,
     true,
@@ -151,7 +151,7 @@ export async function planRepositoryConfiguration(
   const partialFiles = [
     "packages/cli/package.json",
     "references/ts-cli/package.json",
-    "packages/core/src/release-toolchain-snapshot.ts",
+    "packages/workspace/src/release-toolchain-snapshot.ts",
     "references/rust-bin/template/rust-toolchain.toml",
   ];
   const contents = await Promise.all(

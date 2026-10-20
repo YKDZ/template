@@ -13,7 +13,6 @@ import {
   type BuiltInPresetDefinition,
 } from "@ykdz/template-builtin-presets";
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
   createTemplateSourceHandle,
   renderNewProject,
@@ -25,6 +24,7 @@ import {
   type PackageContributionReplayAdapter,
   type PlannedPackageContribution,
 } from "@ykdz/template-workspace-authoring/preset-definition";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 const fixtureSource = createTemplateSourceHandle(
   path.join(process.cwd(), "test/fixtures/development-container-tool-layers"),

@@ -12,6 +12,11 @@
       "types": "./dist/default-package-role.d.ts",
       "default": "./dist/default-package-role.js"
     },
+    "./package-name-projection": {
+      "source": "./src/package-name-projection.ts",
+      "types": "./dist/package-name-projection.d.ts",
+      "default": "./dist/package-name-projection.js"
+    },
     "./package-contribution": {
       "source": "./src/package-contribution.ts",
       "types": "./dist/package-contribution.d.ts",
@@ -34,6 +39,7 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
+    "sync:resource-ignore-snapshot": "node scripts/sync-resource-ignore-snapshot.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
