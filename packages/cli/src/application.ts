@@ -305,18 +305,37 @@ function readBlueprintFailure(
 function initOperationFailure(options: {
   readonly phase: "metadata" | "planning" | "render" | "reconciliation";
   readonly targetDir: string;
+  readonly message?: string;
 }): Extract<InitCommandResult, { readonly status: "operation-failure" }> {
   const phase = options.phase === "render" ? "render" : "planning";
   const phaseName = phase === "planning" ? "生成规划" : "目标目录渲染";
+  const fallbackMessage = `${phaseName}失败。`;
   return {
     status: "operation-failure",
     phase,
     targetDir: options.targetDir,
     error: {
-      message: `${phaseName}失败。`,
-      suggestion: "检查目标目录与运行环境后重试；若问题持续发生，请人工处理。",
+      message:
+        options.message === undefined
+          ? fallbackMessage
+          : safeGeneratorFailureMessage(options.message, fallbackMessage),
+      suggestion:
+        options.message === undefined
+          ? "检查目标目录与运行环境后重试；若问题持续发生，请人工处理。"
+          : "根据错误信息检查所属内容包及其声明资源、目标目录后重试；若问题持续发生，请人工处理。",
     },
   };
+}
+
+function safeGeneratorFailureMessage(
+  message: string,
+  fallback: string,
+): string {
+  const firstLine = message.split(/\r?\n/u, 1)[0]?.trim();
+  if (firstLine === undefined || firstLine.length === 0) return fallback;
+  return firstLine
+    .replace(/file:\/\/\S+/gu, "本地模块路径")
+    .replace(/(^|[\s("'`])(?:[A-Za-z]:[\\/]|\/)[^\s"'`)]*/gu, "$1本地路径");
 }
 
 function initPackageIdentities(
@@ -394,6 +413,7 @@ export async function runInit(
     return initOperationFailure({
       phase: result.phase,
       targetDir: options.dir,
+      message: result.error.message,
     });
   }
   if (result.status === "input-invalid") {
@@ -448,15 +468,22 @@ export async function runInit(
 function packageAdditionOperationFailure(
   phase: "metadata" | "planning" | "render" | "reconciliation",
   diagnostic?: { readonly message: string; readonly suggestion: string },
+  message?: string,
 ): PackageAdditionCommandResult {
   const mappedPhase = phase === "render" ? "reconciliation" : phase;
+  const fallbackMessage = "添加 Package 时发生操作失败。";
   return {
     status: "operation-failure",
     phase: mappedPhase,
     error: diagnostic ?? {
-      message: "添加 Package 时发生操作失败。",
+      message:
+        message === undefined
+          ? fallbackMessage
+          : safeGeneratorFailureMessage(message, fallbackMessage),
       suggestion:
-        "检查生成仓库元数据与工作区状态后重试；若问题持续发生，请人工处理。",
+        message === undefined
+          ? "检查生成仓库元数据与工作区状态后重试；若问题持续发生，请人工处理。"
+          : "根据错误信息检查生成记录、包绑定或所属内容资源后重试；若问题持续发生，请人工处理。",
     },
   };
 }
@@ -490,6 +517,7 @@ export async function runAddPackage(
     return packageAdditionOperationFailure(
       result.phase,
       result.error.diagnostic,
+      result.error.message,
     );
   }
   if (result.status === "input-invalid") {

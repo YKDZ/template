@@ -40,7 +40,7 @@ export const referencePackage: ReferencePackage<
       },
       { name: "smol-toml", purpose: "template-execution" },
     ],
-    scripts: ["build:template"],
+    scripts: ["build:template", "check:author-planning-roles"],
     resources: ["template", "tsconfig.template.json"],
     executionData: ["Cargo.toml", "Cargo.lock", "template/rust-toolchain.toml"],
   },
