@@ -4,6 +4,10 @@
   "tasks": {
     "build": {
       "dependsOn": [
+        "@ykdz/template-core#build",
+        "@ykdz/template-environment#build",
+        "@ykdz/template-generator#build",
+        "@ykdz/template-workspace#build",
         "@ykdz/preset-rust-bin#build",
         "@ykdz/preset-ts-cli#build",
         "@ykdz/preset-ts-lib#build",
@@ -65,6 +69,15 @@
       "dependsOn": [],
       "tags": ["quality:light"],
       "cache": true,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "persistent": false
+    },
+    "test:integration": {
+      "dependsOn": ["build"],
+      "tags": ["quality:heavy"],
+      "passThroughEnv": ["TEMPLATE_CONTENT_ARTIFACT_EVIDENCE_DIR"],
+      "cache": false,
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false

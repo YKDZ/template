@@ -17,7 +17,7 @@
   "scripts": {
     "check:author-planning-roles": "pnpm --workspace-root run author-planning-roles:workspace -- --owner-directory \"$PWD\"",
     "build": "pnpm run build:template",
-    "build:template": "tsc -p tsconfig.template.json --pretty false",
+    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix --ignore-pattern template-dist .",

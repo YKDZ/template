@@ -21,6 +21,7 @@ export const referencePackage: ReferencePackage<
   RustReferenceFacts
 > = defineReferencePackage({
   packageName: "@ykdz/reference-rust-bin",
+  artifactVersion: "0.0.0",
   resolve: (specifier) => import.meta.resolve(specifier),
   resourceRoot: new URL("../", import.meta.url),
   alias: "binary",
@@ -87,8 +88,6 @@ export const referencePackage: ReferencePackage<
     };
   },
   project(contribution, { definition, preparation }) {
-    const targetManifest = { ...contribution.manifest };
-    delete targetManifest.files;
     const { cargoManifest, cargoLock } = preparation.ownerFacts;
     const rustToolchain = contribution.foundation.toolchains.rust;
     if (rustToolchain === undefined) {
@@ -130,7 +129,7 @@ export const referencePackage: ReferencePackage<
     ]);
     return {
       ...contribution,
-      manifest: targetManifest,
+      manifest: contribution.manifest,
       foundation: {
         ...contribution.foundation,
         toolchains: {

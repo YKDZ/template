@@ -759,6 +759,9 @@ importers:
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../workspace
+      execa:
+        specifier: 'catalog:'
+        version: 10.1.1
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1175,7 +1178,7 @@ importers:
         specifier: 'catalog:'
         version: 4.0.0
       '@ykdz/reference-ts-cli':
-        specifier: workspace:*
+        specifier: link:../../references/ts-cli
         version: link:../../references/ts-cli
       '@ykdz/reference-typescript-config':
         specifier: workspace:*

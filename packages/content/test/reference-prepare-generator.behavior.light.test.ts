@@ -236,6 +236,41 @@ void describe("参考包 owner prepare 的公开生成器生命周期", () => {
     await assert.rejects(stat(targetRoot), { code: "ENOENT" });
   });
 
+  void it("作者模板排除规则不要求作者源码作为生成资源存在", () => {
+    const packageDefinition = defineReferencePackage({
+      packageName: library.manifest.name,
+      resolve: (specifier) => import.meta.resolve(specifier),
+      resourceRoot: resourceRoot(library.manifest.name),
+      alias: library.alias,
+      instance: library.instance,
+      defaultLeafName: library.defaultLeafName,
+      defaultPath: library.defaultPath,
+      role: library.role,
+      resources: ["."],
+      template: {
+        dependencies: library.templateDependencies,
+        scripts: ["build:template"],
+        resources: [
+          "template/__author-only-source__",
+          "tsconfig.template.json",
+        ],
+      },
+      foundation: simpleFoundation(),
+      environmentNeeds: [],
+    });
+
+    assert.doesNotThrow(() => packageDefinition.prepare());
+    assert.deepEqual(
+      packageDefinition
+        .prepare()
+        .resources.map((resource) => resource.path)
+        .filter((resource) =>
+          resource.startsWith("template/__author-only-source__"),
+        ),
+      [],
+    );
+  });
+
   void it("所属准备不能读取资源声明范围外的文本", async (context) => {
     const temporaryRoot = await mkdtemp(
       path.join(tmpdir(), "template-reference-prepare-out-of-scope-"),
