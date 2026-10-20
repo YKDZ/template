@@ -26,6 +26,10 @@ export const referencePackage = defineReferencePackage({
     workspacePackageGlobs: [`${definition.path.split("/")[0]}/*`],
   }),
   environmentNeeds: [],
+  project: (contribution) => ({
+    ...contribution,
+    manifest: { ...contribution.manifest, files: ["dist"] },
+  }),
 });
 
 /** 根拥有跨包准备顺序；真实依赖图无需反向依赖应用或迁移包。 */

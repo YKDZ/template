@@ -24,4 +24,11 @@ export const referencePackage = defineReferencePackage({
     workspacePackageGlobs: [`${definition.path.split("/")[0]}/*`],
   }),
   environmentNeeds: [],
+  project: (contribution) => ({
+    ...contribution,
+    manifest: {
+      ...contribution.manifest,
+      files: ["drizzle.config.ts", "drizzle/migrations"],
+    },
+  }),
 });

@@ -76,6 +76,8 @@ export const referencePackage: ReferencePackage = defineReferencePackage({
     };
   },
   project(contribution, { definition }) {
+    const targetManifest = { ...contribution.manifest };
+    delete targetManifest.files;
     const cargoManifest = readCargoFile("Cargo.toml");
     const cargoPackage = cargoManifest.data.package as Record<string, unknown>;
     const nativeName = cargoPackage.name;
@@ -114,6 +116,7 @@ export const referencePackage: ReferencePackage = defineReferencePackage({
     ]);
     return {
       ...contribution,
+      manifest: targetManifest,
       operations: contribution.operations.map((operation) =>
         "to" in operation
           ? (replacements.get(operation.to) ?? operation)

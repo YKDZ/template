@@ -108,6 +108,7 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
       ...contribution,
       manifest: {
         ...contribution.manifest,
+        files: ["dist"],
         bin: { [commandName]: Object.values(bin)[0]! },
         devDependencies,
         engines: {

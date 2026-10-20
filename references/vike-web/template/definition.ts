@@ -42,6 +42,7 @@ export const referencePackage = defineReferencePackage({
   ],
   project: (contribution, { definition }) => ({
     ...contribution,
+    manifest: { ...contribution.manifest, files: ["dist"] },
     ciDiagnosticArtifacts: [
       {
         kind: "playwright",
