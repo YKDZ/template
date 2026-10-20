@@ -37,6 +37,8 @@ export type AuthoredContentFixtureOptions = {
   readonly featureDependsOnTheme?: boolean;
   readonly featureNativeDevDependencies?: Readonly<Record<string, string>>;
   readonly featureTemplateDependencies?: readonly ReferenceTemplateDependency[];
+  readonly addonDependsOnTheme?: boolean;
+  readonly addonTemplateDependencies?: readonly ReferenceTemplateDependency[];
   readonly includeTheme?: boolean;
   readonly includeAddon?: boolean;
   readonly sdkVersions?: ReadonlyMap<string, string>;
@@ -366,6 +368,19 @@ export async function createAuthoredContentFixture(
     alias: "addon",
     instance: "independent",
     resourcePath: "src/addon.ts",
+    dependencies:
+      options.addonDependsOnTheme === true
+        ? { "@fixture/typescript-config": "workspace:*" }
+        : {},
+    ...(options.addonTemplateDependencies === undefined
+      ? options.addonDependsOnTheme === true
+        ? {
+            templateDependencies: [
+              { name: "@fixture/typescript-config", purpose: "target" },
+            ],
+          }
+        : {}
+      : { templateDependencies: options.addonTemplateDependencies }),
   });
   await writePresetPackage({
     collectionRoot,

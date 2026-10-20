@@ -781,12 +781,18 @@ function generatedProviderAggregateSource(
   );
   return [
     'import { deriveTemplateMembers } from "./template-members.js";',
+    'import type { LoadedTemplateContentMember, TemplateContentTypes } from "./template-content-types.js";',
     ...imports,
     "",
     "export { deriveTemplateMembers };",
+    'export type { ContentKind } from "./template-content-types.js";',
     "export const templateContent = [",
     ...packageNames.map((_, index) => `  ...provider${index},`),
-    "] as const;",
+    "] as readonly LoadedTemplateContentMember[];",
+    "type ContentTypes = TemplateContentTypes<typeof templateContent>;",
+    'export type TemplateContentMember = ContentTypes["member"];',
+    'export type TemplatePreset = ContentTypes["preset"];',
+    'export type TemplateReferencePackage = ContentTypes["reference"];',
     "const templateMembers = deriveTemplateMembers(templateContent);",
     "export const templatePresets = templateMembers.presets;",
     "export const templateReferencePackages = templateMembers.referencePackages;",
@@ -995,6 +1001,10 @@ async function createCollectionInstallRoot(options: {
     fileURLToPath(new URL("../src/template-members.ts", import.meta.url)),
     "utf8",
   );
+  const contentTypesModuleSource = await readFile(
+    fileURLToPath(new URL("../src/template-content-types.ts", import.meta.url)),
+    "utf8",
+  );
   return await createModulePackageRoot({
     root: options.root,
     packageName: options.packageName,
@@ -1002,7 +1012,10 @@ async function createCollectionInstallRoot(options: {
     source: generatedProviderAggregateSource(
       options.providers.map(({ packageName }) => packageName),
     ),
-    additionalSources: new Map([["template-members.ts", memberModuleSource]]),
+    additionalSources: new Map([
+      ["template-members.ts", memberModuleSource],
+      ["template-content-types.ts", contentTypesModuleSource],
+    ]),
     dependencies,
     packageRoots,
     sdkPackageRoots: options.sdkPackageRoots,
