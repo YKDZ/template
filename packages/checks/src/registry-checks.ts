@@ -8,7 +8,6 @@ import {
   planGeneratedRepositoryInitialization,
   loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
-  readRustToolchainChannelFromToml,
   resolveBuiltInTemplateSource,
   type BuiltInPresetDefinition,
   type GeneratedRepositoryPlan,
@@ -34,6 +33,7 @@ import {
   canProvideSourceConditionPackageNameImport,
 } from "@ykdz/template-workspace/project-linking";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
+import { readRustToolchainChannelFromToml } from "@ykdz/template-workspace/rust-toolchain-facts";
 import { parse as parseYaml } from "yaml";
 
 /** A real registry Definition and optional Package Addition planner scenario. */
@@ -171,7 +171,13 @@ export function deriveFocusedProjectLinkScenarios(): readonly GeneratedScenario[
 
 type SourceBackedOperation = Extract<
   RenderOperation,
-  { kind: "copyFile" | "writeTextTemplate" | "writeTextFromFragments" }
+  {
+    kind:
+      | "copyFile"
+      | "writeText"
+      | "writeTextTemplate"
+      | "writeTextFromFragments";
+  }
 >;
 
 export type PlanSourceReference = {
@@ -191,6 +197,19 @@ function operationReferences(
       sourceFile: resolveSource(fragment.source, fragment.from),
     }));
   }
+  if (operation.kind === "writeText") {
+    return operation.templateSource === undefined
+      ? []
+      : [
+          {
+            generatedPath: operation.to,
+            sourceFile: resolveSource(
+              operation.templateSource.handle,
+              operation.templateSource.path,
+            ),
+          },
+        ];
+  }
   return [
     {
       generatedPath: operation.to,
@@ -208,6 +227,7 @@ export function planSourceReferences(options: {
   return options.plan.operations.flatMap((operation) => {
     if (
       operation.kind !== "copyFile" &&
+      operation.kind !== "writeText" &&
       operation.kind !== "writeTextTemplate" &&
       operation.kind !== "writeTextFromFragments"
     ) {
@@ -491,10 +511,7 @@ export async function validatePlanDependencyCatalog(
 }
 
 function operationOutputPath(operation: RenderOperation): string | undefined {
-  if (
-    operation.kind === "setExecutable" ||
-    operation.kind === "replaceAnchors"
-  ) {
+  if (operation.kind === "setExecutable") {
     return operation.path;
   }
   return "to" in operation ? operation.to : undefined;

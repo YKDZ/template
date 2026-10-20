@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import {
   createTemplateSourceHandle,
+  resolveTemplateSource,
   type CopyFileOperation,
   type RenderOperation,
   type TemplateSourceHandle,
@@ -18,6 +19,7 @@ import type { PackageContribution } from "./package-contribution.ts";
 import { mapPackageNamesInJson } from "./package-name-projection.ts";
 import type { GenerationContext } from "./preset-definition.ts";
 import { resourceIgnoreSnapshot } from "./resource-ignore-snapshot.ts";
+import { mapTypeScriptModuleSpecifiers } from "./typescript-module-specifiers.ts";
 
 export type ReferencePackageManifest = Readonly<Record<string, unknown>> & {
   readonly name: string;
@@ -272,7 +274,6 @@ export function defineReferencePackage(options: {
         }
         projected[field] = dependencies;
       }
-      const moduleSpecifiers = Object.fromEntries(names);
       const outputOperations: RenderOperation[] = [
         {
           kind: "writeJson",
@@ -332,12 +333,40 @@ export function defineReferencePackage(options: {
               ? operation
               : { kind: "writeJson", to: operation.to, value },
           );
-        } else
-          outputOperations.push(
-            relative.endsWith(".ts")
-              ? { ...operation, moduleSpecifiers }
-              : operation,
+        } else if (relative.endsWith(".ts")) {
+          const sourceFile = resolveTemplateSource(
+            operation.source,
+            operation.from,
           );
+          const original = readFileSync(sourceFile, "utf8");
+          const text = mapTypeScriptModuleSpecifiers(
+            original,
+            names,
+            sourceFile,
+          );
+          outputOperations.push(
+            text === original
+              ? operation
+              : {
+                  kind: "writeText",
+                  to: operation.to,
+                  text,
+                  mode: statSync(sourceFile).mode & 0o777,
+                  templateSource: {
+                    handle: operation.source,
+                    path: operation.from,
+                  },
+                  ...(operation.overwrite === undefined
+                    ? {}
+                    : { overwrite: operation.overwrite }),
+                  ...(operation.provenance === undefined
+                    ? {}
+                    : { provenance: operation.provenance }),
+                },
+          );
+        } else {
+          outputOperations.push(operation);
+        }
       }
       const contribution: PackageContribution = {
         definition: input.definition,

@@ -8,7 +8,6 @@ export {
   prepareGeneratedRepositoryInitialization,
   planGeneratedRepositoryInitialization,
   planGeneratedRepositoryPackageAddition,
-  readRustToolchainChannelFromToml,
   resolveBuiltInTemplateSource,
   validateProjectBlueprint,
 } from "./foundation.ts";
@@ -31,5 +30,4 @@ export type {
   NextStepInstruction,
   PublicationSetupHandoff,
   ResolvedInitialization,
-  RustToolchainChannelReading,
 } from "./foundation.ts";

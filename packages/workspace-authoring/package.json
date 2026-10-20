@@ -22,6 +22,11 @@
       "types": "./dist/package-contribution.d.ts",
       "default": "./dist/package-contribution.js"
     },
+    "./typescript-module-specifiers": {
+      "source": "./src/typescript-module-specifiers.ts",
+      "types": "./dist/typescript-module-specifiers.d.ts",
+      "default": "./dist/typescript-module-specifiers.js"
+    },
     "./preset-definition": {
       "source": "./src/preset-definition.ts",
       "types": "./dist/preset-definition.d.ts",
@@ -45,7 +50,8 @@
   "dependencies": {
     "@ykdz/template-core": "workspace:*",
     "ignore": "catalog:",
-    "jsonc-parser": "catalog:"
+    "jsonc-parser": "catalog:",
+    "typescript": "catalog:public-cli-runtime"
   },
   "devDependencies": {
     "@types/node": "catalog:",
