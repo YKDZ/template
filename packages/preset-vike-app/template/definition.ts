@@ -3,6 +3,7 @@ import { referencePackage as migrations } from "@ykdz/reference-vike-migrations/
 import { referencePackage as web } from "@ykdz/reference-vike-web/template";
 import {
   definePreset,
+  presetOwnerFromManifest,
   type PresetProjectOptions,
 } from "@ykdz/template-core/preset-definition";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
@@ -13,23 +14,7 @@ import type { ProjectRequirement } from "@ykdz/template-workspace-authoring/proj
 
 import presetPackage from "../package.json" with { type: "json" };
 
-const templateExportPath = Object.entries(presetPackage.exports).find(
-  ([exportPath, definition]) =>
-    (exportPath === "." || exportPath.startsWith("./")) &&
-    typeof definition === "object" &&
-    definition !== null &&
-    "source" in definition &&
-    definition.source === "./template/definition.ts",
-)?.[0];
-
-if (templateExportPath === undefined) {
-  throw new Error("Vike 预设包清单未公开当前模板入口");
-}
-
-const owner = {
-  packageName: presetPackage.name,
-  exportPath: templateExportPath,
-};
+const owner = presetOwnerFromManifest(presetPackage, "./template");
 
 function requireNode(
   nodeInstances: ReadonlyMap<string, PackageDefinition>,
