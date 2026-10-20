@@ -24,6 +24,7 @@ const { referencePackages } = deriveTemplateMembers(templateContent);
 await rm(output, { recursive: true, force: true });
 
 for (const reference of referencePackages) {
+  reference.prepare();
   const targetRoot = path.join(output, reference.manifest.name);
   const templateExport = reference.manifest.exports?.["./template"];
   const entry =

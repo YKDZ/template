@@ -9,10 +9,16 @@ export const referencePackage = defineReferencePackage({
   defaultPath: "apps/api",
   role: "runtime-service",
   resources: ["."],
-  authoring: {
-    dependencies: ["@ykdz/template-core", "@ykdz/template-workspace-authoring"],
+  template: {
+    dependencies: [
+      { name: "@ykdz/template-core", purpose: "template-execution" },
+      {
+        name: "@ykdz/template-workspace-authoring",
+        purpose: "template-execution",
+      },
+    ],
     scripts: ["build:template"],
-    resources: ["template", "template-dist", "tsconfig.template.json"],
+    resources: ["template", "tsconfig.template.json"],
   },
   foundation: ({ definition }) => ({
     toolchains: {},

@@ -64,6 +64,7 @@ function webContribution(
   context: GenerationContext,
   topology: VikePackageDefinitions,
 ): PackageContribution {
+  web.prepare();
   const contribution = web.contribute({
     context,
     definition: topology.web,
@@ -91,6 +92,7 @@ function databaseContribution(
   context: GenerationContext,
   topology: VikePackageDefinitions,
 ): PackageContribution {
+  database.prepare();
   const contribution = database.contribute({
     context,
     definition: topology.db,
@@ -111,6 +113,7 @@ function migrationsContribution(
   context: GenerationContext,
   topology: VikePackageDefinitions,
 ): PackageContribution {
+  migration.prepare();
   return migration.contribute({
     context,
     definition: topology.migrations,

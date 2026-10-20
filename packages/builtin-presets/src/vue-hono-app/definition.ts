@@ -28,17 +28,21 @@ function webDefinition(context: GenerationContext): PackageDefinition {
 }
 const apiReplayAdapter = definePackageContributionReplayAdapter({
   identity: "api",
-  replay: ({ context, packageDefinition }) =>
-    api.contribute({ context, definition: packageDefinition }),
+  replay: ({ context, packageDefinition }) => {
+    api.prepare();
+    return api.contribute({ context, definition: packageDefinition });
+  },
 });
 const webReplayAdapter = definePackageContributionReplayAdapter({
   identity: "web",
-  replay: ({ context, packageDefinition, initialPackages }) =>
-    web.contribute({
+  replay: ({ context, packageDefinition, initialPackages }) => {
+    web.prepare();
+    return web.contribute({
       context,
       definition: packageDefinition,
       bindings: new Map([[api.manifest.name, initialPackages.require("api")]]),
-    }),
+    });
+  },
 });
 
 export const vueHonoAppDefinition = {
@@ -65,11 +69,14 @@ export const vueHonoAppDefinition = {
     };
   },
   planInitialization(context) {
+    api.prepare();
     return apiReplayAdapter.identify(
       api.contribute({ context, definition: apiDefinition(context) }),
     );
   },
   planInitializationContributions(context) {
+    api.prepare();
+    web.prepare();
     const apiPackage = apiDefinition(context);
     return [
       apiReplayAdapter.identify(

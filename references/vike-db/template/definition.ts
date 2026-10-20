@@ -11,9 +11,15 @@ export const referencePackage = defineReferencePackage({
   defaultPath: "packages/db",
   role: "shared-library",
   resources: ["."],
-  authoring: {
-    resources: ["template", "template-dist", "tsconfig.template.json"],
-    dependencies: ["@ykdz/template-core", "@ykdz/template-workspace-authoring"],
+  template: {
+    resources: ["template", "tsconfig.template.json"],
+    dependencies: [
+      { name: "@ykdz/template-core", purpose: "template-execution" },
+      {
+        name: "@ykdz/template-workspace-authoring",
+        purpose: "template-execution",
+      },
+    ],
     scripts: ["build:template", "typecheck:template"],
   },
   foundation: ({ definition }) => ({

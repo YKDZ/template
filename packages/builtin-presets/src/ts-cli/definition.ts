@@ -22,6 +22,7 @@ function cliContribution(options: {
   readonly publicationCandidate: boolean;
   readonly creationOrigin?: CandidateCreationOrigin;
 }): PackageContribution {
+  referencePackage.prepare();
   return referencePackage.contribute({
     context: options.context,
     definition: options.packageDefinition ?? {

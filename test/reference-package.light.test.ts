@@ -57,13 +57,13 @@ async function fixture(
     options: {
       packageName: "@author/application",
       resolve,
-      identity: "application",
+      alias: "application",
       instance: "independent" as const,
       defaultLeafName: "application",
       role: "runtime-service" as const,
       resources: ["."],
       resourceIgnore: "/resolve.mjs\n",
-      authoring: { dependencies: [], scripts: [] },
+      template: { dependencies: [], scripts: [] },
       foundation: {
         toolchains: {},
         editorCapabilities: [],
@@ -103,6 +103,8 @@ await test("未提交普通文件自动生成，忽略规则在无 Git 的资源
     ".cache/result": "缓存\n",
   });
   const reference = defineReferencePackage(setup.options);
+  const preparation = reference.prepare();
+  assert.equal(preparation.owner.packageName, "@author/application");
   const contribution = reference.contribute(setup.input);
   await renderProject({
     targetRoot: setup.target,
@@ -140,8 +142,9 @@ await test("普通 JSON 业务资源按原始字节生成，不解释 include �
   const setup = await fixture(context, files);
   const reference = defineReferencePackage({
     ...setup.options,
-    authoring: { dependencies: [], scripts: [], resources: ["template"] },
+    template: { dependencies: [], scripts: [] },
   });
+  reference.prepare();
   const contribution = reference.contribute(setup.input);
   await renderProject({
     targetRoot: setup.target,
@@ -175,6 +178,7 @@ await test("静态 TypeScript 包导入在作者侧映射并保留源码权限",
   await chmod(sourceFile, 0o751);
   const sourceMode = (await stat(sourceFile)).mode & 0o777;
   const reference = defineReferencePackage(setup.options);
+  reference.prepare();
   const contribution = reference.contribute({
     ...setup.input,
     bindings: new Map([
@@ -240,12 +244,13 @@ await test("作者用途声明同步剔除作者资源、命令和任务配置�
   );
   const reference = defineReferencePackage({
     ...setup.options,
-    authoring: {
+    template: {
       dependencies: [],
       scripts: ["build:template"],
       resources: ["template", "template-dist", "tsconfig.template.json"],
     },
   });
+  reference.prepare();
   const contribution = reference.contribute(setup.input);
   await renderProject({
     targetRoot: setup.target,
@@ -276,6 +281,7 @@ await test("作者用途声明同步剔除作者资源、命令和任务配置�
 
 await test("原生 JSONC 配置支持注释和尾逗号，并只移除作者用途", async (context) => {
   const setup = await fixture(context, {
+    "template/definition.ts": "export const source = true;\n",
     "tsconfig.json": `{
       // 作者和产品在维护期共享检查。
       "extends": "@author/config/node.json",
@@ -291,12 +297,13 @@ await test("原生 JSONC 配置支持注释和尾逗号，并只移除作者用�
   });
   const reference = defineReferencePackage({
     ...setup.options,
-    authoring: {
+    template: {
       dependencies: [],
       scripts: ["build:template"],
       resources: ["template"],
     },
   });
+  reference.prepare();
   const contribution = reference.contribute({
     ...setup.input,
     bindings: new Map([
@@ -360,6 +367,7 @@ await test("组合身份映射保留原生依赖协议，并只重映射精确�
     },
   );
   const reference = defineReferencePackage(setup.options);
+  reference.prepare();
   const contribution = reference.contribute({
     ...setup.input,
     bindings: new Map([
@@ -432,8 +440,9 @@ await test("发布载荷保留生成描述读取的作者资产且继续排除�
   });
   const reference = defineReferencePackage({
     ...setup.options,
-    authoring: { dependencies: [], scripts: [], resources: ["template"] },
+    template: { dependencies: [], scripts: [], resources: ["template"] },
   });
+  reference.prepare();
   await renderProject({
     targetRoot: setup.target,
     operations: reference.payloadOperations("payload"),

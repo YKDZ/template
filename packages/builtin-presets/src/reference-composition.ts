@@ -67,7 +67,11 @@ export function referenceDependencyNames(identity: string): readonly string[] {
         return typeof dependencies === "object" && dependencies !== null
           ? Object.keys(dependencies).filter(
               (name) =>
-                !reference.authoringDependencies.includes(name) &&
+                !reference.templateDependencies.some(
+                  (dependency) =>
+                    dependency.name === name &&
+                    dependency.purpose === "template-execution",
+                ) &&
                 referencePackages.some(
                   (candidate) => candidate.manifest.name === name,
                 ),
@@ -201,6 +205,7 @@ export function composeReferenceContributions(options: {
           dependencyName,
           options.context,
         );
+        reference.prepare();
         provider = {
           ...reference.contribute({ context: options.context, definition }),
           planningIdentity: dependencyName,
@@ -220,6 +225,7 @@ export function composeReferenceContributions(options: {
       bindings.set(dependencyName, provider.definition);
     }
     const reference = requireReferencePackage(identity);
+    reference.prepare();
     const original = reference.contribute({
       context: options.context,
       definition: contribution.definition,

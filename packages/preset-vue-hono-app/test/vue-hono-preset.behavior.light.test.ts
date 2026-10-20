@@ -28,16 +28,19 @@ const content = [api, web, vueShared, configuration, library, preset] as const;
 const missingResourceShared = defineReferencePackage({
   packageName: vueShared.manifest.name,
   resolve: (specifier) => import.meta.resolve(specifier),
-  identity: vueShared.identity,
+  alias: vueShared.alias,
   instance: vueShared.instance,
   defaultLeafName: vueShared.defaultLeafName,
   role: vueShared.role,
   resources: ["__missing-vue-shared-resource__.ts"],
-  authoring: {
+  template: {
     dependencies: [
-      "@ykdz/template-core",
-      "@ykdz/template-environment",
-      "@ykdz/template-workspace-authoring",
+      { name: "@ykdz/template-core", purpose: "template-execution" },
+      { name: "@ykdz/template-environment", purpose: "template-execution" },
+      {
+        name: "@ykdz/template-workspace-authoring",
+        purpose: "template-execution",
+      },
     ],
     scripts: ["build:template"],
   },

@@ -17,6 +17,7 @@ function rustContribution(options: {
   readonly packagePath: string;
   readonly packageDefinition?: PackageDefinition;
 }): PackageContribution {
+  referencePackage.prepare();
   return referencePackage.contribute({
     context: options.context,
     definition: options.packageDefinition ?? {

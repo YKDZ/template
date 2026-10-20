@@ -1,8 +1,6 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
 import type { RenderOperation } from "@ykdz/template-core/renderer";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
+import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
 import { rustDevelopmentContainerToolLayer } from "@ykdz/template-environment/development-environment";
 import { rustToolchainEnvironmentNeed } from "@ykdz/template-environment/module-graph";
 import {
@@ -11,17 +9,16 @@ import {
 } from "@ykdz/template-workspace-authoring/reference-package";
 import { parse, type TomlTable } from "smol-toml";
 
-function readCargoFile(file: string): { source: string; data: TomlTable } {
-  const source = readFileSync(
-    fileURLToPath(
-      import.meta.resolve(`@ykdz/reference-rust-bin/assets/${file}`),
-    ),
-    "utf8",
-  );
-  return { source, data: parse(source) };
-}
+type CargoFile = { readonly source: string; readonly data: TomlTable };
+type RustReferenceFacts = {
+  readonly cargoManifest: CargoFile;
+  readonly cargoLock: CargoFile;
+};
 
-export const referencePackage: ReferencePackage = defineReferencePackage({
+export const referencePackage: ReferencePackage<
+  PackageCreationInput,
+  RustReferenceFacts
+> = defineReferencePackage({
   packageName: "@ykdz/reference-rust-bin",
   resolve: (specifier) => import.meta.resolve(specifier),
   alias: "binary",
@@ -29,15 +26,28 @@ export const referencePackage: ReferencePackage = defineReferencePackage({
   defaultLeafName: "app",
   role: "native-package",
   resources: ["."],
-  authoring: {
+  template: {
     dependencies: [
-      "@ykdz/template-core",
-      "@ykdz/template-environment",
-      "@ykdz/template-workspace-authoring",
-      "smol-toml",
+      { name: "@ykdz/template-core", purpose: "template-execution" },
+      { name: "@ykdz/template-environment", purpose: "template-execution" },
+      {
+        name: "@ykdz/template-workspace-authoring",
+        purpose: "template-execution",
+      },
+      { name: "smol-toml", purpose: "template-execution" },
     ],
     scripts: ["build:template"],
     resources: ["template", "tsconfig.template.json"],
+  },
+  prepare({ readText }) {
+    const source = (file: string): CargoFile => {
+      const text = readText(file);
+      return { source: text, data: parse(text) };
+    };
+    return {
+      cargoManifest: source("Cargo.toml"),
+      cargoLock: source("Cargo.lock"),
+    };
   },
   environmentNeeds: ({ definition }) => [
     rustToolchainEnvironmentNeed({
@@ -75,16 +85,15 @@ export const referencePackage: ReferencePackage = defineReferencePackage({
       ],
     };
   },
-  project(contribution, { definition }) {
+  project(contribution, { definition, preparation }) {
     const targetManifest = { ...contribution.manifest };
     delete targetManifest.files;
-    const cargoManifest = readCargoFile("Cargo.toml");
+    const { cargoManifest, cargoLock } = preparation.ownerFacts;
     const cargoPackage = cargoManifest.data.package as Record<string, unknown>;
     const nativeName = cargoPackage.name;
     const targetName = definition.name.slice(
       definition.name.lastIndexOf("/") + 1,
     );
-    const cargoLock = readCargoFile("Cargo.lock");
     const lockedPackages = cargoLock.data.package as Record<string, unknown>[];
     const replacements = new Map<string, RenderOperation>([
       [

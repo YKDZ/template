@@ -7,15 +7,18 @@ export function referencePackagePublicationContexts(): readonly {
   readonly name: string;
   readonly assets: ReadonlyMap<string, string>;
 }[] {
-  return referencePackages.map((referencePackage) => ({
-    name: referencePackage.manifest.name,
-    assets: new Map(
-      referencePackage
-        .operations("")
-        .map((operation) => [
-          resolveTemplateSource(operation.source, operation.from),
-          operation.to,
-        ]),
-    ),
-  }));
+  return referencePackages.map((referencePackage) => {
+    referencePackage.prepare();
+    return {
+      name: referencePackage.manifest.name,
+      assets: new Map(
+        referencePackage
+          .operations("")
+          .map((operation) => [
+            resolveTemplateSource(operation.source, operation.from),
+            operation.to,
+          ]),
+      ),
+    };
+  });
 }

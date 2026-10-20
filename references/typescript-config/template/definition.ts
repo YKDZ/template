@@ -6,10 +6,10 @@ export const referenceDefinition = {
   defaultLeafName: "typescript-config",
   role: "shared-library",
   resources: ["."],
-  authoring: {
+  template: {
     dependencies: [],
     scripts: ["build:template"],
-    resources: ["template", "template-dist", "tsconfig.template.json"],
+    resources: ["template", "tsconfig.template.json"],
   },
   environmentNeeds: [],
   foundation: {

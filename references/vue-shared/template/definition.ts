@@ -9,15 +9,18 @@ export const referencePackage = defineReferencePackage({
   defaultLeafName: "vue-shared",
   role: "shared-library",
   resources: ["."],
-  authoring: {
+  template: {
     dependencies: [
-      "@ykdz/template-core",
-      "@ykdz/template-environment",
-      "@ykdz/template-workspace-authoring",
-      "typescript-7",
+      { name: "@ykdz/template-core", purpose: "template-execution" },
+      { name: "@ykdz/template-environment", purpose: "template-execution" },
+      {
+        name: "@ykdz/template-workspace-authoring",
+        purpose: "template-execution",
+      },
+      { name: "typescript-7", purpose: "template-execution" },
     ],
     scripts: ["build:template"],
-    resources: ["template", "template-dist", "tsconfig.template.json"],
+    resources: ["template", "tsconfig.template.json"],
   },
   foundation: ({ definition }) => ({
     toolchains: {},

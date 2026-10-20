@@ -34,6 +34,7 @@ export function typescriptConfigContribution(
   context: GenerationContext,
   definition = typescriptConfigPackageDefinition(context),
 ): PackageContribution {
+  typescriptReferencePackage.prepare();
   return typescriptReferencePackage.contribute({ context, definition });
 }
 

@@ -15,13 +15,16 @@ export const referencePackage = defineReferencePackage({
   defaultPath: "apps/web",
   role: "runtime-service",
   resources: ["."],
-  authoring: {
-    resources: ["template", "template-dist", "tsconfig.template.json"],
+  template: {
+    resources: ["template", "tsconfig.template.json"],
     dependencies: [
-      "@ykdz/template-core",
-      "@ykdz/template-environment",
-      "@ykdz/template-workspace-authoring",
-      "typescript-7",
+      { name: "@ykdz/template-core", purpose: "template-execution" },
+      { name: "@ykdz/template-environment", purpose: "template-execution" },
+      {
+        name: "@ykdz/template-workspace-authoring",
+        purpose: "template-execution",
+      },
+      { name: "typescript-7", purpose: "template-execution" },
     ],
     scripts: ["build:template", "typecheck:template"],
   },

@@ -35,6 +35,37 @@ export type ReferencePackageManifest = Readonly<Record<string, unknown>> & {
   readonly devDependencies?: Readonly<Record<string, string>>;
 };
 
+export type ReferenceTemplateDependency = {
+  readonly name: string;
+  readonly purpose: "template-execution" | "template-build";
+};
+
+export type PreparedReferenceResource = {
+  /** 仅为所属包内的公开资源路径，不包含物理工作区位置。 */
+  readonly path: string;
+  readonly source: TemplateSourceHandle;
+  readonly mode: number;
+};
+
+/** 所属自定义读取器仅能消费已声明并准备的文本资源。 */
+export type ReferencePackagePreparationInput = {
+  readonly manifest: ReferencePackageManifest;
+  readonly resources: readonly PreparedReferenceResource[];
+  readText(path: string): string;
+};
+
+/** 所属准备返回的公开原生事实和不暴露物理路径的资源句柄。 */
+export type ReferencePackagePreparation<OwnerFacts = unknown> = {
+  readonly owner: {
+    readonly packageName: string;
+    readonly exportPath: "./template";
+  };
+  readonly manifest: ReferencePackageManifest;
+  readonly resources: readonly PreparedReferenceResource[];
+  readonly templateDependencies: readonly ReferenceTemplateDependency[];
+  readonly ownerFacts: OwnerFacts;
+};
+
 export type ReferenceContributionOptions<
   CreationInput extends PackageCreationInput = PackageCreationInput,
 > = {
@@ -48,6 +79,8 @@ export type ReferenceContributionOptions<
   /** 仅旧 BuiltIn 回放适配器使用，后续由新生成记录取代。 */
   readonly planningIdentity?: string;
   readonly creationOrigin?: "new" | "replay";
+  /** 已由公开生成器或所属适配器执行的同一包准备结果。 */
+  readonly preparation?: unknown;
 };
 
 type Contextual<
@@ -55,8 +88,16 @@ type Contextual<
   CreationInput extends PackageCreationInput = PackageCreationInput,
 > = Value | ((options: ReferenceContributionOptions<CreationInput>) => Value);
 
+type ReferencePackageProjectOptions<
+  CreationInput extends PackageCreationInput,
+  OwnerFacts,
+> = Omit<ReferenceContributionOptions<CreationInput>, "preparation"> & {
+  readonly preparation: ReferencePackagePreparation<OwnerFacts>;
+};
+
 export type ReferencePackage<
   CreationInput extends PackageCreationInput = PackageCreationInput,
+  OwnerFacts = unknown,
 > = {
   readonly alias: string;
   readonly resolve: (specifier: string) => string;
@@ -65,8 +106,10 @@ export type ReferencePackage<
   readonly defaultPath: string;
   readonly role: DefaultPackageRole;
   readonly manifest: ReferencePackageManifest;
-  readonly authoringDependencies: readonly string[];
+  readonly templateDependencies: readonly ReferenceTemplateDependency[];
+  /** prepare完成后从所属资源集合中取得的CLI发布身份来源。 */
   readonly publicationIdentitySource?: TemplateSourceHandle;
+  prepare(): ReferencePackagePreparation<OwnerFacts>;
   source(file: string): TemplateSourceHandle;
   operations(targetPath: string): CopyFileOperation[];
   payloadOperations(targetPath: string): CopyFileOperation[];
@@ -83,13 +126,16 @@ function contextual<
   options: ReferenceContributionOptions<CreationInput>,
 ): Value {
   return typeof value === "function"
-    ? (value as (context: ReferenceContributionOptions) => Value)(options)
+    ? (
+        value as (context: ReferenceContributionOptions<CreationInput>) => Value
+      )(options)
     : value;
 }
 
 /** 原生包声明是生成事实源，描述只补充资源范围与局部差异。 */
 export function defineReferencePackage<
   CreationInput extends PackageCreationInput = PackageCreationInput,
+  OwnerFacts = undefined,
 >(options: {
   readonly packageName: string;
   readonly resolve: (specifier: string) => string;
@@ -100,12 +146,13 @@ export function defineReferencePackage<
   readonly role: DefaultPackageRole;
   readonly resources: readonly string[];
   readonly resourceIgnore?: string;
-  readonly authoring: {
-    readonly dependencies: readonly string[];
+  readonly template: {
+    readonly dependencies: readonly ReferenceTemplateDependency[];
     readonly exports?: readonly string[];
     readonly scripts: readonly string[];
     readonly resources?: readonly string[];
   };
+  readonly prepare?: (options: ReferencePackagePreparationInput) => OwnerFacts;
   readonly publicationIdentitySource?: string;
   readonly foundation: Contextual<
     PackageContribution["foundation"],
@@ -117,115 +164,304 @@ export function defineReferencePackage<
   >;
   readonly project?: (
     contribution: PackageContribution,
-    options: ReferenceContributionOptions<CreationInput>,
+    options: ReferencePackageProjectOptions<CreationInput, OwnerFacts>,
   ) => PackageContribution;
-}): ReferencePackage<CreationInput> {
+}): ReferencePackage<CreationInput, OwnerFacts> {
   const manifest = JSON.parse(
     readFileSync(
       fileURLToPath(options.resolve(`${options.packageName}/reference`)),
       "utf8",
     ),
   ) as ReferencePackageManifest;
+  const normalizeOwnedResource = (resource: string): string => {
+    const normalized = path.posix.normalize(resource);
+    if (
+      resource.length === 0 ||
+      path.posix.isAbsolute(resource) ||
+      normalized === ".." ||
+      normalized.startsWith("../") ||
+      /[!*?{}[\]]/u.test(resource)
+    ) {
+      throw new Error(
+        `参考包 ${options.packageName} prepare 阶段资源声明无效：${resource}`,
+      );
+    }
+    return normalized;
+  };
+  const normalizedResources = options.resources.map(normalizeOwnedResource);
+  const templateResources = (options.template.resources ?? []).map(
+    normalizeOwnedResource,
+  );
+  const templateDependencies = Object.freeze(
+    options.template.dependencies.map((dependency) =>
+      Object.freeze({ ...dependency }),
+    ),
+  );
+  const publicationIdentitySource = options.publicationIdentitySource;
+  const inDeclaredResources = (file: string): boolean => {
+    const normalized = path.posix.normalize(file);
+    return normalizedResources.some(
+      (resource) =>
+        resource === "." ||
+        normalized === resource ||
+        normalized.startsWith(`${resource}/`),
+    );
+  };
+  const isTemplateResource = (file: string): boolean => {
+    const normalized = path.posix.normalize(file);
+    return templateResources.some(
+      (resource) =>
+        normalized === resource || normalized.startsWith(`${resource}/`),
+    );
+  };
   const resolveAsset = (file: string): string => {
+    if (!inDeclaredResources(file)) {
+      throw new Error(
+        `参考包 ${options.packageName} prepare 阶段资源超出声明范围：${file}`,
+      );
+    }
     const resolved = fileURLToPath(
       options.resolve(
         `${options.packageName}/assets/${file === "." ? "package.json" : file}`,
       ),
     );
-    // 原生清单也是公开资产，作为整包资源范围的锚点；不定位未公开的邻包内容。
+    // 原生清单也是公开资产，作为包资源根的锚点；不定位未公开的邻包内容。
     return file === "." ? path.dirname(resolved) : resolved;
   };
-  const source = (file: string): TemplateSourceHandle =>
-    createTemplateSourceHandle(resolveAsset(file));
-  const isAuthoringResource = (file: string): boolean => {
+  const sourceCache = new Map<string, TemplateSourceHandle>();
+  const source = (file: string): TemplateSourceHandle => {
     const normalized = path.posix.normalize(file);
-    return (options.authoring.resources ?? []).some((resource) => {
-      const owned = path.posix.normalize(resource).replace(/\/$/u, "");
-      return normalized === owned || normalized.startsWith(`${owned}/`);
-    });
+    const existing = sourceCache.get(normalized);
+    if (existing !== undefined) return existing;
+    const handle = createTemplateSourceHandle(resolveAsset(normalized));
+    sourceCache.set(normalized, handle);
+    return handle;
   };
-  for (const resource of options.resources) {
-    if (/[!*?{}[\]]/u.test(resource))
-      throw new Error(`参考资源只接受字面路径：${manifest.name} ${resource}`);
-  }
-  const collectOperations = (
-    targetPath: string,
-    authoring: boolean,
-  ): CopyFileOperation[] => {
-    const files = new Set<string>();
-    type IgnoreScope = { readonly directory: string; readonly rules: Ignore };
-    const scopes = new Map<string, IgnoreScope>();
-    const scopeFor = (directory: string): IgnoreScope => {
-      const existing = scopes.get(directory);
-      if (existing !== undefined) return existing;
-      const rules = ignore();
-      if (directory === ".")
-        rules.add(options.resourceIgnore ?? resourceIgnoreSnapshot);
-      try {
-        rules.add(
-          readFileSync(
-            resolveAsset(path.posix.join(directory, ".gitignore")),
-            "utf8",
-          ),
-        );
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  const contents = new Map<string, string>();
+  const jsonDocuments = new Map<string, unknown>();
+  let preparation: ReferencePackagePreparation<OwnerFacts> | undefined;
+  let preparedRuntimeResources: readonly PreparedReferenceResource[] = [];
+  let preparedTemplateResources: readonly PreparedReferenceResource[] = [];
+  let preparedResourcesByPath = new Map<string, PreparedReferenceResource>();
+
+  const prepare = (): ReferencePackagePreparation<OwnerFacts> => {
+    if (preparation !== undefined) return preparation;
+    try {
+      const nativeDependencies = new Set(
+        [
+          manifest.dependencies,
+          manifest.devDependencies,
+          manifest.optionalDependencies,
+          manifest.peerDependencies,
+        ].flatMap((record) =>
+          typeof record === "object" && record !== null
+            ? Object.keys(record)
+            : [],
+        ),
+      );
+      const seenTemplateDependencies = new Set<string>();
+      for (const dependency of templateDependencies) {
+        if (
+          dependency.purpose !== "template-execution" &&
+          dependency.purpose !== "template-build"
+        ) {
+          throw new Error(
+            `模板依赖用途无效：${dependency.name} (${String(dependency.purpose)})`,
+          );
+        }
+        if (seenTemplateDependencies.has(dependency.name)) {
+          throw new Error(`模板依赖用途重复：${dependency.name}`);
+        }
+        seenTemplateDependencies.add(dependency.name);
+        if (!nativeDependencies.has(dependency.name)) {
+          throw new Error(
+            `模板依赖未在原生清单声明：${dependency.name} (${dependency.purpose})`,
+          );
+        }
       }
-      const scope = { directory, rules };
-      scopes.set(directory, scope);
-      return scope;
-    };
-    const ignored = (file: string, directory: boolean): boolean => {
-      if (file === ".git" || file.startsWith(".git/")) return true;
-      if (!authoring && isAuthoringResource(file)) return true;
-      let excluded = false;
-      let parent = ".";
-      for (const part of ["", ...file.split("/").slice(0, -1)]) {
-        if (part !== "") parent = path.posix.join(parent, part);
-        const scope = scopeFor(parent);
-        const relative = path.posix.relative(scope.directory, file);
-        const result = scope.rules.test(relative + (directory ? "/" : ""));
-        if (result.ignored) excluded = true;
-        else if (result.unignored) excluded = false;
-      }
-      return excluded;
-    };
-    const visit = (directory: string): void => {
-      for (const entry of readdirSync(resolveAsset(directory), {
-        withFileTypes: true,
-      }).sort((left, right) => left.name.localeCompare(right.name))) {
-        const file = path.posix.join(directory, entry.name);
-        if (ignored(file, entry.isDirectory())) continue;
-        if (entry.isDirectory()) visit(file);
-        else if (file !== "package.json") files.add(file);
-      }
-    };
-    for (const resource of options.resources) {
-      if (resource === ".") visit(resource);
-      else {
-        const parent = path.posix.dirname(resource);
-        const entry = readdirSync(resolveAsset(parent), {
+
+      type IgnoreScope = { readonly directory: string; readonly rules: Ignore };
+      const scopes = new Map<string, IgnoreScope>();
+      const scopeFor = (directory: string): IgnoreScope => {
+        const existing = scopes.get(directory);
+        if (existing !== undefined) return existing;
+        const rules = ignore();
+        if (directory === ".")
+          rules.add(options.resourceIgnore ?? resourceIgnoreSnapshot);
+        const ignoreFile = path.posix.join(directory, ".gitignore");
+        try {
+          if (inDeclaredResources(ignoreFile)) {
+            rules.add(readFileSync(resolveAsset(ignoreFile), "utf8"));
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        const scope = { directory, rules };
+        scopes.set(directory, scope);
+        return scope;
+      };
+      const ignored = (file: string, directory: boolean): boolean => {
+        if (file === ".git" || file.startsWith(".git/")) return true;
+        let excluded = false;
+        let parent = ".";
+        for (const part of ["", ...file.split("/").slice(0, -1)]) {
+          if (part !== "") parent = path.posix.join(parent, part);
+          const scope = scopeFor(parent);
+          const relative = path.posix.relative(scope.directory, file);
+          const result = scope.rules.test(relative + (directory ? "/" : ""));
+          if (result.ignored) excluded = true;
+          else if (result.unignored) excluded = false;
+        }
+        return excluded;
+      };
+      const files = new Set<string>();
+      const visit = (directory: string): void => {
+        for (const entry of readdirSync(resolveAsset(directory), {
           withFileTypes: true,
-        }).find(
-          (candidate) => candidate.name === path.posix.basename(resource),
-        );
-        if (entry === undefined)
-          throw new Error(`参考资源不存在：${manifest.name} ${resource}`);
+        }).sort((left, right) => left.name.localeCompare(right.name))) {
+          const file = path.posix.join(directory, entry.name);
+          if (ignored(file, entry.isDirectory())) continue;
+          if (entry.isDirectory()) visit(file);
+          else if (file !== "package.json") files.add(file);
+        }
+      };
+      for (const resource of normalizedResources) {
+        if (resource === ".") {
+          visit(resource);
+          continue;
+        }
+        let entry;
+        try {
+          entry = statSync(resolveAsset(resource));
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            throw new Error(`参考资源不存在：${resource}`, { cause: error });
+          }
+          throw error;
+        }
         if (ignored(resource, entry.isDirectory())) continue;
         if (entry.isDirectory()) visit(resource);
         else if (resource !== "package.json") files.add(resource);
       }
+
+      const resources = [...files]
+        .toSorted((left, right) => left.localeCompare(right))
+        .map((file) => {
+          const sourcePath = resolveAsset(file);
+          const sourceText = readFileSync(sourcePath).toString("utf8");
+          const mode = statSync(sourcePath).mode & 0o777;
+          contents.set(file, sourceText);
+          if (
+            /^tsconfig(?:\.[^/]+)?\.json$/u.test(file) ||
+            /(^|\/)turbo\.jsonc?$/u.test(file)
+          ) {
+            const errors: ParseError[] = [];
+            const parsed: unknown = parse(sourceText, errors, {
+              allowTrailingComma: true,
+            });
+            if (
+              errors.length > 0 ||
+              typeof parsed !== "object" ||
+              parsed === null ||
+              Array.isArray(parsed)
+            ) {
+              throw new Error(`原生工具配置必须是有效的 JSONC 对象：${file}`);
+            }
+            jsonDocuments.set(file, parsed);
+          }
+          return { path: file, source: source(file), mode };
+        });
+      preparedResourcesByPath = new Map(
+        resources.map((resource) => [resource.path, resource]),
+      );
+      for (const resource of templateResources) {
+        if (
+          !resources.some(
+            (preparedResource) =>
+              preparedResource.path === resource ||
+              preparedResource.path.startsWith(`${resource}/`),
+          )
+        ) {
+          throw new Error(`模板资源未包含在参考资源范围中：${resource}`);
+        }
+      }
+      if (
+        publicationIdentitySource !== undefined &&
+        !preparedResourcesByPath.has(
+          path.posix.normalize(publicationIdentitySource),
+        )
+      ) {
+        throw new Error(
+          `发布身份资源未包含在参考资源范围中：${publicationIdentitySource}`,
+        );
+      }
+      preparedRuntimeResources = resources.filter(
+        (resource) => !isTemplateResource(resource.path),
+      );
+      preparedTemplateResources = resources;
+      const preparedResourcePaths = new Set(preparedResourcesByPath.keys());
+      const ownerFacts = options.prepare?.({
+        manifest,
+        resources,
+        readText(resourcePath) {
+          const normalized = path.posix.normalize(resourcePath);
+          if (!preparedResourcePaths.has(normalized)) {
+            throw new Error(
+              `所属准备请求了未声明或缺失的文本资源：${resourcePath}`,
+            );
+          }
+          const content = contents.get(normalized);
+          if (content === undefined) {
+            throw new Error(`所属准备请求的资源不是文本：${resourcePath}`);
+          }
+          return content;
+        },
+      }) as OwnerFacts;
+      preparation = Object.freeze({
+        owner: Object.freeze({
+          packageName: manifest.name,
+          exportPath: "./template" as const,
+        }),
+        manifest,
+        resources: Object.freeze(resources),
+        templateDependencies,
+        ownerFacts: ownerFacts as OwnerFacts,
+      });
+      return preparation;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `参考包 ${options.packageName}/./template prepare 阶段失败：${message}`,
+        { cause: error },
+      );
     }
-    return [...files].map((file) => ({
+  };
+  const requirePreparation = (): ReferencePackagePreparation<OwnerFacts> => {
+    if (preparation === undefined) {
+      throw new Error(
+        `参考包 ${options.packageName}/./template 尚未完成 prepare 阶段`,
+      );
+    }
+    return preparation;
+  };
+  const collectOperations = (
+    targetPath: string,
+    includeTemplateResources: boolean,
+  ): CopyFileOperation[] => {
+    requirePreparation();
+    const resources = includeTemplateResources
+      ? preparedTemplateResources
+      : preparedRuntimeResources;
+    return resources.map((resource) => ({
       kind: "copyFile",
-      source: source(file),
+      source: resource.source,
       from: ".",
-      to: path.posix.join(targetPath, file),
+      to: path.posix.join(targetPath, resource.path),
     }));
   };
   const operations = (targetPath: string): CopyFileOperation[] =>
     collectOperations(targetPath, false);
-  return {
+  const referencePackage: ReferencePackage<CreationInput, OwnerFacts> = {
     alias: options.alias,
     resolve: options.resolve,
     instance: options.instance,
@@ -233,16 +469,25 @@ export function defineReferencePackage<
     defaultPath: options.defaultPath ?? `packages/${options.defaultLeafName}`,
     role: options.role,
     manifest,
-    authoringDependencies: options.authoring.dependencies,
-    ...(options.publicationIdentitySource === undefined
-      ? {}
-      : {
-          publicationIdentitySource: source(options.publicationIdentitySource),
-        }),
+    templateDependencies,
+    prepare,
     source,
     operations,
     payloadOperations: (targetPath) => collectOperations(targetPath, true),
     contribute(input) {
+      const prepared =
+        (input.preparation as
+          | ReferencePackagePreparation<OwnerFacts>
+          | undefined) ?? requirePreparation();
+      if (
+        prepared.owner.packageName !== options.packageName ||
+        prepared.owner.exportPath !== "./template"
+      ) {
+        throw new Error(
+          `参考包 ${options.packageName}/./template 收到不匹配的所属 prepare 事实：${prepared.owner.packageName}#${prepared.owner.exportPath}`,
+        );
+      }
+      const manifest = prepared.manifest;
       const bindings = input.bindings ?? new Map<string, PackageDefinition>();
       const names = new Map(
         [...bindings].map(([name, definition]) => [name, definition.name]),
@@ -260,11 +505,11 @@ export function defineReferencePackage<
         "./assets",
         "./assets/*",
         "./template",
-        ...(options.authoring.exports ?? []),
+        ...(options.template.exports ?? []),
       ])
         delete exports[key];
       const scripts = { ...manifest.scripts };
-      for (const script of options.authoring.scripts) delete scripts[script];
+      for (const script of options.template.scripts) delete scripts[script];
       if (Object.keys(exports).length > 0) projected.exports = exports;
       else delete projected.exports;
       projected.scripts = scripts;
@@ -283,7 +528,9 @@ export function defineReferencePackage<
         const dependencies = {
           ...(projected[field] as Record<string, string>),
         };
-        for (const name of options.authoring.dependencies)
+        for (const name of templateDependencies
+          .filter((dependency) => dependency.purpose === "template-execution")
+          .map((dependency) => dependency.name))
           delete dependencies[name];
         for (const [nativeName, definition] of bindings) {
           const native = (manifest[field] as Record<string, string>)[
@@ -320,22 +567,9 @@ export function defineReferencePackage<
         const isTurboConfig =
           relative === "turbo.json" || relative === "turbo.jsonc";
         if (isTypeScriptConfig || isTurboConfig) {
-          const errors: ParseError[] = [];
-          const original: unknown = parse(
-            readFileSync(resolveAsset(relative), "utf8"),
-            errors,
-            { allowTrailingComma: true },
-          );
-          if (
-            errors.length > 0 ||
-            typeof original !== "object" ||
-            original === null ||
-            Array.isArray(original)
-          ) {
-            throw new Error(
-              `原生工具配置必须是有效的 JSONC 对象：${manifest.name} ${relative}`,
-            );
-          }
+          const original = jsonDocuments.get(relative);
+          if (original === undefined)
+            throw new Error(`准备结果缺少已解析配置：${relative}`);
           const value = mapPackageNamesInJson(original, names) as Record<
             string,
             unknown
@@ -343,7 +577,7 @@ export function defineReferencePackage<
           if (isTypeScriptConfig && Array.isArray(value.include))
             value.include = value.include.filter(
               (entry: unknown) =>
-                typeof entry !== "string" || !isAuthoringResource(entry),
+                typeof entry !== "string" || !isTemplateResource(entry),
             );
           if (
             isTurboConfig &&
@@ -351,7 +585,7 @@ export function defineReferencePackage<
             value.tasks !== null
           ) {
             const tasks = value.tasks as Record<string, unknown>;
-            for (const script of options.authoring.scripts) {
+            for (const script of options.template.scripts) {
               delete tasks[script];
               delete tasks[`${input.definition.name}#${script}`];
             }
@@ -366,7 +600,11 @@ export function defineReferencePackage<
             operation.source,
             operation.from,
           );
-          const original = readFileSync(sourceFile, "utf8");
+          const original = contents.get(relative);
+          const preparedResource = preparedResourcesByPath.get(relative);
+          if (original === undefined || preparedResource === undefined) {
+            throw new Error(`准备结果缺少已读取源码资源：${relative}`);
+          }
           const text = mapTypeScriptModuleSpecifiers(
             original,
             names,
@@ -379,7 +617,7 @@ export function defineReferencePackage<
                   kind: "writeText",
                   to: operation.to,
                   text,
-                  mode: statSync(sourceFile).mode & 0o777,
+                  mode: preparedResource.mode,
                   templateSource: {
                     handle: operation.source,
                     path: operation.from,
@@ -409,7 +647,30 @@ export function defineReferencePackage<
         referenceSource: manifest.name,
         referenceBindings: Object.fromEntries(bindings),
       };
-      return options.project?.(contribution, input) ?? contribution;
+      return (
+        options.project?.(contribution, {
+          ...input,
+          preparation: prepared,
+        }) ?? contribution
+      );
     },
   };
+  if (publicationIdentitySource !== undefined) {
+    Object.defineProperty(referencePackage, "publicationIdentitySource", {
+      enumerable: true,
+      get() {
+        const resourcePath = path.posix.normalize(publicationIdentitySource);
+        const preparedResource = requirePreparation().resources.find(
+          (resource) => resource.path === resourcePath,
+        );
+        if (preparedResource === undefined) {
+          throw new Error(
+            `参考包 ${options.packageName}/./template prepare 阶段缺少发布身份资源：${resourcePath}`,
+          );
+        }
+        return preparedResource.source;
+      },
+    });
+  }
+  return referencePackage;
 }

@@ -20,6 +20,7 @@ function appContribution(
     role: referencePackage.role,
   },
 ): PackageContribution {
+  referencePackage.prepare();
   return referencePackage.contribute({ context, definition });
 }
 
