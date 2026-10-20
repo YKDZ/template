@@ -383,6 +383,24 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
       "test-policy:first",
     );
     assert.strictEqual(firstInitialized.generationRecord.packages.length, 2);
+    const initialGuide = firstInitialized.generationRecord.packages.find(
+      (record) =>
+        contentIdentityKey(record.contentIdentity) === guideIdentityKey,
+    );
+    const initialGlossary = firstInitialized.generationRecord.packages.find(
+      (record) =>
+        contentIdentityKey(record.contentIdentity) === glossaryIdentityKey,
+    );
+    assert.ok(initialGuide);
+    assert.ok(initialGlossary);
+    assert.strictEqual(initialGuide.createdBy, "initialization");
+    assert.strictEqual(initialGlossary.createdBy, "shared-dependency");
+    assert.strictEqual(initialGuide.creationInput, null);
+    assert.strictEqual(
+      initialGuide.bindings[glossaryIdentityKey],
+      initialGlossary.packageDefinitionId,
+    );
+    assert.strictEqual(Object.hasOwn(initialGuide, "definition"), false);
     assert.ok(firstInitialized.projection !== null);
     assert.deepStrictEqual(firstInitialized.projection.ownerFacts, {
       edition: "draft",
@@ -450,6 +468,23 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
     );
     if (appendixResult.status !== "success") throw new Error("加包应成功");
     assert.ok(appendixResult.projection !== null);
+    const appendixRecord = appendixResult.generationRecord.packages.find(
+      (record) =>
+        contentIdentityKey(record.contentIdentity) === guideIdentityKey &&
+        record.creationInput?.leafName === "appendix",
+    );
+    assert.ok(appendixRecord);
+    assert.strictEqual(appendixRecord.createdBy, "addition");
+    assert.deepStrictEqual(appendixRecord.creationInput, {
+      leafName: "appendix",
+    });
+    assert.strictEqual(
+      appendixResult.blueprint.packages.find(
+        (definition) =>
+          definition.packageDefinitionId === appendixRecord.packageDefinitionId,
+      )?.path,
+      "docs/appendix",
+    );
     assert.deepStrictEqual(appendixResult.projection.ownerFacts, {
       edition: "draft",
       packageCount: 3,
@@ -723,6 +758,28 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
           return record;
         })(),
         message: /缺少必要节点实例映射/u,
+      },
+      {
+        label: "package instance",
+        record: (() => {
+          const record = cloneRecord();
+          const packages = record.packages as Record<string, unknown>[];
+          const guide = packages.find(
+            (item) =>
+              contentIdentityKey(item.contentIdentity as ContentIdentity) ===
+              guideIdentityKey,
+          )!;
+          delete (guide.bindings as Record<string, string>)[
+            glossaryIdentityKey
+          ];
+          record.packages = packages.filter(
+            (item) =>
+              contentIdentityKey(item.contentIdentity as ContentIdentity) !==
+              glossaryIdentityKey,
+          );
+          return record;
+        })(),
+        message: /生成记录与蓝图的包实例数量不一致/u,
       },
       {
         label: "required binding",

@@ -434,6 +434,9 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     );
     assert.ok(presetFeature);
     assert.ok(presetTheme);
+    assert.deepEqual(initialized.generationRecord.presetSelections, [
+      betaPreset.identity,
+    ]);
     assert.equal(
       initialized.generationRecord.nodeInstances.feature,
       presetFeature.packageDefinitionId,
