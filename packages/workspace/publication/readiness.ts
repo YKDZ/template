@@ -277,7 +277,7 @@ function generationPublicationProblem(
   if (
     !isStringRecord(generation.nodeInstances) ||
     Object.values(generation.nodeInstances).some(
-      (packageDefinitionId) => !packageIds.has(packageDefinitionId as string),
+      (packageDefinitionId) => !packageIds.has(packageDefinitionId),
     )
   ) {
     return "schema3 Generation Record 节点实例引用了缺失的包记录。";
