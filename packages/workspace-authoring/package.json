@@ -36,6 +36,11 @@
       "source": "./src/reference-package.ts",
       "types": "./dist/reference-package.d.ts",
       "default": "./dist/reference-package.js"
+    },
+    "./project-requirements": {
+      "source": "./src/project-requirements.ts",
+      "types": "./dist/project-requirements.d.ts",
+      "default": "./dist/project-requirements.js"
     }
   },
   "scripts": {
@@ -49,6 +54,7 @@
   },
   "dependencies": {
     "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-environment": "workspace:*",
     "ignore": "catalog:",
     "jsonc-parser": "catalog:",
     "typescript": "catalog:public-cli-runtime"

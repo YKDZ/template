@@ -831,6 +831,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../environment
       ignore:
         specifier: 'catalog:'
         version: 7.0.12
@@ -1205,6 +1208,9 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../../packages/environment
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../../packages/workspace-authoring
@@ -1272,6 +1278,9 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../../packages/environment
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../../packages/workspace-authoring
@@ -1345,6 +1354,9 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../../packages/environment
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../../packages/workspace-authoring

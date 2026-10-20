@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { PackageDefinition } from "./project-blueprint.ts";
 import type { RenderOperation } from "./renderer.ts";
 
@@ -13,6 +15,16 @@ function operationPath(operation: RenderOperation): string {
   return "";
 }
 
+function isCanonicalRelativePath(value: string): boolean {
+  return (
+    value.length > 0 &&
+    !value.includes("\\") &&
+    !path.posix.isAbsolute(value) &&
+    path.posix.normalize(value) === value &&
+    value.split("/").every((segment) => segment.length > 0)
+  );
+}
+
 /** 确保包贡献只写入自身的包边界。 */
 export function assertPackageContribution(
   contribution: PackageContribution,
@@ -21,15 +33,20 @@ export function assertPackageContribution(
     readonly planner?: string;
   } = {},
 ): PackageContribution {
-  const outsideOperation = contribution.operations.find(
-    (operation) =>
-      !operationPath(operation).startsWith(`${contribution.definition.path}/`),
-  );
+  const outsideOperation = contribution.operations.find((operation) => {
+    const target = operationPath(operation);
+    return (
+      !isCanonicalRelativePath(target) ||
+      !target.startsWith(`${contribution.definition.path}/`)
+    );
+  });
   if (outsideOperation) {
     const target = operationPath(outsideOperation);
-    const rule = target.includes("/")
-      ? "Package Contribution may not write a sibling Package Boundary"
-      : "Package Contribution may not write a coordinated root output";
+    const rule = !isCanonicalRelativePath(target)
+      ? "Package Contribution must use a canonical relative output path"
+      : target.includes("/")
+        ? "Package Contribution may not write a sibling Package Boundary"
+        : "Package Contribution may not write a coordinated root output";
     const owner =
       provenance.definitionName === undefined
         ? ""

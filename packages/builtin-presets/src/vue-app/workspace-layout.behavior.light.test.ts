@@ -25,7 +25,9 @@ void it("Vue 应用连续加包沿参考布局写入 apps", async () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { contentIdentity: "vue-app" },
+      selection: {
+        roots: [{ nodeIdentity: "web", contentIdentity: "vue-app" }],
+      },
       strategyInput: {
         repositoryName: "demo",
         defaultPackageScope: "demo",
@@ -40,7 +42,7 @@ void it("Vue 应用连续加包沿参考布局写入 apps", async () => {
     const added = await generator.add({
       repositoryRoot: targetRoot,
       contentIdentity: "vue-app",
-      leafName: "admin",
+      creationInput: { leafName: "admin" },
     });
 
     assert.strictEqual(added.status, "success", JSON.stringify(added));

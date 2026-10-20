@@ -55,7 +55,9 @@ void describe("显式生成器默认库行为", () => {
 
     const result = await generator.init({
       targetRoot,
-      selection: { contentIdentity: "library" },
+      selection: {
+        roots: [{ nodeIdentity: "library", contentIdentity: "library" }],
+      },
       strategyInput: {
         repositoryName: "demo",
         defaultPackageScope: "demo",
@@ -136,7 +138,9 @@ void describe("显式生成器默认库行为", () => {
 
     const result = await generator.init({
       targetRoot,
-      selection: { contentIdentity: library.identity },
+      selection: {
+        roots: [{ nodeIdentity: "library", contentIdentity: library.identity }],
+      },
       strategyInput: { defaultPackageScope: "demo" },
     });
 
@@ -164,7 +168,9 @@ void describe("显式生成器默认库行为", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { contentIdentity: "library" },
+      selection: {
+        roots: [{ nodeIdentity: "library", contentIdentity: "library" }],
+      },
       strategyInput: { defaultPackageScope: "demo" },
     });
     assert.strictEqual(initialized.status, "success");
@@ -199,7 +205,7 @@ void describe("显式生成器默认库行为", () => {
     const preview = await generator.add({
       repositoryRoot: targetRoot,
       contentIdentity: "library",
-      leafName: "shared",
+      creationInput: { leafName: "shared" },
       dryRun: true,
     });
     assert.strictEqual(preview.status, "success");
@@ -212,13 +218,13 @@ void describe("显式生成器默认库行为", () => {
     const first = await generator.add({
       repositoryRoot: targetRoot,
       contentIdentity: "library",
-      leafName: "shared",
+      creationInput: { leafName: "shared" },
     });
     assert.strictEqual(first.status, "success");
     const repeated = await generator.add({
       repositoryRoot: targetRoot,
       contentIdentity: "library",
-      leafName: "shared",
+      creationInput: { leafName: "shared" },
     });
     assert.strictEqual(repeated.status, "success");
     if (repeated.status === "success")
@@ -227,7 +233,7 @@ void describe("显式生成器默认库行为", () => {
     const second = await generator.add({
       repositoryRoot: targetRoot,
       contentIdentity: "library",
-      leafName: "another",
+      creationInput: { leafName: "another" },
     });
     assert.strictEqual(second.status, "success");
     assert.strictEqual(
@@ -282,7 +288,9 @@ void describe("显式生成器默认库行为", () => {
       });
       const initialized = await generator.init({
         targetRoot,
-        selection: { contentIdentity: "library" },
+        selection: {
+          roots: [{ nodeIdentity: "library", contentIdentity: "library" }],
+        },
         strategyInput: { defaultPackageScope: "demo" },
       });
       assert.strictEqual(initialized.status, "success");
@@ -309,7 +317,7 @@ void describe("显式生成器默认库行为", () => {
       const result = await generator.add({
         repositoryRoot: targetRoot,
         contentIdentity: "library",
-        leafName: "current-node",
+        creationInput: { leafName: "current-node" },
       });
 
       assert.strictEqual(result.status, "success", JSON.stringify(result));
@@ -354,7 +362,9 @@ void describe("显式生成器默认库行为", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { contentIdentity: "library" },
+      selection: {
+        roots: [{ nodeIdentity: "library", contentIdentity: "library" }],
+      },
       strategyInput: { defaultPackageScope: "demo" },
     });
     assert.strictEqual(initialized.status, "success");
@@ -375,7 +385,7 @@ void describe("显式生成器默认库行为", () => {
     const result = await generator.add({
       repositoryRoot: targetRoot,
       contentIdentity: "library",
-      leafName: "missing-export-consumer",
+      creationInput: { leafName: "missing-export-consumer" },
     });
 
     assert.strictEqual(
@@ -397,7 +407,9 @@ void describe("显式生成器默认库行为", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { contentIdentity: "library" },
+      selection: {
+        roots: [{ nodeIdentity: "library", contentIdentity: "library" }],
+      },
       strategyInput: { defaultPackageScope: "demo" },
     });
     assert.strictEqual(initialized.status, "success");
@@ -411,7 +423,7 @@ void describe("显式生成器默认库行为", () => {
     const result = await generator.add({
       repositoryRoot: targetRoot,
       contentIdentity: "library",
-      leafName: "occupied",
+      creationInput: { leafName: "occupied" },
     });
 
     assert.strictEqual(result.status, "conflict");

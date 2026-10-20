@@ -1,23 +1,27 @@
 import {
-  assertCiDiagnosticArtifactDeclaration,
-  type CiDiagnosticArtifactDeclaration,
-} from "@ykdz/template-core/ci-diagnostic-artifact";
-import type { DevelopmentContainerToolLayer } from "@ykdz/template-core/development-container-tool-layer";
-import type { EditorCustomizationCapability } from "@ykdz/template-core/editor-customization";
-import type {
-  CheckEnvironmentNeed,
-  DeploymentEnvironmentNeed,
-} from "@ykdz/template-core/module-graph";
-import {
   assertPackageContribution as assertPackageContributionPaths,
   type PackageContribution as PackageContributionSkeleton,
 } from "@ykdz/template-core/package-contribution";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
-import type { DependencyMaintenancePolicy } from "@ykdz/template-core/project-github";
 import type {
   RenderOperation,
   TemplateSourceHandle,
 } from "@ykdz/template-core/renderer";
+import {
+  assertCiDiagnosticArtifactDeclaration,
+  type CiDiagnosticArtifactDeclaration,
+} from "@ykdz/template-environment/ci-diagnostic-artifact";
+import type { DevelopmentContainerToolLayer } from "@ykdz/template-environment/development-container-tool-layer";
+import type { EditorCustomizationCapability } from "@ykdz/template-environment/editor-customization";
+import type {
+  CheckEnvironmentNeed,
+  DeploymentEnvironmentNeed,
+} from "@ykdz/template-environment/module-graph";
+
+import type {
+  DependencyMaintenancePolicy,
+  ProjectRequirement,
+} from "./project-requirements.ts";
 
 export type FoundationContribution = {
   /** 由根策略拥有的封闭式 Vue-Hono 页面/API 浏览器验收能力。 */
@@ -93,6 +97,8 @@ export type PackageContribution = PackageContributionSkeleton & {
   /** 由 Foundation 消费并投影为协同根输出的类型化需求。 */
   readonly foundation: FoundationContribution;
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
+  /** 只声明由策略解释的闭合项目协作，不授予内容根级写入权限。 */
+  readonly projectRequirements?: readonly ProjectRequirement[];
   /** 由此 Package Boundary 持有的封闭式原生 CI 证据。 */
   readonly ciDiagnosticArtifacts?: readonly CiDiagnosticArtifactDeclaration[];
 };

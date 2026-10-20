@@ -4,33 +4,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
-import { composeCiDiagnosticArtifacts } from "@ykdz/template-core/ci-diagnostic-artifact";
-import type { CiDiagnosticArtifactDeclaration } from "@ykdz/template-core/ci-diagnostic-artifact";
-import {
-  type DevelopmentContainerToolLayer,
-  type DevelopmentContainerToolLayerBuildArgument,
-  type DevelopmentContainerToolLayerMount,
-  type DevelopmentContainerToolLayerProbe,
-  type PlannedDevelopmentContainerToolLayer,
-} from "@ykdz/template-core/development-container-tool-layer";
-import type {
-  CheckEnvironmentNeed,
-  DeploymentEnvironmentNeed,
-  EnvironmentNeedsMetadata,
-} from "@ykdz/template-core/module-graph";
-import {
-  normalizeEnvironmentNeeds,
-  parseEnvironmentNeedsMetadata,
-  playwrightBrowserAssetsEnvironmentNeed,
-  shellCheckEnvironmentNeed,
-} from "@ykdz/template-core/module-graph";
 import {
   type PackageDefinition,
   type PackageDefinitionId,
   type PersistedPackageDefinition,
   type ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
-import type { DependencyMaintenancePolicy } from "@ykdz/template-core/project-github";
 import type {
   MaterializeProjectProjectionOptions,
   ProjectProjectionMirrorSlot,
@@ -46,6 +25,28 @@ import {
 } from "@ykdz/template-core/renderer";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
 import {
+  composeCiDiagnosticArtifacts,
+  type CiDiagnosticArtifactDeclaration,
+} from "@ykdz/template-environment/ci-diagnostic-artifact";
+import {
+  type DevelopmentContainerToolLayer,
+  type DevelopmentContainerToolLayerBuildArgument,
+  type DevelopmentContainerToolLayerMount,
+  type DevelopmentContainerToolLayerProbe,
+  type PlannedDevelopmentContainerToolLayer,
+} from "@ykdz/template-environment/development-container-tool-layer";
+import type {
+  CheckEnvironmentNeed,
+  DeploymentEnvironmentNeed,
+  EnvironmentNeedsMetadata,
+} from "@ykdz/template-environment/module-graph";
+import {
+  normalizeEnvironmentNeeds,
+  parseEnvironmentNeedsMetadata,
+  playwrightBrowserAssetsEnvironmentNeed,
+  shellCheckEnvironmentNeed,
+} from "@ykdz/template-environment/module-graph";
+import {
   assertPackageContribution,
   assertPackageContributionCommandNames,
   type FoundationContribution,
@@ -59,6 +60,7 @@ import type {
   PlannedPackageContribution,
   ResolvedPrimaryPackageIdentity,
 } from "@ykdz/template-workspace-authoring/preset-definition";
+import type { DependencyMaintenancePolicy } from "@ykdz/template-workspace-authoring/project-requirements";
 import {
   assertDefaultProjectBlueprint,
   assertDefaultProjectBlueprintDraft,

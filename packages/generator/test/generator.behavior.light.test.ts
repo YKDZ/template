@@ -8,6 +8,7 @@ import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import type { RenderOperation } from "@ykdz/template-core/renderer";
 import type {
   GeneratorContent,
+  PackageCreationInput,
   WorkspaceStrategy,
 } from "@ykdz/template-core/workspace-strategy";
 import { createGenerator } from "@ykdz/template-generator";
@@ -37,7 +38,8 @@ type DocumentationContribution = {
 
 type DocumentationContent = GeneratorContent<
   DocumentationContext,
-  DocumentationContribution
+  DocumentationContribution,
+  PackageCreationInput
 >;
 
 const guideIdentity = "test-docs:guide";
@@ -67,6 +69,7 @@ function createDocumentationEngine(options: {
   readonly policyId: string;
   readonly author: string;
   readonly includeGlossary?: boolean;
+  readonly invalidProjection?: "duplicate" | "unallocated";
 }) {
   const glossary: DocumentationContent = {
     identity: glossaryIdentity,
@@ -118,11 +121,15 @@ function createDocumentationEngine(options: {
     DocumentationInput,
     DocumentationState,
     DocumentationContribution,
+    PackageCreationInput,
     DocumentationContent
   > = {
     identity: options.policyId,
     initialize({ targetRoot, input, selection }) {
-      if (selection !== guideIdentity) {
+      if (
+        selection.length !== 1 ||
+        selection[0]?.contentIdentity !== guideIdentity
+      ) {
         throw new Error("文档策略只接受明确选择的指南内容");
       }
       const state = { policyId: options.policyId, ...input };
@@ -138,12 +145,13 @@ function createDocumentationEngine(options: {
     bindings({ providers }) {
       return new Map(providers);
     },
-    createDefinition({ context, content: selected, leafName, packagePath }) {
+    createDefinition({ context, content: selected, creationInput }) {
+      const leafName = creationInput?.leafName;
       const leaf = leafName ?? selected.defaultLeafName;
       return {
         name: `${context.collection}:${leaf}`,
         path:
-          packagePath ??
+          creationInput?.packagePath ??
           (leafName === undefined ? selected.defaultPath : `docs/${leafName}`),
         role: selected.role,
       };
@@ -164,6 +172,29 @@ function createDocumentationEngine(options: {
         edition: context.edition,
       };
       return {
+        ...(options.invalidProjection === "duplicate"
+          ? {
+              blueprint: {
+                ...blueprint,
+                packages: [...blueprint.packages, ...blueprint.packages],
+              },
+            }
+          : options.invalidProjection === "unallocated"
+            ? {
+                blueprint: {
+                  ...blueprint,
+                  packages: [
+                    ...blueprint.packages,
+                    {
+                      ...blueprint.packages[0]!,
+                      packageDefinitionId: `package-${"a".repeat(64)}`,
+                      name: "north:unallocated",
+                      path: "docs/unallocated",
+                    },
+                  ],
+                },
+              }
+            : {}),
         operations: [
           ...contributions.flatMap((contribution) => contribution.operations),
           {
@@ -268,12 +299,16 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
 
     const firstInitialized = await first.init({
       targetRoot: firstRoot,
-      selection: { contentIdentity: guideIdentity },
+      selection: {
+        roots: [{ nodeIdentity: "guide", contentIdentity: guideIdentity }],
+      },
       strategyInput: { collection: "north", edition: "draft" },
     });
     const secondInitialized = await second.init({
       targetRoot: secondRoot,
-      selection: { contentIdentity: guideIdentity },
+      selection: {
+        roots: [{ nodeIdentity: "guide", contentIdentity: guideIdentity }],
+      },
       strategyInput: { collection: "south", edition: "release" },
     });
     assert.strictEqual(
@@ -293,14 +328,14 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
       const result = await first.add({
         repositoryRoot: firstRoot,
         contentIdentity: guideIdentity,
-        leafName,
+        creationInput: { leafName },
       });
       assert.strictEqual(result.status, "success", JSON.stringify(result));
     }
     const secondAdd = await second.add({
       repositoryRoot: secondRoot,
       contentIdentity: guideIdentity,
-      leafName: "appendix",
+      creationInput: { leafName: "appendix" },
     });
     assert.strictEqual(secondAdd.status, "success", JSON.stringify(secondAdd));
 
@@ -362,7 +397,7 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
     const wrongStrategy = await second.add({
       repositoryRoot: firstRoot,
       contentIdentity: guideIdentity,
-      leafName: "wrong-policy",
+      creationInput: { leafName: "wrong-policy" },
     });
     assert.strictEqual(wrongStrategy.status, "operation-failure");
     assert.strictEqual(await snapshotTree(firstRoot), beforeWrongStrategy);
@@ -381,7 +416,9 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
 
     const result = await generator.init({
       targetRoot,
-      selection: { contentIdentity: guideIdentity },
+      selection: {
+        roots: [{ nodeIdentity: "guide", contentIdentity: guideIdentity }],
+      },
       strategyInput: { collection: "north", edition: "draft" },
     });
 
@@ -400,7 +437,9 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { contentIdentity: guideIdentity },
+      selection: {
+        roots: [{ nodeIdentity: "guide", contentIdentity: guideIdentity }],
+      },
       strategyInput: { collection: "north", edition: "draft" },
     });
     assert.strictEqual(
@@ -414,7 +453,7 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
     const result = await generator.add({
       repositoryRoot: targetRoot,
       contentIdentity: guideIdentity,
-      leafName: "late-addition",
+      creationInput: { leafName: "late-addition" },
     });
 
     assert.strictEqual(result.status, "conflict", JSON.stringify(result));
@@ -423,5 +462,32 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
       await pathExists(path.join(targetRoot, "docs/late-addition/README.md")),
       false,
     );
+  });
+
+  void it("提交前拒绝重复或未分配的策略蓝图包实例", async () => {
+    for (const invalidProjection of ["duplicate", "unallocated"] as const) {
+      const targetRoot = path.join(
+        await mkdtemp(
+          path.join(tmpdir(), `template-generator-docs-${invalidProjection}-`),
+        ),
+        "project",
+      );
+      const generator = createDocumentationEngine({
+        policyId: `test-policy:${invalidProjection}`,
+        author: "无效蓝图测试",
+        invalidProjection,
+      });
+
+      const result = await generator.init({
+        targetRoot,
+        selection: {
+          roots: [{ nodeIdentity: "guide", contentIdentity: guideIdentity }],
+        },
+        strategyInput: { collection: "north", edition: "draft" },
+      });
+
+      assert.strictEqual(result.status, "operation-failure");
+      assert.strictEqual(await pathExists(targetRoot), false);
+    }
   });
 });
