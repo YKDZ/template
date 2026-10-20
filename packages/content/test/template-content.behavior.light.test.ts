@@ -599,6 +599,10 @@ void describe("公开模板内容集合", () => {
     });
 
     assert.strictEqual(cliResult.status, "success", JSON.stringify(cliResult));
+    const cliManifest = JSON.parse(
+      await readFile(path.join(cliRoot, "packages/cli/package.json"), "utf8"),
+    ) as { files: string[] };
+    assert.deepStrictEqual(cliManifest.files, ["dist"]);
     assert.deepStrictEqual(
       JSON.parse(
         await readFile(
@@ -620,6 +624,10 @@ void describe("公开模板内容集合", () => {
       "success",
       JSON.stringify(rustResult),
     );
+    const rustManifest = JSON.parse(
+      await readFile(path.join(rustRoot, "packages/app/package.json"), "utf8"),
+    ) as Record<string, unknown>;
+    assert.ok(!Object.hasOwn(rustManifest, "files"));
     assert.match(
       await readFile(path.join(rustRoot, "packages/app/Cargo.toml"), "utf8"),
       /name = "app"/u,
@@ -674,6 +682,18 @@ void describe("公开模板内容集合", () => {
         readFile(path.join(targetRoot, relativePath), "utf8"),
       ),
     );
+    const [webManifest, databaseManifestBeforeAdd, migrationsManifest] =
+      existingVikeManifests.map((manifest) => JSON.parse(manifest)) as [
+        { files: string[] },
+        { files: string[] },
+        { files: string[] },
+      ];
+    assert.deepStrictEqual(webManifest.files, ["dist"]);
+    assert.deepStrictEqual(databaseManifestBeforeAdd.files, ["dist"]);
+    assert.deepStrictEqual(migrationsManifest.files, [
+      "drizzle.config.ts",
+      "drizzle/migrations",
+    ]);
 
     for (const addition of [
       { contentIdentity: library.identity },

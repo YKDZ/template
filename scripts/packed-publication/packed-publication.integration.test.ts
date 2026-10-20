@@ -19,6 +19,7 @@ import {
   realpath,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -737,15 +738,22 @@ function packedPresets(
   return runtime.deriveTemplateMembers(runtime.content).presets;
 }
 
-function registerTestOwnedCollectionMember(options: {
+async function registerTestOwnedCollectionMember(options: {
   readonly runtime: PackedRuntimeWithCollectionProjection;
-  readonly declaredContentDependencies: Readonly<Record<string, unknown>>;
-}): {
+  readonly workspace: string;
+  readonly fromCli: NodeJS.Require;
+}): Promise<{
   readonly runtime: PackedRuntimeWithCollectionProjection;
   readonly presetAlias: string;
   readonly packageName: string;
   readonly preset: PackedPreset;
-} {
+  readonly packageManifest: {
+    readonly name: string;
+    readonly exports: { readonly "./template": string };
+    readonly dependencies: Readonly<Record<string, string>>;
+  };
+  readonly publicEntry: string;
+}> {
   const originalMembers = options.runtime.deriveTemplateMembers(
     options.runtime.content,
   );
@@ -755,24 +763,76 @@ function registerTestOwnedCollectionMember(options: {
   if (sourceReference === undefined) {
     throw new Error("已安装内容缺少测试内容使用的真实 TypeScript 库依赖");
   }
-  assert.ok(
-    Object.hasOwn(
-      options.declaredContentDependencies,
-      sourceReference.manifest.name,
-    ),
-    `内容包必须声明真实模板依赖 ${sourceReference.manifest.name}`,
+  const referencePackageRoot = path.dirname(
+    options.fromCli.resolve(`${sourceReference.manifest.name}/reference`),
   );
-
-  const fixtureReference: PackedReference = {
-    ...sourceReference,
-    identity: "test:single-registration-library",
-    defaultLeafName: "single-registration-library",
-    defaultPath: "packages/single-registration-library",
-    manifest: {
-      ...sourceReference.manifest,
-      name: "@fixture/single-registration-library",
+  const packageName = "@fixture/single-registration-library";
+  const packageRoot = path.join(options.workspace, "test-owned-content");
+  const relativeReferencePackage = path
+    .relative(packageRoot, referencePackageRoot)
+    .split(path.sep)
+    .join("/");
+  const packageManifest = {
+    name: packageName,
+    version: "0.0.0",
+    private: true,
+    type: "module",
+    exports: { "./template": "./template.mjs" },
+    dependencies: {
+      [sourceReference.manifest.name]: `file:${relativeReferencePackage}`,
+    },
+    devDependencies: {
+      "@ykdz/reference-typescript-config": "workspace:*",
     },
   };
+  await mkdir(path.join(packageRoot, "node_modules", "@ykdz"), {
+    recursive: true,
+  });
+  await symlink(
+    referencePackageRoot,
+    path.join(packageRoot, "node_modules", "@ykdz", "reference-ts-lib"),
+    "dir",
+  );
+  await writeFile(
+    path.join(packageRoot, "package.json"),
+    `${JSON.stringify(packageManifest, null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(packageRoot, "template.mjs"),
+    [
+      'import { referencePackage as sourceReference } from "@ykdz/reference-ts-lib/template";',
+      'import packageManifest from "./package.json" with { type: "json" };',
+      "export const referencePackage = {",
+      "  ...sourceReference,",
+      '  identity: "test:single-registration-library",',
+      '  defaultLeafName: "single-registration-library",',
+      '  defaultPath: "packages/single-registration-library",',
+      "  manifest: packageManifest,",
+      "};",
+      "",
+    ].join("\n"),
+  );
+  const packageLink = path.join(
+    options.workspace,
+    "node_modules",
+    "@fixture",
+    "single-registration-library",
+  );
+  await mkdir(path.dirname(packageLink), { recursive: true });
+  await symlink(packageRoot, packageLink, "dir");
+  const fromWorkspace = createRequire(
+    path.join(options.workspace, "package.json"),
+  );
+  const publicEntry = fromWorkspace.resolve(`${packageName}/template`);
+  const loadedPackage = (await import(pathToFileURL(publicEntry).href)) as {
+    readonly referencePackage: PackedReference;
+  };
+  const fixtureReference = loadedPackage.referencePackage;
+  assert.deepStrictEqual(fixtureReference.manifest, packageManifest);
+  assert.ok(
+    Object.hasOwn(packageManifest.dependencies, sourceReference.manifest.name),
+    `测试内容包必须声明真实模板依赖 ${sourceReference.manifest.name}`,
+  );
   const fixturePreset = options.runtime.definePreset({
     metadata: {
       alias: "single-registration-fixture",
@@ -843,6 +903,8 @@ function registerTestOwnedCollectionMember(options: {
     presetAlias: fixturePreset.metadata.alias,
     packageName: fixtureReference.manifest.name,
     preset: fixturePreset,
+    packageManifest,
+    publicEntry,
   };
 }
 
@@ -1356,22 +1418,10 @@ void describe("packed public CLI consumer", () => {
         const presetsInArchive = packedPresets(installedRuntime).filter(
           (preset) => preset.operations.includes("init"),
         );
-        const contentEntry = fromCli.resolve("@ykdz/template-content");
-        const contentManifest = JSON.parse(
-          await readFile(
-            path.resolve(path.dirname(contentEntry), "..", "package.json"),
-            "utf8",
-          ),
-        ) as {
-          readonly dependencies?: Readonly<Record<string, unknown>>;
-          readonly devDependencies?: Readonly<Record<string, unknown>>;
-        };
-        const testOwnedCollection = registerTestOwnedCollectionMember({
+        const testOwnedCollection = await registerTestOwnedCollectionMember({
           runtime: installedRuntime,
-          declaredContentDependencies: {
-            ...contentManifest.dependencies,
-            ...contentManifest.devDependencies,
-          },
+          workspace,
+          fromCli,
         });
         const defaultReferenceNames = new Set(
           installedRuntime
@@ -1420,6 +1470,16 @@ void describe("packed public CLI consumer", () => {
               checkScenariosVerified:
                 fixturePublicationSources.scenariosVerified,
               sourceResourcesRead: fixturePublicationSources.resourcesRead,
+              testOwnedPackage: {
+                name: testOwnedCollection.packageManifest.name,
+                templateExport:
+                  testOwnedCollection.packageManifest.exports["./template"],
+                referenceDependency:
+                  testOwnedCollection.packageManifest.dependencies[
+                    "@ykdz/reference-ts-lib"
+                  ],
+                publicEntryLoaded: true,
+              },
               unregisteredPresetExposed: installedRuntime
                 .deriveTemplateMembers(installedRuntime.content)
                 .presets.some(
@@ -1427,10 +1487,7 @@ void describe("packed public CLI consumer", () => {
                     preset.metadata.alias === testOwnedCollection.presetAlias,
                 ),
               fixtureDependencyDeclared: Object.hasOwn(
-                {
-                  ...contentManifest.dependencies,
-                  ...contentManifest.devDependencies,
-                },
+                testOwnedCollection.packageManifest.dependencies,
                 "@ykdz/reference-ts-lib",
               ),
               packRootReferenceNames: registeredReferenceNames,
