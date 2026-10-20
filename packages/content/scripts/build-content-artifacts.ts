@@ -32,7 +32,7 @@ type NativeMember = LoadedTemplateContentMember & {
 type PresetMember = Extract<NativeMember, { readonly kind: "preset" }>;
 type ReferenceMember = Extract<NativeMember, { readonly kind: "reference" }>;
 
-type DependencyStrategy = {
+export type ContentCollectionDependencyStrategy = {
   dependencies(options: {
     readonly content: NativeMember;
     readonly contentByIdentity: ReadonlyMap<string, NativeMember>;
@@ -59,8 +59,8 @@ export type PackedArtifact = {
 
 export type PreparedContentCollection = {
   readonly root: string;
-  readonly namespace: string;
-  readonly preset: PresetMember;
+  readonly roots: readonly NativeMember[];
+  readonly presets: readonly PresetMember[];
   readonly members: readonly NativeMember[];
   readonly owners: readonly {
     readonly member: NativeMember;
@@ -82,12 +82,10 @@ export type PreparedContentCollection = {
 
 export type PrepareContentCollectionOptions = {
   readonly content: readonly LoadedTemplateContentMember[];
-  /** 从同一原生集合中额外公开、供后续add选择的成员。 */
-  readonly additionalMembers?: readonly LoadedTemplateContentMember[];
-  readonly presetAlias: string;
-  readonly strategy: DependencyStrategy;
+  /** 从同一已加载集合中选择任意预设或参考入口作为闭包根。 */
+  readonly roots: readonly LoadedTemplateContentMember[];
+  readonly strategy: ContentCollectionDependencyStrategy;
   readonly workspaceRoot?: string;
-  readonly namespace?: string;
   readonly packageName?: string;
   /** 外部作者工作区集合的原生清单版本。 */
   readonly collectionVersion?: string;
@@ -114,19 +112,42 @@ function ownerDefinition(member: NativeMember): PreparedOwnerDefinition {
 
 function selectedMembers(
   content: readonly NativeMember[],
-  presetAlias: string,
-  strategy: DependencyStrategy,
-  additionalMembers: readonly NativeMember[],
+  roots: readonly NativeMember[],
+  strategy: ContentCollectionDependencyStrategy,
 ): {
-  readonly preset: PresetMember;
+  readonly roots: readonly NativeMember[];
+  readonly presets: readonly PresetMember[];
   readonly members: readonly NativeMember[];
 } {
-  const preset = content.find(
-    (member): member is PresetMember =>
-      member.kind === "preset" && member.alias === presetAlias,
-  );
-  if (preset === undefined) {
-    throw new Error(`内容集合中不存在预设：${presetAlias}`);
+  if (roots.length === 0) {
+    throw new Error("原生内容集合至少需要一个公开入口根");
+  }
+  const contentByIdentity = new Map<string, NativeMember>();
+  for (const member of content) {
+    const key = contentIdentityKey(member.identity);
+    if (contentByIdentity.has(key)) {
+      throw new Error(
+        `原生内容集合存在重复身份：${contentIdentityLabel(member.identity)}`,
+      );
+    }
+    contentByIdentity.set(key, member);
+  }
+
+  const selectedRoots = new Map<string, NativeMember>();
+  for (const root of roots) {
+    const key = contentIdentityKey(root.identity);
+    const available = contentByIdentity.get(key);
+    if (
+      available === undefined ||
+      available.kind !== root.kind ||
+      available.source.moduleURL !== root.source.moduleURL ||
+      available.source.manifestURL !== root.source.manifestURL
+    ) {
+      throw new Error(
+        `内容入口根未由当前原生集合按同一来源修订登记：${contentIdentityLabel(root.identity)}`,
+      );
+    }
+    selectedRoots.set(key, available);
   }
 
   const references = content.filter(
@@ -135,12 +156,17 @@ function selectedMembers(
   const referencesByIdentity = new Map(
     references.map((member) => [contentIdentityKey(member.identity), member]),
   );
-  const referencesByDefinition = new Map(
-    references.map((member) => [member.definition, member]),
-  );
-  const selected = new Map<string, NativeMember>([
-    [contentIdentityKey(preset.identity), preset],
-  ]);
+  const referencesByDefinition = new Map<
+    ReferenceMember["definition"],
+    ReferenceMember[]
+  >();
+  for (const reference of references) {
+    const sameDefinition =
+      referencesByDefinition.get(reference.definition) ?? [];
+    sameDefinition.push(reference);
+    referencesByDefinition.set(reference.definition, sameDefinition);
+  }
+  const selected = new Map<string, NativeMember>();
   const visited = new Set<string>();
   const visit = (member: ReferenceMember): void => {
     const key = contentIdentityKey(member.identity);
@@ -154,7 +180,7 @@ function selectedMembers(
       const child = referencesByIdentity.get(contentIdentityKey(dependency));
       if (child === undefined) {
         throw new Error(
-          `预设 ${presetAlias} 的策略闭包缺少成员 ${dependency.packageName}#${dependency.exportPath}`,
+          `原生入口闭包缺少成员 ${dependency.packageName}#${dependency.exportPath}`,
         );
       }
       visit(child);
@@ -169,39 +195,39 @@ function selectedMembers(
       >,
     );
     for (const node of nodes) {
-      const reference = referencesByDefinition.get(
+      const candidates = referencesByDefinition.get(
         node.reference as ReferenceMember["definition"],
       );
-      if (reference === undefined) {
+      const sameNamespace = candidates?.filter(
+        (candidate) =>
+          candidate.identity.namespace === selectedPreset.identity.namespace,
+      );
+      const matching =
+        sameNamespace !== undefined && sameNamespace.length > 0
+          ? sameNamespace
+          : candidates;
+      if (matching === undefined || matching.length !== 1) {
         throw new Error(
-          `预设 ${selectedPreset.alias} 引用未由当前集合登记的原生成员`,
+          `预设 ${selectedPreset.alias} 的引用未由当前集合唯一登记：${selectedPreset.identity.packageName}`,
         );
       }
-      visit(reference);
+      visit(matching[0]!);
     }
   };
-  includePresetReferences(preset);
-
-  for (const additional of additionalMembers) {
-    const identity = contentIdentityKey(additional.identity);
-    const available = content.find(
-      (member) => contentIdentityKey(member.identity) === identity,
-    );
-    if (available === undefined) {
-      throw new Error(
-        `附加集合成员未由当前原生集合登记：${additional.identity.packageName}#${additional.identity.exportPath}`,
-      );
+  for (const root of selectedRoots.values()) {
+    selected.set(contentIdentityKey(root.identity), root);
+    if (root.kind === "preset") {
+      includePresetReferences(root);
+    } else {
+      visit(root);
     }
-    if (available.kind === "preset") {
-      throw new Error(
-        `附加成员必须是参考包：${available.identity.packageName}#${available.identity.exportPath}`,
-      );
-    }
-    visit(available);
   }
 
   return {
-    preset,
+    roots: [...selectedRoots.values()],
+    presets: [...selectedRoots.values()].filter(
+      (member): member is PresetMember => member.kind === "preset",
+    ),
     members: content.filter((member) =>
       selected.has(contentIdentityKey(member.identity)),
     ),
@@ -209,9 +235,9 @@ function selectedMembers(
 }
 
 function orderedMembers(
-  preset: PresetMember,
+  presets: readonly PresetMember[],
   members: readonly NativeMember[],
-  strategy: DependencyStrategy,
+  strategy: ContentCollectionDependencyStrategy,
 ): readonly NativeMember[] {
   const references = members.filter(
     (member): member is ReferenceMember => member.kind === "reference",
@@ -246,7 +272,7 @@ function orderedMembers(
     ordered.push(member);
   };
   for (const reference of references) visit(reference);
-  ordered.push(preset);
+  ordered.push(...presets);
   return ordered;
 }
 
@@ -900,7 +926,6 @@ async function createCollectionInstallRoot(options: {
   readonly root: string;
   readonly packageName: string;
   readonly collectionVersion: string;
-  readonly members: readonly NativeMember[];
   readonly providers: readonly {
     readonly packageName: string;
     readonly packageVersion: string;
@@ -945,19 +970,18 @@ async function createCollectionInstallRoot(options: {
   });
 }
 
-/** 按预设节点和默认策略依赖派生制品集合，再由pnpm原生pack。 */
+/** 按显式内容入口根及默认策略依赖派生制品集合，再由pnpm原生pack。 */
 export async function prepareContentCollection(
   options: PrepareContentCollectionOptions,
 ): Promise<PreparedContentCollection> {
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const commandLog: string[] = [];
-  const { preset, members } = selectedMembers(
+  const { roots, presets, members } = selectedMembers(
     options.content as readonly NativeMember[],
-    options.presetAlias,
+    options.roots as readonly NativeMember[],
     options.strategy,
-    (options.additionalMembers ?? []) as readonly NativeMember[],
   );
-  const buildOrder = orderedMembers(preset, members, options.strategy);
+  const buildOrder = orderedMembers(presets, members, options.strategy);
   const collectionName = options.packageName ?? "@ykdz/template-content";
   const workspace = await workspaceProjects(workspaceRoot, commandLog);
   const resolutionRoots = new Set([
@@ -1134,7 +1158,6 @@ export async function prepareContentCollection(
     root,
     packageName: collectionName,
     collectionVersion,
-    members,
     providers,
     sdkPackageRoots,
     sdkVersions,
@@ -1165,8 +1188,8 @@ export async function prepareContentCollection(
 
   return {
     root,
-    namespace: options.namespace ?? preset.identity.namespace,
-    preset,
+    roots,
+    presets,
     members,
     owners,
     providers: providerPackages,
@@ -1261,7 +1284,8 @@ export async function writeContentCollectionEvidence(
     [
       `# 原生内容制品证据`,
       "",
-      `预设：${prepared.preset.identity.packageName}#${prepared.preset.identity.exportPath}`,
+      `入口根：${prepared.roots.map((member) => `${member.identity.packageName}#${member.identity.exportPath}`).join(", ")}`,
+      `预设：${prepared.presets.map((preset) => `${preset.identity.packageName}#${preset.identity.exportPath}`).join(", ") || "无"}`,
       `成员：${prepared.members.map((member) => `${member.identity.packageName}#${member.identity.exportPath}`).join(", ")}`,
       "",
       "## 制品",
