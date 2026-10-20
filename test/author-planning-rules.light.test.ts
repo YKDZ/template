@@ -26,9 +26,8 @@ void describe("author planning role check", () => {
 
       const planningRoot = path.join(fixtureRoot, "planning-owner");
       const preparationRoot = path.join(fixtureRoot, "preparation-owner");
+      await Promise.all([mkdir(planningRoot), mkdir(preparationRoot)]);
       await Promise.all([
-        mkdir(planningRoot),
-        mkdir(preparationRoot),
         writeFile(
           path.join(planningRoot, "package.json"),
           JSON.stringify({ name: "@fixture/planning-owner", type: "module" }),
