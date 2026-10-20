@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { isBuiltin } from "node:module";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import { parse as parseSemver, valid as validSemver } from "semver";
 import parseSpdxExpression from "spdx-expression-parse";
@@ -9,7 +10,10 @@ import {
   inspectPackageReleaseChangelog,
   type ChangelogBlockerCode,
 } from "./changelog.ts";
-import { cliCommandIdentity } from "./cli-command-identity.ts";
+import {
+  cliCommandIdentity,
+  isTsCliPublicCandidateCreationInput,
+} from "./cli-command-identity.ts";
 
 export type NpmPublicationReadinessBlockerCode =
   | "package-name"
@@ -171,6 +175,52 @@ function parseJsonFact(fact: TextFact): JsonObject | undefined {
   } catch {
     return undefined;
   }
+}
+
+async function readCandidateSelection(options: {
+  readonly repositoryRoot: string;
+  readonly packagePath: string;
+}): Promise<{
+  readonly selection?: {
+    readonly packageDefinitionId: string;
+    readonly creationInput: unknown;
+  };
+  readonly blocker?: NpmPublicationReadinessBlocker;
+}> {
+  const configPath = "scripts/npm-publication/publication.config.json";
+  const fact = await textFact(path.join(options.repositoryRoot, configPath));
+  const config = parseJsonFact(fact);
+  const selection =
+    config !== undefined &&
+    config.packagePath === options.packagePath &&
+    typeof config.packageDefinitionId === "string" &&
+    config.packageDefinitionId.length > 0 &&
+    isTsCliPublicCandidateCreationInput(config.creationInput)
+      ? {
+          packageDefinitionId: config.packageDefinitionId,
+          creationInput: config.creationInput,
+        }
+      : undefined;
+  if (selection !== undefined) return { selection };
+  return {
+    blocker: blocker({
+      code:
+        fact.kind === "missing"
+          ? "local-template-metadata-missing"
+          : fact.kind === "unreadable"
+            ? "local-template-metadata-invalid"
+            : "local-template-metadata-mismatch",
+      path: configPath,
+      observed:
+        fact.kind === "missing"
+          ? "missing"
+          : fact.kind === "unreadable"
+            ? fact.reason
+            : display(config),
+      expected: "由生成的发布配置选出的公开 CLI 初始化记录。",
+      nextAction: "恢复从公开 CLI 候选投影得到的发布配置。",
+    }),
+  };
 }
 
 function validNpmPackageName(value: string): boolean {
@@ -798,6 +848,10 @@ async function addMetadataBlockers(options: {
   readonly packagePath: string;
   readonly packageName?: string;
   readonly rootManifest?: JsonObject;
+  readonly candidateSelection?: {
+    readonly packageDefinitionId: string;
+    readonly creationInput: unknown;
+  };
   readonly blockers: NpmPublicationReadinessBlocker[];
 }): Promise<void> {
   const metadataRoot = path.join(options.repositoryRoot, ".template");
@@ -825,13 +879,6 @@ async function addMetadataBlockers(options: {
     textFact(path.join(options.repositoryRoot, blueprintPath)),
     textFact(path.join(options.repositoryRoot, generationPath)),
   ]);
-  if (
-    metadataRootState === "absent" &&
-    blueprintFact.kind === "missing" &&
-    generationFact.kind === "missing"
-  ) {
-    return;
-  }
   if (metadataRootState === "invalid") {
     options.blockers.push(
       blocker({
@@ -855,8 +902,8 @@ async function addMetadataBlockers(options: {
           code: "local-template-metadata-missing",
           path: metadataPath,
           observed: "missing",
-          expected: "Complete Local Template Metadata when .template exists",
-          nextAction: "Restore both supported Local Template Metadata files.",
+          expected: "完整的本地模板元数据及其必需文件",
+          nextAction: "恢复项目蓝图与生成记录后重新检查发布就绪状态。",
         }),
       );
     } else if (fact.kind === "unreadable") {
@@ -889,11 +936,19 @@ async function addMetadataBlockers(options: {
     );
   }
   const generationPackages =
-    generation?.schemaVersion === 2 &&
-    typeof generation.repositoryName === "string" &&
-    generation.repositoryName.trim().length > 0 &&
-    typeof generation.defaultPackageScope === "string" &&
-    generation.defaultPackageScope.trim().length > 0 &&
+    generation?.schemaVersion === 1 &&
+    typeof generation.strategyIdentity === "string" &&
+    generation.strategyIdentity.trim().length > 0 &&
+    isObject(generation.strategyState) &&
+    typeof generation.strategyState.repositoryName === "string" &&
+    generation.strategyState.repositoryName.trim().length > 0 &&
+    typeof generation.strategyState.defaultPackageScope === "string" &&
+    generation.strategyState.defaultPackageScope.trim().length > 0 &&
+    typeof generation.strategyState.todo === "boolean" &&
+    isObject(generation.strategyState.toolchain) &&
+    typeof generation.strategyState.toolchain.nodeLtsMajor === "string" &&
+    typeof generation.strategyState.toolchain.nodeVersion === "string" &&
+    typeof generation.strategyState.toolchain.packageManagerPin === "string" &&
     Array.isArray(generation.packages)
       ? generation.packages
       : undefined;
@@ -903,8 +958,7 @@ async function addMetadataBlockers(options: {
         code: "local-template-metadata-invalid",
         path: generationPath,
         observed: "Unreadable Generation Record publication facts",
-        expected:
-          "Generation Record schema version 2 with repository, default scope, and package facts",
+        expected: "Generation Record schema 1，包含默认工作区事实和包记录。",
         nextAction: "Restore the canonical Generation Record.",
       }),
     );
@@ -922,15 +976,13 @@ async function addMetadataBlockers(options: {
   );
   const records = generationPackages.filter(
     (item): item is JsonObject =>
-      isObject(item) && item.path === options.packagePath,
+      isObject(item) &&
+      isObject(item.definition) &&
+      item.definition.path === options.packagePath,
   );
   const definition = definitions[0];
   const record = records[0];
-  const targetId =
-    definition !== undefined &&
-    typeof definition.packageDefinitionId === "string"
-      ? definition.packageDefinitionId
-      : undefined;
+  const targetId = options.candidateSelection?.packageDefinitionId;
   const definitionsWithTargetId =
     targetId === undefined
       ? []
@@ -943,53 +995,79 @@ async function addMetadataBlockers(options: {
       ? []
       : generationPackages.filter(
           (item): item is JsonObject =>
-            isObject(item) && item.packageDefinitionId === targetId,
+            isObject(item) &&
+            isObject(item.definition) &&
+            item.definition.packageDefinitionId === targetId,
         );
-  const candidateProvenance = generationPackages.filter(
-    (item): item is JsonObject =>
-      isObject(item) &&
-      item.definitionName === "ts-cli" &&
-      item.contributionIdentity === "cli-publication-candidate",
-  );
-  const initCandidates = candidateProvenance.filter(
-    (item) => item.planningContribution === "planInitialization",
-  );
+  const recordDefinition =
+    record !== undefined && isObject(record.definition)
+      ? record.definition
+      : undefined;
+  const selectedRecord = recordsWithTargetId[0];
+  const selectedRecordDefinition =
+    selectedRecord !== undefined && isObject(selectedRecord.definition)
+      ? selectedRecord.definition
+      : undefined;
   const definitionMatches =
     definitions.length === 1 &&
     definition !== undefined &&
     targetId !== undefined &&
     targetId.length > 0 &&
     definitionsWithTargetId.length === 1 &&
-    definition.name === options.packageName &&
+    definition.packageDefinitionId === targetId &&
+    definition.path === options.packagePath &&
+    (options.packageName === undefined ||
+      definition.name === options.packageName) &&
     definition.role === "cli-tool";
   const recordMatches =
     records.length === 1 &&
     record !== undefined &&
     definition !== undefined &&
     recordsWithTargetId.length === 1 &&
-    record.packageDefinitionId === definition.packageDefinitionId &&
-    candidateProvenance.length === 1 &&
-    initCandidates.length === 1 &&
-    initCandidates[0] === record;
+    selectedRecord === record &&
+    recordDefinition !== undefined &&
+    recordDefinition.packageDefinitionId === definition.packageDefinitionId &&
+    recordDefinition.path === options.packagePath &&
+    record.createdBy === "initialization" &&
+    isTsCliPublicCandidateCreationInput(record.creationInput) &&
+    options.candidateSelection !== undefined &&
+    isTsCliPublicCandidateCreationInput(
+      options.candidateSelection.creationInput,
+    ) &&
+    isDeepStrictEqual(
+      record.creationInput,
+      options.candidateSelection.creationInput,
+    ) &&
+    selectedRecordDefinition?.packageDefinitionId === targetId;
   const repositoryMatches =
-    generation.repositoryName === options.rootManifest?.name;
-  if (!definitionMatches || !recordMatches || !repositoryMatches) {
+    isObject(generation.strategyState) &&
+    generation.strategyState.repositoryName === options.rootManifest?.name;
+  if (
+    !definitionMatches ||
+    !recordMatches ||
+    !repositoryMatches ||
+    options.candidateSelection === undefined
+  ) {
     options.blockers.push(
       blocker({
         code: "local-template-metadata-mismatch",
-        path: !definitionMatches ? blueprintPath : generationPath,
+        path: !definitionMatches
+          ? blueprintPath
+          : !recordMatches || !repositoryMatches
+            ? generationPath
+            : "scripts/npm-publication/publication.config.json",
         observed: display({
           definitions,
           records,
           definitionsWithTargetId,
           recordsWithTargetId,
-          candidateProvenance,
-          repositoryName: generation.repositoryName,
+          candidateSelection: options.candidateSelection,
+          strategyState: generation.strategyState,
         }),
         expected:
-          "Exactly one matching public CLI target with stable ID and candidate provenance",
+          "唯一的初始化公开 CLI 候选，其包定义 ID 与 Blueprint 及工作区事实一致。",
         nextAction:
-          "Restore the matching Blueprint name and unchanged candidate planning facts.",
+          "恢复匹配的 Blueprint、Generation Record 与公开 CLI 选择事实。",
       }),
     );
   }
@@ -1065,6 +1143,13 @@ export async function inspectNpmPublicationReadiness(options: {
     manifest.private === true && manifest.version === undefined
       ? "safe-unconfigured"
       : "public-intent";
+  const candidateSelection = await readCandidateSelection({
+    repositoryRoot,
+    packagePath,
+  });
+  if (candidateSelection.blocker !== undefined) {
+    blockers.push(candidateSelection.blocker);
+  }
   const identity = addManifestBlockers({
     manifest,
     manifestPath,
@@ -1083,6 +1168,9 @@ export async function inspectNpmPublicationReadiness(options: {
     repositoryRoot,
     packagePath,
     ...(rootManifest === undefined ? {} : { rootManifest }),
+    ...(candidateSelection.selection === undefined
+      ? {}
+      : { candidateSelection: candidateSelection.selection }),
     ...(identity.packageName === undefined
       ? {}
       : { packageName: identity.packageName }),

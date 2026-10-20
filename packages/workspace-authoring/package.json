@@ -27,10 +27,10 @@
       "types": "./dist/typescript-module-specifiers.d.ts",
       "default": "./dist/typescript-module-specifiers.js"
     },
-    "./preset-definition": {
-      "source": "./src/preset-definition.ts",
-      "types": "./dist/preset-definition.d.ts",
-      "default": "./dist/preset-definition.js"
+    "./generation-context": {
+      "source": "./src/generation-context.ts",
+      "types": "./dist/generation-context.d.ts",
+      "default": "./dist/generation-context.js"
     },
     "./reference-package": {
       "source": "./src/reference-package.ts",

@@ -12,15 +12,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { materializeProjectProjection } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
+import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
+import { templateContent, templatePresets } from "@ykdz/template-content";
+import { createGenerator } from "@ykdz/template-generator";
+import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 import { parseDocument } from "yaml";
-
-import {
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-} from "../foundation.ts";
-import { tsCliDefinition } from "../ts-cli/definition.ts";
 
 async function writeVerifiedArtifact(
   workspace: string,
@@ -387,33 +383,47 @@ async function executeFakePublication(
 }
 
 void describe("manual npm publication capability", () => {
-  void it("projects a source-backed release workflow and caller only for the public CLI candidate", async () => {
-    const plan = planGeneratedRepositoryInitialization({
-      definition: tsCliDefinition,
-      context: createGenerationContext({
-        targetDir: path.join("generated", "cli"),
-        defaultPackageScope: "demo",
-        toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.21.0",
-          nodeVersion: releaseToolchainSnapshot.nodeVersion,
-        },
-      }),
-    });
-
-    const projection = await materializeProjectProjection({
-      operations: plan.operations,
-      reconciliation: plan.reconciliation,
-    });
-    const output = (file: string) =>
-      Buffer.from(
-        projection.entries.find((entry) => entry.path === file)!.content,
-      ).toString("utf8");
-    assert.deepStrictEqual(
-      JSON.parse(output("scripts/npm-publication/publication.config.json")),
-      { packagePath: "packages/cli" },
+  void it("通过公开 CLI 预设生成发布工作流并验证候选配置", async (t) => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-publication-workflow-"),
     );
-    const releaseSource = output(".github/workflows/release.yml");
+    t.after(async () => rm(targetRoot, { recursive: true, force: true }));
+    const cliPreset = templatePresets.find(
+      (preset) => preset.owner?.packageName === "@ykdz/preset-ts-cli",
+    );
+    assert.ok(cliPreset);
+    const initialized = await createGenerator({
+      content: templateContent,
+      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+    }).init({
+      targetRoot,
+      selection: { roots: [{ preset: cliPreset }] },
+      strategyInput: { repositoryName: "cli", defaultPackageScope: "demo" },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+    if (initialized.status !== "success") {
+      throw new Error("公开 CLI 预设初始化失败");
+    }
+
+    const output = (file: string) =>
+      readFile(path.join(targetRoot, file), "utf8");
+    const publicationConfig = JSON.parse(
+      await output("scripts/npm-publication/publication.config.json"),
+    ) as Record<string, unknown>;
+    const publicCandidate = initialized.generationRecord.packages.find(
+      (record) => record.definition.path === "packages/cli",
+    );
+    assert.ok(publicCandidate);
+    assert.deepStrictEqual(publicationConfig, {
+      packagePath: "packages/cli",
+      packageDefinitionId: publicCandidate.definition.packageDefinitionId,
+      creationInput: publicCandidate.creationInput,
+    });
+    const releaseSource = await output(".github/workflows/release.yml");
     const workflow = parseDocument(releaseSource).toJS() as {
       readonly jobs: {
         readonly verify: { readonly steps: readonly Record<string, unknown>[] };
