@@ -1,4 +1,29 @@
+import type { PackageDefinition } from "./project-blueprint.ts";
+
 export type PresetOperation = "init" | "add";
+
+/** 预设项目行为的持久选择由所属包的真实公开导出标识。 */
+export type PresetOwnerSelection = {
+  readonly packageName: string;
+  readonly exportPath: string;
+};
+
+/** 预设只计算项目要求；实际写入仍由工作区策略解释并投影。 */
+export type PresetProjectOptions<Context, Contribution> = {
+  readonly context: Context;
+  readonly contributions: readonly Contribution[];
+  readonly nodeInstances: ReadonlyMap<string, PackageDefinition>;
+};
+
+type PresetProjectFields<
+  Options extends PresetProjectOptions<unknown, unknown> | never,
+  ProjectContribution,
+> = {
+  readonly owner?: PresetOwnerSelection;
+  readonly project?: [Options] extends [never]
+    ? never
+    : (options: Options) => ProjectContribution;
+};
 
 export type PresetReference = {
   readonly identity: string;
@@ -51,6 +76,8 @@ export type PresetDefinition<
   Reference extends PresetReference,
   Layout = never,
   CreationInput = never,
+  ProjectOptions extends PresetProjectOptions<unknown, unknown> | never = never,
+  ProjectContribution = never,
 > = {
   readonly kind: "preset";
   readonly metadata: {
@@ -62,7 +89,7 @@ export type PresetDefinition<
   readonly nodes: Readonly<
     Record<string, PresetNode<Reference, Layout, CreationInput>>
   >;
-};
+} & PresetProjectFields<ProjectOptions, ProjectContribution>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -74,19 +101,61 @@ function requireText(value: unknown, label: string): asserts value is string {
   }
 }
 
-/** 创建不读取资源、不执行规划的预设组合声明。 */
-export function definePreset<const Nodes extends PresetNodeMap>(options: {
+type PresetBaseOptions<Nodes extends PresetNodeMap> = {
   readonly metadata: PresetDefinition<NodeReference<Nodes>>["metadata"];
   readonly operations: readonly PresetOperation[];
   readonly nodes: Nodes;
-}): PresetDefinition<
+};
+
+/** 创建不读取资源、不执行规划的预设组合声明。 */
+export function definePreset<const Nodes extends PresetNodeMap>(
+  options: PresetBaseOptions<Nodes> & {
+    readonly owner?: PresetOwnerSelection;
+    readonly project?: never;
+  },
+): PresetDefinition<
   NodeReference<Nodes>,
   NodeLayout<Nodes>,
   NodeCreationInput<Nodes>
-> & { readonly nodes: Nodes } {
+> & { readonly nodes: Nodes };
+export function definePreset<
+  const Nodes extends PresetNodeMap,
+  ProjectOptions extends PresetProjectOptions<unknown, unknown>,
+  ProjectContribution,
+>(
+  options: PresetBaseOptions<Nodes> & {
+    readonly owner: PresetOwnerSelection;
+    readonly project: (options: ProjectOptions) => ProjectContribution;
+  },
+): PresetDefinition<
+  NodeReference<Nodes>,
+  NodeLayout<Nodes>,
+  NodeCreationInput<Nodes>,
+  ProjectOptions,
+  ProjectContribution
+> & { readonly nodes: Nodes };
+export function definePreset<const Nodes extends PresetNodeMap>(
+  options: PresetBaseOptions<Nodes> & {
+    readonly owner?: PresetOwnerSelection;
+    readonly project?: (...args: never[]) => unknown;
+  },
+): unknown {
   requireText(options.metadata.alias, "别名");
   requireText(options.metadata.title, "标题");
   requireText(options.metadata.description, "说明");
+  if (options.project !== undefined) {
+    if (!isRecord(options.owner)) {
+      throw new Error("项目预设必须声明所属包的公开导出身份");
+    }
+    requireText(options.owner.packageName, "所属包名");
+    requireText(options.owner.exportPath, "公开导出路径");
+    if (
+      options.owner.exportPath !== "." &&
+      !options.owner.exportPath.startsWith("./")
+    ) {
+      throw new Error("预设公开导出路径必须是包的公开入口");
+    }
+  }
   if (!Array.isArray(options.operations) || options.operations.length === 0) {
     throw new Error("预设至少允许一种操作");
   }
@@ -157,9 +226,15 @@ export function definePreset<const Nodes extends PresetNodeMap>(options: {
     metadata: Object.freeze({ ...options.metadata }),
     operations: Object.freeze(operations),
     nodes: Object.freeze(nodes) as Nodes,
+    ...(options.owner === undefined
+      ? {}
+      : { owner: Object.freeze({ ...options.owner }) }),
+    ...(options.project === undefined ? {} : { project: options.project }),
   }) as unknown as PresetDefinition<
     NodeReference<Nodes>,
     NodeLayout<Nodes>,
-    NodeCreationInput<Nodes>
+    NodeCreationInput<Nodes>,
+    never,
+    never
   > & { readonly nodes: Nodes };
 }

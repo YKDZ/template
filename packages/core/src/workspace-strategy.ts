@@ -94,6 +94,7 @@ export type WorkspaceStrategy<
   Content extends GeneratorContent<Context, Contribution, CreationInput> =
     GeneratorContent<Context, Contribution, CreationInput>,
   NodeLayout = unknown,
+  PresetProjectContribution = unknown,
 > = {
   readonly identity: string;
   initialize(options: {
@@ -137,5 +138,7 @@ export type WorkspaceStrategy<
     readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
     readonly contributions: readonly Contribution[];
     readonly nodeInstances: GeneratorNodeInstances;
+    /** 各已选预设计算的封闭项目贡献由策略解释。 */
+    readonly presetProjectContributions: readonly PresetProjectContribution[];
   }): WorkspaceProjection;
 };

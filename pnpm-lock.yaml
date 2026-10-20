@@ -842,6 +842,58 @@ importers:
         specifier: 'catalog:'
         version: typescript@7.0.2
 
+  packages/preset-vike-app:
+    dependencies:
+      '@ykdz/reference-vike-db':
+        specifier: workspace:*
+        version: link:../../references/vike-db
+      '@ykdz/reference-vike-migrations':
+        specifier: workspace:*
+        version: link:../../references/vike-migrations
+      '@ykdz/reference-vike-web':
+        specifier: workspace:*
+        version: link:../../references/vike-web
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../core
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../environment
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
+      '@ykdz/reference-typescript-config':
+        specifier: workspace:*
+        version: link:../../references/typescript-config
+      '@ykdz/reference-vue-shared':
+        specifier: workspace:*
+        version: link:../../references/vue-shared
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../generator
+      '@ykdz/template-workspace':
+        specifier: workspace:*
+        version: link:../workspace
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../workspace-authoring
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
   packages/workspace:
     dependencies:
       '@ykdz/reference-rust-bin':
