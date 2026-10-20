@@ -13,6 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  contentIdentityLabel,
   contentIdentityKey,
   type ContentIdentity,
 } from "@ykdz/template-core/content-identity";
@@ -68,6 +69,8 @@ export type PreparedContentCollection = {
     readonly installRoot: string;
     readonly packed: PackedArtifact;
   }[];
+  /** 按来源命名空间隔离解析上下文的原生内容入口包。 */
+  readonly providers: readonly PackedArtifact[];
   readonly sdkPackages: readonly PackedArtifact[];
   readonly collection: PackedArtifact;
   readonly archives: ReadonlyMap<string, PackedArtifact>;
@@ -362,12 +365,9 @@ async function resolvedVersions(
 function versionForDependency(
   name: string,
   specifier: string,
-  artifacts: ReadonlyMap<string, PreparedNativeContentArtifact>,
   workspace: ReadonlyMap<string, WorkspaceProject>,
   resolved: ReadonlyMap<string, string>,
 ): string {
-  const artifact = artifacts.get(name);
-  if (artifact !== undefined) return artifact.coordinate.version;
   const project = workspace.get(name);
   if (project?.version !== undefined) return project.version;
   const version = resolved.get(name);
@@ -379,18 +379,68 @@ function versionForDependency(
 }
 
 function artifactInstallDependencies(
+  member: NativeMember,
   artifact: PreparedNativeContentArtifact,
+  members: readonly NativeMember[],
   artifacts: ReadonlyMap<string, PreparedNativeContentArtifact>,
   workspace: ReadonlyMap<string, WorkspaceProject>,
   resolved: ReadonlyMap<string, string>,
 ): Readonly<Record<string, string>> {
   const dependencies: Record<string, string> = {};
   for (const dependency of artifact.dependencies) {
+    const contentCandidates = members.filter(
+      (candidate) =>
+        candidate.identity.packageName === dependency.name &&
+        candidate.identity.namespace === member.identity.namespace,
+    );
+    const allContentCandidates = members.filter(
+      (candidate) => candidate.identity.packageName === dependency.name,
+    );
+    const selectedContent =
+      contentCandidates.length === 1
+        ? contentCandidates[0]
+        : contentCandidates.length > 1
+          ? undefined
+          : allContentCandidates.length === 1
+            ? allContentCandidates[0]
+            : undefined;
+    if (contentCandidates.length > 1) {
+      throw new Error(
+        `所属制品 ${contentIdentityLabel(member.identity)} 的依赖 ${dependency.name} 在同一来源中对应多个内容入口`,
+      );
+    }
+    if (
+      allContentCandidates.length > 1 &&
+      contentCandidates.length === 0 &&
+      dependency.purposes.includes("template-execution")
+    ) {
+      throw new Error(
+        `所属制品 ${contentIdentityLabel(member.identity)} 的执行依赖 ${dependency.name} 存在多个来源，无法按原生坐标选择`,
+      );
+    }
+    const contentArtifact =
+      selectedContent === undefined
+        ? undefined
+        : artifacts.get(contentIdentityKey(selectedContent.identity));
+    if (contentArtifact !== undefined) {
+      // 已选内容目标依赖还是定义解析边；普通目标依赖不进入执行闭包。
+      if (
+        dependency.purposes.includes("template-execution") ||
+        contentCandidates.length === 1
+      ) {
+        dependencies[dependency.name] = contentArtifact.coordinate.version;
+      }
+      continue;
+    }
+    if (selectedContent !== undefined) {
+      throw new Error(
+        `执行依赖 ${dependency.name} 缺少已准备内容制品：${contentIdentityLabel(selectedContent.identity)}`,
+      );
+    }
     if (!dependency.purposes.includes("template-execution")) continue;
     dependencies[dependency.name] = versionForDependency(
       dependency.name,
       dependency.specifier,
-      artifacts,
       workspace,
       resolved,
     );
@@ -663,68 +713,75 @@ function generatedCollectionSource(
   ].join("\n");
 }
 
-async function createCollectionInstallRoot(options: {
+function generatedProviderAggregateSource(
+  packageNames: readonly string[],
+): string {
+  const imports = packageNames.map(
+    (name, index) =>
+      `import { templateContent as provider${index} } from ${JSON.stringify(name)};`,
+  );
+  return [
+    ...imports,
+    "",
+    "export const templateContent = [",
+    ...packageNames.map((_, index) => `  ...provider${index},`),
+    "] as const;",
+    "export const templatePresets = templateContent.filter(",
+    '  (member) => member.kind === "preset",',
+    ");",
+    "export const templateReferencePackages = templateContent.filter(",
+    '  (member) => member.kind === "reference",',
+    ");",
+    "",
+  ].join("\n");
+}
+
+function providerPackageName(namespace: string): string {
+  const suffix = createHash("sha256")
+    .update(namespace)
+    .digest("hex")
+    .slice(0, 16);
+  return `@ykdz/template-content-provider-${suffix}`;
+}
+
+async function createModulePackageRoot(options: {
   readonly root: string;
   readonly packageName: string;
-  readonly collectionVersion: string;
-  readonly namespace: string;
-  readonly members: readonly NativeMember[];
-  readonly owners: ReadonlyMap<
-    string,
-    {
-      readonly artifact: PreparedNativeContentArtifact;
-      readonly installRoot: string;
-    }
-  >;
+  readonly packageVersion: string;
+  readonly source: string;
+  readonly dependencies: Readonly<Record<string, string>>;
+  readonly packageRoots: ReadonlyMap<string, string>;
   readonly sdkPackageRoots: ReadonlyMap<string, string>;
-  readonly sdkVersions: ReadonlyMap<string, string>;
   readonly workspaceRoot: string;
   readonly commandLog: string[];
 }): Promise<string> {
-  const installRoot = path.join(options.root, "collection");
-  const distRoot = path.join(installRoot, "dist");
+  const installRoot = path.join(
+    options.root,
+    "packages",
+    options.packageName.replaceAll("/", "+"),
+  );
   const sourceRoot = path.join(installRoot, "src");
+  const distRoot = path.join(installRoot, "dist");
   const nodeModulesRoot = path.join(installRoot, "node_modules");
   await rm(installRoot, { recursive: true, force: true });
   await mkdir(sourceRoot, { recursive: true });
   await mkdir(distRoot, { recursive: true });
-
-  const dependencies: Record<string, string> = {};
-  for (const member of options.members) {
-    const prepared = options.owners.get(contentIdentityKey(member.identity));
-    if (prepared === undefined) {
-      throw new Error(`集合成员缺少所属制品：${member.identity.packageName}`);
-    }
-    dependencies[prepared.artifact.coordinate.name] =
-      prepared.artifact.coordinate.version;
-  }
-  for (const name of [
-    "@ykdz/template-generator",
-    "@ykdz/template-workspace",
-    "@ykdz/template-core",
-    "@ykdz/template-workspace-authoring",
-  ]) {
-    const packageRoot = options.sdkPackageRoots.get(name);
-    const version = options.sdkVersions.get(name);
-    if (packageRoot === undefined || version === undefined) {
-      throw new Error(`集合运行依赖未由pnpm工作区解析：${name}`);
-    }
-    dependencies[name] = version;
-  }
-
-  const packageManifest = {
-    name: options.packageName,
-    version: options.collectionVersion,
-    type: "module",
-    files: ["dist"],
-    exports: {
-      ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
-    },
-    dependencies,
-  };
   await writeFile(
     path.join(installRoot, "package.json"),
-    `${JSON.stringify(packageManifest, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        name: options.packageName,
+        version: options.packageVersion,
+        type: "module",
+        files: ["dist"],
+        exports: {
+          ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
+        },
+        dependencies: options.dependencies,
+      },
+      null,
+      2,
+    )}\n`,
   );
   await writeFile(
     path.join(installRoot, "tsconfig.json"),
@@ -747,16 +804,13 @@ async function createCollectionInstallRoot(options: {
       2,
     )}\n`,
   );
-  await writeFile(
-    path.join(sourceRoot, "index.ts"),
-    generatedCollectionSource(options.namespace, options.members),
-  );
+  await writeFile(path.join(sourceRoot, "index.ts"), options.source);
 
   for (const [name, packageRoot] of options.sdkPackageRoots) {
     await linkPackage(nodeModulesRoot, name, packageRoot);
   }
-  for (const [name, owner] of options.owners) {
-    await linkPackage(nodeModulesRoot, name, owner.installRoot);
+  for (const [name, packageRoot] of options.packageRoots) {
+    await linkPackage(nodeModulesRoot, name, packageRoot);
   }
   await linkPackage(
     nodeModulesRoot,
@@ -789,6 +843,106 @@ async function createCollectionInstallRoot(options: {
   if (stdout.length > 0) options.commandLog.push(stdout.trimEnd());
   await rm(nodeModulesRoot, { recursive: true, force: true });
   return installRoot;
+}
+
+async function createContentProviderRoot(options: {
+  readonly root: string;
+  readonly namespace: string;
+  readonly members: readonly NativeMember[];
+  readonly owners: ReadonlyMap<
+    string,
+    {
+      readonly artifact: PreparedNativeContentArtifact;
+      readonly installRoot: string;
+    }
+  >;
+  readonly sdkPackageRoots: ReadonlyMap<string, string>;
+  readonly sdkVersions: ReadonlyMap<string, string>;
+  readonly workspaceRoot: string;
+  readonly commandLog: string[];
+}): Promise<{ readonly packageName: string; readonly installRoot: string }> {
+  const packageName = providerPackageName(options.namespace);
+  const dependencies: Record<string, string> = {};
+  const packageRoots = new Map<string, string>();
+  for (const member of options.members) {
+    const owner = options.owners.get(contentIdentityKey(member.identity));
+    if (owner === undefined) {
+      throw new Error(`来源入口缺少所属制品：${member.identity.packageName}`);
+    }
+    const previous = packageRoots.get(owner.artifact.coordinate.name);
+    if (previous !== undefined && previous !== owner.installRoot) {
+      throw new Error(
+        `同一来源命名空间含多个同名原生包，无法形成公开解析入口：${owner.artifact.coordinate.name}`,
+      );
+    }
+    packageRoots.set(owner.artifact.coordinate.name, owner.installRoot);
+    dependencies[owner.artifact.coordinate.name] =
+      owner.artifact.coordinate.version;
+  }
+  for (const [name, version] of options.sdkVersions) {
+    dependencies[name] = version;
+  }
+  const installRoot = await createModulePackageRoot({
+    root: options.root,
+    packageName,
+    packageVersion: "1.0.0",
+    source: generatedCollectionSource(options.namespace, options.members),
+    dependencies,
+    packageRoots,
+    sdkPackageRoots: options.sdkPackageRoots,
+    workspaceRoot: options.workspaceRoot,
+    commandLog: options.commandLog,
+  });
+  return { packageName, installRoot };
+}
+
+async function createCollectionInstallRoot(options: {
+  readonly root: string;
+  readonly packageName: string;
+  readonly collectionVersion: string;
+  readonly members: readonly NativeMember[];
+  readonly providers: readonly {
+    readonly packageName: string;
+    readonly packageVersion: string;
+    readonly installRoot: string;
+  }[];
+  readonly sdkPackageRoots: ReadonlyMap<string, string>;
+  readonly sdkVersions: ReadonlyMap<string, string>;
+  readonly workspaceRoot: string;
+  readonly commandLog: string[];
+}): Promise<string> {
+  const dependencies: Record<string, string> = {};
+  const packageRoots = new Map<string, string>();
+  for (const provider of options.providers) {
+    dependencies[provider.packageName] = provider.packageVersion;
+    packageRoots.set(provider.packageName, provider.installRoot);
+  }
+  for (const name of [
+    "@ykdz/template-generator",
+    "@ykdz/template-workspace",
+    "@ykdz/template-core",
+    "@ykdz/template-workspace-authoring",
+  ]) {
+    const packageRoot = options.sdkPackageRoots.get(name);
+    const version = options.sdkVersions.get(name);
+    if (packageRoot === undefined || version === undefined) {
+      throw new Error(`集合运行依赖未由pnpm工作区解析：${name}`);
+    }
+    dependencies[name] = version;
+  }
+  return await createModulePackageRoot({
+    root: options.root,
+    packageName: options.packageName,
+    packageVersion: options.collectionVersion,
+    source: generatedProviderAggregateSource(
+      options.providers.map(({ packageName }) => packageName),
+    ),
+    dependencies,
+    packageRoots,
+    sdkPackageRoots: options.sdkPackageRoots,
+    workspaceRoot: options.workspaceRoot,
+    commandLog: options.commandLog,
+  });
 }
 
 /** 按预设节点和默认策略依赖派生制品集合，再由pnpm原生pack。 */
@@ -824,7 +978,25 @@ export async function prepareContentCollection(
   const ownerDirectory = path.join(root, "owners");
   await mkdir(archiveRoot, { recursive: true });
   await mkdir(ownerDirectory, { recursive: true });
-  const artifactsByName = new Map<string, PreparedNativeContentArtifact[]>();
+  const preparedOwners = buildOrder.map((member) => {
+    const artifact = ownerDefinition(member).prepareArtifact?.();
+    if (artifact === undefined) {
+      throw new Error(
+        `所属包 ${member.identity.packageName} 未公开 prepareArtifact 接口`,
+      );
+    }
+    return {
+      member,
+      artifact,
+      packageRoot: packageRoot(member),
+    };
+  });
+  const artifactsByIdentity = new Map(
+    preparedOwners.map(({ member, artifact }) => [
+      contentIdentityKey(member.identity),
+      artifact,
+    ]),
+  );
   const owners: {
     member: NativeMember;
     artifact: PreparedNativeContentArtifact;
@@ -833,34 +1005,23 @@ export async function prepareContentCollection(
     packed: PackedArtifact;
   }[] = [];
 
-  for (const member of buildOrder) {
-    const ownerRoot = packageRoot(member);
-    const artifact = ownerDefinition(member).prepareArtifact?.();
-    if (artifact === undefined) {
-      throw new Error(
-        `所属包 ${member.identity.packageName} 未公开 prepareArtifact 接口`,
-      );
-    }
-    const sameName = artifactsByName.get(artifact.coordinate.name) ?? [];
-    if (sameName.length > 0) {
-      throw new Error(
-        `当前集合含多个同名来源制品，pnpm原生根override无法表达来源选择：${artifact.coordinate.name} (${sameName.map((existing) => existing.coordinate.version).join(", ")} 与 ${artifact.coordinate.version})`,
-      );
-    }
-    sameName.push(artifact);
-    artifactsByName.set(artifact.coordinate.name, sameName);
-    const artifactByName = new Map(
-      [...artifactsByName].map(([name, values]) => [name, values[0]!] as const),
-    );
+  for (const { member, artifact, packageRoot: ownerRoot } of preparedOwners) {
+    const identityKey = contentIdentityKey(member.identity);
     const dependencies = artifactInstallDependencies(
+      member,
       artifact,
-      artifactByName,
+      members,
+      artifactsByIdentity,
       workspace,
       resolved.versions,
     );
+    const identitySuffix = createHash("sha256")
+      .update(identityKey)
+      .digest("hex")
+      .slice(0, 16);
     const installRoot = path.join(
       ownerDirectory,
-      artifact.coordinate.name.replaceAll("/", "+"),
+      `${artifact.coordinate.name.replaceAll("/", "+")}-${identitySuffix}`,
     );
     await copyOwnerArtifact(artifact, installRoot, dependencies);
     const packed = await packPreparedRoot(installRoot, archiveRoot, commandLog);
@@ -892,11 +1053,11 @@ export async function prepareContentCollection(
   const sdkPackagesByName = new Map(
     (options.sdkArchives ?? []).map((artifact) => [artifact.name, artifact]),
   );
+  const ownerNames = new Set(
+    owners.map(({ artifact }) => artifact.coordinate.name),
+  );
   for (const project of sdkProjects) {
-    if (
-      artifactsByName.has(project.name) ||
-      sdkPackagesByName.has(project.name)
-    ) {
+    if (ownerNames.has(project.name) || sdkPackagesByName.has(project.name)) {
       continue;
     }
     const packed = await packNativeProject(
@@ -933,13 +1094,48 @@ export async function prepareContentCollection(
   const ownerByIdentity = new Map(
     owners.map((owner) => [contentIdentityKey(owner.member.identity), owner]),
   );
+  const providerMembers = new Map<string, NativeMember[]>();
+  for (const member of members) {
+    const namespaceMembers =
+      providerMembers.get(member.identity.namespace) ?? [];
+    namespaceMembers.push(member);
+    providerMembers.set(member.identity.namespace, namespaceMembers);
+  }
+  const providerPackages: PackedArtifact[] = [];
+  const providers: {
+    readonly packageName: string;
+    readonly packageVersion: string;
+    readonly installRoot: string;
+  }[] = [];
+  for (const [namespace, namespaceMembers] of providerMembers) {
+    const provider = await createContentProviderRoot({
+      root,
+      namespace,
+      members: namespaceMembers,
+      owners: ownerByIdentity,
+      sdkPackageRoots,
+      sdkVersions,
+      workspaceRoot,
+      commandLog,
+    });
+    const packed = await packPreparedRoot(
+      provider.installRoot,
+      archiveRoot,
+      commandLog,
+    );
+    providerPackages.push(packed);
+    providers.push({
+      packageName: packed.name,
+      packageVersion: packed.version,
+      installRoot: provider.installRoot,
+    });
+  }
   const collectionRoot = await createCollectionInstallRoot({
     root,
     packageName: collectionName,
     collectionVersion,
-    namespace: options.namespace ?? preset.identity.namespace,
     members,
-    owners: ownerByIdentity,
+    providers,
     sdkPackageRoots,
     sdkVersions,
     workspaceRoot,
@@ -954,6 +1150,7 @@ export async function prepareContentCollection(
   for (const artifact of [
     ...sdkPackages,
     ...owners.map((owner) => owner.packed),
+    ...providerPackages,
     collection,
   ]) {
     const key =
@@ -972,6 +1169,7 @@ export async function prepareContentCollection(
     preset,
     members,
     owners,
+    providers: providerPackages,
     sdkPackages,
     collection,
     archives,
@@ -989,16 +1187,17 @@ export async function writeNativeArchiveOverrides(
 ): Promise<void> {
   const artifactRoot = path.join(root, ".artifacts");
   await mkdir(artifactRoot, { recursive: true });
-  const byName = new Map<
+  const byCoordinate = new Map<
     string,
     { readonly archive: PackedArtifact; readonly path: string }
   >();
   for (const archive of archives) {
-    const existing = byName.get(archive.name);
+    const coordinate = `${archive.name}@${archive.version}`;
+    const existing = byCoordinate.get(coordinate);
     if (existing !== undefined) {
-      if (existing.archive.tarball !== archive.tarball) {
+      if (existing.archive.sha256 !== archive.sha256) {
         throw new Error(
-          `pnpm根override无法唯一安装同名来源制品 ${archive.name}：${existing.archive.version} 与 ${archive.version}`,
+          `pnpm原生精确坐标无法区分不同来源制品 ${coordinate}；请为来源发布不同原生版本`,
         );
       }
       continue;
@@ -1006,13 +1205,13 @@ export async function writeNativeArchiveOverrides(
     const filename = `${archive.name.replaceAll("/", "+")}-${archive.version}-${archive.sha256.slice(0, 12)}.tgz`;
     const archivePath = path.join(artifactRoot, filename);
     await copyFile(archive.tarball, archivePath);
-    byName.set(archive.name, { archive, path: archivePath });
+    byCoordinate.set(coordinate, { archive, path: archivePath });
   }
-  const overrideLines = [...byName.values()]
-    .sort((left, right) => left.archive.name.localeCompare(right.archive.name))
+  const overrideLines = [...byCoordinate]
+    .sort(([left], [right]) => left.localeCompare(right))
     .map(
-      ({ archive, path: archivePath }) =>
-        `  ${JSON.stringify(archive.name)}: ${JSON.stringify(`file:${archivePath}`)}`,
+      ([coordinate, { path: archivePath }]) =>
+        `  ${JSON.stringify(coordinate)}: ${JSON.stringify(`file:${archivePath}`)}`,
     );
   const workspaceLines =
     workspacePackages.length === 0
