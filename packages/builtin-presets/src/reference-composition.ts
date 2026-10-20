@@ -103,6 +103,14 @@ function comparableOperation(operation: RenderOperation): unknown {
       source: resolveTemplateSource(operation.source, operation.from),
       from: ".",
     };
+  if (operation.kind === "writeText" && operation.templateSource !== undefined)
+    return {
+      ...operation,
+      templateSource: resolveTemplateSource(
+        operation.templateSource.handle,
+        operation.templateSource.path,
+      ),
+    };
   if (operation.kind === "writeTextFromFragments")
     return {
       ...operation,
@@ -244,25 +252,6 @@ export function composeReferenceContributions(options: {
           const rebound = projected.operations.find(
             (candidate) => operationIdentity(candidate) === identity,
           );
-          if (
-            operation.kind === "copyFile" &&
-            native?.kind === "copyFile" &&
-            rebound?.kind === "copyFile"
-          ) {
-            // 替换资源来源仍需绑定共同依赖；仅显式修改的模块映射覆盖新绑定。
-            return {
-              ...operation,
-              moduleSpecifiers: {
-                ...rebound.moduleSpecifiers,
-                ...Object.fromEntries(
-                  Object.entries(operation.moduleSpecifiers ?? {}).filter(
-                    ([name, target]) =>
-                      native.moduleSpecifiers?.[name] !== target,
-                  ),
-                ),
-              },
-            };
-          }
           if (
             native === undefined ||
             !isDeepStrictEqual(

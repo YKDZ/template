@@ -324,6 +324,7 @@ void describe("Erasable TypeScript enforcement", () => {
       "packages/checks",
       "packages/cli",
       "packages/core",
+      "packages/workspace-authoring",
     ];
     const repositoryManifests = await Promise.all(
       repositoryPackages.map(async (packageRoot) => ({
@@ -407,6 +408,7 @@ void describe("Erasable TypeScript enforcement", () => {
           "@ykdz/template-builtin-presets",
           "@ykdz/template-checks",
           "@ykdz/template-core",
+          "@ykdz/template-workspace-authoring",
         ]).has(manifest.name ?? "")
       ) {
         assert.ok(
@@ -456,15 +458,27 @@ void describe("Erasable TypeScript enforcement", () => {
       ({ manifest }) => manifest.name === "@ykdz/template-core",
     );
     assert.ok(
-      core?.manifest.peerDependencies !== undefined &&
-        "typescript" in core.manifest.peerDependencies,
-    );
-    assert.ok(
       core?.manifest.devDependencies !== undefined &&
         "typescript" in core.manifest.devDependencies,
     );
     const coreCompilerApiImports = await compilerApiImports(core.packageRoot);
-    assert.ok(coreCompilerApiImports.includes("packages/core/src/renderer.ts"));
+    assert.strictEqual(coreCompilerApiImports.length, 0);
+
+    const authoring = repositoryManifests.find(
+      ({ manifest }) => manifest.name === "@ykdz/template-workspace-authoring",
+    );
+    assert.ok(
+      authoring?.manifest.dependencies !== undefined &&
+        "typescript" in authoring.manifest.dependencies,
+    );
+    const authoringCompilerApiImports = await compilerApiImports(
+      authoring.packageRoot,
+    );
+    assert.ok(
+      authoringCompilerApiImports.includes(
+        "packages/workspace-authoring/src/typescript-module-specifiers.ts",
+      ),
+    );
 
     const cliManifest = repositoryManifests.find(
       ({ manifest }) => manifest.name === "@ykdz/template",

@@ -837,6 +837,9 @@ importers:
       jsonc-parser:
         specifier: 'catalog:'
         version: 3.3.1
+      typescript:
+        specifier: catalog:public-cli-runtime
+        version: 6.0.3
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

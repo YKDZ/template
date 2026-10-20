@@ -87,56 +87,6 @@ void describe("Project Projection materialization", () => {
     );
   });
 
-  void it("rejects overwriting content after a transform during plan preflight", () => {
-    assert.ok(
-      validateProjectProjectionPlan({
-        operations: [
-          {
-            kind: "writeText",
-            to: "src/main.ts",
-            text: "// @template:start entry\nold\n// @template:end entry\n",
-          },
-          {
-            kind: "replaceAnchors",
-            path: "src/main.ts",
-            language: "typescript",
-            replacements: { entry: "new" },
-          },
-          {
-            kind: "writeJson",
-            to: "src/main.ts",
-            value: { discarded: true },
-            overwrite: true,
-          },
-        ],
-      }).includes(
-        "Project Projection writeJson may not overwrite content after replaceAnchors: src/main.ts",
-      ),
-    );
-  });
-
-  void it("rejects applying a text transform to known JSON content", () => {
-    assert.ok(
-      validateProjectProjectionPlan({
-        operations: [
-          {
-            kind: "writeJson",
-            to: "src/main.ts",
-            value: { entry: "old" },
-          },
-          {
-            kind: "replaceAnchors",
-            path: "src/main.ts",
-            language: "typescript",
-            replacements: { entry: "new" },
-          },
-        ],
-      }).includes(
-        "Project Projection replaceAnchors requires text-compatible content: src/main.ts follows writeJson",
-      ),
-    );
-  });
-
   for (const scenario of [
     {
       sequence: "writeJson to mergeJson",
@@ -155,28 +105,6 @@ void describe("Project Projection materialization", () => {
           to: "config.json",
         },
         { kind: "mergeJson", to: "config.json", value: { second: true } },
-      ],
-    },
-    {
-      sequence: "copyFile to replaceAnchors to setExecutable",
-      operations: [
-        {
-          kind: "copyFile",
-          source: planTemplateSource,
-          from: "main.ts",
-          to: "src/main.ts",
-        },
-        {
-          kind: "replaceAnchors",
-          path: "src/main.ts",
-          language: "typescript",
-          replacements: { entry: "new" },
-        },
-        {
-          kind: "setExecutable",
-          path: "src/main.ts",
-          executable: true,
-        },
       ],
     },
   ] satisfies readonly {

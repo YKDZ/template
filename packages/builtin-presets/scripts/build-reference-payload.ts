@@ -1,12 +1,20 @@
-import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   renderProject,
   resolveTemplateSource,
-  createTemplateSourceHandle,
 } from "@ykdz/template-core/renderer";
+import { mapTypeScriptModuleSpecifiers } from "@ykdz/template-workspace-authoring/typescript-module-specifiers";
 
 import { referencePackages } from "../src/reference-composition.ts";
 
@@ -57,7 +65,7 @@ const compiledSource = path.join(distributionRoot, "src");
 for (const file of await readdir(compiledSource, { recursive: true })) {
   if (!file.endsWith(".js") && !file.endsWith(".d.ts")) continue;
   const target = path.join(compiledSource, file);
-  const moduleSpecifiers = Object.fromEntries(
+  const moduleSpecifiers = new Map(
     referencePackages.map((reference) => {
       const relative = path
         .relative(
@@ -72,15 +80,21 @@ for (const file of await readdir(compiledSource, { recursive: true })) {
       ];
     }),
   );
+  const original = await readFile(target, "utf8");
+  const text = mapTypeScriptModuleSpecifiers(
+    original,
+    moduleSpecifiers,
+    target,
+  );
+  if (text === original) continue;
   await renderProject({
     targetRoot: distributionRoot,
     operations: [
       {
-        kind: "copyFile",
-        source: createTemplateSourceHandle(compiledSource),
-        from: file,
+        kind: "writeText",
         to: path.posix.join("src", file),
-        moduleSpecifiers,
+        text,
+        mode: (await stat(target)).mode & 0o777,
         overwrite: true,
       },
     ],

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -151,6 +153,60 @@ await test("普通 JSON 业务资源按原始字节生成，不解释 include �
       content,
     );
   }
+});
+
+await test("静态 TypeScript 包导入在作者侧映射并保留源码权限", async (context) => {
+  const sourceText = [
+    'import { own } from "@author/application/internal";',
+    'export { shared } from "@author/shared/runtime";',
+    'import { root } from "@author/shared";',
+    'const documented = "@author/shared/runtime";',
+    'void import("@author/shared/lazy");',
+    "",
+  ].join("\n");
+  const setup = await fixture(
+    context,
+    { "src/main.ts": sourceText },
+    {
+      dependencies: { "@author/shared": "workspace:*" },
+    },
+  );
+  const sourceFile = path.join(setup.source, "src/main.ts");
+  await chmod(sourceFile, 0o751);
+  const sourceMode = (await stat(sourceFile)).mode & 0o777;
+  const reference = defineReferencePackage(setup.options);
+  const contribution = reference.contribute({
+    ...setup.input,
+    bindings: new Map([
+      [
+        "@author/shared",
+        {
+          name: "@consumer/shared",
+          path: "packages/shared",
+          role: "shared-library",
+        },
+      ],
+    ]),
+  });
+
+  await renderProject({
+    targetRoot: setup.target,
+    operations: [...contribution.operations],
+  });
+
+  const outputFile = path.join(setup.target, "apps/application/src/main.ts");
+  assert.equal(
+    await readFile(outputFile, "utf8"),
+    [
+      'import { own } from "@consumer/application/internal";',
+      'export { shared } from "@consumer/shared/runtime";',
+      'import { root } from "@consumer/shared";',
+      'const documented = "@author/shared/runtime";',
+      'void import("@author/shared/lazy");',
+      "",
+    ].join("\n"),
+  );
+  assert.equal((await stat(outputFile)).mode & 0o777, sourceMode);
 });
 
 await test("作者用途声明同步剔除作者资源、命令和任务配置并保留用户测试", async (context) => {

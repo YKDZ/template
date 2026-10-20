@@ -65,8 +65,6 @@ export type CopyFileOperation = {
   from: string;
   to: string;
   source: TemplateSourceHandle;
-  /** 仅重映射原生 TypeScript 的静态公开模块引用。 */
-  moduleSpecifiers?: Readonly<Record<string, string>>;
   overwrite?: boolean;
   provenance?: RenderOperationProvenance;
 };
@@ -108,6 +106,12 @@ export type WriteTextOperation = {
   kind: "writeText";
   to: string;
   text: string;
+  mode?: number;
+  overwrite?: boolean;
+  templateSource?: {
+    readonly handle: TemplateSourceHandle;
+    readonly path: string;
+  };
   provenance?: RenderOperationProvenance;
 };
 
@@ -140,14 +144,6 @@ export type SetExecutableOperation = {
   provenance?: RenderOperationProvenance;
 };
 
-export type ReplaceAnchorsOperation = {
-  kind: "replaceAnchors";
-  path: string;
-  language: "typescript";
-  replacements: Record<string, string>;
-  provenance?: RenderOperationProvenance;
-};
-
 export type RenderOperation =
   | CopyFileOperation
   | WriteJsonOperation
@@ -156,8 +152,7 @@ export type RenderOperation =
   | WriteTextOperation
   | WriteTextFromFragmentsOperation
   | WriteTextTemplateOperation
-  | SetExecutableOperation
-  | ReplaceAnchorsOperation;
+  | SetExecutableOperation;
 
 export type RenderProjectOptions = {
   targetRoot: string;
@@ -191,52 +186,7 @@ async function renderCopyFile(
   const sourceMode = (await stat(from)).mode;
 
   await mkdir(path.dirname(to), { recursive: true });
-  if (operation.moduleSpecifiers === undefined) {
-    await copyGeneratedFile(from, to, operation.overwrite ?? false);
-  } else {
-    const ts = await import("typescript");
-    const original = await readFile(from, "utf8");
-    const parsed = ts.createSourceFile(
-      from,
-      original,
-      ts.ScriptTarget.Latest,
-      true,
-    );
-    const replacements = parsed.statements.flatMap((statement) => {
-      if (
-        !ts.isImportDeclaration(statement) &&
-        !ts.isExportDeclaration(statement)
-      )
-        return [];
-      const specifier = statement.moduleSpecifier;
-      if (specifier === undefined || !ts.isStringLiteral(specifier)) return [];
-      const prefix = Object.entries(operation.moduleSpecifiers ?? {}).find(
-        ([name]) => specifier.text.startsWith(`${name}/`),
-      );
-      const replacement =
-        operation.moduleSpecifiers?.[specifier.text] ??
-        (prefix === undefined
-          ? undefined
-          : prefix[1] + specifier.text.slice(prefix[0].length));
-      return replacement === undefined
-        ? []
-        : [
-            {
-              start: specifier.getStart(parsed),
-              end: specifier.end,
-              text: JSON.stringify(replacement),
-            },
-          ];
-    });
-    let mapped = original;
-    for (const replacement of replacements.toReversed()) {
-      mapped =
-        mapped.slice(0, replacement.start) +
-        replacement.text +
-        mapped.slice(replacement.end);
-    }
-    await writeGeneratedFile(to, mapped, operation.overwrite ?? false);
-  }
+  await copyGeneratedFile(from, to, operation.overwrite ?? false);
   await chmod(to, sourceMode & 0o777);
 }
 
@@ -539,7 +489,10 @@ async function renderWriteText(
   const to = resolveContainedPath(options.targetRoot, operation.to);
 
   await mkdir(path.dirname(to), { recursive: true });
-  await writeGeneratedFile(to, operation.text);
+  await writeGeneratedFile(to, operation.text, operation.overwrite ?? false);
+  if (operation.mode !== undefined) {
+    await chmod(to, operation.mode & 0o777);
+  }
 }
 
 type LoadedTextFragment = {
@@ -630,133 +583,6 @@ async function renderSetExecutable(
     : currentMode & ~executeBits;
 
   await chmod(filePath, mode & 0o777);
-}
-
-type AnchorRange = {
-  name: string;
-  start: number;
-  end: number;
-};
-
-type ParsedSourceFile = import("typescript").SourceFile & {
-  parseDiagnostics?: readonly import("typescript").Diagnostic[];
-};
-
-function parseAnchorComment(commentText: string): string | undefined {
-  const singleLine = commentText.match(
-    /^\/\/\s*@template-anchor\s+([A-Za-z][A-Za-z0-9_-]*)\s*$/,
-  );
-  if (singleLine) {
-    return singleLine[1];
-  }
-
-  const multiline = commentText.match(
-    /^\/\*\s*@template-anchor\s+([A-Za-z][A-Za-z0-9_-]*)\s*\*\/$/,
-  );
-  return multiline?.[1];
-}
-
-async function findTypeScriptAnchorRanges(
-  sourceText: string,
-): Promise<AnchorRange[]> {
-  const ts = await import("typescript");
-  const sourceFile = ts.createSourceFile(
-    "template-anchor.ts",
-    sourceText,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const anchors: AnchorRange[] = [];
-  const seenRanges = new Set<string>();
-
-  if (((sourceFile as ParsedSourceFile).parseDiagnostics ?? []).length > 0) {
-    throw new Error(
-      "Checked Transform Anchor requires valid TypeScript source",
-    );
-  }
-
-  function collectNodeAnchors(node: import("typescript").Node): void {
-    if (node.kind === ts.SyntaxKind.EndOfFileToken) {
-      return;
-    }
-
-    const comments =
-      ts.getLeadingCommentRanges(sourceText, node.getFullStart()) ?? [];
-
-    for (const comment of comments) {
-      const name = parseAnchorComment(
-        sourceText.slice(comment.pos, comment.end),
-      );
-      const rangeKey = `${comment.pos}:${comment.end}`;
-
-      if (name === undefined || seenRanges.has(rangeKey)) {
-        continue;
-      }
-
-      seenRanges.add(rangeKey);
-      anchors.push({
-        name,
-        start: comment.pos,
-        end: comment.end,
-      });
-    }
-
-    ts.forEachChild(node, collectNodeAnchors);
-  }
-
-  ts.forEachChild(sourceFile, collectNodeAnchors);
-  return anchors;
-}
-
-function replaceRanges(
-  sourceText: string,
-  ranges: AnchorRange[],
-  replacements: Record<string, string>,
-) {
-  let nextText = sourceText;
-
-  for (const range of ranges.toSorted((a, b) => b.start - a.start)) {
-    const replacement = replacements[range.name];
-    if (replacement === undefined) {
-      continue;
-    }
-
-    nextText = `${nextText.slice(0, range.start)}${replacement}${nextText.slice(range.end)}`;
-  }
-
-  return nextText;
-}
-
-async function renderReplaceAnchors(
-  operation: ReplaceAnchorsOperation,
-  options: RenderProjectOptions,
-): Promise<void> {
-  if (operation.language !== "typescript") {
-    throw new Error("Checked Transform Anchor only supports TypeScript");
-  }
-
-  const filePath = resolveContainedPath(options.targetRoot, operation.path);
-  const sourceText = await readFile(filePath, "utf8");
-  const ranges = await findTypeScriptAnchorRanges(sourceText);
-
-  for (const anchorName of Object.keys(operation.replacements)) {
-    const matches = ranges.filter((range) => range.name === anchorName);
-
-    if (matches.length === 0) {
-      throw new Error(`Missing Checked Transform Anchor: ${anchorName}`);
-    }
-
-    if (matches.length > 1) {
-      throw new Error(`Duplicate Checked Transform Anchor: ${anchorName}`);
-    }
-  }
-
-  await writeFile(
-    filePath,
-    replaceRanges(sourceText, ranges, operation.replacements),
-    "utf8",
-  );
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
@@ -873,11 +699,6 @@ export async function renderProject(
       continue;
     }
 
-    if (operation.kind === "replaceAnchors") {
-      await renderReplaceAnchors(operation, options);
-      continue;
-    }
-
     throw new Error(
       `Unsupported renderer operation: ${(operation as { kind: string }).kind}`,
     );
@@ -979,9 +800,7 @@ function changedOutputPaths(
   const changedPaths = new Set<string>();
   for (const operation of operations) {
     const outputPath =
-      operation.kind === "setExecutable" || operation.kind === "replaceAnchors"
-        ? operation.path
-        : operation.to;
+      operation.kind === "setExecutable" ? operation.path : operation.to;
     if (outputPath.length > 0) changedPaths.add(path.normalize(outputPath));
   }
   return [...changedPaths];

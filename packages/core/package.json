@@ -40,8 +40,5 @@
     "oxlint-tsgolint": "catalog:",
     "typescript": "catalog:",
     "typescript-7": "catalog:"
-  },
-  "peerDependencies": {
-    "typescript": ">=6 <7"
   }
 }

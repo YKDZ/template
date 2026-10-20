@@ -153,9 +153,7 @@ export type MaterializeProjectProjectionOptions = {
 
 function normalizedOutputPath(operation: RenderOperation): string {
   const operationPath =
-    operation.kind === "setExecutable" || operation.kind === "replaceAnchors"
-      ? operation.path
-      : operation.to;
+    operation.kind === "setExecutable" ? operation.path : operation.to;
   if (path.isAbsolute(operationPath)) {
     throw new Error(
       `Project Projection paths must be relative: ${operationPath}`,
@@ -189,8 +187,6 @@ function operationDriver(
     case "writeTextFromFragments":
     case "writeTextTemplate":
       return "text";
-    case "replaceAnchors":
-      return "text";
     case "setExecutable":
       return undefined;
   }
@@ -203,10 +199,7 @@ export function validateProjectProjectionPlan(
   const diagnostics: string[] = [];
   const contentKindByPath = new Map<string, RenderOperation["kind"]>();
   const contentTypeByPath = new Map<string, "json" | "text" | "unknown">();
-  const transformationKindByPath = new Map<
-    string,
-    "replaceAnchors" | "setExecutable"
-  >();
+  const transformationKindByPath = new Map<string, "setExecutable">();
   const finalPaths = new Set<string>();
   for (const operation of options.operations) {
     let outputPath: string;
@@ -218,27 +211,13 @@ export function validateProjectProjectionPlan(
     }
     finalPaths.add(outputPath);
     const precedingKind = contentKindByPath.get(outputPath);
-    if (
-      operation.kind === "setExecutable" ||
-      operation.kind === "replaceAnchors"
-    ) {
+    if (operation.kind === "setExecutable") {
       if (precedingKind === undefined) {
         diagnostics.push(
           `Project Projection ${operation.kind} requires a preceding content-producing operation: ${outputPath}`,
         );
       }
-      const hasCompatibleContent =
-        operation.kind !== "replaceAnchors" ||
-        contentTypeByPath.get(outputPath) !== "json";
-      if (!hasCompatibleContent) {
-        diagnostics.push(
-          `Project Projection replaceAnchors requires text-compatible content: ${outputPath} follows ${precedingKind}`,
-        );
-      }
-      if (precedingKind !== undefined && hasCompatibleContent) {
-        if (operation.kind === "replaceAnchors") {
-          contentTypeByPath.set(outputPath, "text");
-        }
+      if (precedingKind !== undefined) {
         transformationKindByPath.set(outputPath, operation.kind);
       }
       continue;
@@ -2181,7 +2160,7 @@ export async function materializeProjectProjection(
           `Project Projection setExecutable requires a preceding content-producing operation: ${outputPath}`,
         );
       }
-    } else if (operation.kind !== "replaceAnchors") {
+    } else {
       contentPaths.add(outputPath);
     }
     const driver = operationDriver(operation);
