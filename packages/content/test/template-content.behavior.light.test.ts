@@ -242,6 +242,57 @@ void describe("公开模板内容集合", () => {
     );
   });
 
+  void it("linkFrom 按同次正式贡献的 provider manifest 校验新端点", async () => {
+    const targetRoot = await createTargetRoot(
+      "template-content-link-from-contribution-",
+    );
+    const provider = {
+      ...library,
+      identity: "test:manifest-transformed-provider",
+      manifest: { ...library.manifest, exports: {} },
+    };
+    const generator = createGenerator({
+      content: [...templateContent, provider],
+      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+    });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { roots: [{ preset: tsCliPreset }] },
+      strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+
+    const result = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: provider.identity,
+      creationInput: {
+        leafName: "provider",
+        packagePath: "packages/provider",
+        linkFrom: ["packages/cli"],
+      },
+    });
+
+    assert.strictEqual(result.status, "success", JSON.stringify(result));
+    if (result.status !== "success") throw new Error("加包应成功");
+    assert.deepStrictEqual(result.blueprint.packageLinkIntents, [
+      {
+        consumerPackagePath: "packages/cli",
+        providerPackagePath: "packages/provider",
+      },
+    ]);
+    const providerManifest = JSON.parse(
+      await readFile(
+        path.join(targetRoot, "packages/provider/package.json"),
+        "utf8",
+      ),
+    ) as { exports: Record<string, unknown> };
+    assert.ok(Object.hasOwn(providerManifest.exports, "."));
+  });
+
   void it("重复已存在的 provider 时拒绝补交缺失的 linkFrom", async () => {
     const targetRoot = await createTargetRoot(
       "template-content-link-from-repeat-",
@@ -403,6 +454,78 @@ void describe("公开模板内容集合", () => {
       issues: [{ code: "UNKNOWN_LINK_FROM" }],
     });
     assert.strictEqual(await snapshotTree(targetRoot), before);
+  });
+
+  void it("加包返回默认 owner 的版本声明诊断并保持目标不变", async () => {
+    const cases = [
+      {
+        field: "engines.node" as const,
+        actual: '实际收到 ">=22"',
+        suggestion: "请先修改根 package.json 的 engines.node 声明再加包。",
+      },
+      {
+        field: "packageManager" as const,
+        actual: "实际收到 null",
+        suggestion: "请先修改根 package.json 的 packageManager 声明再加包。",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const targetRoot = await createTargetRoot(
+        `template-content-add-diagnostic-${testCase.field.replaceAll(".", "-")}-`,
+      );
+      const generator = createGenerator({
+        content: templateContent,
+        strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+      });
+      const initialized = await generator.init({
+        targetRoot,
+        selection: { roots: [{ preset: tsCliPreset }] },
+        strategyInput: {
+          repositoryName: "demo",
+          defaultPackageScope: "demo",
+        },
+      });
+      assert.strictEqual(
+        initialized.status,
+        "success",
+        JSON.stringify(initialized),
+      );
+
+      const rootManifestPath = path.join(targetRoot, "package.json");
+      const rootManifest = JSON.parse(
+        await readFile(rootManifestPath, "utf8"),
+      ) as Record<string, unknown>;
+      if (testCase.field === "engines.node") {
+        rootManifest.engines = { node: ">=22" };
+      } else {
+        delete rootManifest.packageManager;
+      }
+      await writeFile(
+        rootManifestPath,
+        `${JSON.stringify(rootManifest, null, 2)}\n`,
+      );
+      const before = await snapshotTree(targetRoot);
+
+      const result = await generator.add({
+        repositoryRoot: targetRoot,
+        contentIdentity: library.identity,
+        creationInput: { leafName: "diagnostic-package" },
+      });
+
+      assert.strictEqual(result.status, "operation-failure");
+      if (result.status !== "operation-failure") {
+        throw new Error("无效的根版本声明应返回操作失败");
+      }
+      assert.strictEqual(result.phase, "metadata");
+      assert.match(result.error.message, /加包需要目标仓库根 package\.json/u);
+      assert.ok(result.error.message.includes(testCase.actual));
+      assert.deepStrictEqual(result.error.diagnostic, {
+        message: result.error.message,
+        suggestion: testCase.suggestion,
+      });
+      assert.strictEqual(await snapshotTree(targetRoot), before);
+    }
   });
 
   void it("linkFrom 拒绝已失去 Node package-name import 能力的当前 consumer", async () => {
