@@ -35,7 +35,7 @@ import {
   assertPublicationWorkflowContract,
 } from "@ykdz/template-checks/workflow-contract";
 import type { PackageRole } from "@ykdz/template-core/project-blueprint";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa as runExeca } from "execa";
 import { parse as parseToml } from "smol-toml";
 import { parse as parseYaml } from "yaml";

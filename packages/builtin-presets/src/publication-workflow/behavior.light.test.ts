@@ -13,7 +13,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 
 import { materializeProjectProjection } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { parseDocument } from "yaml";
 
 import {

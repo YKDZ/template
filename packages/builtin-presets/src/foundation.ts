@@ -7,10 +7,6 @@ import { isDeepStrictEqual } from "node:util";
 import { composeCiDiagnosticArtifacts } from "@ykdz/template-core/ci-diagnostic-artifact";
 import type { CiDiagnosticArtifactDeclaration } from "@ykdz/template-core/ci-diagnostic-artifact";
 import {
-  collectGeneratedManifestCatalogReferences,
-  selectTemplateDependencyCatalogEntries,
-} from "@ykdz/template-core/dependency-catalog";
-import {
   type DevelopmentContainerToolLayer,
   type DevelopmentContainerToolLayerBuildArgument,
   type DevelopmentContainerToolLayerMount,
@@ -43,7 +39,6 @@ import type {
   StructuredIdentitySetPolicy,
 } from "@ykdz/template-core/project-projection";
 import { validateProjectProjectionPlan } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import type { RenderOperation } from "@ykdz/template-core/renderer";
 import {
   resolveTemplateSource,
@@ -72,6 +67,10 @@ import {
   validateDefaultProjectBlueprint,
 } from "@ykdz/template-workspace/default-package-identity";
 import {
+  collectGeneratedManifestCatalogReferences,
+  selectTemplateDependencyCatalogEntries,
+} from "@ykdz/template-workspace/dependency-catalog";
+import {
   assertReusablePackageExposure,
   readPackageAdditionVersionFacts,
   WorkspacePackageAdditionFailure,
@@ -86,6 +85,7 @@ import {
   canProvideSourceConditionPackageNameImport,
   planExplicitProjectLinks,
 } from "@ykdz/template-workspace/project-linking";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import {
   createWorkspaceRootManifest,
   packageConditionKeyOrder,

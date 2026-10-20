@@ -12,8 +12,8 @@ import {
   planGeneratedRepositoryPackageAddition,
 } from "@ykdz/template-builtin-presets";
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 void describe("Built-in Preset Package Addition universality", () => {
   void it("keeps default-root task entrypoints stable while Turbo discovers added scripts", async (testContext) => {

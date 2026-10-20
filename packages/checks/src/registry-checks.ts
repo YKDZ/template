@@ -14,26 +14,26 @@ import {
   type GeneratedRepositoryPlan,
 } from "@ykdz/template-builtin-presets";
 import {
-  loadTemplateDependencyCatalog,
-  selectTemplateDependencyCatalogEntries,
-} from "@ykdz/template-core/dependency-catalog";
-import {
   materializeProjectProjection,
   readProjectedMirrorSlotScalar,
   type ProjectProjectionMirrorSlot,
   type MaterializeProjectProjectionOptions,
 } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
   renderNewProject,
   type RenderOperation,
 } from "@ykdz/template-core/renderer";
+import {
+  loadTemplateDependencyCatalog,
+  selectTemplateDependencyCatalogEntries,
+} from "@ykdz/template-workspace/dependency-catalog";
 import {
   planExplicitProjectLinks,
   canConsumeNodePackageNameImport,
   canLinkNodePackageRoles,
   canProvideSourceConditionPackageNameImport,
 } from "@ykdz/template-workspace/project-linking";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { parse as parseYaml } from "yaml";
 
 /** A real registry Definition and optional Package Addition planner scenario. */

@@ -17,8 +17,8 @@ import {
   materializeProjectProjection,
   reconcileAndApplyProjectProjections,
 } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { parse as parseToml } from "smol-toml";
 import { parse as parseYaml } from "yaml";
 

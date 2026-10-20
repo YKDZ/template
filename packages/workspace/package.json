@@ -17,6 +17,11 @@
   },
   "exports": {
     "./assets/*": "./*",
+    "./dependency-catalog": {
+      "source": "./src/dependency-catalog.ts",
+      "types": "./dist/dependency-catalog.d.ts",
+      "default": "./dist/dependency-catalog.js"
+    },
     "./publication/*": "./publication/*.ts",
     "./task-gates": "./scripts/task-gates.ts",
     "./turbo-boundaries": "./scripts/run-turbo-boundaries.ts",
@@ -45,6 +50,11 @@
       "types": "./dist/project-linking.d.ts",
       "default": "./dist/project-linking.js"
     },
+    "./release-toolchain-snapshot": {
+      "source": "./src/release-toolchain-snapshot.ts",
+      "types": "./dist/release-toolchain-snapshot.d.ts",
+      "default": "./dist/release-toolchain-snapshot.js"
+    },
     "./root-projection": {
       "source": "./src/root-projection.ts",
       "types": "./dist/root-projection.d.ts",
@@ -72,6 +82,7 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
+    "sync:policy-snapshot": "node scripts/sync-policy-snapshot.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
