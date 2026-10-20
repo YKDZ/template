@@ -765,6 +765,9 @@ importers:
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../workspace
+      execa:
+        specifier: 'catalog:'
+        version: 10.1.1
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0

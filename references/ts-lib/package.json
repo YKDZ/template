@@ -32,7 +32,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
     "build": "tsc -p tsconfig.build.json --pretty false",
     "test": "node --conditions=source --test --test-reporter=spec --test-reporter='#tooling/reporter' --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.test.ts'",
-    "build:template": "tsc -p tsconfig.template.json --pretty false"
+    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false"
   },
   "dependencies": {
     "@ykdz/template-core": "workspace:*",

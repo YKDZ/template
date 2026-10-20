@@ -19,6 +19,10 @@ import type {
 import ignore, { type Ignore } from "ignore";
 import { parse, type ParseError } from "jsonc-parser";
 
+import {
+  prepareNativeContentArtifact,
+  type PreparedNativeContentArtifact,
+} from "./content-artifact.ts";
 import type { DefaultPackageRole } from "./default-package-role.ts";
 import type { GenerationContext } from "./generation-context.ts";
 import type { PackageContribution } from "./package-contribution.ts";
@@ -137,6 +141,8 @@ export type ReferencePackage<
   /** prepare完成后从所属资源集合中取得的CLI发布身份来源。 */
   readonly publicationIdentitySource?: TemplateSourceHandle;
   prepare(): ReferencePackagePreparation<OwnerFacts>;
+  /** 完成原生模板编译后，公开可供collection装配的所属制品句柄。 */
+  prepareArtifact(): PreparedNativeContentArtifact;
   source(file: string): TemplateSourceHandle;
   operations(targetPath: string): CopyFileOperation[];
   payloadOperations(targetPath: string): CopyFileOperation[];
@@ -233,6 +239,8 @@ export function defineReferencePackage<
   OwnerFacts = undefined,
 >(options: {
   readonly packageName: string;
+  /** 原生清单未声明version时由所属包提供的安装制品坐标。 */
+  readonly artifactVersion?: string;
   readonly resolve: (specifier: string) => string;
   /** 所属包公开准备职责选择的本包资源根目录。 */
   readonly resourceRoot: URL;
@@ -475,17 +483,6 @@ export function defineReferencePackage<
         }
         return resource;
       });
-      for (const resource of templateResources) {
-        if (
-          !resources.some(
-            (preparedResource) =>
-              preparedResource.path === resource ||
-              preparedResource.path.startsWith(`${resource}/`),
-          )
-        ) {
-          throw new Error(`模板资源未包含在参考资源范围中：${resource}`);
-        }
-      }
       if (
         publicationIdentitySource !== undefined &&
         !preparedResourcesByPath.has(
@@ -595,6 +592,33 @@ export function defineReferencePackage<
       return dependencyUses();
     },
     prepare,
+    prepareArtifact() {
+      const prepared = prepare();
+      const dependencyPurposes = new Map(
+        prepared.dependencyUses.map((dependency) => [
+          dependency.name,
+          dependency.purposes.filter(
+            (purpose): purpose is "target" | "template-execution" =>
+              purpose === "target" || purpose === "template-execution",
+          ),
+        ]),
+      );
+      const resources = new Map(
+        [...preparedRuntimeResources, ...prepared.executionData].map(
+          (resource) => [resource.path, resource],
+        ),
+      );
+      return prepareNativeContentArtifact({
+        manifest: prepared.manifest,
+        resourceRoot: options.resourceRoot,
+        exportPath: "./template",
+        ...(options.artifactVersion === undefined
+          ? {}
+          : { artifactVersion: options.artifactVersion }),
+        resources: [...resources.values()],
+        dependencyPurposes,
+      });
+    },
     source,
     operations,
     payloadOperations: (targetPath) => collectOperations(targetPath, true),

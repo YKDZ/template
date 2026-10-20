@@ -29,7 +29,7 @@
     "lint": "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
-    "build:template": "tsc -p tsconfig.template.json --pretty false",
+    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
     "build": "tsc -p tsconfig.build.json",
     "dev": "node --conditions=source --watch src/server.ts",
     "start": "node dist/server.js",
