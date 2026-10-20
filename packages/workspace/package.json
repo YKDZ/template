@@ -74,6 +74,11 @@
       "source": "./src/package-addition-facts.ts",
       "types": "./dist/package-addition-facts.d.ts",
       "default": "./dist/package-addition-facts.js"
+    },
+    "./rust-toolchain-facts": {
+      "source": "./src/rust-toolchain-facts.ts",
+      "types": "./dist/rust-toolchain-facts.d.ts",
+      "default": "./dist/rust-toolchain-facts.js"
     }
   },
   "scripts": {
@@ -90,6 +95,7 @@
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*",
+    "smol-toml": "catalog:",
     "yaml": "catalog:"
   },
   "devDependencies": {
@@ -102,7 +108,6 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "semver": "catalog:",
-    "smol-toml": "catalog:",
     "spdx-expression-parse": "catalog:",
     "tar": "catalog:",
     "typescript-7": "catalog:"

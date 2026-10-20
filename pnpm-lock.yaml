@@ -782,6 +782,9 @@ importers:
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../workspace-authoring
+      smol-toml:
+        specifier: 'catalog:'
+        version: 1.9.1
       yaml:
         specifier: 'catalog:'
         version: 2.9.1
@@ -813,9 +816,6 @@ importers:
       semver:
         specifier: 'catalog:'
         version: 7.8.5
-      smol-toml:
-        specifier: 'catalog:'
-        version: 1.9.1
       spdx-expression-parse:
         specifier: 'catalog:'
         version: 5.0.0

@@ -94,13 +94,17 @@ import {
   projectToolchainMirrorManifest,
   type WorkspaceRootInsertion,
 } from "@ykdz/template-workspace/root-projection";
+import {
+  readRootRustToolchainChannel,
+  rootRustDeclarationFileName,
+  RustToolchainDeclarationFailure,
+} from "@ykdz/template-workspace/rust-toolchain-facts";
 import { vuePnpmDependencyOverrides } from "@ykdz/template-workspace/vue-policy";
 import {
   copyWorkspaceResource,
   copyWorkspaceDirectory,
   readWorkspaceJson,
 } from "@ykdz/template-workspace/workspace-resources";
-import { parse as parseToml } from "smol-toml";
 import ts from "typescript";
 
 import {
@@ -448,108 +452,6 @@ function readGenerationRecord(options: {
   return parseGenerationRecord(
     readJsonFile(generationPath, "Generation Record facts"),
   );
-}
-
-/**
- * 目标根现行版本声明缺失或形状错误时的显式带形状内部失败：点名文件与字段、实际值与修正动作，
- * 由 Package Addition 准备边界传递给命令层；其他 metadata 错误保持通用。
- */
-class PackageAdditionTargetDeclarationFailure extends Error {
-  readonly field: "engines.node" | "packageManager" | "[toolchain].channel";
-  readonly suggestion: string;
-
-  constructor(
-    file: "package.json" | "rust-toolchain.toml",
-    field: "engines.node" | "packageManager" | "[toolchain].channel",
-    requirement: string,
-    actualDeclaration: string,
-    suggestion: string,
-  ) {
-    super(
-      `加包需要目标仓库根 ${file} 的 ${field} ${requirement}，实际收到 ${actualDeclaration}。${suggestion}`,
-    );
-    this.field = field;
-    this.suggestion = suggestion;
-  }
-}
-
-/** 生成仓库根 Rust 声明的唯一文件名；所有权判定与投影保留都只经这个接缝引用它。 */
-const rootRustDeclarationFileName = "rust-toolchain.toml";
-
-/**
- * 已选用 Rust 的目标仓库由根 rust-toolchain.toml 的 channel 拥有后续 Rust 版本选择，因此加包
- * 按该现行声明重放根投影与开发容器初值。声明缺失、非法 TOML 或 channel 形状错误时在此失败，
- * 不回退 CLI 发版快照、Generation Record 历史或 ambient 环境。
- */
-function readPackageAdditionTargetRustChannel(repositoryRoot: string): string {
-  const relativePath = rootRustDeclarationFileName;
-  const filePath = path.join(repositoryRoot, relativePath);
-  if (!existsSync(filePath)) {
-    throw new PackageAdditionTargetDeclarationFailure(
-      relativePath,
-      "[toolchain].channel",
-      "存在",
-      "文件不存在",
-      `请先创建根 ${relativePath}，在 [toolchain] 表内声明 channel 再加包。`,
-    );
-  }
-  let declaration: unknown;
-  try {
-    declaration = parseToml(readFileSync(filePath, "utf8"));
-  } catch (error) {
-    throw new PackageAdditionTargetDeclarationFailure(
-      relativePath,
-      "[toolchain].channel",
-      "是有效 TOML 声明",
-      `无法解析：${error instanceof Error ? error.message : String(error)}`,
-      `请先修正根 ${relativePath} 的 TOML 语法，使 [toolchain] 表内声明 channel 再加包。`,
-    );
-  }
-  const toolchain = isRecord(declaration) ? declaration.toolchain : undefined;
-  const channel = isRecord(toolchain) ? toolchain.channel : undefined;
-  if (typeof channel !== "string" || channel.trim().length === 0) {
-    throw new PackageAdditionTargetDeclarationFailure(
-      relativePath,
-      "[toolchain].channel",
-      "为非空字符串",
-      JSON.stringify(channel ?? null),
-      `请先在根 ${relativePath} 的 [toolchain] 表内写入 channel 再加包。`,
-    );
-  }
-  return channel;
-}
-
-export type RustToolchainChannelReading =
-  | { readonly channel: string; readonly status: "explained" }
-  | { readonly reason: string; readonly status: "unreadable" };
-
-/**
- * Root Rust 来源的最小接缝：从 rust-toolchain.toml 正文结构化读出 `[toolchain].channel`。
- * 复用加包路径同一 smol-toml 真源，供模板仓投影值门核对 M5；不引入第二套版本或文件名表。
- * 正文非法 TOML 或缺少非空 channel 时返回不可解释，由调用方按缺失/漂移分类，不静默跳过。
- */
-export function readRustToolchainChannelFromToml(
-  contents: string,
-): RustToolchainChannelReading {
-  let declaration: unknown;
-  try {
-    declaration = parseToml(contents);
-  } catch (error) {
-    return {
-      reason: `不是有效 TOML 声明：${error instanceof Error ? error.message : String(error)}`,
-      status: "unreadable",
-    };
-  }
-  const toolchain = isRecord(declaration) ? declaration.toolchain : undefined;
-  const channel = isRecord(toolchain) ? toolchain.channel : undefined;
-  if (typeof channel !== "string" || channel.trim().length === 0) {
-    return {
-      reason: `[toolchain].channel 必须是非空字符串，实际为 ${JSON.stringify(channel ?? null)}`,
-      status: "unreadable",
-    };
-  }
-
-  return { channel, status: "explained" };
 }
 
 function readJsonFile(filePath: string, label: string): unknown {
@@ -953,7 +855,7 @@ export function loadLocalTemplateMetadata(
       ...nodeFactsContext,
       toolchain: {
         ...nodeFactsContext.toolchain,
-        rustVersion: readPackageAdditionTargetRustChannel(resolvedRoot),
+        rustVersion: readRootRustToolchainChannel(resolvedRoot),
       },
     };
     planningState = replayLocalTemplateMetadata({ context, preflight });
@@ -4812,7 +4714,7 @@ export function prepareGeneratedRepositoryPackageAddition(options: {
     localTemplateMetadata = loadLocalTemplateMetadata(options.repositoryRoot);
   } catch (error) {
     if (
-      error instanceof PackageAdditionTargetDeclarationFailure ||
+      error instanceof RustToolchainDeclarationFailure ||
       error instanceof WorkspacePackageAdditionFailure ||
       error instanceof ReferenceCompositionFailure
     ) {
@@ -4895,12 +4797,12 @@ export function prepareGeneratedRepositoryPackageAddition(options: {
       if (existingDeclaration === undefined) {
         rustVersion = releaseToolchainSnapshot.rustVersion;
       } else {
-        rustVersion = readPackageAdditionTargetRustChannel(repositoryRoot);
+        rustVersion = readRootRustToolchainChannel(repositoryRoot);
         preservedRootRustDeclaration = existingDeclaration;
       }
     } catch (error) {
       if (
-        error instanceof PackageAdditionTargetDeclarationFailure ||
+        error instanceof RustToolchainDeclarationFailure ||
         error instanceof WorkspacePackageAdditionFailure ||
         error instanceof ReferenceCompositionFailure
       ) {

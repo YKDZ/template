@@ -8,7 +8,6 @@ import {
   planGeneratedRepositoryInitialization,
   loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
-  readRustToolchainChannelFromToml,
   resolveBuiltInTemplateSource,
   type BuiltInPresetDefinition,
   type GeneratedRepositoryPlan,
@@ -34,6 +33,7 @@ import {
   canProvideSourceConditionPackageNameImport,
 } from "@ykdz/template-workspace/project-linking";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
+import { readRustToolchainChannelFromToml } from "@ykdz/template-workspace/rust-toolchain-facts";
 import { parse as parseYaml } from "yaml";
 
 /** A real registry Definition and optional Package Addition planner scenario. */
