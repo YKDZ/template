@@ -22,6 +22,7 @@
     "lint": "oxlint --quiet --format=unix --ignore-pattern template-dist .",
     "lint:fix": "oxlint --format=unix --ignore-pattern template-dist . --fix",
     "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 'test/**/*.light.test.ts'",
+    "test:integration": "node --conditions=source --experimental-strip-types --test --test-concurrency=1 --test-timeout=300000 'test/**/*.integration.test.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
@@ -39,6 +40,7 @@
     "@ykdz/reference-vue-shared": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
+    "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

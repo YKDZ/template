@@ -12,23 +12,36 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { renderNewProject } from "@ykdz/template-core/renderer";
-import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
+import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
+import { templateContent, templatePresets } from "@ykdz/template-content";
+import { createGenerator } from "@ykdz/template-generator";
+import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
-import {
-  builtInPresetRegistry,
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-} from "../foundation.ts";
+function presetFor(packageName: string) {
+  const preset = templatePresets.find(
+    (candidate) => candidate.owner?.packageName === packageName,
+  );
+  assert.ok(preset, `缺少公开预设：${packageName}`);
+  return preset;
+}
 
-const runtimeToolchain = {
-  nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-    0,
-    releaseToolchainSnapshot.nodeVersion.indexOf("."),
-  ),
-  packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-  nodeVersion: releaseToolchainSnapshot.nodeVersion,
-};
+async function initialize(
+  targetRoot: string,
+  preset: (typeof templatePresets)[number],
+): Promise<void> {
+  const result = await createGenerator({
+    content: templateContent,
+    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+  }).init({
+    targetRoot,
+    selection: { roots: [{ preset }] },
+    strategyInput: {
+      repositoryName: "generated-repository",
+      defaultPackageScope: "generated",
+    },
+  });
+  assert.strictEqual(result.status, "success", JSON.stringify(result));
+}
 async function waitForFile(filePath: string): Promise<string> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
@@ -71,26 +84,16 @@ async function assertProcessExited(pid: number): Promise<void> {
 }
 
 void describe("生成任务公共入口", () => {
-  void it("为每个初始化预设投影四个公共入口", async () => {
+  void it("每个公开初始化预设都投影四个公共质量入口", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-gates-"));
 
     try {
-      for (const definition of builtInPresetRegistry.all()) {
-        const targetRoot = path.join(workspace, definition.metadata.name);
-        const context = createGenerationContext({
-          targetDir: targetRoot,
-          defaultPackageScope: "generated",
-          toolchain: runtimeToolchain,
-        });
-        const plan = planGeneratedRepositoryInitialization({
-          definition,
-          context,
-        });
-
-        await renderNewProject({
-          targetRoot,
-          operations: [...plan.operations],
-        });
+      for (const preset of templatePresets) {
+        const targetRoot = path.join(
+          workspace,
+          preset.owner?.packageName ?? preset.metadata.alias,
+        );
+        await initialize(targetRoot, preset);
 
         const rootManifest = JSON.parse(
           await readFile(path.join(targetRoot, "package.json"), "utf8"),
@@ -135,32 +138,24 @@ void describe("生成任务公共入口", () => {
   for (const runnerKind of ["boundaries", "cargo"] as const) {
     for (const signal of ["SIGINT", "SIGTERM"] as const) {
       void it(
-        `forwards parent ${signal} through the generated ${runnerKind} process tree`,
+        `生成的 ${runnerKind} 运行器传递 ${signal} 并保留进程退出码`,
         { skip: process.platform === "win32", timeout: 15_000 },
         async () => {
           const workspace = await mkdtemp(
             path.join(tmpdir(), `template-${runnerKind}-signal-`),
           );
           const targetRoot = path.join(workspace, "generated-repository");
-          const definition = builtInPresetRegistry.require(
-            runnerKind === "boundaries" ? "ts-lib" : "rust-bin",
-          );
-          const context = createGenerationContext({
-            targetDir: targetRoot,
-            defaultPackageScope: "generated",
-            toolchain: runtimeToolchain,
-          });
-          const initialization = planGeneratedRepositoryInitialization({
-            definition,
-            context,
-          });
           let runnerPid: number | undefined;
           let toolPid: number | undefined;
           try {
-            await renderNewProject({
+            await initialize(
               targetRoot,
-              operations: [...initialization.operations],
-            });
+              presetFor(
+                runnerKind === "boundaries"
+                  ? "@ykdz/preset-ts-lib"
+                  : "@ykdz/preset-rust-bin",
+              ),
+            );
 
             const runnerCwd =
               runnerKind === "boundaries"

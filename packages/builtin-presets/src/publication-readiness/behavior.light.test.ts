@@ -6,6 +6,7 @@ import {
   readFile,
   rm,
   symlink,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,15 +14,30 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 
 import { referencePackage } from "@ykdz/reference-ts-cli/template";
+import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
+import { templateContent, templatePresets } from "@ykdz/template-content";
 import { resolveTemplateSource } from "@ykdz/template-core/renderer";
-import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
+import { createGenerator } from "@ykdz/template-generator";
+import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 import { execa } from "execa";
 
 const workspaces: string[] = [];
+const metadataSnapshots = new Map<
+  string,
+  { readonly blueprint: string; readonly generation: string }
+>();
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function snapshotFile(filePath: string) {
+  const [source, metadata] = await Promise.all([
+    readFile(filePath),
+    stat(filePath),
+  ]);
+  return { mode: metadata.mode & 0o777, source };
 }
 
 async function generatedRepository(
@@ -34,45 +50,56 @@ async function generatedRepository(
     path.join(tmpdir(), "template-publication-readiness-"),
   );
   workspaces.push(repositoryRoot);
+  const cliPreset = templatePresets.find(
+    (preset) => preset.owner?.packageName === "@ykdz/preset-ts-cli",
+  );
+  assert.ok(cliPreset);
+  const result = await createGenerator({
+    content: templateContent,
+    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+  }).init({
+    targetRoot: repositoryRoot,
+    selection: { roots: [{ preset: cliPreset }] },
+    strategyInput: {
+      repositoryName: "demo-cli",
+      defaultPackageScope: "demo",
+    },
+  });
+  assert.strictEqual(result.status, "success");
+  metadataSnapshots.set(repositoryRoot, {
+    blueprint: await readFile(
+      path.join(repositoryRoot, ".template/blueprint.json"),
+      "utf8",
+    ),
+    generation: await readFile(
+      path.join(repositoryRoot, ".template/generation.json"),
+      "utf8",
+    ),
+  });
   await symlink(
     path.resolve(import.meta.dirname, "../../node_modules"),
     path.join(repositoryRoot, "node_modules"),
     "dir",
   );
+  const rootManifest = JSON.parse(
+    await readFile(path.join(repositoryRoot, "package.json"), "utf8"),
+  ) as Record<string, unknown>;
+  const rootEngines =
+    typeof rootManifest.engines === "object" && rootManifest.engines !== null
+      ? (rootManifest.engines as Record<string, unknown>)
+      : {};
   await writeJson(path.join(repositoryRoot, "package.json"), {
-    name: "demo-cli",
-    private: true,
-    type: "module",
-    engines: { node: options.rootNode ?? "26" },
-    packageManager: releaseToolchainSnapshot.packageManagerPin,
-    imports: { "#npm-publication/*": "./scripts/npm-publication/*.ts" },
-    scripts: {
-      "publication:readiness":
-        "node --conditions=source scripts/npm-publication/check-readiness.ts",
-    },
+    ...rootManifest,
+    engines: { ...rootEngines, node: options.rootNode ?? "26" },
   });
-  await writeFile(
-    path.join(repositoryRoot, "pnpm-workspace.yaml"),
-    "packages:\n  - packages/*\n",
-  );
-  await writeJson(path.join(repositoryRoot, "packages/cli/package.json"), {
-    name: "@demo/cli",
-    private: true,
-    files: ["dist"],
-    type: "module",
-    bin: { cli: "./dist/cli.js" },
-    scripts: {
-      build: "tsc -p tsconfig.build.json --pretty false",
-      prepack: "pnpm exec turbo run build --filter=.",
-    },
-    dependencies: {
-      "@ykdz/cli-contract": "catalog:",
-      "@valibot/to-json-schema": "catalog:",
-      valibot: "catalog:",
-    },
-    engines: { node: ">=26" },
-    ...options.manifest,
-  });
+  if (options.manifest !== undefined) {
+    const manifestPath = path.join(repositoryRoot, "packages/cli/package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    await writeJson(manifestPath, { ...manifest, ...options.manifest });
+  }
   return repositoryRoot;
 }
 
@@ -120,6 +147,7 @@ async function writeReadyFacts(
     path.join(repositoryRoot, "packages/cli/package.json"),
     readyManifest(packageName),
   );
+  await writeBlueprintPackageName(repositoryRoot, packageName);
   const license = [
     "MIT License",
     "",
@@ -160,42 +188,37 @@ async function writeReadyFacts(
   );
 }
 
-const candidatePackageDefinitionId = `package-${"a".repeat(64)}`;
-
 async function writeLocalTemplateMetadata(
   repositoryRoot: string,
   packageName: string,
 ): Promise<void> {
-  await writeJson(path.join(repositoryRoot, ".template/blueprint.json"), {
-    schemaVersion: 3,
-    packages: [
-      {
-        packageDefinitionId: candidatePackageDefinitionId,
-        name: packageName,
-        path: "packages/cli",
-        role: "cli-tool",
-      },
-    ],
-  });
-  await writeJson(path.join(repositoryRoot, ".template/generation.json"), {
-    schemaVersion: 2,
-    repositoryName: "demo-cli",
-    defaultPackageScope: "original-scope",
-    preset: "ts-cli",
-    templateVersion: "0.0.0",
-    toolchain: {
-      nodeLtsMajor: "26",
-      packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-    },
-    packages: [
-      {
-        packageDefinitionId: candidatePackageDefinitionId,
-        path: "packages/cli",
-        definitionName: "ts-cli",
-        planningContribution: "planInitialization",
-        contributionIdentity: "cli-publication-candidate",
-      },
-    ],
+  const snapshot = metadataSnapshots.get(repositoryRoot);
+  assert.ok(snapshot);
+  await mkdir(path.join(repositoryRoot, ".template"), { recursive: true });
+  await writeFile(
+    path.join(repositoryRoot, ".template/blueprint.json"),
+    snapshot.blueprint,
+  );
+  await writeFile(
+    path.join(repositoryRoot, ".template/generation.json"),
+    snapshot.generation,
+  );
+  await writeBlueprintPackageName(repositoryRoot, packageName);
+}
+
+async function writeBlueprintPackageName(
+  repositoryRoot: string,
+  packageName: string,
+): Promise<void> {
+  const blueprintPath = path.join(repositoryRoot, ".template/blueprint.json");
+  const blueprint = JSON.parse(await readFile(blueprintPath, "utf8")) as {
+    readonly packages: readonly Record<string, unknown>[];
+  } & Record<string, unknown>;
+  await writeJson(blueprintPath, {
+    ...blueprint,
+    packages: blueprint.packages.map((item) =>
+      item.path === "packages/cli" ? { ...item, name: packageName } : item,
+    ),
   });
 }
 
@@ -224,11 +247,11 @@ async function runReadinessCaller(
       );
     })(),
     cp(
-      new URL(
-        import.meta
-          .resolve("@ykdz/template-workspace/assets/publication/publication.config.json"),
+      resolveTemplateSource(
+        referencePackage.source("template/creation-input.ts"),
+        ".",
       ),
-      path.join(moduleRoot, "publication.config.json"),
+      path.join(moduleRoot, "cli-candidate-selection.ts"),
     ),
   ]);
   const callerPath = path.join(
@@ -476,11 +499,72 @@ void describe("Generated Repository npm publication readiness", () => {
     }
   });
 
-  void it("accepts entirely absent Local Template Metadata and rejects partial or contradictory owner facts", async () => {
+  void it("缺少本地模板元数据时阻止就绪并拒绝矛盾的所有者事实", async () => {
     const repositoryRoot = await generatedRepository();
     await writeReadyFacts(repositoryRoot, "demo-cli");
+    const publicationConfigPath = path.join(
+      repositoryRoot,
+      "scripts/npm-publication/publication.config.json",
+    );
+    const publicationConfig = JSON.parse(
+      await readFile(publicationConfigPath, "utf8"),
+    ) as {
+      readonly packagePath?: unknown;
+      readonly packageDefinitionId?: unknown;
+      readonly creationInput?: unknown;
+    };
+    assert.strictEqual(publicationConfig.packagePath, "packages/cli");
+    assert.ok(
+      typeof publicationConfig.packageDefinitionId === "string" &&
+        publicationConfig.packageDefinitionId.length > 0,
+    );
+    assert.ok(
+      typeof publicationConfig.creationInput === "object" &&
+        publicationConfig.creationInput !== null,
+    );
+    const userReadmePath = path.join(repositoryRoot, "packages/cli/README.md");
+    const packageManifestPath = path.join(
+      repositoryRoot,
+      "packages/cli/package.json",
+    );
+    const beforeReadiness = await Promise.all([
+      snapshotFile(publicationConfigPath),
+      snapshotFile(packageManifestPath),
+      snapshotFile(userReadmePath),
+    ]);
     const { inspectNpmPublicationReadiness } =
       await import("@ykdz/template-workspace/publication/readiness");
+
+    await rm(path.join(repositoryRoot, ".template"), {
+      recursive: true,
+      force: true,
+    });
+    const absent = await inspectNpmPublicationReadiness({
+      repositoryRoot,
+      packagePath: "packages/cli",
+    });
+    assert.strictEqual(absent.kind, "blocked");
+    if (absent.kind !== "blocked") throw new Error("Expected blockers");
+    assert.deepStrictEqual(
+      absent.blockers.map(({ code }) => code),
+      ["local-template-metadata-missing", "local-template-metadata-missing"],
+    );
+    const copiedCaller = await runReadinessCaller(repositoryRoot, [
+      "--require-ready",
+    ]);
+    assert.strictEqual(copiedCaller.exitCode, 1);
+    assert.ok(
+      copiedCaller.stdout.includes("BLOCKER local-template-metadata-missing"),
+      copiedCaller.all,
+    );
+    assert.deepStrictEqual(
+      await Promise.all([
+        snapshotFile(publicationConfigPath),
+        snapshotFile(packageManifestPath),
+        snapshotFile(userReadmePath),
+      ]),
+      beforeReadiness,
+    );
 
     await mkdir(path.join(repositoryRoot, ".template"));
     const partial = await inspectNpmPublicationReadiness({
@@ -526,6 +610,7 @@ void describe("Generated Repository npm publication readiness", () => {
       ".template/generation.json",
     );
     const generation = JSON.parse(await readFile(generationPath, "utf8")) as {
+      strategyState: Record<string, unknown>;
       packages: readonly Record<string, unknown>[];
     };
     await writeJson(generationPath, {
@@ -546,9 +631,19 @@ void describe("Generated Repository npm publication readiness", () => {
     );
 
     await writeLocalTemplateMetadata(repositoryRoot, "demo-cli");
+    const packageRecord = generation.packages[0]!;
+    assert.ok(
+      typeof packageRecord.definition === "object" &&
+        packageRecord.definition !== null,
+    );
     await writeJson(generationPath, {
       ...generation,
-      packages: [{ ...generation.packages[0], path: "packages/other" }],
+      packages: [
+        {
+          ...packageRecord,
+          definition: { ...packageRecord.definition, path: "packages/other" },
+        },
+      ],
     });
     const pathMismatch = await inspectNpmPublicationReadiness({
       repositoryRoot,
@@ -602,7 +697,7 @@ void describe("Generated Repository npm publication readiness", () => {
     );
   });
 
-  void it("requires a globally unique metadata target and init candidate provenance", async () => {
+  void it("要求发布目标与唯一的初始化候选和蓝图身份一致", async () => {
     const repositoryRoot = await generatedRepository();
     await writeReadyFacts(repositoryRoot, "@demo/cli");
     await writeLocalTemplateMetadata(repositoryRoot, "@demo/cli");
@@ -615,6 +710,7 @@ void describe("Generated Repository npm publication readiness", () => {
       readonly packages: readonly Record<string, unknown>[];
     };
     const generation = JSON.parse(await readFile(generationPath, "utf8")) as {
+      readonly strategyState: Record<string, unknown>;
       readonly packages: readonly Record<string, unknown>[];
     };
     const { inspectNpmPublicationReadiness } =
@@ -646,28 +742,49 @@ void describe("Generated Repository npm publication readiness", () => {
     );
 
     await writeJson(blueprintPath, blueprint);
+    for (const changedRecord of [
+      { ...generation.packages[0]!, createdBy: "addition" },
+      {
+        ...generation.packages[0]!,
+        creationInput: { variant: "private" },
+      },
+    ]) {
+      await writeJson(generationPath, {
+        ...generation,
+        packages: [changedRecord, ...generation.packages.slice(1)],
+      });
+      const rejectedCandidate = await inspectNpmPublicationReadiness({
+        repositoryRoot,
+        packagePath: "packages/cli",
+      });
+      assert.strictEqual(rejectedCandidate.kind, "blocked");
+      if (rejectedCandidate.kind !== "blocked") {
+        throw new Error("Expected blockers");
+      }
+      assert.ok(
+        rejectedCandidate.blockers.some(
+          (blocker) => blocker.code === "local-template-metadata-mismatch",
+        ),
+      );
+    }
+
     await writeJson(generationPath, {
       ...generation,
-      packages: [
-        ...generation.packages,
-        {
-          ...generation.packages[0],
-          packageDefinitionId: `package-${"b".repeat(64)}`,
-          path: "packages/other",
-          planningContribution: "planPackageAddition",
-        },
-      ],
+      strategyState: {
+        ...(generation.strategyState as Record<string, unknown>),
+        repositoryName: "different-root",
+      },
     });
-    const additionMasquerade = await inspectNpmPublicationReadiness({
+    const wrongRepository = await inspectNpmPublicationReadiness({
       repositoryRoot,
       packagePath: "packages/cli",
     });
-    assert.strictEqual(additionMasquerade.kind, "blocked");
-    if (additionMasquerade.kind !== "blocked") {
+    assert.strictEqual(wrongRepository.kind, "blocked");
+    if (wrongRepository.kind !== "blocked") {
       throw new Error("Expected blockers");
     }
     assert.ok(
-      additionMasquerade.blockers.some(
+      wrongRepository.blockers.some(
         (blocker) => blocker.code === "local-template-metadata-mismatch",
       ),
     );

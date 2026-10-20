@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { referencePackagePublicationContexts } from "@ykdz/template-builtin-presets";
+import { templateReferencePackages } from "@ykdz/template-content";
+import { resolveTemplateSource } from "@ykdz/template-core/renderer";
 import ts from "typescript";
 
 function property(
@@ -51,11 +52,13 @@ async function loadMaintainedConfig(
 }
 
 void describe("maintained Playwright diagnostic configuration", () => {
-  const resources = referencePackagePublicationContexts();
-  const playwrightConfiguration = (name: string) =>
-    [...resources.find((item) => item.name === name)!.assets].find(
-      ([, target]) => target === "playwright.config.ts",
-    )![0];
+  const playwrightConfiguration = (name: string) => {
+    const reference = templateReferencePackages.find(
+      (item) => item.manifest.name === name,
+    );
+    assert.ok(reference, `内容集合缺少参考包：${name}`);
+    return resolveTemplateSource(reference.source("playwright.config.ts"), ".");
+  };
   for (const relativePath of [
     playwrightConfiguration("@ykdz/reference-vue-app"),
     fileURLToPath(

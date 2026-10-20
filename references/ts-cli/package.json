@@ -21,6 +21,11 @@
       "types": "./template-dist/definition.d.ts",
       "default": "./template-dist/definition.js"
     },
+    "./creation-input": {
+      "source": "./template/creation-input.ts",
+      "types": "./template-dist/creation-input.d.ts",
+      "default": "./template-dist/creation-input.js"
+    },
     "./command-identity": {
       "source": "./src/cli-command-identity.ts",
       "types": "./dist/cli-command-identity.d.ts",

@@ -19,7 +19,10 @@ import {
   type TemplateReferencePackage,
 } from "@ykdz/template-content";
 import { contentIdentityKey } from "@ykdz/template-core/content-identity";
-import { createGenerator } from "@ykdz/template-generator";
+import {
+  createGenerator,
+  parseGenerationRecord,
+} from "@ykdz/template-generator";
 import {
   createDefaultWorkspaceStrategy,
   defaultWorkspaceConfigurationIdentity,
@@ -53,10 +56,12 @@ const tsCliMember = requireReferenceMember("@ykdz/reference-ts-cli");
 const rustBinMember = requireReferenceMember("@ykdz/reference-rust-bin");
 const vueAppMember = requireReferenceMember("@ykdz/reference-vue-app");
 const library = libraryMember.definition;
+const tsCli = tsCliMember.definition;
 const tsLibPreset = requirePresetMember("@ykdz/preset-ts-lib");
 const tsCliPreset = requirePresetMember("@ykdz/preset-ts-cli");
 const rustBinPreset = requirePresetMember("@ykdz/preset-rust-bin");
 const vikeAppPreset = requirePresetMember("@ykdz/preset-vike-app");
+const vueAppPreset = requirePresetMember("@ykdz/preset-vue-app");
 
 const temporaryDirectories: string[] = [];
 
@@ -104,6 +109,121 @@ void describe("公开模板内容集合", () => {
       path: "packages/typescript-config",
       role: "shared-library",
     });
+  });
+
+  void it("按路径顺序聚合诊断制品并原子拒绝用户覆盖", async () => {
+    const generator = createGenerator({
+      content: templateContent,
+      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+    });
+    const rendered: string[] = [];
+
+    for (const names of [
+      ["web", "admin"],
+      ["admin", "web"],
+    ] as const) {
+      const targetRoot = await createTargetRoot(
+        "template-content-diagnostics-",
+      );
+      const initialized = await generator.init({
+        targetRoot,
+        selection: { roots: [{ preset: tsLibPreset.identity }] },
+        strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
+      });
+      assert.strictEqual(
+        initialized.status,
+        "success",
+        JSON.stringify(initialized),
+      );
+      const workflowPath = path.join(targetRoot, ".github/workflows/check.yml");
+      const originalWorkflow = await readFile(workflowPath, "utf8");
+      await writeFile(workflowPath, `# 用户工作流策略\n${originalWorkflow}`);
+
+      if (rendered.length === 0) {
+        const userStep =
+          "      - name: Upload User-owned diagnostics\n        run: echo user-owned\n";
+        const customizedWorkflow = (
+          await readFile(workflowPath, "utf8")
+        ).replace(
+          "      - name: Run Heavy Check\n        run: node --conditions=source scripts/task-gates.ts check:heavy\n",
+          `      - name: Run Heavy Check\n        run: node --conditions=source scripts/task-gates.ts check:heavy\n${userStep}`,
+        );
+        assert.notStrictEqual(
+          customizedWorkflow,
+          await readFile(workflowPath, "utf8"),
+        );
+        await writeFile(workflowPath, customizedWorkflow);
+        const beforeConflict = await snapshotTree(targetRoot);
+        const conflict = await generator.add({
+          repositoryRoot: targetRoot,
+          preset: vueAppPreset.identity,
+          creationInput: { leafName: names[0] },
+        });
+        assert.strictEqual(conflict.status, "conflict");
+        assert.strictEqual(await snapshotTree(targetRoot), beforeConflict);
+        await writeFile(workflowPath, customizedWorkflow.replace(userStep, ""));
+      }
+
+      for (const leafName of names) {
+        const added = await generator.add({
+          repositoryRoot: targetRoot,
+          preset: vueAppPreset.identity,
+          creationInput: { leafName },
+        });
+        assert.strictEqual(added.status, "success", JSON.stringify(added));
+      }
+
+      const workflow = await readFile(workflowPath, "utf8");
+      rendered.push(workflow);
+      assert.match(workflow, /^# 用户工作流策略\n/u);
+      assert.ok(
+        workflow.includes(
+          "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/admin\n            apps/web",
+        ),
+      );
+      assert.strictEqual(
+        workflow.match(/PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: \|-/gu)?.length,
+        1,
+      );
+      assert.strictEqual(
+        workflow.match(/Upload Root Check diagnostics/gu)?.length,
+        1,
+      );
+    }
+
+    assert.strictEqual(rendered[0], rendered[1]);
+  });
+
+  void it("非诊断加包不读取未变化的工作流目标", async () => {
+    const targetRoot = await createTargetRoot(
+      "template-content-no-diagnostics-",
+    );
+    const generator = createGenerator({
+      content: templateContent,
+      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+    });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { roots: [{ preset: tsLibPreset.identity }] },
+      strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+
+    const workflowPath = path.join(targetRoot, ".github/workflows/check.yml");
+    await rm(workflowPath);
+    await mkdir(workflowPath);
+    const added = await generator.add({
+      repositoryRoot: targetRoot,
+      preset: tsLibPreset.identity,
+      creationInput: { leafName: "utilities" },
+    });
+
+    assert.strictEqual(added.status, "success", JSON.stringify(added));
+    assert.ok((await stat(workflowPath)).isDirectory());
   });
 
   void it("只用集合成员完成库初始化及其公开共享依赖展开", async () => {
@@ -634,16 +754,69 @@ void describe("公开模板内容集合", () => {
     assert.strictEqual(cliResult.status, "success", JSON.stringify(cliResult));
     const cliManifest = JSON.parse(
       await readFile(path.join(cliRoot, "packages/cli/package.json"), "utf8"),
-    ) as { files: string[] };
+    ) as {
+      files: string[];
+      exports?: Readonly<Record<string, unknown>>;
+      scripts?: Readonly<Record<string, string>>;
+    };
     assert.deepStrictEqual(cliManifest.files, ["dist"]);
-    assert.deepStrictEqual(
-      JSON.parse(
-        await readFile(
-          path.join(cliRoot, "scripts/npm-publication/publication.config.json"),
-          "utf8",
-        ),
+    assert.strictEqual(
+      cliManifest.scripts?.build,
+      tsCli.manifest.scripts?.build,
+    );
+    assert.strictEqual(cliManifest.exports?.["./creation-input"], undefined);
+    await assert.rejects(
+      readFile(path.join(cliRoot, "packages/cli/template/creation-input.ts")),
+      { code: "ENOENT" },
+    );
+    const publicationConfig = JSON.parse(
+      await readFile(
+        path.join(cliRoot, "scripts/npm-publication/publication.config.json"),
+        "utf8",
       ),
-      { packagePath: "packages/cli" },
+    ) as {
+      readonly packageDefinitionId: string;
+      readonly packagePath: string;
+      readonly creationInput: TsCliCreationInput;
+    };
+    assert.strictEqual(publicationConfig.packagePath, "packages/cli");
+    assert.deepStrictEqual(
+      publicationConfig.creationInput,
+      tsCliPreset.definition.nodes.cli.creationInput.init,
+    );
+    const blueprint = JSON.parse(
+      await readFile(path.join(cliRoot, ".template/blueprint.json"), "utf8"),
+    ) as {
+      readonly packages: readonly {
+        readonly packageDefinitionId: string;
+        readonly path: string;
+      }[];
+    };
+    const matchingDefinitions = blueprint.packages.filter(
+      ({ packageDefinitionId }) =>
+        packageDefinitionId === publicationConfig.packageDefinitionId,
+    );
+    assert.strictEqual(matchingDefinitions.length, 1);
+    assert.strictEqual(
+      matchingDefinitions[0]?.path,
+      publicationConfig.packagePath,
+    );
+    const generationRecord = parseGenerationRecord<TsCliCreationInput>(
+      JSON.parse(
+        await readFile(path.join(cliRoot, ".template/generation.json"), "utf8"),
+      ),
+    );
+    const matchingRecords = generationRecord.packages.filter(
+      ({ definition }) =>
+        definition.packageDefinitionId ===
+        publicationConfig.packageDefinitionId,
+    );
+    assert.strictEqual(matchingRecords.length, 1);
+    assert.strictEqual(matchingRecords[0]?.createdBy, "initialization");
+    assert.strictEqual(matchingRecords[0]?.definition.path, "packages/cli");
+    assert.deepStrictEqual(
+      matchingRecords[0]?.creationInput,
+      publicationConfig.creationInput,
     );
 
     const rustRoot = await createTargetRoot("template-content-rust-bin-");
@@ -782,6 +955,15 @@ void describe("公开模板内容集合", () => {
           path: "packages/db-migrations",
         },
       },
+    );
+    const checkWorkflow = await readFile(
+      path.join(targetRoot, ".github/workflows/check.yml"),
+      "utf8",
+    );
+    assert.ok(
+      checkWorkflow.includes(
+        "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/vue",
+      ),
     );
     assert.strictEqual(
       await readFile(path.join(targetRoot, "apps/web/+server.ts"), "utf8"),

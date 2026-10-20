@@ -4,14 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import {
-  builtInPresetRegistry,
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
-import { renderNewProject } from "@ykdz/template-core/renderer";
-import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
-
+import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
+import { templateContent, templatePresets } from "@ykdz/template-content";
+import { createGenerator } from "@ykdz/template-generator";
+import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 type Tsconfig = {
   readonly compilerOptions?: Readonly<Record<string, unknown>>;
   readonly extends?: string | readonly string[];
@@ -100,8 +96,8 @@ async function localExtendsChain(
 }
 
 void describe("Generated Repository TypeScript policy", () => {
-  for (const definition of builtInPresetRegistry.all()) {
-    const presetName = definition.metadata.name;
+  for (const preset of templatePresets) {
+    const presetName = preset.metadata.alias;
     void describe(`${presetName} generated repository TypeScript policy`, () => {
       void it("inherits one strict policy with explicit ecosystem exceptions", async () => {
         const workspace = await mkdtemp(
@@ -109,22 +105,23 @@ void describe("Generated Repository TypeScript policy", () => {
         );
         const targetDir = path.join(workspace, "repository");
         try {
-          const plan = planGeneratedRepositoryInitialization({
-            definition,
-            context: createGenerationContext({
-              targetDir,
-              defaultPackageScope: "policy",
-              toolchain: {
-                nodeLtsMajor: "24",
-                packageManagerPin: "pnpm@11.11.0",
-                nodeVersion: releaseToolchainSnapshot.nodeVersion,
-              },
-            }),
-          });
-          await renderNewProject({
+          const initialized = await createGenerator({
+            content: templateContent,
+            strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+          }).init({
             targetRoot: targetDir,
-            operations: [...plan.operations],
+            selection: { roots: [{ preset }] },
+            strategyInput: {
+              repositoryName: "repository",
+              defaultPackageScope: "policy",
+            },
           });
+          assert.strictEqual(
+            initialized.status,
+            "success",
+            JSON.stringify(initialized),
+          );
+          if (initialized.status !== "success") return;
 
           const configPackageName = "@policy/typescript-config";
           const configReference = `${configPackageName}/base.json`;
@@ -136,7 +133,7 @@ void describe("Generated Repository TypeScript policy", () => {
             compilerOptions: policyOptions,
           });
           assert.ok(
-            plan.blueprint.packages.some(
+            initialized.blueprint.packages.some(
               (pkg) =>
                 pkg.name === configPackageName &&
                 pkg.path === "packages/typescript-config" &&
@@ -154,7 +151,7 @@ void describe("Generated Repository TypeScript policy", () => {
             const chain = await localExtendsChain(
               configPath,
               new Map(
-                plan.blueprint.packages.map((pkg) => [
+                initialized.blueprint.packages.map((pkg) => [
                   pkg.name,
                   path.join(targetDir, pkg.path),
                 ]),

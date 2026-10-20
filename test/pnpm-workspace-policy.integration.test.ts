@@ -12,11 +12,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import {
-  builtInPresetRegistry,
-  planGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
-import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
+import { templatePresets } from "@ykdz/template-content";
 import { renderGeneratedPnpmWorkspaceYaml } from "@ykdz/template-workspace/dependency-catalog";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
@@ -27,41 +23,15 @@ const repoRoot = path.resolve(
   "..",
 );
 
-function definitionForPnpmPolicy(context: GenerationContext) {
-  const definition = builtInPresetRegistry.all().find((candidate) => {
-    const contributions = planGeneratedRepositoryInitialization({
-      definition: candidate,
-      context,
-    }).packageContributions;
-    return contributions.every(
-      (contribution) => contribution.foundation.toolchains.rust === undefined,
-    );
-  });
-  if (definition === undefined) {
-    throw new Error(
-      "The pnpm Workspace Policy check requires a Node-only Built-in Preset Definition",
-    );
-  }
-  return definition;
-}
-
 async function generateNodeOnlyProject(prefix: string): Promise<string> {
   const workspace = await mkdtemp(path.join(tmpdir(), prefix));
   const projectDir = path.join(workspace, "demo-lib");
-  const context = {
-    targetDir: projectDir,
-    repositoryName: "demo-lib",
-    defaultPackageScope: "demo-lib",
-    foundationPackages: {
-      typescriptConfiguration: { name: "@demo-lib/typescript-config" },
-    },
-    toolchain: {
-      nodeLtsMajor: "24",
-      packageManagerPin,
-      // 直接规划新建初始化会派生新建公开 ts-cli 候选，需要发版快照的精确三段版本。
-      nodeVersion: releaseToolchainSnapshot.nodeVersion,
-    },
-  } satisfies GenerationContext;
+  const nodeOnlyPreset = templatePresets.find(
+    (preset) => preset.owner?.packageName === "@ykdz/preset-ts-lib",
+  );
+  if (nodeOnlyPreset === undefined) {
+    throw new Error("内容集合缺少 TypeScript 库预设");
+  }
 
   await execa(
     "node",
@@ -71,7 +41,7 @@ async function generateNodeOnlyProject(prefix: string): Promise<string> {
       "init",
       projectDir,
       "--preset",
-      definitionForPnpmPolicy(context).metadata.name,
+      nodeOnlyPreset.metadata.alias,
     ],
     { cwd: repoRoot },
   );
