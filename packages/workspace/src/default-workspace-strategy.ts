@@ -60,7 +60,7 @@ export type DefaultWorkspaceState = {
   readonly defaultPackageScope: string;
   readonly toolchain: {
     readonly nodeLtsMajor: string;
-    readonly nodeVersion: string;
+    readonly nodeVersion?: string;
     readonly packageManagerPin: string;
   };
 };
@@ -114,7 +114,9 @@ function defaultContext(
     },
     toolchain: {
       nodeLtsMajor: state.toolchain.nodeLtsMajor,
-      nodeVersion: state.toolchain.nodeVersion,
+      ...(state.toolchain.nodeVersion === undefined
+        ? {}
+        : { nodeVersion: state.toolchain.nodeVersion }),
       packageManagerPin: state.toolchain.packageManagerPin,
     },
   };
@@ -514,7 +516,7 @@ export function createDefaultWorkspaceStrategy(): WorkspaceStrategy<
       const current = readPackageAdditionVersionFacts(targetRoot);
       const context = defaultContext(targetRoot, {
         ...state,
-        toolchain: { ...state.toolchain, ...current.toolchain },
+        toolchain: current.toolchain,
       });
       const definitionsById = new Map<string, PackageDefinition>(
         packages.map((item) => [

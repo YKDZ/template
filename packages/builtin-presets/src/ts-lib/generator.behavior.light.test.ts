@@ -265,72 +265,80 @@ void describe("显式生成器默认库行为", () => {
     );
   });
 
-  void it("加包从根读取当前 Node 与 pnpm 并保留既有包事实", async () => {
-    const targetRoot = path.join(
-      await mkdtemp(
-        path.join(tmpdir(), "template-generator-current-toolchain-"),
-      ),
-      "demo",
-    );
-    const generator = createGenerator({
-      content: [library, configuration],
-      strategy: createDefaultWorkspaceStrategy(),
-    });
-    const initialized = await generator.init({
-      targetRoot,
-      selection: { contentIdentity: "library" },
-      strategyInput: { defaultPackageScope: "demo" },
-    });
-    assert.strictEqual(initialized.status, "success");
+  void it("加包从根读取当前精确或纯大版本 Node 与 pnpm 并保留既有包事实", async () => {
+    for (const [nodeDeclaration, expectedContainerNode] of [
+      ["26.1.0", "26.1.0"],
+      ["26", "26"],
+    ]) {
+      const targetRoot = path.join(
+        await mkdtemp(
+          path.join(tmpdir(), "template-generator-current-toolchain-"),
+        ),
+        "demo",
+      );
+      const generator = createGenerator({
+        content: [library, configuration],
+        strategy: createDefaultWorkspaceStrategy(),
+      });
+      const initialized = await generator.init({
+        targetRoot,
+        selection: { contentIdentity: "library" },
+        strategyInput: { defaultPackageScope: "demo" },
+      });
+      assert.strictEqual(initialized.status, "success");
 
-    const rootManifestPath = path.join(targetRoot, "package.json");
-    const rootManifest = JSON.parse(
-      await readFile(rootManifestPath, "utf8"),
-    ) as {
-      engines: Record<string, string>;
-      packageManager: string;
-    };
-    rootManifest.engines.node = "26.1.0";
-    rootManifest.packageManager = "pnpm@12.9.2";
-    await writeFile(
-      rootManifestPath,
-      JSON.stringify(rootManifest, null, 2) + "\n",
-    );
-    const existingPackagePath = path.join(
-      targetRoot,
-      "packages/lib/package.json",
-    );
-    const existingPackageBefore = await readFile(existingPackagePath, "utf8");
+      const rootManifestPath = path.join(targetRoot, "package.json");
+      const rootManifest = JSON.parse(
+        await readFile(rootManifestPath, "utf8"),
+      ) as {
+        engines: Record<string, string>;
+        packageManager: string;
+      };
+      rootManifest.engines.node = nodeDeclaration!;
+      rootManifest.packageManager = "pnpm@12.9.2";
+      await writeFile(
+        rootManifestPath,
+        JSON.stringify(rootManifest, null, 2) + "\n",
+      );
+      const existingPackagePath = path.join(
+        targetRoot,
+        "packages/lib/package.json",
+      );
+      const existingPackageBefore = await readFile(existingPackagePath, "utf8");
 
-    const result = await generator.add({
-      repositoryRoot: targetRoot,
-      contentIdentity: "library",
-      leafName: "current-node",
-    });
+      const result = await generator.add({
+        repositoryRoot: targetRoot,
+        contentIdentity: "library",
+        leafName: "current-node",
+      });
 
-    assert.strictEqual(result.status, "success", JSON.stringify(result));
-    assert.deepStrictEqual(
-      JSON.parse(await readFile(rootManifestPath, "utf8")),
-      rootManifest,
-    );
-    const devcontainer = JSON.parse(
-      await readFile(
-        path.join(targetRoot, ".devcontainer/devcontainer.json"),
-        "utf8",
-      ),
-    ) as { build: { args: Record<string, string> } };
-    assert.strictEqual(devcontainer.build.args.NODE_VERSION, "26.1.0");
-    const addedPackage = JSON.parse(
-      await readFile(
-        path.join(targetRoot, "packages/current-node/package.json"),
-        "utf8",
-      ),
-    ) as { engines: { node: string } };
-    assert.strictEqual(addedPackage.engines.node, "26");
-    assert.strictEqual(
-      await readFile(existingPackagePath, "utf8"),
-      existingPackageBefore,
-    );
+      assert.strictEqual(result.status, "success", JSON.stringify(result));
+      assert.deepStrictEqual(
+        JSON.parse(await readFile(rootManifestPath, "utf8")),
+        rootManifest,
+      );
+      const devcontainer = JSON.parse(
+        await readFile(
+          path.join(targetRoot, ".devcontainer/devcontainer.json"),
+          "utf8",
+        ),
+      ) as { build: { args: Record<string, string> } };
+      assert.strictEqual(
+        devcontainer.build.args.NODE_VERSION,
+        expectedContainerNode,
+      );
+      const addedPackage = JSON.parse(
+        await readFile(
+          path.join(targetRoot, "packages/current-node/package.json"),
+          "utf8",
+        ),
+      ) as { engines: { node: string } };
+      assert.strictEqual(addedPackage.engines.node, "26");
+      assert.strictEqual(
+        await readFile(existingPackagePath, "utf8"),
+        existingPackageBefore,
+      );
+    }
   });
 
   void it("共享配置缺少原生公开接口时加包失败且目标树零写入", async () => {
