@@ -39,10 +39,6 @@ import { createAuthoredContentFixture } from "../test-support/authored-content-f
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const temporaryRoots: string[] = [];
 const preparedCollections: PreparedContentCollection[] = [];
-const protectedAuthorDirectories: {
-  readonly path: string;
-  readonly mode: number;
-}[] = [];
 const authoredFixtures: Awaited<
   ReturnType<typeof createAuthoredContentFixture>
 >[] = [];
@@ -53,6 +49,25 @@ async function temporaryRoot(prefix: string): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), prefix));
   temporaryRoots.push(root);
   return root;
+}
+
+async function withUnreadableAuthorDirectories<Result>(
+  directories: readonly { readonly path: string; readonly mode: number }[],
+  action: () => Promise<Result>,
+): Promise<Result> {
+  const orderedDirectories = [...directories].sort(
+    (left, right) => right.path.length - left.path.length,
+  );
+  try {
+    for (const directory of orderedDirectories) {
+      await chmod(directory.path, 0);
+    }
+    return await action();
+  } finally {
+    for (const directory of [...orderedDirectories].reverse()) {
+      await chmod(directory.path, directory.mode);
+    }
+  }
 }
 
 async function contentArtifactEvidenceRoot(): Promise<string> {
@@ -252,11 +267,6 @@ async function auditInstalledClosure(
 }
 
 after(async () => {
-  await Promise.all(
-    protectedAuthorDirectories.map(
-      async ({ path: authorPath, mode }) => await chmod(authorPath, mode),
-    ),
-  );
   await Promise.all([
     ...preparedCollections.map((prepared) => prepared.cleanup()),
     ...authoredFixtures.map((fixture) => fixture.close()),
@@ -290,17 +300,13 @@ void describe("原生内容制品安装链", () => {
     const workspaceRootMode = workspaceRootMetadata.mode & 0o777;
     const workspaceRootTime = workspaceRootMetadata.mtimeMs;
     const authorRoots = prepared.owners.map((owner) => owner.packageRoot);
-    for (const authorRoot of authorRoots) {
-      protectedAuthorDirectories.push({
-        path: authorRoot,
-        mode: (await stat(authorRoot)).mode & 0o777,
-      });
-    }
+    const authorModes = await Promise.all(
+      authorRoots.map(
+        async (authorRoot) => (await stat(authorRoot)).mode & 0o777,
+      ),
+    );
     const authorTimes = await Promise.all(
       authorRoots.map(async (authorRoot) => (await stat(authorRoot)).mtimeMs),
-    );
-    await Promise.all(
-      authorRoots.map(async (authorRoot) => await chmod(authorRoot, 0)),
     );
 
     const consumerRoot = await temporaryRoot("template-content-consumer-");
@@ -378,28 +384,32 @@ void describe("原生内容制品安装链", () => {
       ].join("\n"),
     );
 
-    await chmod(workspaceRoot, 0);
-    try {
-      assert.equal((await stat(workspaceRoot)).mode & 0o777, 0);
-      await execa(
-        process.execPath,
-        [driverPath, targetRoot, resultPath, authorRootsPath, workspaceRoot],
-        {
-          cwd: installedPackage,
-          env: {
-            ...process.env,
-            HOME: consumerRoot,
-            TMPDIR: path.join(consumerRoot, "tmp"),
-            NODE_OPTIONS: "--no-global-search-paths",
-            NODE_PATH: "",
+    await withUnreadableAuthorDirectories(
+      [
+        ...authorRoots.map((authorPath, index) => ({
+          path: authorPath,
+          mode: authorModes[index]!,
+        })),
+        { path: workspaceRoot, mode: workspaceRootMode },
+      ],
+      async () =>
+        await execa(
+          process.execPath,
+          [driverPath, targetRoot, resultPath, authorRootsPath, workspaceRoot],
+          {
+            cwd: installedPackage,
+            env: {
+              ...process.env,
+              HOME: consumerRoot,
+              TMPDIR: path.join(consumerRoot, "tmp"),
+              NODE_OPTIONS: "--no-global-search-paths",
+              NODE_PATH: "",
+            },
+            uid: 65534,
+            gid: 65534,
           },
-          uid: 65534,
-          gid: 65534,
-        },
-      );
-    } finally {
-      await chmod(workspaceRoot, workspaceRootMode);
-    }
+        ),
+    );
 
     const result = JSON.parse(await readFile(resultPath, "utf8")) as {
       readonly generationRecord: {
@@ -464,14 +474,13 @@ void describe("原生内容制品安装链", () => {
     const restoredWorkspaceRoot = await stat(workspaceRoot);
     assert.equal(restoredWorkspaceRoot.mtimeMs, workspaceRootTime);
     assert.equal(restoredWorkspaceRoot.mode & 0o777, workspaceRootMode);
-    assert.ok(
-      (
-        await Promise.all(
-          authorRoots.map(
-            async (authorRoot) => (await stat(authorRoot)).mode & 0o777,
-          ),
-        )
-      ).every((mode) => mode === 0),
+    assert.deepEqual(
+      await Promise.all(
+        authorRoots.map(
+          async (authorRoot) => (await stat(authorRoot)).mode & 0o777,
+        ),
+      ),
+      authorModes,
     );
     const closure = await auditInstalledClosure(consumerRoot, [
       ...authorRoots,
@@ -709,13 +718,26 @@ void describe("原生内容制品安装链", () => {
     const fixtureRootMetadata = await stat(fixture.root);
     const fixtureRootMode = fixtureRootMetadata.mode & 0o777;
     const fixtureRootTime = fixtureRootMetadata.mtimeMs;
+    const workspaceRootMetadata = await stat(workspaceRoot);
+    const workspaceRootMode = workspaceRootMetadata.mode & 0o777;
+    const workspaceRootTime = workspaceRootMetadata.mtimeMs;
     const authorRoots = ["feature", "typescript-config", "addon", "preset"].map(
       (name) => path.join(fixture.root, namespace, "authors", name),
+    );
+    const authorModes = await Promise.all(
+      authorRoots.map(async (root) => (await stat(root)).mode & 0o777),
     );
     const authorTimes = await Promise.all(
       authorRoots.map(async (root) => (await stat(root)).mtimeMs),
     );
-    await Promise.all(authorRoots.map(async (root) => await chmod(root, 0)));
+    const unreadableAuthorDirectories = [
+      ...authorRoots.map((authorPath, index) => ({
+        path: authorPath,
+        mode: authorModes[index]!,
+      })),
+      { path: fixture.root, mode: fixtureRootMode },
+      { path: workspaceRoot, mode: workspaceRootMode },
+    ];
 
     const consumerRoot = await temporaryRoot("authored-content-consumer-");
     await installContentCollection(prepared, consumerRoot);
@@ -736,7 +758,7 @@ void describe("原生内容制品安装链", () => {
     const authorRootsPath = path.join(projectRoot, "author-roots.json");
     await writeFile(
       authorRootsPath,
-      JSON.stringify([...authorRoots, fixture.root]),
+      JSON.stringify([...authorRoots, fixture.root, workspaceRoot]),
     );
     const driverPath = path.join(installedCollection, "integration-driver.mjs");
     await writeFile(
@@ -811,28 +833,26 @@ void describe("原生内容制品安装链", () => {
         "await writeFile(resultPath, JSON.stringify({ templateContent, initialized, addition, generatedAddon, beforeWrongKindTree, afterWrongKindTree }));",
       ].join("\n"),
     );
-    await chmod(fixture.root, 0);
-    try {
-      assert.equal((await stat(fixture.root)).mode & 0o777, 0);
-      await execa(
-        process.execPath,
-        [driverPath, targetRoot, resultPath, authorRootsPath, fixture.root],
-        {
-          cwd: installedCollection,
-          env: {
-            ...process.env,
-            HOME: consumerRoot,
-            TMPDIR: temporaryDirectory,
-            NODE_OPTIONS: "--no-global-search-paths",
-            NODE_PATH: "",
+    await withUnreadableAuthorDirectories(
+      unreadableAuthorDirectories,
+      async () =>
+        await execa(
+          process.execPath,
+          [driverPath, targetRoot, resultPath, authorRootsPath, fixture.root],
+          {
+            cwd: installedCollection,
+            env: {
+              ...process.env,
+              HOME: consumerRoot,
+              TMPDIR: temporaryDirectory,
+              NODE_OPTIONS: "--no-global-search-paths",
+              NODE_PATH: "",
+            },
+            uid: 65534,
+            gid: 65534,
           },
-          uid: 65534,
-          gid: 65534,
-        },
-      );
-    } finally {
-      await chmod(fixture.root, fixtureRootMode);
-    }
+        ),
+    );
 
     const result = JSON.parse(await readFile(resultPath, "utf8")) as {
       readonly templateContent: readonly {
@@ -886,9 +906,18 @@ void describe("原生内容制品安装链", () => {
       ),
       authorTimes,
     );
+    assert.deepEqual(
+      await Promise.all(
+        authorRoots.map(async (root) => (await stat(root)).mode & 0o777),
+      ),
+      authorModes,
+    );
     const restoredFixtureRoot = await stat(fixture.root);
     assert.equal(restoredFixtureRoot.mtimeMs, fixtureRootTime);
     assert.equal(restoredFixtureRoot.mode & 0o777, fixtureRootMode);
+    const restoredWorkspaceRoot = await stat(workspaceRoot);
+    assert.equal(restoredWorkspaceRoot.mtimeMs, workspaceRootTime);
+    assert.equal(restoredWorkspaceRoot.mode & 0o777, workspaceRootMode);
 
     const closure = await auditInstalledClosure(consumerRoot, [
       fixture.root,
@@ -930,7 +959,14 @@ void describe("原生内容制品安装链", () => {
     );
     await writeFile(
       missingDependencyDriverPath,
-      'await import("@fixture/authored-content");\n',
+      [
+        'import assert from "node:assert/strict";',
+        'import { readFile, readdir } from "node:fs/promises";',
+        'const authorRoots = JSON.parse(await readFile(process.argv[2], "utf8"));',
+        'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
+        'await import("@fixture/authored-content");',
+        "",
+      ].join("\n"),
     );
     const generatorPackagePaths = [
       ...new Set(
@@ -953,22 +989,26 @@ void describe("原生内容制品安装链", () => {
     );
     let missingDependencyResult;
     try {
-      missingDependencyResult = await execa(
-        process.execPath,
-        [missingDependencyDriverPath],
-        {
-          cwd: installedCollection,
-          env: {
-            ...process.env,
-            HOME: consumerRoot,
-            TMPDIR: temporaryDirectory,
-            NODE_OPTIONS: "--no-global-search-paths",
-            NODE_PATH: "",
-          },
-          uid: 65534,
-          gid: 65534,
-          reject: false,
-        },
+      missingDependencyResult = await withUnreadableAuthorDirectories(
+        unreadableAuthorDirectories,
+        async () =>
+          await execa(
+            process.execPath,
+            [missingDependencyDriverPath, authorRootsPath],
+            {
+              cwd: installedCollection,
+              env: {
+                ...process.env,
+                HOME: consumerRoot,
+                TMPDIR: temporaryDirectory,
+                NODE_OPTIONS: "--no-global-search-paths",
+                NODE_PATH: "",
+              },
+              uid: 65534,
+              gid: 65534,
+              reject: false,
+            },
+          ),
       );
     } finally {
       await Promise.all(
@@ -1006,10 +1046,13 @@ void describe("原生内容制品安装链", () => {
     await writeFile(
       missingResourceDriverPath,
       [
-        'import { writeFile } from "node:fs/promises";',
+        'import assert from "node:assert/strict";',
+        'import { readdir, readFile, writeFile } from "node:fs/promises";',
         'import { createGenerator } from "@ykdz/template-generator";',
         'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
         'import { templateContent } from "@fixture/authored-content";',
+        'const authorRoots = JSON.parse(await readFile(process.argv[5], "utf8"));',
+        'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
         "const generator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
         'const existing = await generator.add({ repositoryRoot: process.argv[2], contentIdentity: { alias: "addon", namespace: "native-authored" }, creationInput: { leafName: "second-addon" } });',
         'const fresh = await generator.init({ targetRoot: process.argv[3], selection: { roots: [{ preset: { alias: "authored", namespace: "native-authored" } }] }, strategyInput: { repositoryName: "authored-library", defaultPackageScope: "authored" } });',
@@ -1032,26 +1075,31 @@ void describe("原生内容制品安装链", () => {
     await rename(featureResourceRoot, hiddenFeatureResourceRoot);
     let missingResourceExecution;
     try {
-      missingResourceExecution = await execa(
-        process.execPath,
-        [
-          missingResourceDriverPath,
-          targetRoot,
-          missingResourceTarget,
-          missingResourceResultPath,
-        ],
-        {
-          cwd: installedCollection,
-          env: {
-            ...process.env,
-            HOME: consumerRoot,
-            TMPDIR: temporaryDirectory,
-            NODE_OPTIONS: "--no-global-search-paths",
-            NODE_PATH: "",
-          },
-          uid: 65534,
-          gid: 65534,
-        },
+      missingResourceExecution = await withUnreadableAuthorDirectories(
+        unreadableAuthorDirectories,
+        async () =>
+          await execa(
+            process.execPath,
+            [
+              missingResourceDriverPath,
+              targetRoot,
+              missingResourceTarget,
+              missingResourceResultPath,
+              authorRootsPath,
+            ],
+            {
+              cwd: installedCollection,
+              env: {
+                ...process.env,
+                HOME: consumerRoot,
+                TMPDIR: temporaryDirectory,
+                NODE_OPTIONS: "--no-global-search-paths",
+                NODE_PATH: "",
+              },
+              uid: 65534,
+              gid: 65534,
+            },
+          ),
       );
     } finally {
       await rename(hiddenFeatureResourceRoot, featureResourceRoot);
@@ -1105,6 +1153,7 @@ void describe("原生内容制品安装链", () => {
               readableByConsumer: false,
             })),
             { path: fixture.root, mode: 0, readableByConsumer: false },
+            { path: workspaceRoot, mode: 0, readableByConsumer: false },
           ],
           providers: closure.packages,
           links: closure.links,
