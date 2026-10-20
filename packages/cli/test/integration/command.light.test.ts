@@ -146,6 +146,129 @@ void describe("template CLI command control", () => {
     assert.equal(output.stderr(), "");
   });
 
+  void it("serializes the complete schema3 record for a public CLI candidate", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-cli-generation-record-"),
+    );
+    const cliPreset = templatePresets.find(
+      (member) => member.identity.packageName === "@ykdz/preset-ts-cli",
+    );
+    assert.ok(cliPreset);
+
+    try {
+      const output = testRuntime([
+        "init",
+        "demo",
+        "--preset",
+        cliPreset.definition.metadata.alias,
+        "--scope",
+        "acme",
+      ]);
+      assert.equal(
+        await runCli({ ...output.runtime, cwd: workspace }),
+        0,
+        output.stderr(),
+      );
+      assert.equal(output.stderr(), "");
+
+      const result = JSON.parse(output.stdout()) as {
+        readonly kind: string;
+        readonly variant: string;
+        readonly data: {
+          readonly blueprint: {
+            readonly packages: readonly {
+              readonly packageDefinitionId: string;
+              readonly path: string;
+            }[];
+          };
+          readonly generationRecord: {
+            readonly schemaVersion: number;
+            readonly strategyIdentity: string;
+            readonly strategyState: Record<string, unknown>;
+            readonly packages: readonly {
+              readonly packageDefinitionId: string;
+              readonly createdBy: string;
+              readonly creationInput: unknown;
+              readonly bindings: Readonly<Record<string, string>>;
+            }[];
+            readonly nodeInstances: Readonly<Record<string, string>>;
+            readonly presetSelections: readonly {
+              readonly namespace: string;
+              readonly packageName: string;
+              readonly exportPath: string;
+            }[];
+          };
+        };
+      };
+      assert.equal(result.kind, "data");
+      assert.equal(result.variant, "initialized");
+
+      const { blueprint, generationRecord } = result.data;
+      const persistedRecord = JSON.parse(
+        await readFile(
+          path.join(workspace, "demo/.template/generation.json"),
+          "utf8",
+        ),
+      );
+      assert.deepEqual(generationRecord, persistedRecord);
+      assert.equal(generationRecord.schemaVersion, 3);
+      assert.equal(generationRecord.strategyIdentity, "default");
+      assert.equal(generationRecord.strategyState.repositoryName, "demo");
+      assert.equal(generationRecord.strategyState.defaultPackageScope, "acme");
+      assert.ok(
+        generationRecord.presetSelections.some(
+          (selection) =>
+            selection.packageName === "@ykdz/preset-ts-cli" &&
+            selection.exportPath === "./template",
+        ),
+      );
+      assert.ok(
+        Object.values(generationRecord.nodeInstances).every((packageId) =>
+          blueprint.packages.some(
+            (definition) => definition.packageDefinitionId === packageId,
+          ),
+        ),
+      );
+
+      const cliDefinition = blueprint.packages.find(
+        (definition) => definition.path === "packages/cli",
+      );
+      assert.ok(cliDefinition);
+      const candidateRecord = generationRecord.packages.find(
+        (record) =>
+          record.packageDefinitionId === cliDefinition.packageDefinitionId,
+      );
+      assert.ok(candidateRecord);
+      assert.equal(candidateRecord.createdBy, "initialization");
+      assert.ok(candidateRecord.creationInput !== null);
+      assert.ok(Object.keys(candidateRecord.bindings).length > 0);
+      assert.ok(
+        Object.values(candidateRecord.bindings).every((packageId) =>
+          blueprint.packages.some(
+            (definition) => definition.packageDefinitionId === packageId,
+          ),
+        ),
+      );
+
+      const publicationConfig = JSON.parse(
+        await readFile(
+          path.join(
+            workspace,
+            "demo/scripts/npm-publication/publication.config.json",
+          ),
+          "utf8",
+        ),
+      );
+      assert.deepEqual(publicationConfig, {
+        packagePath: "packages/cli",
+        packageDefinitionId: candidateRecord.packageDefinitionId,
+        creationInput: candidateRecord.creationInput,
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   void it("renders bare command and help as Chinese discoverability output", async () => {
     for (const args of [[], ["--help", "--output-format", "structured"]]) {
       const output = testRuntime(args);
