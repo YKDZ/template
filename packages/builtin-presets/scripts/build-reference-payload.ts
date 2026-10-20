@@ -74,7 +74,13 @@ for (const reference of referencePackages) {
 // 复用正式渲染器的模块映射，不携带完整参考包的运行依赖。
 const distributionRoot = fileURLToPath(new URL("../dist/", import.meta.url));
 const compiledSource = path.join(distributionRoot, "src");
-for (const file of await readdir(compiledSource, { recursive: true })) {
+const compiledFiles = await readdir(compiledSource, { recursive: true }).catch(
+  (error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+    return [] as string[];
+  },
+);
+for (const file of compiledFiles) {
   if (!file.endsWith(".js") && !file.endsWith(".d.ts")) continue;
   const target = path.join(compiledSource, file);
   const moduleSpecifiers = new Map(

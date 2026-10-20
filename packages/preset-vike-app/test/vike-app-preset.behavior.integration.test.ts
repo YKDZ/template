@@ -4,28 +4,36 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { preset } from "@ykdz/preset-vike-app/template";
-import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
-import { referenceDefinition as configurationDefinition } from "@ykdz/reference-typescript-config/template";
-import { referencePackage as database } from "@ykdz/reference-vike-db/template";
-import { referencePackage as migrations } from "@ykdz/reference-vike-migrations/template";
-import { referencePackage as web } from "@ykdz/reference-vike-web/template";
-import { referencePackage as vueShared } from "@ykdz/reference-vue-shared/template";
 import { createGenerator } from "@ykdz/template-generator";
+import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 import { execa } from "execa";
 
-const configuration = defineReferencePackage(configurationDefinition);
-const content = [
-  web,
-  database,
-  migrations,
-  vueShared,
-  library,
-  configuration,
-  preset,
-];
+const content = await loadContentSource({
+  namespace: "ykdz",
+  resolve: (specifier) => import.meta.resolve(specifier),
+  members: [
+    "@ykdz/reference-vike-web/template",
+    "@ykdz/reference-vike-db/template",
+    "@ykdz/reference-vike-migrations/template",
+    "@ykdz/reference-vue-shared/template",
+    "@ykdz/reference-ts-lib/template",
+    "@ykdz/reference-typescript-config/template",
+    "@ykdz/preset-vike-app/template",
+  ],
+  prepareReferenceDefinition(definition) {
+    return defineReferencePackage(
+      definition as Parameters<typeof defineReferencePackage>[0],
+    );
+  },
+});
+const preset = content.find(
+  (member) =>
+    member.kind === "preset" &&
+    member.identity.packageName === "@ykdz/preset-vike-app",
+);
+assert.ok(preset);
 
 void describe("Vike 应用公开预设安装行为", () => {
   void it(
@@ -45,7 +53,7 @@ void describe("Vike 应用公开预设安装行为", () => {
         strategy: createDefaultWorkspaceStrategy(),
       }).init({
         targetRoot,
-        selection: { roots: [{ preset }] },
+        selection: { roots: [{ preset: preset.identity }] },
         strategyInput: {
           repositoryName: "demo-vike",
           defaultPackageScope: "demo",

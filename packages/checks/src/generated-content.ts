@@ -278,12 +278,10 @@ export async function materializeGeneratedScenario(options: {
         `${options.scenario.id}: focused provider node is missing`,
       );
     }
-    const provider = createContentIndex(options.runtime.content).resolve(
-      {
-        alias: providerNode.reference.alias,
-        namespace: options.scenario.addition.identity.namespace,
-      },
+    const provider = createContentIndex(options.runtime.content).fromDefinition(
+      providerNode.reference,
       "reference",
+      { namespace: options.scenario.addition.identity.namespace },
     );
     const consumer = await focusedConsumerPath({
       projectDir,

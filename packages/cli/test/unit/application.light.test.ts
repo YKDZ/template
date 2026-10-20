@@ -25,14 +25,9 @@ void describe("init publication setup handoff", () => {
   void it("renders the one-time setup command only in the init terminal result", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-cli-init-"));
     try {
-      const publicationSetupPreset = templatePresets
-        .map((member) => member.definition)
-        .find((preset) =>
-          Object.values(preset.nodes).some(
-            ({ reference }) =>
-              reference.manifest.name === "@ykdz/reference-ts-cli",
-          ),
-        );
+      const publicationSetupPreset = templatePresets.find(
+        (member) => member.identity.packageName === "@ykdz/preset-ts-cli",
+      )?.definition;
       if (publicationSetupPreset === undefined)
         throw new Error("Expected a Built-in Preset with publication setup");
       const runtime = createRuntime(workspace);

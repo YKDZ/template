@@ -29,7 +29,7 @@ export async function initializePreset(options: {
   });
   const result = await generator.init({
     targetRoot: options.targetRoot,
-    selection: { roots: [{ preset: options.preset }] },
+    selection: { roots: [{ preset: options.preset.identity }] },
     strategyInput: {
       repositoryName: options.repositoryName,
       defaultPackageScope: options.defaultPackageScope ?? "demo",
@@ -42,15 +42,15 @@ export async function initializePreset(options: {
     result.projection.ownerFacts === undefined
   ) {
     throw new Error(
-      `${options.preset.metadata.alias}: 公开生成器未返回成功收据：${JSON.stringify(result)}`,
+      `${options.preset.definition.metadata.alias}: 公开生成器未返回成功收据：${JSON.stringify(result)}`,
     );
   }
   const receiptResult = result as GeneratedPresetReceipt["result"];
   return {
     status: "generated",
     scenario: {
-      id: options.preset.metadata.alias,
-      label: `initialize ${options.preset.metadata.alias}`,
+      id: options.preset.definition.metadata.alias,
+      label: `initialize ${options.preset.definition.metadata.alias}`,
       base: options.preset,
     },
     projectDir: options.targetRoot,

@@ -389,7 +389,7 @@ void describe("manual npm publication capability", () => {
     );
     t.after(async () => rm(targetRoot, { recursive: true, force: true }));
     const cliPreset = templatePresets.find(
-      (preset) => preset.owner?.packageName === "@ykdz/preset-ts-cli",
+      (preset) => preset.identity.packageName === "@ykdz/preset-ts-cli",
     );
     assert.ok(cliPreset);
     const initialized = await createGenerator({
@@ -397,7 +397,7 @@ void describe("manual npm publication capability", () => {
       strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
     }).init({
       targetRoot,
-      selection: { roots: [{ preset: cliPreset }] },
+      selection: { roots: [{ preset: cliPreset.identity }] },
       strategyInput: { repositoryName: "cli", defaultPackageScope: "demo" },
     });
     assert.strictEqual(

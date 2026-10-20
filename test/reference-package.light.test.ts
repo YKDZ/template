@@ -57,7 +57,7 @@ async function fixture(
     options: {
       packageName: "@author/application",
       resolve,
-      identity: "application",
+      alias: "application",
       instance: "independent" as const,
       defaultLeafName: "application",
       role: "runtime-service" as const,

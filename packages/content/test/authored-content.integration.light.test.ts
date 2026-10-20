@@ -187,6 +187,19 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
         "owner-note.txt",
       );
       await writeFile(movedPackageNote, "首包更新事实\n");
+      const firstPackageManifestPath = path.join(
+        movedRoot,
+        featureDefinition.path,
+        "package.json",
+      );
+      const changedFirstPackageManifest = JSON.parse(
+        await readFile(firstPackageManifestPath, "utf8"),
+      ) as Record<string, unknown>;
+      changedFirstPackageManifest.name = `@renamed-${namespace}/feature`;
+      await writeFile(
+        firstPackageManifestPath,
+        `${JSON.stringify(changedFirstPackageManifest, null, 2)}\n`,
+      );
 
       const addition = await replayGenerator.add({
         repositoryRoot: movedRoot,
@@ -217,7 +230,12 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       };
       assert.equal(strategyState.repositoryName, `${namespace}-fixture`);
       assert.equal(strategyState.defaultPackageScope, namespace);
+      assert.equal(addonDefinition.name, `@${namespace}/addon-extra`);
       assert.equal(await readFile(movedPackageNote, "utf8"), "首包更新事实\n");
+      assert.deepEqual(
+        JSON.parse(await readFile(firstPackageManifestPath, "utf8")),
+        changedFirstPackageManifest,
+      );
       assert.equal((await stat(movedPackageNote)).mode & 0o777, 0o600);
       assert.equal(
         await readFile(
@@ -438,6 +456,92 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     );
   });
 
+  void it("同一生成器按明确来源选择不同正文与各自共享绑定", async () => {
+    const alpha = await createFixture({
+      namespace: "source-alpha",
+      marker: "A",
+    });
+    const beta = await createFixture({ namespace: "source-beta", marker: "B" });
+    const content = [...alpha.members, ...beta.members];
+    const generator = createGenerator({
+      content,
+      strategy: createDefaultWorkspaceStrategy(),
+    });
+
+    for (const fixture of [alpha, beta]) {
+      const targetRoot = path.join(
+        await createWorkspace(),
+        fixture.members[0]!.identity.namespace,
+      );
+      const preset = fixture.members.find((member) => member.kind === "preset");
+      assert.ok(preset);
+      const initialized = await generator.init({
+        targetRoot,
+        selection: { roots: [{ preset: preset.identity }] },
+        strategyInput: {
+          repositoryName: fixture.members[0]!.identity.namespace,
+          defaultPackageScope: fixture.members[0]!.identity.namespace,
+        },
+      });
+      assert.equal(initialized.status, "success");
+      if (initialized.status !== "success") continue;
+
+      const featureIdentity = identityFor(fixture, "@fixture/feature");
+      const themeIdentity = identityFor(fixture, "@fixture/typescript-config");
+      const featureRecord = initialized.generationRecord.packages.find(
+        (record) =>
+          contentIdentityKey(record.contentIdentity) ===
+          contentIdentityKey(featureIdentity),
+      );
+      const themeRecord = initialized.generationRecord.packages.find(
+        (record) =>
+          contentIdentityKey(record.contentIdentity) ===
+          contentIdentityKey(themeIdentity),
+      );
+      assert.ok(featureRecord);
+      assert.ok(themeRecord);
+      const featureDefinition = initialized.blueprint.packages.find(
+        (definition) =>
+          definition.packageDefinitionId === featureRecord.packageDefinitionId,
+      );
+      const themeDefinition = initialized.blueprint.packages.find(
+        (definition) =>
+          definition.packageDefinitionId === themeRecord.packageDefinitionId,
+      );
+      assert.ok(featureDefinition);
+      assert.ok(themeDefinition);
+      assert.equal(
+        featureRecord.bindings[contentIdentityKey(themeIdentity)],
+        themeRecord.packageDefinitionId,
+      );
+      const marker = fixture.members[0]!.identity.namespace.endsWith("alpha")
+        ? "A"
+        : "B";
+      assert.equal(
+        await readFile(
+          path.join(targetRoot, featureDefinition.path, "src/content.ts"),
+          "utf8",
+        ),
+        `export const fixtureOrigin = ${JSON.stringify(`${marker}:feature`)};\n`,
+      );
+      assert.equal(
+        await readFile(
+          path.join(targetRoot, themeDefinition.path, "src/theme.ts"),
+          "utf8",
+        ),
+        `export const fixtureOrigin = ${JSON.stringify(`${marker}:theme`)};\n`,
+      );
+      assert.equal(
+        initialized.generationRecord.packages.some(
+          (record) =>
+            record.contentIdentity.namespace !== featureIdentity.namespace &&
+            record.contentIdentity.packageName === featureIdentity.packageName,
+        ),
+        false,
+      );
+    }
+  });
+
   void it("不自动登记必要依赖，缺失时在规划阶段零写入", async () => {
     const fixture = await createFixture({
       namespace: "incomplete",
@@ -469,7 +573,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     await assert.rejects(readFile(targetRoot));
   });
 
-  void it("别名和私有资源路径变化不改变三分量规范身份", async () => {
+  void it("别名和资源路径变化保持身份并实际生成新路径正文", async () => {
     const original = await createFixture({
       namespace: "stable",
       marker: "one",
@@ -491,5 +595,108 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
         (member) => member.identity.packageName === "@fixture/feature",
       )?.source.moduleURL,
     );
+    const targetRoot = path.join(await createWorkspace(), "moved-resource");
+    const generator = createGenerator({
+      content: moved.members,
+      strategy: createDefaultWorkspaceStrategy(),
+    });
+    const generated = await generator.init({
+      targetRoot,
+      selection: {
+        roots: [{ nodeIdentity: "feature", contentIdentity: movedFeature }],
+      },
+      strategyInput: {
+        repositoryName: "moved-resource",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.equal(generated.status, "success");
+    if (generated.status !== "success") return;
+    const featureRecord = generated.generationRecord.packages.find(
+      (record) =>
+        contentIdentityKey(record.contentIdentity) ===
+        contentIdentityKey(movedFeature),
+    );
+    assert.ok(featureRecord);
+    const featureDefinition = generated.blueprint.packages.find(
+      (definition) =>
+        definition.packageDefinitionId === featureRecord.packageDefinitionId,
+    );
+    assert.ok(featureDefinition);
+    assert.equal(featureDefinition.path, "packages/renamed-feature");
+    assert.equal(
+      await readFile(
+        path.join(targetRoot, featureDefinition.path, "lib/renamed-content.ts"),
+        "utf8",
+      ),
+      'export const fixtureOrigin = "two:feature";\n',
+    );
+  });
+
+  void it("公开包名变更产生新身份，旧身份不会映射到新成员", async () => {
+    const original = await createFixture({
+      namespace: "renamed-package",
+      marker: "old",
+    });
+    const renamed = await createFixture({
+      namespace: "renamed-package",
+      marker: "new",
+      featurePackageName: "@fixture/feature-v2",
+    });
+    const oldIdentity = identityFor(original, "@fixture/feature");
+    const newIdentity = identityFor(renamed, "@fixture/feature-v2");
+    assert.notDeepEqual(oldIdentity, newIdentity);
+    const generator = createGenerator({
+      content: renamed.members,
+      strategy: createDefaultWorkspaceStrategy(),
+    });
+    const newTargetRoot = path.join(await createWorkspace(), "new-package");
+    const generated = await generator.init({
+      targetRoot: newTargetRoot,
+      selection: {
+        roots: [{ nodeIdentity: "feature", contentIdentity: newIdentity }],
+      },
+      strategyInput: {
+        repositoryName: "new-package",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.equal(generated.status, "success");
+    if (generated.status !== "success") return;
+    const newFeature = generated.generationRecord.packages.find(
+      (record) =>
+        contentIdentityKey(record.contentIdentity) ===
+        contentIdentityKey(newIdentity),
+    );
+    assert.ok(newFeature);
+    const newFeatureDefinition = generated.blueprint.packages.find(
+      (definition) =>
+        definition.packageDefinitionId === newFeature.packageDefinitionId,
+    );
+    assert.ok(newFeatureDefinition);
+    assert.equal(
+      await readFile(
+        path.join(newTargetRoot, newFeatureDefinition.path, "src/content.ts"),
+        "utf8",
+      ),
+      'export const fixtureOrigin = "new:feature";\n',
+    );
+
+    const oldTargetRoot = path.join(await createWorkspace(), "old-identity");
+    const stale = await generator.init({
+      targetRoot: oldTargetRoot,
+      selection: {
+        roots: [{ nodeIdentity: "feature", contentIdentity: oldIdentity }],
+      },
+      strategyInput: {
+        repositoryName: "old-identity",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.equal(stale.status, "operation-failure");
+    if (stale.status === "operation-failure") {
+      assert.match(stale.error.message, /规范内容不存在/u);
+    }
+    await assert.rejects(readFile(oldTargetRoot));
   });
 });

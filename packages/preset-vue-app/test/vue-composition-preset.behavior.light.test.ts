@@ -33,6 +33,7 @@ const content = await loadContentSource({
   members: [
     "@ykdz/reference-vue-app/template",
     "@ykdz/reference-vue-shared/template",
+    "@ykdz/reference-ts-lib/template",
     "@ykdz/reference-typescript-config/template",
     "@ykdz/preset-vue-app/template",
   ],
@@ -51,6 +52,14 @@ const vueApp = contentIndex.fromDefinition(
   "reference"
 >;
 const vueShared = contentIndex.fromDefinition(vueSharedDefinition, "reference");
+const library = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/reference-ts-lib",
+    exportPath: "./template",
+  },
+  "reference",
+);
 const configuration = contentIndex.resolve(
   {
     namespace: "ykdz",
@@ -64,11 +73,8 @@ const preset = contentIndex.fromDefinition(presetDefinition, "preset");
 type PersistedPackage = {
   readonly contentIdentity: ContentIdentity;
   readonly createdBy: string;
-  readonly definition: {
-    readonly packageDefinitionId: string;
-    readonly path: string;
-    readonly role: string;
-  };
+  readonly packageDefinitionId: string;
+  readonly creationInput: unknown | null;
   readonly bindings: Readonly<Record<string, string>>;
 };
 
@@ -100,6 +106,69 @@ async function snapshotTree(
 }
 
 void describe("Vue 独立组合预设", () => {
+  void it("保留现有 Editor 推荐顺序并在末尾追加新能力", async (testContext) => {
+    const temporaryRoot = await mkdtemp(
+      path.join(tmpdir(), "template-vue-editor-order-"),
+    );
+    testContext.after(async () =>
+      rm(temporaryRoot, { recursive: true, force: true }),
+    );
+    const targetRoot = path.join(temporaryRoot, "demo");
+    const generator = createGenerator({
+      content,
+      strategy: createDefaultWorkspaceStrategy(),
+    });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: {
+        roots: [{ nodeIdentity: "library", contentIdentity: library.identity }],
+      },
+      strategyInput: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+
+    const extensionsPath = path.join(targetRoot, ".vscode/extensions.json");
+    const extensions = JSON.parse(await readFile(extensionsPath, "utf8")) as {
+      recommendations: string[];
+    };
+    const initialRecommendation = extensions.recommendations[0];
+    assert.ok(initialRecommendation);
+    extensions.recommendations = [
+      "user.first",
+      initialRecommendation,
+      "user.last",
+    ];
+    await writeFile(extensionsPath, `${JSON.stringify(extensions, null, 2)}\n`);
+
+    const added = await generator.add({
+      repositoryRoot: targetRoot,
+      preset: preset.identity,
+      creationInput: { leafName: "dashboard" },
+    });
+    assert.strictEqual(added.status, "success", JSON.stringify(added));
+
+    const updated = JSON.parse(await readFile(extensionsPath, "utf8")) as {
+      recommendations: string[];
+    };
+    assert.deepStrictEqual(updated.recommendations.slice(0, 3), [
+      "user.first",
+      initialRecommendation,
+      "user.last",
+    ]);
+    assert.deepStrictEqual(updated.recommendations.slice(3), [
+      "Vue.volar",
+      "bradlc.vscode-tailwindcss",
+      "vitest.explorer",
+    ]);
+  });
+
   void it("连续新增独立应用并保留应用、共享模块、配置和根定制", async (testContext) => {
     const temporaryRoot = await mkdtemp(
       path.join(tmpdir(), "template-vue-composition-preset-"),
@@ -262,6 +331,23 @@ void describe("Vue 独立组合预设", () => {
       nodeInstances: Record<string, string>;
       packages: PersistedPackage[];
     };
+    const blueprint = JSON.parse(
+      await readFile(path.join(targetRoot, ".template/blueprint.json"), "utf8"),
+    ) as {
+      packages: {
+        packageDefinitionId: string;
+        path: string;
+        role: string;
+      }[];
+    };
+    function definitionFor(record: PersistedPackage) {
+      const definition = blueprint.packages.find(
+        (candidate) =>
+          candidate.packageDefinitionId === record.packageDefinitionId,
+      );
+      assert.ok(definition);
+      return definition;
+    }
     const packages = generation.packages;
     const apps = packages.filter(
       (item) =>
@@ -269,26 +355,28 @@ void describe("Vue 独立组合预设", () => {
         contentIdentityKey(vueApp.identity),
     );
     assert.deepStrictEqual(
-      apps.map((item) => item.definition.path).toSorted(),
+      apps.map((item) => definitionFor(item).path).toSorted(),
       ["apps/admin", "apps/portal", "apps/web"].toSorted(),
     );
-    assert.ok(apps.every((item) => item.definition.role === "runtime-service"));
+    assert.ok(
+      apps.every((item) => definitionFor(item).role === "runtime-service"),
+    );
     assert.strictEqual(
-      new Set(apps.map((item) => item.definition.packageDefinitionId)).size,
+      new Set(apps.map((item) => item.packageDefinitionId)).size,
       3,
     );
     assert.strictEqual(
       generation.nodeInstances.web,
-      apps.find((item) => item.definition.path === "apps/web")?.definition
-        .packageDefinitionId,
+      apps.find((item) => definitionFor(item).path === "apps/web")
+        ?.packageDefinitionId,
     );
     assert.strictEqual(
-      apps.find((item) => item.definition.path === "apps/web")?.createdBy,
+      apps.find((item) => definitionFor(item).path === "apps/web")?.createdBy,
       "initialization",
     );
     assert.deepStrictEqual(
       apps
-        .filter((item) => item.definition.path !== "apps/web")
+        .filter((item) => definitionFor(item).path !== "apps/web")
         .map((item) => item.createdBy)
         .toSorted(),
       ["addition", "addition"],
@@ -308,11 +396,11 @@ void describe("Vue 独立组合预设", () => {
     for (const app of apps) {
       assert.strictEqual(
         app.bindings[contentIdentityKey(vueShared.identity)],
-        sharedInstances[0]!.definition.packageDefinitionId,
+        sharedInstances[0]!.packageDefinitionId,
       );
       assert.strictEqual(
         app.bindings[contentIdentityKey(configuration.identity)],
-        configurationInstances[0]!.definition.packageDefinitionId,
+        configurationInstances[0]!.packageDefinitionId,
       );
     }
   });
@@ -367,14 +455,14 @@ void describe("Vue 独立组合预设", () => {
 
     const generationPath = path.join(targetRoot, ".template/generation.json");
     const record = JSON.parse(await readFile(generationPath, "utf8")) as {
+      nodeInstances: Record<string, string>;
       packages: {
-        contentIdentity: ContentIdentity;
-        definition: { path: string };
+        packageDefinitionId: string;
         bindings: Record<string, string>;
       }[];
     };
     const web = record.packages.find(
-      (item) => item.definition.path === "apps/web",
+      (item) => item.packageDefinitionId === record.nodeInstances.web,
     );
     assert.ok(web);
     assert.ok(web.bindings[contentIdentityKey(vueShared.identity)]);

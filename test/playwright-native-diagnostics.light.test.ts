@@ -54,10 +54,13 @@ async function loadMaintainedConfig(
 void describe("maintained Playwright diagnostic configuration", () => {
   const playwrightConfiguration = (name: string) => {
     const reference = templateReferencePackages.find(
-      (item) => item.manifest.name === name,
+      (item) => item.identity.packageName === name,
     );
     assert.ok(reference, `内容集合缺少参考包：${name}`);
-    return resolveTemplateSource(reference.source("playwright.config.ts"), ".");
+    return resolveTemplateSource(
+      reference.definition.source("playwright.config.ts"),
+      ".",
+    );
   };
   for (const relativePath of [
     playwrightConfiguration("@ykdz/reference-vue-app"),

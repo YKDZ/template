@@ -61,13 +61,13 @@ function workspaceGenerator() {
 
 async function initializePublicCli(targetRoot: string) {
   const tsCliPreset = templatePresets.find(
-    (preset) => preset.owner?.packageName === "@ykdz/preset-ts-cli",
+    (preset) => preset.identity.packageName === "@ykdz/preset-ts-cli",
   );
   assert.ok(tsCliPreset);
   const generator = workspaceGenerator();
   const initialized = await generator.init({
     targetRoot,
-    selection: { roots: [{ preset: tsCliPreset }] },
+    selection: { roots: [{ preset: tsCliPreset.identity }] },
     strategyInput: {
       repositoryName: path.basename(targetRoot),
       defaultPackageScope: "seed",
@@ -642,7 +642,7 @@ void describe("ts-cli publication owner-fact integration", () => {
       const { generator, initialized } =
         await initializePublicCli(repositoryRoot);
       const tsLibPreset = templatePresets.find(
-        (preset) => preset.owner?.packageName === "@ykdz/preset-ts-lib",
+        (preset) => preset.identity.packageName === "@ykdz/preset-ts-lib",
       );
       assert.ok(tsLibPreset);
       const initialCandidate = initialized.blueprint.packages.find(
@@ -676,7 +676,7 @@ void describe("ts-cli publication owner-fact integration", () => {
         const publicManifestBytes = await readFile(publicManifestPath, "utf8");
         const addition = await generator.add({
           repositoryRoot,
-          preset: tsLibPreset,
+          preset: tsLibPreset.identity,
           creationInput: { leafName: "lib", packagePath: "packages/lib" },
         });
         assert.strictEqual(
