@@ -266,6 +266,10 @@ function isDataResourceExpression(
   return false;
 }
 
+function isTypeQueryReference(identifier: ts.Identifier): boolean {
+  return ts.isTypeQueryNode(identifier.parent);
+}
+
 function functionFromDeclaration(
   declaration: ts.Declaration,
   checker: ts.TypeChecker,
@@ -422,24 +426,47 @@ function roleKind(
     }
     const moduleSpecifier = statement.moduleSpecifier.text;
     const bindings = statement.importClause?.namedBindings;
-    if (bindings === undefined || !ts.isNamedImports(bindings)) continue;
-    for (const binding of bindings.elements) {
-      const exportedName = binding.propertyName?.text ?? binding.name.text;
-      const localSymbol = checker.getSymbolAtLocation(binding.name);
-      if (localSymbol === undefined) continue;
-      let exportedSymbol: ts.Symbol;
-      try {
-        exportedSymbol = checker.getAliasedSymbol(localSymbol);
-      } catch {
-        continue;
+    const candidates: { symbol: ts.Symbol; name: string }[] = [];
+    if (bindings !== undefined && ts.isNamedImports(bindings)) {
+      for (const binding of bindings.elements) {
+        const localSymbol = checker.getSymbolAtLocation(binding.name);
+        if (localSymbol === undefined) continue;
+        try {
+          candidates.push({
+            symbol: checker.getAliasedSymbol(localSymbol),
+            name: binding.propertyName?.text ?? binding.name.text,
+          });
+        } catch {
+          continue;
+        }
       }
-
+    } else if (bindings !== undefined && ts.isNamespaceImport(bindings)) {
+      const localSymbol = checker.getSymbolAtLocation(bindings.name);
+      if (localSymbol !== undefined) {
+        try {
+          const moduleSymbol = checker.getAliasedSymbol(localSymbol);
+          for (const symbol of checker.getExportsOfModule(moduleSymbol)) {
+            candidates.push({ symbol, name: symbol.getName() });
+          }
+        } catch {
+          continue;
+        }
+      }
+    }
+    for (const candidate of candidates) {
       const contract = publicPlanningContracts.find(
-        (candidate) =>
-          candidate.module === moduleSpecifier &&
-          candidate.names.has(exportedName),
+        (item) =>
+          item.module === moduleSpecifier && item.names.has(candidate.name),
       );
       if (contract === undefined) continue;
+      let exportedSymbol = candidate.symbol;
+      if ((exportedSymbol.flags & ts.SymbolFlags.Alias) !== 0) {
+        try {
+          exportedSymbol = checker.getAliasedSymbol(exportedSymbol);
+        } catch {
+          continue;
+        }
+      }
       const anchors = projectPropertySymbols(
         exportedSymbol,
         contract.role,
@@ -715,6 +742,7 @@ function diagnosticsForRole(
       }
       if (
         ts.isIdentifier(node) &&
+        !isTypeQueryReference(node) &&
         isDataResourceExpression(node, checker, dataBindings)
       ) {
         report(node, "data-as-code");
@@ -774,7 +802,7 @@ function diagnosticsForRole(
   return violations;
 }
 
-function compilerOptionsFromConfig(configPath: string): ts.CompilerOptions {
+function parsedConfiguration(configPath: string): ts.ParsedCommandLine {
   const configFile = ts.readConfigFile(configPath, (fileName) =>
     ts.sys.readFile(fileName),
   );
@@ -799,7 +827,52 @@ function compilerOptionsFromConfig(configPath: string): ts.CompilerOptions {
         .join("\n"),
     );
   }
-  return parsed.options;
+  return parsed;
+}
+
+function compilerOptionsFromConfig(configPath: string): ts.CompilerOptions {
+  return parsedConfiguration(configPath).options;
+}
+
+function productionSourceFiles(root: PlanningRoleRoot): readonly string[] {
+  const manifestPath = path.join(root.packageRoot, "package.json");
+  const manifestText = ts.sys.readFile(manifestPath);
+  if (manifestText === undefined) return [root.entryFile];
+  const manifest = JSON.parse(manifestText) as {
+    readonly scripts?: Readonly<Record<string, unknown>>;
+  };
+  const configurations = new Set([
+    path.join(root.packageRoot, "tsconfig.template.json"),
+    path.join(root.packageRoot, "tsconfig.build.json"),
+  ]);
+  for (const scriptName of ["build:template", "build"]) {
+    const script = manifest.scripts?.[scriptName];
+    if (typeof script !== "string") continue;
+    for (const match of script.matchAll(/\btsc\s+-p\s+["']?([^"'&;\s]+)/gu)) {
+      const config = match[1];
+      if (config !== undefined) {
+        configurations.add(path.resolve(root.packageRoot, config));
+      }
+    }
+  }
+
+  const files = new Set<string>([root.entryFile]);
+  for (const configPath of configurations) {
+    if (!ts.sys.fileExists(configPath)) continue;
+    const parsed = parsedConfiguration(configPath);
+    if (
+      !parsed.fileNames.some(
+        (fileName) => absolute(fileName) === root.entryFile,
+      )
+    ) {
+      continue;
+    }
+    for (const fileName of parsed.fileNames) {
+      const absoluteFile = absolute(fileName);
+      if (isWithin(root.packageRoot, absoluteFile)) files.add(absoluteFile);
+    }
+  }
+  return [...files];
 }
 
 export function findPlanningEffectViolations(
@@ -811,8 +884,12 @@ export function findPlanningEffectViolations(
     packageRoot: absolute(root.packageRoot),
     identity: root.identity,
   }));
+  const rootNames = new Set<string>();
+  for (const root of normalizedRoots) {
+    for (const fileName of productionSourceFiles(root)) rootNames.add(fileName);
+  }
   const program = ts.createProgram({
-    rootNames: normalizedRoots.map((root) => root.entryFile),
+    rootNames: [...rootNames],
     options: compilerOptionsFromConfig(absolute(configPath)),
   });
   const checker = program.getTypeChecker();
