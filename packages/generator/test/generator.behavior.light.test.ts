@@ -590,6 +590,34 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
     assert.strictEqual(await pathExists(targetRoot), false);
   });
 
+  void it("已有目标拒绝初始化时报告渲染失败并保留目标内容", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-generator-docs-existing-target-"),
+    );
+    const markerPath = path.join(targetRoot, "keep.txt");
+    await writeFile(markerPath, "用户内容\n");
+    const before = await snapshotTree(targetRoot);
+    const generator = createDocumentationEngine({
+      policyId: "test-policy:existing-target",
+      author: "已有目标测试",
+    });
+
+    const result = await generator.init({
+      targetRoot,
+      selection: {
+        roots: [{ nodeIdentity: "guide", contentIdentity: guideIdentity }],
+      },
+      strategyInput: { collection: "north", edition: "draft" },
+    });
+
+    assert.deepStrictEqual(result, {
+      status: "operation-failure",
+      phase: "render",
+      error: { message: `Target directory is not empty: ${targetRoot}` },
+    });
+    assert.strictEqual(await snapshotTree(targetRoot), before);
+  });
+
   void it("正式协调冲突拒绝新增并完整保留当前目标", async () => {
     const targetRoot = path.join(
       await mkdtemp(path.join(tmpdir(), "template-generator-docs-conflict-")),

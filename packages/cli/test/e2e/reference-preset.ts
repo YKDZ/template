@@ -1,36 +1,22 @@
-import {
-  builtInPresetRegistry,
-  createGenerationContext,
-} from "@ykdz/template-builtin-presets";
-import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
+import { templateContent } from "@ykdz/template-content";
 
-/** 从公开来源与新增能力找到本次旅程要消费的预设。 */
+/** 从公开内容集合查找拥有指定参考包的可扩展预设。 */
 export function requireReferencePresetName(
   referencePackageName: string,
 ): string {
-  const context = createGenerationContext({
-    targetDir: "project",
-    defaultPackageScope: "acme",
-    toolchain: {
-      nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.split(".")[0]!,
-      packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-      nodeVersion: releaseToolchainSnapshot.nodeVersion,
-    },
-  });
-  const definition = builtInPresetRegistry.all().find((candidate) => {
-    if (candidate.planPackageAddition === undefined) return false;
-    return (
-      candidate.planPackageAddition({
-        context,
-        packageLeafName: "consumer",
-        packagePath: "packages/consumer",
-      }).referenceSource === referencePackageName
+  const preset = templateContent
+    .filter((content) => "kind" in content)
+    .find(
+      (candidate) =>
+        candidate.operations.includes("add") &&
+        Object.values(candidate.nodes).some(
+          ({ reference }) => reference.manifest.name === referencePackageName,
+        ),
     );
-  });
-  if (definition === undefined) {
+  if (preset === undefined) {
     throw new Error(
       `没有可新增且拥有指定公开来源的预设：${referencePackageName}`,
     );
   }
-  return definition.metadata.name;
+  return preset.metadata.alias;
 }

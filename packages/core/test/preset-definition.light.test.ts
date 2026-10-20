@@ -1,9 +1,42 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { definePreset } from "../src/preset-definition.ts";
+import {
+  definePreset,
+  presetOwnerFromManifest,
+} from "../src/preset-definition.ts";
 
 void describe("预设声明", () => {
+  void it("从所属包的真实公开导出推导预设身份", () => {
+    assert.deepStrictEqual(
+      presetOwnerFromManifest(
+        {
+          name: "@demo/example-preset",
+          exports: {
+            ".": { source: "./src/preset.ts" },
+            "./template": { source: "./template/definition.ts" },
+          },
+        },
+        ".",
+      ),
+      {
+        packageName: "@demo/example-preset",
+        exportPath: ".",
+      },
+    );
+    assert.throws(
+      () =>
+        presetOwnerFromManifest(
+          {
+            name: "@demo/hidden-preset",
+            exports: { "./template": "./template/index.js" },
+          },
+          "./missing",
+        ),
+      /未公开所选预设入口/u,
+    );
+  });
+
   void it("保留稳定节点、来源成员和允许操作", () => {
     const library = {
       identity: "library",

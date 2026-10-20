@@ -108,9 +108,19 @@ try {
   }
   await mkdir(destination, { recursive: true });
   const output = path.join(destination, archive);
-  await create({ cwd: unpacked, file: output, gzip: true, portable: true }, [
-    "package",
-  ]);
+  await create(
+    {
+      cwd: unpacked,
+      file: output,
+      gzip: true,
+      portable: true,
+      filter: (entryPath) =>
+        !entryPath
+          .split("/")
+          .some((segment) => [".cache", ".pnpm", ".turbo"].includes(segment)),
+    },
+    ["package"],
+  );
   console.log(output);
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });

@@ -23,7 +23,8 @@
   "files": [
     "dist",
     "node_modules/@ykdz/template-core",
-    "node_modules/@ykdz/template-builtin-presets",
+    "node_modules/@ykdz/template-content",
+    "node_modules/@ykdz/template-generator",
     "!**/node_modules/**/node_modules",
     "node_modules/@ykdz/template-environment",
     "node_modules/@ykdz/template-workspace",
@@ -66,9 +67,10 @@
   "dependencies": {
     "@valibot/to-json-schema": "catalog:",
     "@ykdz/cli-contract": "catalog:",
-    "@ykdz/template-builtin-presets": "workspace:*",
+    "@ykdz/template-content": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
+    "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*",
     "hosted-git-info": "catalog:",
@@ -87,6 +89,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/template-builtin-presets": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
@@ -97,9 +100,10 @@
   "bundleDependencies": [
     "@valibot/to-json-schema",
     "@ykdz/cli-contract",
-    "@ykdz/template-builtin-presets",
+    "@ykdz/template-content",
     "@ykdz/template-core",
     "@ykdz/template-environment",
+    "@ykdz/template-generator",
     "@ykdz/template-workspace",
     "@ykdz/template-workspace-authoring",
     "hosted-git-info",

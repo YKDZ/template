@@ -2400,7 +2400,7 @@ void describe("Development Container Fixture Executor", () => {
   for (const identity of requiredCapabilityProbeIdentities) {
     void it(`does not let a host-prepared ${identity} capability mask its missing container probe`, async () => {
       const projectDir = path.resolve(`/fixture/container-${identity}-missing`);
-      const probe = registryCapabilityProbes(projectDir).find(
+      const probe = (await registryCapabilityProbes(projectDir)).find(
         (candidate) => candidate.identity === identity,
       );
       if (probe === undefined) {

@@ -10,17 +10,17 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { deriveTemplateMembers, templateContent } from "@ykdz/template-content";
 import {
   renderProject,
   resolveTemplateSource,
 } from "@ykdz/template-core/renderer";
 import { mapTypeScriptModuleSpecifiers } from "@ykdz/template-workspace-authoring/typescript-module-specifiers";
 
-import { referencePackages } from "../src/reference-composition.ts";
-
 const output = fileURLToPath(
   new URL("../dist/reference-packages/", import.meta.url),
 );
+const { referencePackages } = deriveTemplateMembers(templateContent);
 await rm(output, { recursive: true, force: true });
 
 for (const reference of referencePackages) {

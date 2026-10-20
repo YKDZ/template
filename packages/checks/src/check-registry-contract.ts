@@ -1,19 +1,23 @@
 #!/usr/bin/env node
 import {
-  deriveVerificationPlans,
-  validatePlanDependencyCatalog,
-  validatePlanSources,
-  validateRegistryMirrorSlotProjections,
-} from "./registry-checks.ts";
+  deriveFixtureMatrix,
+  forEachGeneratedScenario,
+} from "./generated-content.ts";
+import { validateGeneratedScenarioReceipt } from "./registry-checks.ts";
+import { sourceGeneratedScenarioRuntime } from "./source-generated-runtime.ts";
 
-/** Registry-only checks; Definition planners are the only catalog input. */
+/** 检查唯一内容集合的真实 init/add 投影与工作区原生约束。 */
 export async function checkPresetRegistryContract(): Promise<void> {
-  const plans = await deriveVerificationPlans();
-  for (const { definition, plan } of plans) {
-    await validatePlanSources({ definition, plan });
-    await validatePlanDependencyCatalog(plan);
-  }
-  await validateRegistryMirrorSlotProjections(plans);
+  await forEachGeneratedScenario({
+    runtime: sourceGeneratedScenarioRuntime,
+    scenarios: deriveFixtureMatrix(sourceGeneratedScenarioRuntime),
+    inspect: async (receipt) => {
+      await validateGeneratedScenarioReceipt({
+        receipt,
+        runtime: sourceGeneratedScenarioRuntime,
+      });
+    },
+  });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

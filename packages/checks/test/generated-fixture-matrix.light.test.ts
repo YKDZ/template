@@ -56,7 +56,8 @@ void describe("registry-derived Package Addition Fixture Matrix", () => {
       mutate: (config: GeneratedDevelopmentContainerConfig) => {
         config.build.args.NODE_VERSION = "999";
       },
-      expectedError: "build arguments do not match the final Tool Layer plan",
+      expectedError:
+        "build arguments do not match the default workspace owner facts",
     },
     {
       protectedField: "mount",
@@ -70,7 +71,7 @@ void describe("registry-derived Package Addition Fixture Matrix", () => {
         mount.source = "user-overlap";
       },
       expectedError:
-        "mount pnpm-store does not match the final Tool Layer plan",
+        "mount pnpm-store does not match the default workspace owner facts",
     },
   ] as const) {
     const { mutate, expectedError, protectedField } = testCase;

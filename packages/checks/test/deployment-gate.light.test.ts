@@ -5,13 +5,6 @@ import path from "node:path";
 import { describe, it } from "node:test";
 
 import {
-  builtInPresetRegistry,
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
-import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
-
-import {
   deriveDeploymentQualityContractIdentity,
   deriveDeploymentQualityPlanInput,
   normalizedDeploymentQualityPlan,
@@ -21,121 +14,107 @@ import {
   runFixtureEvidenceGate,
   type FixtureEvidenceLifecycleEvent,
 } from "../src/fixture-evidence/kernel/index.ts";
+import {
+  deriveInitializationScenarios,
+  materializeGeneratedScenario,
+} from "../src/generated-content.ts";
+import { sourceGeneratedScenarioRuntime } from "../src/source-generated-runtime.ts";
 
-function deploymentPlan() {
-  const definition = builtInPresetRegistry.all().find((candidate) =>
-    planGeneratedRepositoryInitialization({
-      definition: candidate,
-      context: createGenerationContext({
-        targetDir: path.join("generated-repository", "deployment-gate"),
-        toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.11.0",
-          nodeVersion: releaseToolchainSnapshot.nodeVersion,
-        },
-      }),
-    }).manifests.some(
-      (manifest) =>
-        (manifest.scripts as Record<string, unknown> | undefined)?.[
-          "deployment"
-        ] !== undefined,
-    ),
-  );
-  if (definition === undefined) {
-    throw new Error("A deployment Definition is required");
-  }
-  return planGeneratedRepositoryInitialization({
-    definition,
-    context: createGenerationContext({
-      targetDir: path.join("generated-repository", "deployment-gate"),
-      toolchain: {
-        nodeLtsMajor: "24",
-        packageManagerPin: "pnpm@11.11.0",
-        nodeVersion: releaseToolchainSnapshot.nodeVersion,
-      },
-    }),
+async function generatedScenario(alias: string, workspace: string) {
+  const scenario = deriveInitializationScenarios(
+    sourceGeneratedScenarioRuntime,
+  ).find((candidate) => candidate.base.metadata.alias === alias);
+  if (scenario === undefined) throw new Error(`Missing ${alias} initializer`);
+  const receipt = await materializeGeneratedScenario({
+    runtime: sourceGeneratedScenarioRuntime,
+    scenario,
+    workspace,
   });
+  if (receipt.status !== "generated")
+    throw new Error(`${alias} is inapplicable`);
+  return receipt;
 }
 
 void describe("deployment quality gate", () => {
   void it("owns the normalized Deployment contract covered by Root full quality", async () => {
-    const plan = deploymentPlan();
-    const deployment = deriveDeploymentQualityPlanInput(plan);
-    assert.notStrictEqual(deployment, undefined);
-    const normalized = normalizedDeploymentQualityPlan(deployment!) as {
-      readonly executionResources: readonly unknown[];
-      readonly dependencyInstallation: {
-        readonly commands: readonly {
-          readonly args: readonly unknown[];
-        }[];
-      };
-      readonly generatedDeployment: { readonly args: readonly unknown[] };
-    };
-    assert.partialDeepStrictEqual(normalized, {
-      gate: "deployment-quality",
-      executionResources: ["docker"],
-      dependencyInstallation: {
-        storeDir: "/pnpm/store",
-        commands: [
-          {
-            command: "pnpm",
-            args: ["install", "--lockfile-only", "--store-dir", "/pnpm/store"],
-          },
-          {
-            command: "pnpm",
-            args: ["fetch", "--store-dir", "/pnpm/store"],
-          },
-          {
-            command: "pnpm",
-            args: [
-              "install",
-              "--offline",
-              "--frozen-lockfile",
-              "--store-dir",
-              "/pnpm/store",
-            ],
-          },
-        ],
-      },
-      generatedDeployment: {
-        command: "node",
-        args: ["--conditions=source", "scripts/task-gates.ts", "check:full"],
-      },
-    });
-    assert.strictEqual(normalized.executionResources.length, 1);
-    assert.strictEqual(normalized.dependencyInstallation.commands.length, 3);
-    assert.strictEqual(normalized.generatedDeployment.args.length, 3);
-    assert.match(
-      await deriveDeploymentQualityContractIdentity(deployment!),
-      /^[0-9a-f]{64}$/u,
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "deployment-contract-"),
     );
+    try {
+      const receipt = await generatedScenario("vike-app", workspace);
+      const deployment = deriveDeploymentQualityPlanInput(
+        receipt.result,
+        receipt.scenario.id,
+      );
+      assert.notStrictEqual(deployment, undefined);
+      const normalized = normalizedDeploymentQualityPlan(deployment!) as {
+        readonly executionResources: readonly unknown[];
+        readonly dependencyInstallation: {
+          readonly commands: readonly {
+            readonly args: readonly unknown[];
+          }[];
+        };
+        readonly generatedDeployment: { readonly args: readonly unknown[] };
+      };
+      assert.partialDeepStrictEqual(normalized, {
+        gate: "deployment-quality",
+        executionResources: ["docker"],
+        dependencyInstallation: {
+          storeDir: "/pnpm/store",
+          commands: [
+            {
+              command: "pnpm",
+              args: [
+                "install",
+                "--lockfile-only",
+                "--store-dir",
+                "/pnpm/store",
+              ],
+            },
+            {
+              command: "pnpm",
+              args: ["fetch", "--store-dir", "/pnpm/store"],
+            },
+            {
+              command: "pnpm",
+              args: [
+                "install",
+                "--offline",
+                "--frozen-lockfile",
+                "--store-dir",
+                "/pnpm/store",
+              ],
+            },
+          ],
+        },
+        generatedDeployment: {
+          command: "node",
+          args: ["--conditions=source", "scripts/task-gates.ts", "check:full"],
+        },
+      });
+      assert.strictEqual(normalized.executionResources.length, 1);
+      assert.strictEqual(normalized.dependencyInstallation.commands.length, 3);
+      assert.strictEqual(normalized.generatedDeployment.args.length, 3);
+      assert.match(
+        await deriveDeploymentQualityContractIdentity(deployment!),
+        /^[0-9a-f]{64}$/u,
+      );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
-  void it("makes no Deployment Quality claim without a generated entrypoint", () => {
-    const planWithoutDeployment = builtInPresetRegistry
-      .all()
-      .map((definition) =>
-        planGeneratedRepositoryInitialization({
-          definition,
-          context: createGenerationContext({
-            targetDir: path.join(
-              "generated-repository",
-              definition.metadata.name,
-            ),
-            toolchain: {
-              nodeLtsMajor: "24",
-              packageManagerPin: "pnpm@11.11.0",
-              nodeVersion: releaseToolchainSnapshot.nodeVersion,
-            },
-          }),
-        }),
-      )
-      .find((plan) => plan.deploymentCheck === undefined);
-    assert.notStrictEqual(planWithoutDeployment, undefined);
-    assert.strictEqual(
-      deriveDeploymentQualityPlanInput(planWithoutDeployment!),
-      undefined,
-    );
+  void it("makes no Deployment Quality claim without a generated requirement", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "no-deployment-"));
+    try {
+      const receipt = await generatedScenario("ts-lib", workspace);
+      assert.strictEqual(
+        deriveDeploymentQualityPlanInput(receipt.result, receipt.scenario.id),
+        undefined,
+      );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   void it("issues no evidence when Root full is cancelled before Deployment derivation", async () => {

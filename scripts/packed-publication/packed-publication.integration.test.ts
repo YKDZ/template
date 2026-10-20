@@ -28,20 +28,35 @@ import { after, before, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import type { GeneratedRepositoryPlan } from "@ykdz/template-builtin-presets";
+import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import { checkPresetPublicationSources } from "@ykdz/template-checks/publication-source";
 import {
   assertWorkflowContract,
   assertPublicationWorkflowContract,
 } from "@ykdz/template-checks/workflow-contract";
 import type { PackageRole } from "@ykdz/template-core/project-blueprint";
+import type { DefaultWorkspaceCreationInput } from "@ykdz/template-workspace/default-workspace-strategy";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa as runExeca } from "execa";
 import { parse as parseToml } from "smol-toml";
 import { parse as parseYaml } from "yaml";
 
 const publicCliPackageName = ["@ykdz", "template"].join("/");
-let installedBuiltin: typeof import("@ykdz/template-builtin-presets");
+type PackedRuntime = Parameters<typeof checkPresetPublicationSources>[0];
+type PackedRuntimeWithCollectionProjection = PackedRuntime & {
+  readonly deriveTemplateMembers: typeof import("@ykdz/template-content").deriveTemplateMembers;
+  readonly definePreset: typeof import("@ykdz/template-core/preset-definition").definePreset;
+};
+type PackedPreset = Extract<
+  PackedRuntime["content"][number],
+  { readonly kind: "preset" }
+>;
+type PackedReference = Extract<
+  PackedRuntime["content"][number],
+  { readonly manifest: unknown }
+>;
+type PackedReceipt = Parameters<typeof assertWorkflowContract>[0];
+type PackedCreationInput = DefaultWorkspaceCreationInput<TsCliCreationInput>;
 const turboExecutablePath = fileURLToPath(import.meta.resolve("turbo"));
 const journeyDiagnosticsRoot =
   process.env.TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR ?? tmpdir();
@@ -659,91 +674,266 @@ async function expectPackedProjectionRollback(
   assert.strictEqual(committedPaths?.length, 2);
 }
 
-function definitionWithPackagePath(packagePath: string) {
-  const definition = installedBuiltin.builtInPresetRegistry
-    .all()
-    .find((candidate) =>
-      installedBuiltin
-        .planGeneratedRepositoryInitialization({
-          definition: candidate,
-          context: installedBuiltin.createGenerationContext({
-            targetDir: path.join(
-              "generated-repository",
-              "package-path-selection",
-            ),
-            defaultPackageScope: "demo",
-            toolchain: {
-              nodeLtsMajor: "24",
-              packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-              nodeVersion: releaseToolchainSnapshot.nodeVersion,
-            },
-          }),
-        })
-        .blueprint.packages.some((pkg) => pkg.path === packagePath),
-    );
-  if (definition === undefined) {
-    throw new Error(
-      `Expected a Built-in Preset Definition with package path ${packagePath}`,
-    );
-  }
-  return definition;
+async function loadPackedRuntime(
+  fromCli: ReturnType<typeof createRequire>,
+): Promise<PackedRuntimeWithCollectionProjection> {
+  const [
+    content,
+    generator,
+    workspace,
+    renderer,
+    projectLinking,
+    presetDefinition,
+  ] = await Promise.all([
+    import(
+      pathToFileURL(fromCli.resolve("@ykdz/template-content")).href
+    ) as Promise<typeof import("@ykdz/template-content")>,
+    import(
+      pathToFileURL(fromCli.resolve("@ykdz/template-generator")).href
+    ) as Promise<typeof import("@ykdz/template-generator")>,
+    import(
+      pathToFileURL(
+        fromCli.resolve("@ykdz/template-workspace/default-workspace-strategy"),
+      ).href
+    ) as Promise<
+      typeof import("@ykdz/template-workspace/default-workspace-strategy")
+    >,
+    import(
+      pathToFileURL(fromCli.resolve("@ykdz/template-core/renderer")).href
+    ) as Promise<typeof import("@ykdz/template-core/renderer")>,
+    import(
+      pathToFileURL(fromCli.resolve("@ykdz/template-workspace/project-linking"))
+        .href
+    ) as Promise<typeof import("@ykdz/template-workspace/project-linking")>,
+    import(
+      pathToFileURL(fromCli.resolve("@ykdz/template-core/preset-definition"))
+        .href
+    ) as Promise<typeof import("@ykdz/template-core/preset-definition")>,
+  ]);
+  return {
+    content: content.templateContent,
+    deriveTemplateMembers: content.deriveTemplateMembers,
+    createGenerator: generator.createGenerator,
+    createDefaultWorkspaceStrategy: workspace.createDefaultWorkspaceStrategy,
+    resolveTemplateSource: renderer.resolveTemplateSource,
+    canConsumeNodePackageNameImportForRole:
+      projectLinking.canConsumeNodePackageNameImportForRole,
+    canProvideSourceConditionPackageNameImportForRole:
+      projectLinking.canProvideSourceConditionPackageNameImportForRole,
+    definePreset: presetDefinition.definePreset,
+  };
 }
 
-function definitionWithInitialPackageRole(role: PackageRole) {
-  const definition = installedBuiltin.builtInPresetRegistry
-    .all()
-    .find((candidate) =>
-      installedBuiltin
-        .planGeneratedRepositoryInitialization({
-          definition: candidate,
-          context: installedBuiltin.createGenerationContext({
-            targetDir: path.join("generated-repository", "role-selection"),
-            defaultPackageScope: "demo",
-            toolchain: {
-              nodeLtsMajor: "24",
-              packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-              nodeVersion: releaseToolchainSnapshot.nodeVersion,
-            },
-          }),
-        })
-        .blueprint.packages.some((pkg) => pkg.role === role),
-    );
-  if (definition === undefined) {
-    throw new Error(`Expected a Definition for initial Package Role ${role}`);
-  }
-  return definition;
-}
-
-function addableDefinitionWithPackageRole(role: PackageRole) {
-  const context = installedBuiltin.createGenerationContext({
-    targetDir: path.join("generated-repository", "addition-role-selection"),
-    defaultPackageScope: "demo",
-    toolchain: {
-      nodeLtsMajor: "24",
-      packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-    },
+function createPackedGenerator(runtime: PackedRuntime) {
+  return runtime.createGenerator({
+    content: runtime.content,
+    strategy: runtime.createDefaultWorkspaceStrategy<PackedCreationInput>(),
   });
-  const packageLeafName = "role-probe";
-  const definition = installedBuiltin.builtInPresetRegistry
-    .all()
-    .find((candidate) => {
-      const packagePath = candidate.defaultPackagePath?.({
-        context,
-        packageLeafName,
-      });
-      return (
-        packagePath !== undefined &&
-        candidate.planPackageAddition?.({
-          context,
-          packageLeafName,
-          packagePath,
-        }).definition.role === role
-      );
-    });
-  if (definition === undefined) {
-    throw new Error(`Expected an addable Definition for Package Role ${role}`);
+}
+
+function packedPresets(
+  runtime: PackedRuntimeWithCollectionProjection,
+): readonly PackedPreset[] {
+  return runtime.deriveTemplateMembers(runtime.content).presets;
+}
+
+function registerTestOwnedCollectionMember(options: {
+  readonly runtime: PackedRuntimeWithCollectionProjection;
+  readonly declaredContentDependencies: Readonly<Record<string, unknown>>;
+}): {
+  readonly runtime: PackedRuntimeWithCollectionProjection;
+  readonly presetAlias: string;
+  readonly packageName: string;
+  readonly preset: PackedPreset;
+} {
+  const originalMembers = options.runtime.deriveTemplateMembers(
+    options.runtime.content,
+  );
+  const sourceReference = originalMembers.referencePackages.find(
+    (reference) => reference.manifest.name === "@ykdz/reference-ts-lib",
+  );
+  if (sourceReference === undefined) {
+    throw new Error("已安装内容缺少测试内容使用的真实 TypeScript 库依赖");
   }
-  return definition;
+  assert.ok(
+    Object.hasOwn(
+      options.declaredContentDependencies,
+      sourceReference.manifest.name,
+    ),
+    `内容包必须声明真实模板依赖 ${sourceReference.manifest.name}`,
+  );
+
+  const fixtureReference: PackedReference = {
+    ...sourceReference,
+    identity: "test:single-registration-library",
+    defaultLeafName: "single-registration-library",
+    defaultPath: "packages/single-registration-library",
+    manifest: {
+      ...sourceReference.manifest,
+      name: "@fixture/single-registration-library",
+    },
+  };
+  const fixturePreset = options.runtime.definePreset({
+    metadata: {
+      alias: "single-registration-fixture",
+      title: "单次登记测试预设",
+      description: "通过真实已安装参考包验证集合派生",
+    },
+    operations: ["init"],
+    nodes: { library: { reference: fixtureReference } },
+  });
+  const registeredContent = [
+    ...options.runtime.content,
+    fixtureReference,
+    fixturePreset,
+  ] as unknown as PackedRuntime["content"];
+  const registeredMembers =
+    options.runtime.deriveTemplateMembers(registeredContent);
+  assert.strictEqual(
+    (registeredMembers.presets as readonly unknown[]).filter(
+      (member) => member === fixturePreset,
+    ).length,
+    1,
+    "测试预设只在内容集合登记一次",
+  );
+  assert.strictEqual(
+    (registeredMembers.referencePackages as readonly unknown[]).filter(
+      (member) => member === fixtureReference,
+    ).length,
+    1,
+    "测试参考包只在内容集合登记一次",
+  );
+  assert.ok(
+    !(originalMembers.presets as readonly unknown[]).includes(fixturePreset),
+    "未登记的预设不进入选择器",
+  );
+  assert.ok(
+    !(originalMembers.referencePackages as readonly unknown[]).includes(
+      fixtureReference,
+    ),
+    "未登记的参考包不进入打包根",
+  );
+  assert.ok(
+    (registeredMembers.referencePackages as readonly unknown[]).includes(
+      fixtureReference,
+    ),
+    "登记后的真实参考依赖进入打包根输入",
+  );
+
+  const withoutReference = [
+    ...options.runtime.content,
+    fixturePreset,
+  ] as unknown as PackedRuntime["content"];
+  assert.throws(
+    () =>
+      options.runtime.createGenerator({
+        content: withoutReference,
+        strategy:
+          options.runtime.createDefaultWorkspaceStrategy<PackedCreationInput>(),
+      }),
+    /显式内容集合缺少预设参考成员/u,
+    "缺少声明的真实模板依赖必须明确失败",
+  );
+
+  return {
+    runtime: {
+      ...options.runtime,
+      content: registeredContent,
+    },
+    presetAlias: fixturePreset.metadata.alias,
+    packageName: fixtureReference.manifest.name,
+    preset: fixturePreset,
+  };
+}
+
+async function generatePackedPreset(options: {
+  readonly generator: ReturnType<typeof createPackedGenerator>;
+  readonly preset: PackedPreset;
+  readonly targetRoot: string;
+  readonly packageScope: string;
+  readonly todo?: boolean;
+  readonly dryRun?: boolean;
+}): Promise<PackedReceipt> {
+  const result = await options.generator.init({
+    targetRoot: options.targetRoot,
+    selection: { roots: [{ preset: options.preset }] },
+    strategyInput: {
+      repositoryName: path.basename(options.targetRoot),
+      defaultPackageScope: options.packageScope,
+      todo: options.todo ?? true,
+    },
+    ...(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
+  });
+  if (
+    result.status !== "success" ||
+    result.projection === null ||
+    result.projection === undefined ||
+    result.projection.blueprint === undefined ||
+    result.projection.ownerFacts === undefined
+  ) {
+    throw new Error(
+      `packed runtime 未为 ${options.preset.metadata.alias} 返回初始化收据：${JSON.stringify(result)}`,
+    );
+  }
+  const successful = result as PackedReceipt["result"];
+  return {
+    status: "generated",
+    scenario: {
+      id: `init--${options.preset.metadata.alias}`,
+      label: `initialize ${options.preset.metadata.alias}`,
+      base: options.preset,
+    },
+    projectDir: options.targetRoot,
+    initialization: successful,
+    result: successful,
+    linkFrom: [],
+  };
+}
+
+async function addPackedPreset(options: {
+  readonly generator: ReturnType<typeof createPackedGenerator>;
+  readonly preset: PackedPreset;
+  readonly base: PackedReceipt;
+  readonly packageLeafName: string;
+  readonly packagePath?: string;
+  readonly dryRun?: boolean;
+}): Promise<PackedReceipt> {
+  const result = await options.generator.add({
+    repositoryRoot: options.base.projectDir,
+    preset: options.preset,
+    creationInput: {
+      leafName: options.packageLeafName,
+      ...(options.packagePath === undefined
+        ? {}
+        : { packagePath: options.packagePath }),
+    },
+    ...(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
+  });
+  if (
+    result.status !== "success" ||
+    result.projection === null ||
+    result.projection === undefined ||
+    result.projection.blueprint === undefined ||
+    result.projection.ownerFacts === undefined
+  ) {
+    throw new Error(
+      `packed runtime 未为 ${options.preset.metadata.alias} 返回添加收据：${JSON.stringify(result)}`,
+    );
+  }
+  const successful = result as PackedReceipt["result"];
+  return {
+    status: "generated",
+    scenario: {
+      id: `${options.base.scenario.id}--add--${options.preset.metadata.alias}`,
+      label: `${options.base.scenario.label}, then add ${options.preset.metadata.alias}`,
+      base: options.base.scenario.base,
+      addition: options.preset,
+    },
+    projectDir: options.base.projectDir,
+    initialization: options.base.result,
+    result: successful,
+    linkFrom: [],
+  };
 }
 
 async function generatedTextFiles(
@@ -902,47 +1092,41 @@ const packageOwnedTaskQuery =
 
 async function expectPackedHardenedRootCheckWorkflow(
   projectDir: string,
-  plan: GeneratedRepositoryPlan,
+  receipt: PackedReceipt,
 ): Promise<void> {
   const generatedPath = ".github/workflows/check.yml";
   const source = await readFile(path.join(projectDir, generatedPath), "utf8");
-  assertWorkflowContract(plan, generatedPath, source, parseYaml(source));
-  if (
-    plan.packageContributions.some(
-      (contribution) =>
-        contribution.foundation.npmPublication?.kind === "public-cli-candidate",
-    )
-  ) {
+  assertWorkflowContract(receipt, generatedPath, source, parseYaml(source));
+  if (receipt.result.projection.ownerFacts.publication.candidate !== null) {
     const releaseSource = await readFile(
       path.join(projectDir, ".github/workflows/release.yml"),
       "utf8",
     );
     assertPublicationWorkflowContract(
-      plan,
+      receipt,
       releaseSource,
       parseYaml(releaseSource),
     );
   }
 }
 
-function initializationDiagnosticPlan(definitionName: string) {
-  const definition =
-    installedBuiltin.builtInPresetRegistry.require(definitionName);
-  return installedBuiltin.planGeneratedRepositoryInitialization({
-    definition,
-    context: installedBuiltin.createGenerationContext({
-      targetDir: path.join(
-        "generated-repository",
-        "packed-diagnostic-expectation",
-        definitionName,
-      ),
-      toolchain: {
-        nodeLtsMajor: "24",
-        packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-        nodeVersion: releaseToolchainSnapshot.nodeVersion,
-      },
-    }),
-  });
+async function assertWorkflowArtifactParity(
+  projectDir: string,
+  receipt: PackedReceipt,
+): Promise<void> {
+  const generatedPaths = [
+    ".github/workflows/check.yml",
+    ...(receipt.result.projection.ownerFacts.publication.candidate === null
+      ? []
+      : [".github/workflows/release.yml"]),
+  ];
+  for (const generatedPath of generatedPaths) {
+    assert.strictEqual(
+      await readFile(path.join(projectDir, generatedPath), "utf8"),
+      await readFile(path.join(receipt.projectDir, generatedPath), "utf8"),
+      `CLI 输出应与同一归档 generator 的 ${generatedPath} 投影一致`,
+    );
+  }
 }
 
 void describe("packed public CLI consumer", () => {
@@ -1053,7 +1237,9 @@ void describe("packed public CLI consumer", () => {
           "package/dist/main.js",
           "package/node_modules/@ykdz/cli-contract/package.json",
           "package/node_modules/@ykdz/template-core/package.json",
-          "package/node_modules/@ykdz/template-builtin-presets/package.json",
+          "package/node_modules/@ykdz/template-content/package.json",
+          "package/node_modules/@ykdz/template-generator/package.json",
+          "package/node_modules/@ykdz/template-workspace/package.json",
           "package/node_modules/typescript/package.json",
         ]) {
           assert.ok(packedPaths.includes(expectedPath));
@@ -1075,7 +1261,8 @@ void describe("packed public CLI consumer", () => {
               ) ||
               entry.startsWith("package/test/") ||
               entry.includes("/.template/") ||
-              entry.includes("template-checks"),
+              entry.includes("template-checks") ||
+              entry.includes("template-builtin-presets"),
           ),
           false,
         );
@@ -1092,7 +1279,6 @@ void describe("packed public CLI consumer", () => {
           ({ stdout }) =>
             JSON.parse(stdout) as {
               readonly dependencies?: Readonly<Record<string, unknown>>;
-              readonly peerDependencies?: Readonly<Record<string, unknown>>;
             },
         );
         assert.partialDeepStrictEqual(packedManifest, {
@@ -1117,6 +1303,9 @@ void describe("packed public CLI consumer", () => {
           "@ykdz/cli-contract",
           "@valibot/to-json-schema",
           "valibot",
+          "@ykdz/template-content",
+          "@ykdz/template-generator",
+          "@ykdz/template-workspace",
         ]) {
           assert.ok(Object.hasOwn(packedDependencies, dependencyName));
           assert.strictEqual(
@@ -1129,22 +1318,23 @@ void describe("packed public CLI consumer", () => {
           packedManifest.bundleDependencies as string[];
         for (const dependencyName of [
           "@ykdz/template-core",
-          "@ykdz/template-builtin-presets",
+          "@ykdz/template-content",
+          "@ykdz/template-generator",
+          "@ykdz/template-environment",
+          "@ykdz/template-workspace",
+          "@ykdz/template-workspace-authoring",
           "@ykdz/cli-contract",
           "@valibot/to-json-schema",
           "typescript",
         ]) {
           assert.ok(bundledDependencies.includes(dependencyName));
         }
+        assert.ok(
+          !bundledDependencies.includes("@ykdz/template-builtin-presets"),
+        );
         assert.ok(Object.hasOwn(packedDependencies, "typescript"));
         assert.ok(
           !Object.hasOwn(packedCoreManifest.dependencies ?? {}, "typescript"),
-        );
-        assert.ok(
-          Object.hasOwn(
-            packedCoreManifest.peerDependencies ?? {},
-            "typescript",
-          ),
         );
         await mkdir(consumer, { recursive: true });
         activeRun.stage = "安装 packed 消费者";
@@ -1161,16 +1351,105 @@ void describe("packed public CLI consumer", () => {
           `CLI 默认入口越出隔离消费者：${installedCliEntry}`,
         );
         const fromCli = createRequire(installedCliEntry);
-        installedBuiltin = (await import(
-          pathToFileURL(fromCli.resolve("@ykdz/template-builtin-presets")).href
-        )) as typeof import("@ykdz/template-builtin-presets");
-        const installedRenderer = (await import(
-          pathToFileURL(fromCli.resolve("@ykdz/template-core/renderer")).href
-        )) as typeof import("@ykdz/template-core/renderer");
-        const publicationSources = await checkPresetPublicationSources({
-          builtin: installedBuiltin,
-          renderNewProject: installedRenderer.renderNewProject,
+        const installedRuntime = await loadPackedRuntime(fromCli);
+        const installedGenerator = createPackedGenerator(installedRuntime);
+        const presetsInArchive = packedPresets(installedRuntime).filter(
+          (preset) => preset.operations.includes("init"),
+        );
+        const contentEntry = fromCli.resolve("@ykdz/template-content");
+        const contentManifest = JSON.parse(
+          await readFile(
+            path.resolve(path.dirname(contentEntry), "..", "package.json"),
+            "utf8",
+          ),
+        ) as {
+          readonly dependencies?: Readonly<Record<string, unknown>>;
+          readonly devDependencies?: Readonly<Record<string, unknown>>;
+        };
+        const testOwnedCollection = registerTestOwnedCollectionMember({
+          runtime: installedRuntime,
+          declaredContentDependencies: {
+            ...contentManifest.dependencies,
+            ...contentManifest.devDependencies,
+          },
         });
+        const defaultReferenceNames = new Set(
+          installedRuntime
+            .deriveTemplateMembers(installedRuntime.content)
+            .referencePackages.map((reference) => reference.manifest.name),
+        );
+        const registeredReferenceNames = testOwnedCollection.runtime
+          .deriveTemplateMembers(testOwnedCollection.runtime.content)
+          .referencePackages.map((reference) => reference.manifest.name);
+        assert.ok(!defaultReferenceNames.has(testOwnedCollection.packageName));
+        assert.ok(
+          registeredReferenceNames.includes(testOwnedCollection.packageName),
+        );
+        assert.ok(
+          testOwnedCollection.runtime
+            .deriveTemplateMembers(testOwnedCollection.runtime.content)
+            .presets.some(
+              (preset) =>
+                preset.metadata.alias === testOwnedCollection.presetAlias,
+            ),
+          "已登记的新预设进入唯一选择投影",
+        );
+        const fixtureOnlyRuntime: PackedRuntime = {
+          ...testOwnedCollection.runtime,
+          content: testOwnedCollection.runtime.content.filter(
+            (member) =>
+              !("kind" in member) || member === testOwnedCollection.preset,
+          ) as unknown as PackedRuntime["content"],
+        };
+        const fixturePublicationSources =
+          await checkPresetPublicationSources(fixtureOnlyRuntime);
+        assert.strictEqual(
+          fixturePublicationSources.scenariosVerified,
+          1,
+          "登记后的单个预设应成为正式检查入口的唯一场景",
+        );
+        assert.ok(fixturePublicationSources.resourcesRead > 0);
+        await writeFile(
+          path.join(workspace, "collection-derivation-proof.json"),
+          JSON.stringify(
+            {
+              presetAlias: testOwnedCollection.presetAlias,
+              fixturePackageName: testOwnedCollection.packageName,
+              registeredPresetCount: 1,
+              registeredReferenceCount: 1,
+              checkScenariosVerified:
+                fixturePublicationSources.scenariosVerified,
+              sourceResourcesRead: fixturePublicationSources.resourcesRead,
+              unregisteredPresetExposed: installedRuntime
+                .deriveTemplateMembers(installedRuntime.content)
+                .presets.some(
+                  (preset) =>
+                    preset.metadata.alias === testOwnedCollection.presetAlias,
+                ),
+              fixtureDependencyDeclared: Object.hasOwn(
+                {
+                  ...contentManifest.dependencies,
+                  ...contentManifest.devDependencies,
+                },
+                "@ykdz/reference-ts-lib",
+              ),
+              packRootReferenceNames: registeredReferenceNames,
+            },
+            null,
+            2,
+          ),
+        );
+        const initializationReceipts = new Map<string, PackedReceipt>();
+        const additionReceipts = new Map<string, PackedReceipt>();
+        const publicationSources = await checkPresetPublicationSources(
+          testOwnedCollection.runtime,
+        );
+        assert.strictEqual(
+          publicationSources.scenariosVerified,
+          35,
+          "新增测试预设应把实际 init/add 检查范围从 30 个场景扩到 35 个",
+        );
+        assert.ok(publicationSources.resourcesRead > 0);
         await writeFile(
           path.join(workspace, "publication-resources.json"),
           JSON.stringify(publicationSources, null, 2),
@@ -1258,130 +1537,177 @@ void describe("packed public CLI consumer", () => {
         });
         const definitions = JSON.parse(presets.stdout).data.presets as {
           name: string;
+          title: string;
+          description: string;
         }[];
+        assert.deepStrictEqual(
+          definitions.map(({ name }) => name).toSorted(),
+          presetsInArchive.map(({ metadata }) => metadata.alias).toSorted(),
+          "packed CLI 目录应直接来自已安装内容集合",
+        );
         assert.ok(definitions.length > 0);
-        for (const definition of definitions) {
+        for (const preset of presetsInArchive) {
+          const alias = preset.metadata.alias;
+          const oracleRoot = path.join(consumer, "generator-oracle", alias);
+          const receipt = await generatePackedPreset({
+            generator: installedGenerator,
+            preset,
+            targetRoot: oracleRoot,
+            packageScope: alias,
+          });
+          initializationReceipts.set(alias, receipt);
+          await expectPackedHardenedRootCheckWorkflow(oracleRoot, receipt);
           await execa(
             installedBin,
             [
               "init",
-              path.join(consumer, "generated", definition.name),
+              path.join(consumer, "generated", alias),
               "--preset",
-              definition.name,
+              alias,
             ],
             {
               cwd: consumer,
             },
           );
-          await expectNativeTaskModel(
-            path.join(consumer, "generated", definition.name),
-          );
-          const generatedProject = path.join(
-            consumer,
-            "generated",
-            definition.name,
-          );
-          await expectPackedHardenedRootCheckWorkflow(
-            generatedProject,
-            initializationDiagnosticPlan(definition.name),
+          await expectNativeTaskModel(path.join(consumer, "generated", alias));
+          await assertWorkflowArtifactParity(
+            path.join(consumer, "generated", alias),
+            receipt,
           );
         }
 
-        const sharedLibraryDefinition =
-          addableDefinitionWithPackageRole("shared-library");
+        const presetWithInitialRole = (role: PackageRole): PackedPreset => {
+          const preset = presetsInArchive.find((candidate) =>
+            initializationReceipts
+              .get(candidate.metadata.alias)
+              ?.result.blueprint.packages.some(
+                (definition) => definition.role === role,
+              ),
+          );
+          if (preset === undefined) {
+            throw new Error(`已安装内容没有初始包角色 ${role} 的预设`);
+          }
+          return preset;
+        };
+        const presetWithAddedRole = (role: PackageRole): PackedPreset => {
+          const preset = presetsInArchive.find((candidate) =>
+            additionReceipts
+              .get(candidate.metadata.alias)
+              ?.result.blueprint.packages.some(
+                (definition) =>
+                  definition.path === "packages/archive-addition" &&
+                  definition.role === role,
+              ),
+          );
+          if (preset === undefined) {
+            throw new Error(`已安装内容没有新增包角色 ${role} 的预设`);
+          }
+          return preset;
+        };
+        const presetWithPackagePath = (packagePath: string): PackedPreset => {
+          const preset = presetsInArchive.find((candidate) =>
+            initializationReceipts
+              .get(candidate.metadata.alias)
+              ?.result.blueprint.packages.some(
+                (definition) => definition.path === packagePath,
+              ),
+          );
+          if (preset === undefined) {
+            throw new Error(`已安装内容没有输出包路径 ${packagePath} 的预设`);
+          }
+          return preset;
+        };
+
+        const sharedLibraryDefinition = presetWithAddedRole("shared-library");
         const sharedLibraryProject = path.join(
           consumer,
           "generated",
-          sharedLibraryDefinition.metadata.name,
+          sharedLibraryDefinition.metadata.alias,
         );
         await execa("pnpm", ["install"], { cwd: sharedLibraryProject });
 
-        const cliToolDefinition = addableDefinitionWithPackageRole("cli-tool");
+        const cliToolDefinition = presetWithAddedRole("cli-tool");
         const cliToolProject = path.join(
           consumer,
           "generated",
-          cliToolDefinition.metadata.name,
+          cliToolDefinition.metadata.alias,
         );
         await execa("pnpm", ["install"], { cwd: cliToolProject });
 
-        const nativePackageDefinition =
-          addableDefinitionWithPackageRole("native-package");
+        const nativePackageDefinition = presetWithAddedRole("native-package");
         const nativePackageProject = path.join(
           consumer,
           "generated",
-          nativePackageDefinition.metadata.name,
+          nativePackageDefinition.metadata.alias,
         );
         await execa("pnpm", ["install"], { cwd: nativePackageProject });
 
-        const deploymentDefinition = definitionWithPackagePath("packages/db");
+        const deploymentDefinition = presetWithPackagePath("packages/db");
         const deploymentProject = path.join(
           consumer,
           "generated",
-          deploymentDefinition.metadata.name,
+          deploymentDefinition.metadata.alias,
         );
         await execa("pnpm", ["install"], { cwd: deploymentProject });
 
-        const expectedAddableDefinitions =
-          installedBuiltin.builtInPresetRegistry
-            .all()
-            .filter(
-              (definition) => definition.planPackageAddition !== undefined,
-            )
-            .map((definition) => definition.metadata.name)
-            .toSorted();
+        const expectedAddableDefinitions = presetsInArchive
+          .filter((preset) => preset.operations.includes("add"))
+          .map((preset) => preset.metadata.alias)
+          .toSorted();
         const completedAdditions: string[] = [];
-        for (const candidate of definitions) {
-          const definition = installedBuiltin.builtInPresetRegistry.require(
-            candidate.name,
-          );
-          const generatedProject = path.join(
-            consumer,
-            "generated",
-            candidate.name,
-          );
-          const additionPlan =
-            definition.planPackageAddition === undefined
-              ? undefined
-              : installedBuiltin.planGeneratedRepositoryPackageAddition({
-                  definition,
-                  localTemplateMetadata:
-                    installedBuiltin.loadLocalTemplateMetadata(
-                      generatedProject,
-                    ),
-                  packageLeafName: "archive-addition",
-                  packagePath: "packages/archive-addition",
-                });
-          activeRun.stage = `添加 ${candidate.name} 预设包`;
+        for (const preset of presetsInArchive) {
+          const alias = preset.metadata.alias;
+          const generatedProject = path.join(consumer, "generated", alias);
+          const baseReceipt = initializationReceipts.get(alias);
+          assert.notStrictEqual(baseReceipt, undefined);
+          const additionReceipt = preset.operations.includes("add")
+            ? await addPackedPreset({
+                generator: installedGenerator,
+                preset,
+                base: baseReceipt!,
+                packageLeafName: "archive-addition",
+                packagePath: "packages/archive-addition",
+              })
+            : undefined;
+          activeRun.stage = `添加 ${alias} 预设包`;
           const result = await execa(
             installedBin,
             [
               "add",
               "package",
               "--preset",
-              candidate.name,
+              alias,
               "--name",
               "archive-addition",
               "--path",
               "packages/archive-addition",
             ],
             {
-              cwd: path.join(consumer, "generated", candidate.name),
+              cwd: generatedProject,
               reject: false,
             },
           );
-          throwIfPackedCommandWasCancelled(
-            result,
-            `向 ${candidate.name} 预设添加包`,
-          );
+          throwIfPackedCommandWasCancelled(result, `向 ${alias} 预设添加包`);
           if (result.exitCode === 0) {
-            completedAdditions.push(candidate.name);
+            completedAdditions.push(alias);
+            assert.notStrictEqual(additionReceipt, undefined);
+            additionReceipts.set(alias, additionReceipt!);
             await expectNativeTaskModel(
-              path.join(consumer, "generated", candidate.name),
+              path.join(consumer, "generated", alias),
             );
-            assert.notStrictEqual(additionPlan, undefined);
             await expectPackedHardenedRootCheckWorkflow(
+              additionReceipt!.projectDir,
+              additionReceipt!,
+            );
+            await assertWorkflowArtifactParity(
               generatedProject,
-              additionPlan!,
+              additionReceipt!,
+            );
+          } else {
+            assert.strictEqual(
+              additionReceipt,
+              undefined,
+              `${alias} 实际不支持 add 时，内容操作元数据应同步声明`,
             );
           }
         }
@@ -1391,71 +1717,56 @@ void describe("packed public CLI consumer", () => {
         );
 
         const sharedLibraryAdditionDefinition =
-          addableDefinitionWithPackageRole("shared-library");
+          presetWithAddedRole("shared-library");
         const sharedLibraryAdditionProject = path.join(
           consumer,
           "generated",
-          sharedLibraryAdditionDefinition.metadata.name,
+          sharedLibraryAdditionDefinition.metadata.alias,
         );
         await execa("pnpm", ["install", "--no-frozen-lockfile"], {
           cwd: sharedLibraryAdditionProject,
         });
 
-        const cliToolAdditionDefinition =
-          addableDefinitionWithPackageRole("cli-tool");
+        const cliToolAdditionDefinition = presetWithAddedRole("cli-tool");
         const cliToolAdditionProject = path.join(
           consumer,
           "generated",
-          cliToolAdditionDefinition.metadata.name,
+          cliToolAdditionDefinition.metadata.alias,
         );
         await execa("pnpm", ["install", "--no-frozen-lockfile"], {
           cwd: cliToolAdditionProject,
         });
 
         const nativePackageAdditionDefinition =
-          addableDefinitionWithPackageRole("native-package");
+          presetWithAddedRole("native-package");
         const nativePackageAdditionProject = path.join(
           consumer,
           "generated",
-          nativePackageAdditionDefinition.metadata.name,
+          nativePackageAdditionDefinition.metadata.alias,
         );
         await execa("pnpm", ["install", "--no-frozen-lockfile"], {
           cwd: nativePackageAdditionProject,
         });
 
-        const rustDefinition =
-          addableDefinitionWithPackageRole("native-package");
-        const nonRustBase = installedBuiltin.builtInPresetRegistry
-          .all()
-          .find((definition) => {
-            const context = installedBuiltin.createGenerationContext({
-              targetDir: path.join(
-                consumer,
-                "generated",
-                definition.metadata.name,
-              ),
-              toolchain: {
-                nodeLtsMajor: "24",
-                packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-                nodeVersion: releaseToolchainSnapshot.nodeVersion,
-              },
-            });
-            const contributions =
-              installedBuiltin.planGeneratedRepositoryInitialization({
-                definition,
-                context,
-              }).packageContributions;
-            return contributions.every(
-              (contribution) =>
-                contribution.foundation.toolchains.rust === undefined,
-            );
-          });
+        const rustDefinition = presetWithAddedRole("native-package");
+        const nonRustBase = presetsInArchive.find((preset) => {
+          const receipt = initializationReceipts.get(preset.metadata.alias);
+          return receipt?.result.projection.operations.every(
+            (operation) =>
+              !("to" in operation && operation.to === "rust-toolchain.toml"),
+          );
+        });
         assert.notStrictEqual(nonRustBase, undefined);
+        const nonRustBaseReceipt = initializationReceipts.get(
+          nonRustBase!.metadata.alias,
+        );
+        assert.notStrictEqual(nonRustBaseReceipt, undefined);
         const rustAdditionTarget = path.join(
           consumer,
           "generated",
-          nonRustBase!.metadata.name,
+          nonRustBase!.metadata.alias,
         );
+        const rustOracleTarget = nonRustBaseReceipt!.projectDir;
         const rustDockerfilePath = path.join(
           rustAdditionTarget,
           ".devcontainer/Dockerfile",
@@ -1508,7 +1819,7 @@ void describe("packed public CLI consumer", () => {
             "add",
             "package",
             "--preset",
-            rustDefinition.metadata.name,
+            rustDefinition.metadata.alias,
             "--name",
             "worker",
             "--dry-run",
@@ -1527,6 +1838,18 @@ void describe("packed public CLI consumer", () => {
         };
         assert.strictEqual(rustPreview.dryRun, true);
         assert.deepStrictEqual(rustPreview.conflicts ?? [], []);
+        const rustPreviewReceipt = await addPackedPreset({
+          generator: installedGenerator,
+          preset: rustDefinition,
+          base: nonRustBaseReceipt!,
+          packageLeafName: "worker",
+          dryRun: true,
+        });
+        assert.strictEqual(rustPreviewReceipt.result.dryRun, true);
+        assert.deepStrictEqual(
+          rustPreview.actions,
+          rustPreviewReceipt.result.actions,
+        );
         for (const [expectedPath, expectedAction] of [
           [".devcontainer/Dockerfile", "update"],
           [".devcontainer/devcontainer.json", "update"],
@@ -1554,7 +1877,7 @@ void describe("packed public CLI consumer", () => {
             "add",
             "package",
             "--preset",
-            rustDefinition.metadata.name,
+            rustDefinition.metadata.alias,
             "--name",
             "worker",
           ],
@@ -1562,16 +1885,25 @@ void describe("packed public CLI consumer", () => {
             cwd: rustAdditionTarget,
           },
         );
+        const rustAdditionReceipt = await addPackedPreset({
+          generator: installedGenerator,
+          preset: rustDefinition,
+          base: nonRustBaseReceipt!,
+          packageLeafName: "worker",
+        });
         const rustManifest = JSON.parse(
           await readFile(
             path.join(rustAdditionTarget, "packages/worker/package.json"),
             "utf8",
           ),
         ) as { readonly name: string };
-        assert.strictEqual(
-          rustManifest.name,
-          `@${nonRustBase!.metadata.name}/worker`,
-        );
+        const initialRustBasePackage =
+          nonRustBaseReceipt!.result.blueprint.packages[0];
+        assert.notStrictEqual(initialRustBasePackage, undefined);
+        const packageScope =
+          initialRustBasePackage!.name.match(/^@([^/]+)\//u)?.[1];
+        assert.notStrictEqual(packageScope, undefined);
+        assert.strictEqual(rustManifest.name, `@${packageScope}/worker`);
         assert.ok(
           (
             await readFile(
@@ -1690,16 +2022,19 @@ void describe("packed public CLI consumer", () => {
         });
         await execa("pnpm", ["run", "check"], { cwd: rustAdditionTarget });
         await expectPackedHardenedRootCheckWorkflow(
+          rustOracleTarget,
+          rustAdditionReceipt,
+        );
+        await assertWorkflowArtifactParity(
           rustAdditionTarget,
-          initializationDiagnosticPlan(rustDefinition.metadata.name),
+          rustAdditionReceipt,
         );
 
-        const cliAdditionDefinition =
-          addableDefinitionWithPackageRole("cli-tool");
+        const cliAdditionDefinition = presetWithAddedRole("cli-tool");
         const cliTarget = path.join(
           consumer,
           "generated",
-          cliAdditionDefinition.metadata.name,
+          cliAdditionDefinition.metadata.alias,
         );
         const explicitCliManifest = JSON.parse(
           await readFile(
@@ -1719,7 +2054,7 @@ void describe("packed public CLI consumer", () => {
               "add",
               "package",
               "--preset",
-              cliAdditionDefinition.metadata.name,
+              cliAdditionDefinition.metadata.alias,
               "--name",
               "default-command",
             ],
@@ -1728,11 +2063,22 @@ void describe("packed public CLI consumer", () => {
             },
           );
         };
+        const cliBaseReceipt = initializationReceipts.get(
+          cliAdditionDefinition.metadata.alias,
+        );
+        assert.notStrictEqual(cliBaseReceipt, undefined);
+        const secondCliReceipt = await addPackedPreset({
+          generator: installedGenerator,
+          preset: cliAdditionDefinition,
+          base: cliBaseReceipt!,
+          packageLeafName: "default-command",
+        });
         await addSecondCli();
         await expectPackedHardenedRootCheckWorkflow(
-          cliTarget,
-          initializationDiagnosticPlan(cliAdditionDefinition.metadata.name),
+          secondCliReceipt.projectDir,
+          secondCliReceipt,
         );
+        await assertWorkflowArtifactParity(cliTarget, secondCliReceipt);
         const secondCliManifest = JSON.parse(
           await readFile(
             path.join(cliTarget, "packages/default-command/package.json"),
@@ -1750,22 +2096,21 @@ void describe("packed public CLI consumer", () => {
         const secondCliSnapshot = await workspaceByteSnapshot(cliTarget);
         await addSecondCli();
         await expectPackedHardenedRootCheckWorkflow(
-          cliTarget,
-          initializationDiagnosticPlan(cliAdditionDefinition.metadata.name),
+          secondCliReceipt.projectDir,
+          secondCliReceipt,
         );
         assert.deepStrictEqual(
           await workspaceByteSnapshot(cliTarget),
           secondCliSnapshot,
         );
 
-        const previewBaseDefinition =
-          definitionWithInitialPackageRole("shared-library");
+        const previewBaseDefinition = presetWithInitialRole("shared-library");
         const previewAdditionDefinition =
-          addableDefinitionWithPackageRole("runtime-service");
+          presetWithAddedRole("runtime-service");
         const previewTarget = path.join(
           consumer,
           "generated",
-          previewBaseDefinition.metadata.name,
+          previewBaseDefinition.metadata.alias,
         );
         const reservedBefore = await workspaceByteSnapshot(previewTarget);
         const reservedPackagePath = await execa(
@@ -1774,7 +2119,7 @@ void describe("packed public CLI consumer", () => {
             "add",
             "package",
             "--preset",
-            previewAdditionDefinition.metadata.name,
+            previewAdditionDefinition.metadata.alias,
             "--name",
             "evil",
             "--path",
@@ -1815,7 +2160,7 @@ void describe("packed public CLI consumer", () => {
             "add",
             "package",
             "--preset",
-            previewAdditionDefinition.metadata.name,
+            previewAdditionDefinition.metadata.alias,
             "--name",
             "existing",
             "--path",
@@ -1857,7 +2202,7 @@ void describe("packed public CLI consumer", () => {
             "add",
             "package",
             "--preset",
-            previewAdditionDefinition.metadata.name,
+            previewAdditionDefinition.metadata.alias,
             "--name",
             "dashboard",
             "--path",
@@ -1898,7 +2243,7 @@ void describe("packed public CLI consumer", () => {
             "add",
             "package",
             "--preset",
-            previewAdditionDefinition.metadata.name,
+            previewAdditionDefinition.metadata.alias,
             "--name",
             "dashboard",
             "--path",
@@ -1957,7 +2302,7 @@ void describe("packed public CLI consumer", () => {
             "add",
             "package",
             "--preset",
-            previewAdditionDefinition.metadata.name,
+            previewAdditionDefinition.metadata.alias,
             "--name",
             "dashboard",
             "--path",
@@ -2050,13 +2395,64 @@ void describe("packed public CLI consumer", () => {
           const fromCli = createRequire(
             fromConsumer.resolve(publicCliPackageName),
           );
-          installedBuiltin = (await import(
-            pathToFileURL(fromCli.resolve("@ykdz/template-builtin-presets"))
-              .href
-          )) as typeof import("@ykdz/template-builtin-presets");
-          const baseDefinition = definitionWithPackagePath("packages/db");
-          const additionDefinition =
-            addableDefinitionWithPackageRole("native-package");
+          const installedRuntime = await loadPackedRuntime(fromCli);
+          const installedGenerator = createPackedGenerator(installedRuntime);
+          const presets = packedPresets(installedRuntime);
+          let baseDefinition: PackedPreset | undefined;
+          for (const preset of presets.filter((candidate) =>
+            candidate.operations.includes("init"),
+          )) {
+            const receipt = await generatePackedPreset({
+              generator: installedGenerator,
+              preset,
+              targetRoot: path.join(
+                workspace,
+                "selection",
+                preset.metadata.alias,
+              ),
+              packageScope: "demo",
+              dryRun: true,
+            });
+            if (
+              receipt.result.blueprint.packages.some(
+                (definition) => definition.path === "packages/db",
+              )
+            ) {
+              baseDefinition = preset;
+              break;
+            }
+          }
+          assert.notStrictEqual(baseDefinition, undefined);
+          const selectionReceipt = await generatePackedPreset({
+            generator: installedGenerator,
+            preset: baseDefinition!,
+            targetRoot: path.join(workspace, "selection", "generated"),
+            packageScope: "demo",
+          });
+          let additionDefinition: PackedPreset | undefined;
+          for (const preset of presets.filter((candidate) =>
+            candidate.operations.includes("add"),
+          )) {
+            const result = await installedGenerator.add({
+              repositoryRoot: selectionReceipt.projectDir,
+              preset,
+              creationInput: { leafName: "role-probe" },
+              dryRun: true,
+            });
+            if (result.status !== "success") {
+              throw new Error(
+                `packed runtime 无法对 ${preset.metadata.alias} 预览加包：${JSON.stringify(result)}`,
+              );
+            }
+            const addedPackage = result.generationRecord.packages.find(
+              (record) => record.createdBy === "addition",
+            );
+            if (addedPackage?.definition.role === "native-package") {
+              additionDefinition = preset;
+              break;
+            }
+          }
+          assert.notStrictEqual(additionDefinition, undefined);
 
           const installedBin = path.join(
             consumer,
@@ -2065,14 +2461,14 @@ void describe("packed public CLI consumer", () => {
             "template",
           );
           activeRun.packedBin = installedBin;
-          activeRun.stage = `生成 ${baseDefinition.metadata.name} 仓库`;
+          activeRun.stage = `生成 ${baseDefinition!.metadata.alias} 仓库`;
           await execa(
             installedBin,
             [
               "init",
               generated,
               "--preset",
-              baseDefinition.metadata.name,
+              baseDefinition!.metadata.alias,
               "--scope",
               "demo",
             ],
@@ -2111,7 +2507,7 @@ void describe("packed public CLI consumer", () => {
                   "add",
                   "package",
                   "--preset",
-                  additionDefinition.metadata.name,
+                  additionDefinition!.metadata.alias,
                   "--name",
                   packageName,
                   "--path",

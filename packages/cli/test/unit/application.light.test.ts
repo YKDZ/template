@@ -4,10 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import {
-  builtInPresetRegistry,
-  prepareGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
+import { templateContent } from "@ykdz/template-content";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 import { runInit, type ApplicationRuntime } from "../../src/application.ts";
@@ -28,25 +25,21 @@ void describe("init publication setup handoff", () => {
   void it("renders the one-time setup command only in the init terminal result", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-cli-init-"));
     try {
-      const publicationSetupPreset = builtInPresetRegistry
-        .all()
-        .find((definition) => {
-          const preparation = prepareGeneratedRepositoryInitialization({
-            definition,
-            targetDir: path.join(workspace, "publication-setup-test"),
-          });
-          return (
-            preparation.status === "ready" &&
-            preparation.publicationSetup !== null
-          );
-        });
+      const publicationSetupPreset = templateContent
+        .filter((content) => "kind" in content)
+        .find((preset) =>
+          Object.values(preset.nodes).some(
+            ({ reference }) =>
+              reference.manifest.name === "@ykdz/reference-ts-cli",
+          ),
+        );
       if (publicationSetupPreset === undefined)
         throw new Error("Expected a Built-in Preset with publication setup");
       const runtime = createRuntime(workspace);
       const output = await runInit(
         {
           dir: "publication-setup-test",
-          preset: publicationSetupPreset.metadata.name,
+          preset: publicationSetupPreset.metadata.alias,
           dryRun: false,
           todo: true,
         },
@@ -61,7 +54,7 @@ void describe("init publication setup handoff", () => {
       const preview = await runInit(
         {
           dir: "preview",
-          preset: publicationSetupPreset.metadata.name,
+          preset: publicationSetupPreset.metadata.alias,
           dryRun: true,
           todo: false,
         },
@@ -85,12 +78,13 @@ void describe("init toolchain snapshot consumption", () => {
       path.join(tmpdir(), "template-cli-snapshot-init-"),
     );
     try {
-      // 本业务需要一个共享库角色的初始包，从公开 registry 的既有能力选取 Preset。
-      const snapshotInitPreset = builtInPresetRegistry
-        .all()
-        .find(
-          (definition) =>
-            definition.initialPrimaryPackage?.role === "shared-library",
+      // 本业务需要一个共享库角色的初始包，从唯一内容集合中选取 Preset。
+      const snapshotInitPreset = templateContent
+        .filter((content) => "kind" in content)
+        .find((preset) =>
+          Object.values(preset.nodes).some(
+            ({ reference }) => reference.role === "shared-library",
+          ),
         );
       if (snapshotInitPreset === undefined)
         throw new Error(
@@ -99,7 +93,7 @@ void describe("init toolchain snapshot consumption", () => {
       const output = await runInit(
         {
           dir: "project",
-          preset: snapshotInitPreset.metadata.name,
+          preset: snapshotInitPreset.metadata.alias,
           dryRun: false,
           todo: false,
           scope: "acme",
@@ -134,9 +128,16 @@ void describe("init toolchain snapshot consumption", () => {
           path.join(workspace, "project/.template/generation.json"),
           "utf8",
         ),
-      ) as { readonly toolchain: Record<string, unknown> };
-      assert.deepEqual(generationRecord.toolchain, {
+      ) as {
+        readonly schemaVersion: number;
+        readonly strategyState: {
+          readonly toolchain: Record<string, unknown>;
+        };
+      };
+      assert.equal(generationRecord.schemaVersion, 1);
+      assert.deepEqual(generationRecord.strategyState.toolchain, {
         nodeLtsMajor: snapshotNodeMajor,
+        nodeVersion: releaseToolchainSnapshot.nodeVersion,
         packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
       });
     } finally {

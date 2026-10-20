@@ -10,7 +10,6 @@ import {
   versionCapability,
 } from "@ykdz/cli-contract";
 import { isNodeBrokenPipe } from "@ykdz/cli-contract/node";
-import { builtInPresetRegistry } from "@ykdz/template-builtin-presets";
 import * as v from "valibot";
 
 import {
@@ -24,6 +23,7 @@ import {
   initializationInputSchema,
   packageAdditionInputSchema,
 } from "./input-schemas.ts";
+import { cliPresets } from "./preset-catalog.ts";
 import {
   initializationSchema,
   packageAdditionSchema,
@@ -95,11 +95,8 @@ function createCliContract(runtime: CliRuntime) {
         name: "init",
         description: "初始化项目仓库。",
         input: initializationInputSchema(runtime.cwd),
-        usageConstraints: builtInPresetRegistry
-          .all()
-          .filter(
-            (definition) => definition.initialPrimaryPackage === undefined,
-          )
+        usageConstraints: cliPresets
+          .filter((preset) => Object.keys(preset.nodes).length !== 1)
           .map(
             (definition) =>
               ({
@@ -108,7 +105,7 @@ function createCliContract(runtime: CliRuntime) {
                   {
                     kind: "equals",
                     field: "preset",
-                    value: definition.metadata.name,
+                    value: definition.metadata.alias,
                   },
                 ],
                 onMatch: { forbid: ["name", "path"] },
@@ -248,6 +245,7 @@ function createCliContract(runtime: CliRuntime) {
             generationRecord: {
               ...data.generationRecord,
               packages: [...data.generationRecord.packages],
+              presetSelections: [...data.generationRecord.presetSelections],
             },
           };
           return input.dryRun
