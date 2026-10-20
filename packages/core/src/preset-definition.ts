@@ -16,7 +16,7 @@ export type PresetProjectOptions<Context, Contribution> = {
 };
 
 type PresetProjectFields<
-  Options extends PresetProjectOptions<unknown, unknown> | never,
+  Options,
   ProjectContribution,
 > = {
   readonly owner?: PresetOwnerSelection;
@@ -76,7 +76,7 @@ export type PresetDefinition<
   Reference extends PresetReference,
   Layout = never,
   CreationInput = never,
-  ProjectOptions extends PresetProjectOptions<unknown, unknown> | never = never,
+  ProjectOptions = never,
   ProjectContribution = never,
 > = {
   readonly kind: "preset";
