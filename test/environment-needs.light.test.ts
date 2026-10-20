@@ -6,7 +6,7 @@ import {
   parseEnvironmentNeedsMetadata,
   playwrightBrowserAssetsEnvironmentNeed,
   shellCheckEnvironmentNeed,
-} from "@ykdz/template-core/module-graph";
+} from "@ykdz/template-environment/module-graph";
 
 const workspaceOwner = {
   kind: "workspace-orchestration" as const,

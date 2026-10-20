@@ -2,15 +2,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { composeCiDiagnosticArtifacts } from "@ykdz/template-core/ci-diagnostic-artifact";
 import {
   collectGeneratedManifestCatalogReferences,
   selectTemplateDependencyCatalogEntries,
 } from "@ykdz/template-core/dependency-catalog";
-import {
-  normalizeEnvironmentNeeds,
-  type CheckEnvironmentNeed,
-} from "@ykdz/template-core/module-graph";
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type { GenerationContext } from "@ykdz/template-core/preset-definition";
 import type {
@@ -29,11 +24,20 @@ import type {
   WorkspaceProjection,
   WorkspaceStrategy,
 } from "@ykdz/template-core/workspace-strategy";
+import { composeCiDiagnosticArtifacts } from "@ykdz/template-environment/ci-diagnostic-artifact";
 import {
   builtInEditorCustomization,
   planBuiltInDevelopmentContainer,
+  shellCheckDevelopmentContainerToolLayer,
 } from "@ykdz/template-environment/development-environment";
+import {
+  normalizeEnvironmentNeeds,
+  type CheckEnvironmentNeed,
+  playwrightBrowserAssetsEnvironmentNeed,
+  shellCheckEnvironmentNeed,
+} from "@ykdz/template-environment/module-graph";
 
+import { browserTestDevelopmentContainerToolLayer } from "./development-container.ts";
 import {
   assertReusablePackageExposure,
   readPackageAdditionVersionFacts,
@@ -178,6 +182,14 @@ function nativeBindings(
   );
 }
 
+function siblingPackagePath(defaultPath: string, leafName: string): string {
+  const parentPath = path.posix.dirname(defaultPath);
+  return path.posix.join(
+    parentPath === "." ? "packages" : parentPath,
+    leafName,
+  );
+}
+
 function maintenancePolicy(contributions: readonly PackageContribution[]) {
   const ecosystems = [
     ...new Set([
@@ -278,9 +290,49 @@ function projectOperations(options: {
       (contribution) => contribution.foundation.editorCapabilities,
     ),
   );
+  const deploymentEnvironmentNeeds = contributions.flatMap(
+    (contribution) =>
+      contribution.foundation.deploymentCheck?.environmentNeeds ?? [],
+  );
+  const hasDeployment = deploymentEnvironmentNeeds.length > 0;
+  const hasJointE2e = contributions.some(
+    (contribution) => contribution.foundation.vueHonoJointE2e !== undefined,
+  );
+  const checkEnvironmentNeeds = [
+    ...contributions.flatMap((contribution) => contribution.environmentNeeds),
+    ...(hasJointE2e
+      ? [
+          playwrightBrowserAssetsEnvironmentNeed({
+            browser: "chromium",
+            owner: { kind: "workspace-orchestration", path: "." },
+          }),
+        ]
+      : []),
+    ...(hasDeployment
+      ? [
+          shellCheckEnvironmentNeed({
+            kind: "workspace-orchestration",
+            path: ".",
+          }),
+        ]
+      : []),
+  ];
+  const containerLayers = [
+    ...(checkEnvironmentNeeds.some(
+      (need) => need.kind === "playwright-browser-assets",
+    )
+      ? [browserTestDevelopmentContainerToolLayer()]
+      : []),
+    ...(hasDeployment ? [shellCheckDevelopmentContainerToolLayer()] : []),
+    ...contributions.flatMap(
+      (contribution) =>
+        contribution.foundation.developmentContainerToolLayers ?? [],
+    ),
+  ];
   const container = planBuiltInDevelopmentContainer({
     nodeVersion:
       context.toolchain.nodeVersion ?? context.toolchain.nodeLtsMajor,
+    layers: containerLayers,
   });
   const containerBase = JSON.parse(
     readFileSync(
@@ -328,8 +380,8 @@ function projectOperations(options: {
       : {}),
   };
   const environmentNeeds = normalizeEnvironmentNeeds({
-    check: [] as CheckEnvironmentNeed[],
-    deployment: [],
+    check: checkEnvironmentNeeds as CheckEnvironmentNeed[],
+    deployment: deploymentEnvironmentNeeds,
   });
   const reconciliation: readonly ProjectProjectionReconciliation[] = [
     { path: "tsconfig.json", driver: "structured" },
@@ -593,7 +645,7 @@ export function createDefaultWorkspaceStrategy(): WorkspaceStrategy<
           explicitPath ??
           (leafName === undefined
             ? content.defaultPath
-            : "packages/" + selectedLeaf),
+            : siblingPackagePath(content.defaultPath, selectedLeaf)),
         role: content.role,
       };
     },

@@ -711,6 +711,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
+      valibot:
+        specifier: 'catalog:'
+        version: 1.5.0(typescript@7.0.2)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1107,6 +1110,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../../packages/environment
       pinia:
         specifier: 'catalog:'
         version: 4.1.0(@vue/devtools-api@8.2.1)(vue@3.5.44)
@@ -1174,6 +1180,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../../packages/environment
       pinia:
         specifier: 'catalog:'
         version: 4.1.0(@vue/devtools-api@8.2.1)(vue@3.5.44)
@@ -1241,6 +1250,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../../packages/environment
       pinia:
         specifier: 'catalog:'
         version: 4.1.0(@vue/devtools-api@8.2.1)(vue@3.5.44)

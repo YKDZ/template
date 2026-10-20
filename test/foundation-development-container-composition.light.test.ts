@@ -12,7 +12,6 @@ import {
   planGeneratedRepositoryPackageAddition,
   type BuiltInPresetDefinition,
 } from "@ykdz/template-builtin-presets";
-import type { DevelopmentContainerToolLayer } from "@ykdz/template-core/development-container-tool-layer";
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import {
   definePackageContributionReplayAdapter,
@@ -25,6 +24,7 @@ import {
   createTemplateSourceHandle,
   renderNewProject,
 } from "@ykdz/template-core/renderer";
+import type { DevelopmentContainerToolLayer } from "@ykdz/template-environment/development-container-tool-layer";
 
 const fixtureSource = createTemplateSourceHandle(
   path.join(process.cwd(), "test/fixtures/development-container-tool-layers"),

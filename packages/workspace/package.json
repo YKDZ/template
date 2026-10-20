@@ -25,6 +25,21 @@
       "types": "./dist/project-github.d.ts",
       "default": "./dist/project-github.js"
     },
+    "./workspace-resources": {
+      "source": "./src/workspace-resources.ts",
+      "types": "./dist/workspace-resources.d.ts",
+      "default": "./dist/workspace-resources.js"
+    },
+    "./vue-policy": {
+      "source": "./src/vue-policy.ts",
+      "types": "./dist/vue-policy.d.ts",
+      "default": "./dist/vue-policy.js"
+    },
+    "./development-container": {
+      "source": "./src/development-container.ts",
+      "types": "./dist/development-container.d.ts",
+      "default": "./dist/development-container.js"
+    },
     "./project-linking": {
       "source": "./src/project-linking.ts",
       "types": "./dist/project-linking.d.ts",

@@ -118,7 +118,6 @@ export type WriteTextFromFragmentsOperation = {
     from: string;
     source: TemplateSourceHandle;
   }[];
-  validation?: "development-container-dockerfile" | undefined;
   overwrite?: boolean;
   provenance?: RenderOperationProvenance;
 };
@@ -560,69 +559,12 @@ async function loadTextFragments(
   );
 }
 
-async function validateDevelopmentContainerDockerfileOperation(
-  operation: WriteTextFromFragmentsOperation,
-  fragments: readonly LoadedTextFragment[],
-): Promise<void> {
-  if (operation.validation !== "development-container-dockerfile") {
-    return;
-  }
-  const [baseFragment, ...optionalFragments] = fragments;
-  if (baseFragment === undefined) {
-    throw new Error(
-      "Development Container Dockerfile requires a base fragment.",
-    );
-  }
-  const { validateDevelopmentContainerDockerfileFragments } =
-    await import("./development-container-tool-layer.ts");
-  validateDevelopmentContainerDockerfileFragments({
-    baseFragment: {
-      identity: baseFragment.from,
-      from: baseFragment.from,
-      text: baseFragment.text,
-    },
-    fragments: optionalFragments.map((fragment) => ({
-      identity: fragment.from,
-      from: fragment.from,
-      text: fragment.text,
-    })),
-  });
-}
-
-async function preflightDevelopmentContainerDockerfiles(
-  options: RenderProjectOptions,
-): Promise<
-  ReadonlyMap<WriteTextFromFragmentsOperation, readonly LoadedTextFragment[]>
-> {
-  const loadedFragments = new Map<
-    WriteTextFromFragmentsOperation,
-    readonly LoadedTextFragment[]
-  >();
-
-  for (const operation of options.operations) {
-    if (
-      operation.kind !== "writeTextFromFragments" ||
-      operation.validation !== "development-container-dockerfile"
-    ) {
-      continue;
-    }
-
-    const fragments = await loadTextFragments(operation);
-    await validateDevelopmentContainerDockerfileOperation(operation, fragments);
-    loadedFragments.set(operation, fragments);
-  }
-
-  return loadedFragments;
-}
-
 async function renderWriteTextFromFragments(
   operation: WriteTextFromFragmentsOperation,
   options: RenderProjectOptions,
-  preloadedFragments?: readonly LoadedTextFragment[],
 ): Promise<void> {
   const to = resolveContainedPath(options.targetRoot, operation.to);
-  const fragments = preloadedFragments ?? (await loadTextFragments(operation));
-  await validateDevelopmentContainerDockerfileOperation(operation, fragments);
+  const fragments = await loadTextFragments(operation);
 
   await mkdir(path.dirname(to), { recursive: true });
   await writeGeneratedFile(
@@ -890,9 +832,6 @@ async function writeGeneratedFile(
 export async function renderProject(
   options: RenderProjectOptions,
 ): Promise<void> {
-  const preloadedDevelopmentContainerDockerfiles =
-    await preflightDevelopmentContainerDockerfiles(options);
-
   for (const operation of options.operations) {
     if (operation.kind === "copyFile") {
       await renderCopyFile(operation, options);
@@ -920,11 +859,7 @@ export async function renderProject(
     }
 
     if (operation.kind === "writeTextFromFragments") {
-      await renderWriteTextFromFragments(
-        operation,
-        options,
-        preloadedDevelopmentContainerDockerfiles.get(operation),
-      );
+      await renderWriteTextFromFragments(operation, options);
       continue;
     }
 

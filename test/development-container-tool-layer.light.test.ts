@@ -1,17 +1,12 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
+import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
 import {
   planDevelopmentContainerToolLayers,
   type DevelopmentContainerToolLayer,
-} from "@ykdz/template-core/development-container-tool-layer";
-import {
-  createTemplateSourceHandle,
-  renderProject,
-} from "@ykdz/template-core/renderer";
+} from "@ykdz/template-environment/development-container-tool-layer";
 
 const source = createTemplateSourceHandle(
   path.resolve("test/fixtures/development-container-tool-layers"),
@@ -117,59 +112,6 @@ void describe("Development Container Tool Layer Contract", () => {
       );
     });
   }
-
-  void it("validates current Dockerfile fragment operations before writing generated files", async () => {
-    const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-development-container-tool-layer-"),
-    );
-    const earlierGeneratedFile = path.join(targetRoot, "generated-first.txt");
-    const dockerfilePath = path.join(targetRoot, ".devcontainer/Dockerfile");
-
-    try {
-      await assert.rejects(
-        renderProject({
-          targetRoot,
-          operations: [
-            {
-              kind: "writeText",
-              to: "generated-first.txt",
-              text: "must not be written\n",
-            },
-            {
-              kind: "writeTextFromFragments",
-              to: ".devcontainer/Dockerfile",
-              validation: "development-container-dockerfile",
-              fragments: [
-                { source, from: "base.Dockerfile" },
-                { source, from: "hidden-copy.Dockerfile" },
-              ],
-            },
-          ],
-        }),
-        (error) =>
-          error instanceof Error &&
-          error.message.includes(
-            "must not use Dockerfile instruction COPY; allowed instructions are ARG, ENV, and RUN.",
-          ),
-      );
-      await assert.rejects(access(earlierGeneratedFile), (error) => {
-        return (
-          error instanceof Error &&
-          Object.hasOwn(error, "code") &&
-          (error as Error & { readonly code?: unknown }).code === "ENOENT"
-        );
-      });
-      await assert.rejects(access(dockerfilePath), (error) => {
-        return (
-          error instanceof Error &&
-          Object.hasOwn(error, "code") &&
-          (error as Error & { readonly code?: unknown }).code === "ENOENT"
-        );
-      });
-    } finally {
-      await rm(targetRoot, { recursive: true, force: true });
-    }
-  });
 
   void it("orders equivalent dependency graphs independently of registration order", async () => {
     const descriptors = [
