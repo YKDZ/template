@@ -1444,8 +1444,7 @@ void describe("packed public CLI consumer", () => {
               ) ||
               entry.startsWith("package/test/") ||
               entry.includes("/.template/") ||
-              entry.includes("template-checks") ||
-              entry.includes("template-builtin-presets"),
+              entry.includes("template-checks"),
           ),
           false,
         );
@@ -1512,9 +1511,6 @@ void describe("packed public CLI consumer", () => {
         ]) {
           assert.ok(bundledDependencies.includes(dependencyName));
         }
-        assert.ok(
-          !bundledDependencies.includes("@ykdz/template-builtin-presets"),
-        );
         assert.ok(Object.hasOwn(packedDependencies, "typescript"));
         assert.ok(
           !Object.hasOwn(packedCoreManifest.dependencies ?? {}, "typescript"),

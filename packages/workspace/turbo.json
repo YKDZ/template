@@ -64,6 +64,14 @@
       "outputs": [],
       "persistent": false
     },
+    "test": {
+      "dependsOn": [],
+      "tags": ["quality:light"],
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "persistent": false
+    },
     "check:author-planning-roles": {
       "cache": false,
       "outputs": [],

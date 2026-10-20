@@ -33,8 +33,8 @@
     "lint": "oxlint --quiet --format=unix --ignore-pattern dist .",
     "lint:fix": "oxlint --format=unix --ignore-pattern dist . --fix",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
-    "test": "node --conditions=source --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec --test-reporter=@ykdz/reference-typescript-config/reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.light.test.ts'",
-    "test:integration": "node --conditions=source --test --test-concurrency=1 --test-timeout=300000 --test-reporter=spec --test-reporter=@ykdz/reference-typescript-config/reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.integration.test.ts'",
+    "test": "node --conditions=source --experimental-strip-types --import=./test-support/setup.ts --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec --test-reporter=@ykdz/reference-typescript-config/reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.light.test.ts'",
+    "test:integration": "node --conditions=source --experimental-strip-types scripts/run-installed-integration.ts",
     "check:generated:output": "node --conditions=source scripts/check-generated-output.ts",
     "diagnose:matrix": "node --conditions=source src/check-generated-registry.ts package-addition-matrix",
     "check:capabilities": "node --conditions=source src/check-fixture-evidence-architecture.ts && node --conditions=source src/check-generated-registry.ts capabilities"
@@ -56,7 +56,9 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
+    "semver": "catalog:",
     "smol-toml": "catalog:",
+    "spdx-expression-parse": "catalog:",
     "turbo": "catalog:",
     "typescript": "catalog:",
     "typescript-7": "catalog:"
