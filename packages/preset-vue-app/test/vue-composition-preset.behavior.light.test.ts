@@ -74,7 +74,7 @@ type PersistedPackage = {
   readonly contentIdentity: ContentIdentity;
   readonly createdBy: string;
   readonly packageDefinitionId: string;
-  readonly creationInput: unknown | null;
+  readonly creationInput: unknown;
   readonly bindings: Readonly<Record<string, string>>;
 };
 
@@ -153,6 +153,9 @@ void describe("Vue 独立组合预设", () => {
       creationInput: { leafName: "dashboard" },
     });
     assert.strictEqual(added.status, "success", JSON.stringify(added));
+    assert.deepStrictEqual(added.generationRecord.presetSelections, [
+      preset.identity,
+    ]);
 
     const updated = JSON.parse(await readFile(extensionsPath, "utf8")) as {
       recommendations: string[];
@@ -589,6 +592,15 @@ void describe("Vue 独立组合预设", () => {
       JSON.stringify(initialized),
     );
     if (initialized.status !== "success") return;
+    const initializedHome = initialized.generationRecord.packages.find(
+      (record) =>
+        contentIdentityKey(record.contentIdentity) ===
+        contentIdentityKey(vueApp.identity),
+    );
+    assert.ok(initializedHome);
+    assert.deepStrictEqual(initializedHome.creationInput, {
+      leafName: "caller-home",
+    });
     assert.ok(
       initialized.blueprint.packages.some(
         (definition) =>
