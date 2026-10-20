@@ -411,7 +411,7 @@ void describe("原生内容制品安装链", () => {
       driverPath,
       [
         'import assert from "node:assert/strict";',
-        'import { readdir, readFile, writeFile } from "node:fs/promises";',
+        'import { chmod, readdir, readFile, stat, writeFile } from "node:fs/promises";',
         'import { contentIdentityKey } from "@ykdz/template-core/content-identity";',
         'import { createGenerator } from "@ykdz/template-generator";',
         'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
@@ -432,6 +432,12 @@ void describe("原生内容制品安装链", () => {
         "});",
         'assert.equal(initialized.status, "success", JSON.stringify(initialized));',
         'if (initialized.status !== "success") process.exit(2);',
+        "const initializedPackages = initialized.generationRecord.packages.map((record) => ({ packageDefinitionId: record.packageDefinitionId, bindings: record.bindings }));",
+        "const initializedNodeInstances = initialized.generationRecord.nodeInstances;",
+        "const initializedDefinitions = initialized.blueprint.packages.map(({ packageDefinitionId, path }) => ({ packageDefinitionId, path }));",
+        "const userFile = `${targetRoot}/user-owned.txt`;",
+        'await writeFile(userFile, "keep the initialized workspace\\n", { mode: 0o640 });',
+        "await chmod(userFile, 0o640);",
         'const library = templateContent.find((member) => member.kind === "reference" && member.identity.packageName === "@ykdz/reference-ts-lib");',
         'const configuration = templateContent.find((member) => member.kind === "reference" && member.identity.packageName === "@ykdz/reference-typescript-config");',
         'const libraryRecord = initialized.generationRecord.packages.find((record) => record.contentIdentity.packageName === "@ykdz/reference-ts-lib");',
@@ -453,10 +459,15 @@ void describe("原生内容制品安装链", () => {
         'const addition = await replayGenerator.add({ repositoryRoot: targetRoot, contentIdentity: { alias: "library", namespace: "ykdz" }, creationInput: { leafName: "fresh-library" } });',
         'assert.equal(addition.status, "success", JSON.stringify(addition));',
         'if (addition.status !== "success") process.exit(3);',
+        "for (const previous of initializedPackages) { const current = addition.generationRecord.packages.find((record) => record.packageDefinitionId === previous.packageDefinitionId); assert.ok(current); assert.deepEqual(current.bindings, previous.bindings); }",
+        "for (const [identity, instanceId] of Object.entries(initializedNodeInstances)) assert.equal(addition.generationRecord.nodeInstances[identity], instanceId);",
+        "for (const previous of initializedDefinitions) assert.ok(addition.blueprint.packages.some(({ packageDefinitionId, path }) => packageDefinitionId === previous.packageDefinitionId && path === previous.path));",
+        'assert.equal(await readFile(userFile, "utf8"), "keep the initialized workspace\\n");',
+        "assert.equal((await stat(userFile)).mode & 0o777, 0o640);",
         'const freshLibrary = addition.blueprint.packages.find((definition) => definition.path === "packages/fresh-library");',
         "assert.ok(freshLibrary);",
         'const freshGenerated = await readFile(`${targetRoot}/${freshLibrary.path}/src/index.ts`, "utf8");',
-        "await writeFile(resultPath, JSON.stringify({ generationRecord: initialized.generationRecord, blueprint: initialized.blueprint, generated, addition, freshLibrary, freshGenerated }));",
+        'await writeFile(resultPath, JSON.stringify({ generationRecord: initialized.generationRecord, blueprint: initialized.blueprint, generated, addition, freshLibrary, freshGenerated, userCustomization: { text: await readFile(userFile, "utf8"), mode: (await stat(userFile)).mode & 0o777 } }));',
       ].join("\n"),
     );
 
@@ -515,6 +526,10 @@ void describe("原生内容制品安装链", () => {
       };
       readonly freshLibrary: { readonly path: string };
       readonly freshGenerated: string;
+      readonly userCustomization: {
+        readonly text: string;
+        readonly mode: number;
+      };
     };
     assert.deepEqual(
       result.generationRecord.presetSelections.map(
@@ -541,6 +556,10 @@ void describe("原生内容制品安装链", () => {
     );
     assert.match(result.generated, /export function/u);
     assert.match(result.freshGenerated, /export function/u);
+    assert.deepEqual(result.userCustomization, {
+      text: "keep the initialized workspace\n",
+      mode: 0o640,
+    });
     assert.deepEqual(
       await Promise.all(
         authorRoots.map(async (authorRoot) => (await stat(authorRoot)).mtimeMs),
@@ -572,6 +591,87 @@ void describe("原生内容制品安装链", () => {
         `TS库集合安装闭包缺少制品：${archive.name}@${archive.version}`,
       );
     }
+    const missingSdkDriverPath = path.join(
+      installedPackage,
+      "missing-generator-dependency-driver.mjs",
+    );
+    await writeFile(
+      missingSdkDriverPath,
+      [
+        'import assert from "node:assert/strict";',
+        'import { readFile, readdir } from "node:fs/promises";',
+        'const authorRoots = JSON.parse(await readFile(process.argv[2], "utf8"));',
+        'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
+        'await import("@ykdz/template-content");',
+      ].join("\n"),
+    );
+    const targetBeforeMissingSdk = await snapshotTree(targetRoot);
+    const projectBeforeMissingSdk = await snapshotTree(projectRoot);
+    const missingSdkTarget = path.join(projectRoot, "missing-sdk-workspace");
+    const generatorPackagePaths = [
+      ...new Set(
+        await Promise.all(
+          closure.packages
+            .filter(({ name }) => name === "@ykdz/template-generator")
+            .map(async ({ path: packagePath }) => await realpath(packagePath)),
+        ),
+      ),
+    ];
+    assert.ok(generatorPackagePaths.length > 0);
+    const hiddenGeneratorPackagePaths = generatorPackagePaths.map(
+      (packagePath) => `${packagePath}.temporarily-missing`,
+    );
+    await Promise.all(
+      generatorPackagePaths.map(
+        async (packagePath, index) =>
+          await rename(packagePath, hiddenGeneratorPackagePaths[index]!),
+      ),
+    );
+    let missingSdkExecution;
+    try {
+      missingSdkExecution = await withUnreadableAuthorDirectories(
+        [
+          ...authorRoots.map((authorPath, index) => ({
+            path: authorPath,
+            mode: authorModes[index]!,
+          })),
+          { path: workspaceRoot, mode: workspaceRootMode },
+        ],
+        async () =>
+          await execa(
+            process.execPath,
+            [missingSdkDriverPath, authorRootsPath],
+            {
+              cwd: installedPackage,
+              env: {
+                ...process.env,
+                HOME: consumerRoot,
+                TMPDIR: temporaryDirectory,
+                NODE_OPTIONS: "--no-global-search-paths",
+                NODE_PATH: "",
+              },
+              uid: 65534,
+              gid: 65534,
+              reject: false,
+            },
+          ),
+      );
+    } finally {
+      await Promise.all(
+        generatorPackagePaths.map(
+          async (packagePath, index) =>
+            await rename(hiddenGeneratorPackagePaths[index]!, packagePath),
+        ),
+      );
+    }
+    assert.notEqual(missingSdkExecution.exitCode, 0);
+    assert.match(missingSdkExecution.stderr, /ERR_MODULE_NOT_FOUND/u);
+    assert.match(
+      missingSdkExecution.stderr,
+      /Cannot find package '@ykdz\/template-generator' imported from .*template-content-provider/su,
+    );
+    assert.deepEqual(await snapshotTree(targetRoot), targetBeforeMissingSdk);
+    assert.deepEqual(await snapshotTree(projectRoot), projectBeforeMissingSdk);
     const evidenceRoot = await contentArtifactEvidenceRoot();
     await writeContentCollectionEvidence(
       prepared,
@@ -603,6 +703,14 @@ void describe("原生内容制品安装链", () => {
               ({ path: packagePath }) => packagePath,
             ),
             freshGenerated: result.freshGenerated,
+            userCustomization: result.userCustomization,
+          },
+          missingGeneratorDependency: {
+            exitCode: missingSdkExecution.exitCode,
+            stderr: missingSdkExecution.stderr,
+            targetPath: missingSdkTarget,
+            initializedTargetUnchanged: true,
+            missingTargetCreated: false,
           },
         },
         null,
@@ -683,7 +791,7 @@ void describe("原生内容制品安装链", () => {
         driverPath,
         [
           'import assert from "node:assert/strict";',
-          'import { readdir, readFile, writeFile } from "node:fs/promises";',
+          'import { chmod, readdir, readFile, stat, writeFile } from "node:fs/promises";',
           'import { createGenerator } from "@ykdz/template-generator";',
           'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
           'import { templateContent } from "@ykdz/template-content";',
@@ -696,7 +804,13 @@ void describe("原生内容制品安装链", () => {
           'assert.equal(initialized.status, "success", JSON.stringify(initialized));',
           'if (initialized.status !== "success") process.exit(2);',
           "assert.deepEqual(initialized.generationRecord.presetSelections.map(({ packageName }) => packageName), [preset.identity.packageName]);",
-          "await writeFile(process.argv[5], JSON.stringify({ initialized, preset: preset.identity }));",
+          "const initializedPackages = initialized.generationRecord.packages.map((record) => ({ packageDefinitionId: record.packageDefinitionId, bindings: record.bindings }));",
+          "const initializedNodeInstances = initialized.generationRecord.nodeInstances;",
+          "const initializedDefinitions = initialized.blueprint.packages.map(({ packageDefinitionId, path }) => ({ packageDefinitionId, path }));",
+          "const userFile = `${process.argv[2]}/user-owned.txt`;",
+          'await writeFile(userFile, "keep the initialized workspace\\n", { mode: 0o640 });',
+          "await chmod(userFile, 0o640);",
+          "await writeFile(process.argv[5], JSON.stringify({ initialized: { presetSelections: initialized.generationRecord.presetSelections, packages: initializedPackages, nodeInstances: initializedNodeInstances, definitions: initializedDefinitions, packagePaths: initialized.blueprint.packages.map(({ path }) => path) } }));",
         ].join("\n"),
       );
 
@@ -729,23 +843,28 @@ void describe("原生内容制品安装链", () => {
 
       const result = JSON.parse(await readFile(resultPath, "utf8")) as {
         readonly initialized: {
-          readonly generationRecord: {
-            readonly presetSelections: readonly {
-              readonly packageName: string;
-            }[];
-          };
-          readonly blueprint: {
-            readonly packages: readonly { readonly path: string }[];
-          };
+          readonly presetSelections: readonly {
+            readonly packageName: string;
+          }[];
+          readonly packages: readonly {
+            readonly packageDefinitionId: string;
+            readonly bindings: Readonly<Record<string, string>>;
+          }[];
+          readonly nodeInstances: Readonly<Record<string, string>>;
+          readonly definitions: readonly {
+            readonly packageDefinitionId: string;
+            readonly path: string;
+          }[];
+          readonly packagePaths: readonly string[];
         };
       };
       assert.deepEqual(
-        result.initialized.generationRecord.presetSelections.map(
+        result.initialized.presetSelections.map(
           ({ packageName }) => packageName,
         ),
         [preset.identity.packageName],
       );
-      assert.ok(result.initialized.blueprint.packages.length > 0);
+      assert.ok(result.initialized.packagePaths.length > 0);
       const closure = await auditInstalledClosure(consumerRoot, [
         ...authorRoots,
         workspaceRoot,
@@ -759,6 +878,236 @@ void describe("原生内容制品安装链", () => {
         assert.ok(
           closure.packages.some(({ name }) => name === archive.name),
           `${preset.alias} 安装闭包缺少制品：${archive.name}@${archive.version}`,
+        );
+      }
+      assert.deepEqual(
+        await Promise.all(
+          authorRoots.map(
+            async (authorPath) => (await stat(authorPath)).mtimeMs,
+          ),
+        ),
+        authorTimes,
+      );
+      assert.deepEqual(
+        await Promise.all(
+          authorRoots.map(
+            async (authorPath) => (await stat(authorPath)).mode & 0o777,
+          ),
+        ),
+        authorModes,
+      );
+      const afterInitWorkspace = await stat(workspaceRoot);
+      assert.equal(afterInitWorkspace.mode & 0o777, workspaceMode);
+      assert.equal(afterInitWorkspace.mtimeMs, workspaceTime);
+
+      const replayPackageByPreset = new Map([
+        ["ts-cli", "@ykdz/reference-ts-cli"],
+        ["rust-bin", "@ykdz/reference-rust-bin"],
+        ["vue-app", "@ykdz/reference-vue-app"],
+        ["vue-hono-app", "@ykdz/reference-vue-app"],
+        ["vike-app", "@ykdz/reference-vue-app"],
+      ]);
+      const replayPackageName = replayPackageByPreset.get(preset.alias);
+      assert.ok(replayPackageName, `${preset.alias} 缺少受支持的单包回放选择`);
+      const replayMember = templateContent.find(
+        (member) =>
+          member.kind === "reference" &&
+          member.identity.packageName === replayPackageName,
+      );
+      assert.ok(replayMember);
+      const alreadyPrepared = prepared.members.some(
+        (member) =>
+          contentIdentityKey(member.identity) ===
+          contentIdentityKey(replayMember.identity),
+      );
+      let replayPrepared = prepared;
+      let replayConsumerRoot = consumerRoot;
+      if (!alreadyPrepared) {
+        replayPrepared = await prepareContentCollection({
+          content: templateContent,
+          roots: [preset, replayMember],
+          strategy: createDefaultWorkspaceStrategy(),
+          workspaceRoot,
+          packageName: `@fixture/replay-${preset.alias}`,
+          collectionVersion: prepared.collection.version,
+          root: await temporaryRoot(`preset-${preset.alias}-replay-build-`),
+          sdkArchives,
+        });
+        preparedCollections.push(replayPrepared);
+        assert.deepEqual(
+          replayPrepared.presets.map(({ alias }) => alias),
+          [preset.alias],
+        );
+        replayConsumerRoot = await temporaryRoot(
+          `preset-${preset.alias}-replay-consumer-`,
+        );
+        await installContentCollection(replayPrepared, replayConsumerRoot);
+      }
+      const replayInstalledCollection = path.join(
+        replayConsumerRoot,
+        "node_modules",
+        alreadyPrepared ? "@ykdz" : "@fixture",
+        alreadyPrepared ? "template-content" : `replay-${preset.alias}`,
+      );
+      const replayDriverPath = path.join(
+        replayInstalledCollection,
+        "preset-add-driver.mjs",
+      );
+      const replayAuthorRoots = replayPrepared.owners.map(
+        (owner) => owner.packageRoot,
+      );
+      const replayAuthorModes = await Promise.all(
+        replayAuthorRoots.map(
+          async (authorPath) => (await stat(authorPath)).mode & 0o777,
+        ),
+      );
+      const replayAuthorTimes = await Promise.all(
+        replayAuthorRoots.map(
+          async (authorPath) => (await stat(authorPath)).mtimeMs,
+        ),
+      );
+      const replayWorkspaceMetadata = await stat(workspaceRoot);
+      const replayWorkspaceMode = replayWorkspaceMetadata.mode & 0o777;
+      const replayWorkspaceTime = replayWorkspaceMetadata.mtimeMs;
+      const replayAuthorRootsPath = path.join(
+        projectRoot,
+        `${preset.alias}-replay-author-roots.json`,
+      );
+      const replayResultPath = path.join(
+        projectRoot,
+        `${preset.alias}-replay-result.json`,
+      );
+      const replayTemporaryDirectory = path.join(replayConsumerRoot, "tmp");
+      await mkdir(replayTemporaryDirectory, { recursive: true });
+      await chmod(replayTemporaryDirectory, 0o777);
+      await writeFile(
+        replayAuthorRootsPath,
+        JSON.stringify([...replayAuthorRoots, workspaceRoot]),
+      );
+      const replayCreationInput = {
+        leafName: `replayed-${preset.alias}`,
+        packagePath: `packages/replayed-${preset.alias}`,
+        ...(preset.alias === "ts-cli" ? { variant: "private" } : {}),
+      };
+      await writeFile(
+        replayDriverPath,
+        [
+          'import assert from "node:assert/strict";',
+          'import { readdir, readFile, stat, writeFile } from "node:fs/promises";',
+          'import { contentIdentityKey } from "@ykdz/template-core/content-identity";',
+          'import { createGenerator } from "@ykdz/template-generator";',
+          'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
+          `import { templateContent } from "${replayPrepared.collection.name}";`,
+          "const targetRoot = process.argv[2];",
+          'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
+          'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
+          'const baseline = JSON.parse(await readFile(process.argv[4], "utf8")).initialized;',
+          'const member = templateContent.find((candidate) => candidate.kind === "reference" && candidate.identity.packageName === process.argv[5]);',
+          "assert.ok(member);",
+          "const creationInput = JSON.parse(process.argv[6]);",
+          "const generator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+          "const addition = await generator.add({ repositoryRoot: targetRoot, contentIdentity: member.identity, creationInput });",
+          'assert.equal(addition.status, "success", JSON.stringify(addition));',
+          'if (addition.status !== "success") process.exit(3);',
+          "for (const previous of baseline.packages) { const current = addition.generationRecord.packages.find((record) => record.packageDefinitionId === previous.packageDefinitionId); assert.ok(current); assert.deepEqual(current.bindings, previous.bindings); }",
+          "for (const [identity, instanceId] of Object.entries(baseline.nodeInstances)) assert.equal(addition.generationRecord.nodeInstances[identity], instanceId);",
+          "for (const previous of baseline.definitions) assert.ok(addition.blueprint.packages.some(({ packageDefinitionId, path }) => packageDefinitionId === previous.packageDefinitionId && path === previous.path));",
+          "assert.deepEqual(addition.generationRecord.presetSelections.map(({ packageName }) => packageName), baseline.presetSelections.map(({ packageName }) => packageName));",
+          "const userFile = `${targetRoot}/user-owned.txt`;",
+          'assert.equal(await readFile(userFile, "utf8"), "keep the initialized workspace\\n");',
+          "assert.equal((await stat(userFile)).mode & 0o777, 0o640);",
+          "const newRecord = addition.generationRecord.packages.find((record) => record.contentIdentity.packageName === member.identity.packageName && !baseline.packages.some((previous) => previous.packageDefinitionId === record.packageDefinitionId));",
+          "assert.ok(newRecord);",
+          "assert.ok(addition.blueprint.packages.some((definition) => definition.packageDefinitionId === newRecord.packageDefinitionId && definition.path === creationInput.packagePath));",
+          'await writeFile(process.argv[7], JSON.stringify({ status: addition.status, identity: member.identity, packageDefinitionId: newRecord.packageDefinitionId, path: creationInput.packagePath, userCustomization: { text: await readFile(userFile, "utf8"), mode: (await stat(userFile)).mode & 0o777 } }));',
+        ].join("\n"),
+      );
+      await withUnreadableAuthorDirectories(
+        [
+          ...replayAuthorRoots.map((authorPath, index) => ({
+            path: authorPath,
+            mode: replayAuthorModes[index]!,
+          })),
+          { path: workspaceRoot, mode: replayWorkspaceMode },
+        ],
+        async () =>
+          await execa(
+            process.execPath,
+            [
+              replayDriverPath,
+              targetRoot,
+              replayAuthorRootsPath,
+              resultPath,
+              replayPackageName,
+              JSON.stringify(replayCreationInput),
+              replayResultPath,
+            ],
+            {
+              cwd: replayInstalledCollection,
+              env: {
+                ...process.env,
+                HOME: replayConsumerRoot,
+                TMPDIR: replayTemporaryDirectory,
+                NODE_OPTIONS: "--no-global-search-paths",
+                NODE_PATH: "",
+              },
+              uid: 65534,
+              gid: 65534,
+            },
+          ),
+      );
+      const replayResult = JSON.parse(
+        await readFile(replayResultPath, "utf8"),
+      ) as {
+        readonly status: string;
+        readonly identity: { readonly packageName: string };
+        readonly packageDefinitionId: string;
+        readonly path: string;
+        readonly userCustomization: {
+          readonly text: string;
+          readonly mode: number;
+        };
+      };
+      assert.equal(replayResult.status, "success");
+      assert.equal(replayResult.identity.packageName, replayPackageName);
+      assert.equal(replayResult.path, replayCreationInput.packagePath);
+      assert.equal(
+        replayResult.userCustomization.text,
+        "keep the initialized workspace\n",
+      );
+      assert.equal(replayResult.userCustomization.mode, 0o640);
+      assert.deepEqual(
+        await Promise.all(
+          replayAuthorRoots.map(
+            async (authorPath) => (await stat(authorPath)).mtimeMs,
+          ),
+        ),
+        replayAuthorTimes,
+      );
+      assert.deepEqual(
+        await Promise.all(
+          replayAuthorRoots.map(
+            async (authorPath) => (await stat(authorPath)).mode & 0o777,
+          ),
+        ),
+        replayAuthorModes,
+      );
+      const afterReplayWorkspace = await stat(workspaceRoot);
+      assert.equal(afterReplayWorkspace.mode & 0o777, replayWorkspaceMode);
+      assert.equal(afterReplayWorkspace.mtimeMs, replayWorkspaceTime);
+      const replayClosure = await auditInstalledClosure(replayConsumerRoot, [
+        ...replayAuthorRoots,
+        workspaceRoot,
+      ]);
+      for (const archive of [
+        ...replayPrepared.sdkPackages,
+        ...replayPrepared.owners.map((owner) => owner.packed),
+        ...replayPrepared.providers,
+        replayPrepared.collection,
+      ]) {
+        assert.ok(
+          replayClosure.packages.some(({ name }) => name === archive.name),
+          `${preset.alias} 回放闭包缺少制品：${archive.name}@${archive.version}`,
         );
       }
       let missingResourceEvidence:
@@ -873,31 +1222,17 @@ void describe("原生内容制品安装链", () => {
           { code: "ENOENT" },
         );
       }
-      assert.deepEqual(
-        await Promise.all(
-          authorRoots.map(
-            async (authorPath) => (await stat(authorPath)).mtimeMs,
-          ),
-        ),
-        authorTimes,
-      );
-      assert.deepEqual(
-        await Promise.all(
-          authorRoots.map(
-            async (authorPath) => (await stat(authorPath)).mode & 0o777,
-          ),
-        ),
-        authorModes,
-      );
-      const restoredWorkspace = await stat(workspaceRoot);
-      assert.equal(restoredWorkspace.mode & 0o777, workspaceMode);
-      assert.equal(restoredWorkspace.mtimeMs, workspaceTime);
-
       const evidenceRoot = await contentArtifactEvidenceRoot();
       await writeContentCollectionEvidence(
         prepared,
         path.join(evidenceRoot, `${preset.alias}-build.md`),
       );
+      if (!alreadyPrepared) {
+        await writeContentCollectionEvidence(
+          replayPrepared,
+          path.join(evidenceRoot, `${preset.alias}-replay-build.md`),
+        );
+      }
       await writeFile(
         path.join(evidenceRoot, `${preset.alias}-consumer.json`),
         `${JSON.stringify(
@@ -913,7 +1248,18 @@ void describe("原生内容制品安装链", () => {
             links: closure.links,
             providers: closure.packages,
             preset: preset.identity,
-            packages: result.initialized.blueprint.packages,
+            packages: result.initialized.packagePaths,
+            replay: {
+              collectionRoot: alreadyPrepared
+                ? [preset.identity]
+                : [preset.identity, replayMember.identity],
+              package: replayResult.identity,
+              packageDefinitionId: replayResult.packageDefinitionId,
+              path: replayResult.path,
+              userCustomization: replayResult.userCustomization,
+              providers: replayClosure.packages,
+              links: replayClosure.links,
+            },
             missingResource: missingResourceEvidence,
           },
           null,
@@ -1622,7 +1968,7 @@ void describe("原生内容制品安装链", () => {
       driverPath,
       [
         'import assert from "node:assert/strict";',
-        'import { lstat, readdir, readFile, readlink, writeFile } from "node:fs/promises";',
+        'import { chmod, lstat, readdir, readFile, readlink, stat, writeFile } from "node:fs/promises";',
         'import { contentIdentityKey } from "@ykdz/template-core/content-identity";',
         'import { createGenerator } from "@ykdz/template-generator";',
         'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
@@ -1670,8 +2016,18 @@ void describe("原生内容制品安装链", () => {
         "assert.ok(featureDefinition && themeDefinition);",
         'assert.equal(await readFile(`${targetRoot}/${featureDefinition.path}/lib/content.ts`, "utf8"), \'export const fixtureOrigin = "native-authored:feature";\\n\');',
         'assert.equal(await readFile(`${targetRoot}/${themeDefinition.path}/src/theme.ts`, "utf8"), \'export const fixtureOrigin = "native-authored:theme";\\n\');',
+        "const featureSourcePath = `${targetRoot}/${featureDefinition.path}/lib/content.ts`;",
+        "const customizedFeatureSource = 'export const fixtureOrigin = \"native-authored:feature\";\\n// preserved user edit\\n';",
+        "await writeFile(featureSourcePath, customizedFeatureSource, { mode: 0o640 });",
+        "await chmod(featureSourcePath, 0o640);",
         "const generationPath = `${targetRoot}/.template/generation.json`;",
         'await writeFile(`${targetRoot}/user-owned.txt`, "keep this file\\n", { mode: 0o640 });',
+        "await chmod(`${targetRoot}/user-owned.txt`, 0o640);",
+        "const rootManifestPath = `${targetRoot}/package.json`;",
+        'const rootManifest = JSON.parse(await readFile(rootManifestPath, "utf8"));',
+        'rootManifest.scripts["user:retained"] = "node --version";',
+        'rootManifest.userMetadata = { owner: "human", ticket: "18" };',
+        "await writeFile(rootManifestPath, `${JSON.stringify(rootManifest, null, 2)}\\n`);",
         'const beforeWrongKind = await readFile(generationPath, "utf8");',
         "const beforeWrongKindTree = await snapshotTree(targetRoot);",
         "const presetIdentity = initialized.generationRecord.presetSelections[0];",
@@ -1688,6 +2044,12 @@ void describe("原生内容制品安装链", () => {
         "assert.ok(addonDefinition);",
         'const generatedAddon = await readFile(`${targetRoot}/${addonDefinition.path}/src/addon.ts`, "utf8");',
         "assert.equal(generatedAddon, 'export const fixtureOrigin = \"native-authored:addon\";\\n');",
+        'assert.equal(await readFile(`${targetRoot}/user-owned.txt`, "utf8"), "keep this file\\n");',
+        "assert.equal((await stat(`${targetRoot}/user-owned.txt`)).mode & 0o777, 0o640);",
+        'assert.equal(await readFile(featureSourcePath, "utf8"), customizedFeatureSource);',
+        "assert.equal((await stat(featureSourcePath)).mode & 0o777, 0o640);",
+        'assert.equal(JSON.parse(await readFile(rootManifestPath, "utf8")).scripts["user:retained"], "node --version");',
+        'assert.deepEqual(JSON.parse(await readFile(rootManifestPath, "utf8")).userMetadata, { owner: "human", ticket: "18" });',
         "const afterFeatureRecord = addition.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(featureIdentity));",
         "const afterThemeRecords = addition.generationRecord.packages.filter((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(themeIdentity));",
         'const addonIdentity = { namespace: "native-authored", packageName: "@fixture/addon", exportPath: "./template" };',
@@ -1698,7 +2060,49 @@ void describe("原生内容制品安装链", () => {
         "assert.equal(afterThemeRecords[0].packageDefinitionId, themeRecord.packageDefinitionId);",
         "assert.equal(addonRecord.bindings[contentIdentityKey(themeIdentity)], themeRecord.packageDefinitionId);",
         "for (const [nodeIdentity, instanceId] of Object.entries(initialized.generationRecord.nodeInstances)) assert.equal(addition.generationRecord.nodeInstances[nodeIdentity], instanceId);",
-        "await writeFile(resultPath, JSON.stringify({ templateContent, initialized, addition, generatedAddon, beforeWrongKindTree, afterWrongKindTree }));",
+        "const secondFreshGenerator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+        'const secondAddition = await secondFreshGenerator.add({ repositoryRoot: targetRoot, contentIdentity: { alias: "addon", namespace: "native-authored" }, creationInput: { leafName: "second-addon" } });',
+        'assert.equal(secondAddition.status, "success", JSON.stringify(secondAddition));',
+        'if (secondAddition.status !== "success") process.exit(4);',
+        'const secondAddonDefinition = secondAddition.blueprint.packages.find((definition) => definition.path === "packages/second-addon");',
+        "assert.ok(secondAddonDefinition);",
+        'const secondGeneratedAddon = await readFile(`${targetRoot}/${secondAddonDefinition.path}/src/addon.ts`, "utf8");',
+        "assert.equal(secondGeneratedAddon, 'export const fixtureOrigin = \"native-authored:addon\";\\n');",
+        "const secondFeatureRecord = secondAddition.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(featureIdentity));",
+        "const secondThemeRecords = secondAddition.generationRecord.packages.filter((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(themeIdentity));",
+        "const secondAddonRecords = secondAddition.generationRecord.packages.filter((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(addonIdentity));",
+        "const secondAddonRecord = secondAddonRecords.find((record) => record.packageDefinitionId !== addonRecord.packageDefinitionId);",
+        "assert.ok(secondFeatureRecord && secondAddonRecord);",
+        "assert.equal(secondFeatureRecord.packageDefinitionId, featureRecord.packageDefinitionId);",
+        "assert.equal(secondThemeRecords.length, 1);",
+        "assert.equal(secondThemeRecords[0].packageDefinitionId, themeRecord.packageDefinitionId);",
+        "assert.equal(addonRecord.bindings[contentIdentityKey(themeIdentity)], themeRecord.packageDefinitionId);",
+        "assert.equal(secondAddonRecord.bindings[contentIdentityKey(themeIdentity)], themeRecord.packageDefinitionId);",
+        "for (const record of addition.generationRecord.packages) { const retained = secondAddition.generationRecord.packages.find((candidate) => candidate.packageDefinitionId === record.packageDefinitionId); assert.ok(retained); assert.deepEqual(retained.bindings, record.bindings); }",
+        "for (const [nodeIdentity, instanceId] of Object.entries(addition.generationRecord.nodeInstances)) assert.equal(secondAddition.generationRecord.nodeInstances[nodeIdentity], instanceId);",
+        'assert.equal(await readFile(`${targetRoot}/user-owned.txt`, "utf8"), "keep this file\\n");',
+        "assert.equal((await stat(`${targetRoot}/user-owned.txt`)).mode & 0o777, 0o640);",
+        'assert.equal(await readFile(featureSourcePath, "utf8"), customizedFeatureSource);',
+        "assert.equal((await stat(featureSourcePath)).mode & 0o777, 0o640);",
+        'assert.equal(JSON.parse(await readFile(rootManifestPath, "utf8")).scripts["user:retained"], "node --version");',
+        'assert.deepEqual(JSON.parse(await readFile(rootManifestPath, "utf8")).userMetadata, { owner: "human", ticket: "18" });',
+        'const validGenerationRecordText = await readFile(generationPath, "utf8");',
+        "const invalidGenerationRecord = JSON.parse(validGenerationRecordText);",
+        "const invalidFeatureRecord = invalidGenerationRecord.packages.find((record) => record.packageDefinitionId === featureRecord.packageDefinitionId);",
+        "assert.ok(invalidFeatureRecord);",
+        'invalidFeatureRecord.bindings[contentIdentityKey(themeIdentity)] = "missing-theme-instance";',
+        "await writeFile(generationPath, `${JSON.stringify(invalidGenerationRecord, null, 2)}\\n`);",
+        "const beforeInvalidBindingTree = await snapshotTree(targetRoot);",
+        "const invalidBindingGenerator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+        'const invalidBinding = await invalidBindingGenerator.add({ repositoryRoot: targetRoot, contentIdentity: { alias: "addon", namespace: "native-authored" }, creationInput: { leafName: "rejected-addon" } });',
+        'assert.equal(invalidBinding.status, "operation-failure", JSON.stringify(invalidBinding));',
+        'if (invalidBinding.status !== "operation-failure") process.exit(5);',
+        'assert.equal(invalidBinding.phase, "metadata");',
+        "assert.match(invalidBinding.error.message, /binding|绑定|实例/u);",
+        "const afterInvalidBindingTree = await snapshotTree(targetRoot);",
+        "assert.deepEqual(afterInvalidBindingTree, beforeInvalidBindingTree);",
+        "await writeFile(generationPath, validGenerationRecordText);",
+        'await writeFile(resultPath, JSON.stringify({ templateContent, initialized, addition, secondAddition, invalidBinding: { status: invalidBinding.status, phase: invalidBinding.phase, errorMessage: invalidBinding.error.message, before: beforeInvalidBindingTree, after: afterInvalidBindingTree }, generatedAddon, secondGeneratedAddon, beforeWrongKindTree, afterWrongKindTree, userCustomization: { text: await readFile(`${targetRoot}/user-owned.txt`, "utf8"), mode: (await stat(`${targetRoot}/user-owned.txt`)).mode & 0o777, featureSource: await readFile(featureSourcePath, "utf8"), featureMode: (await stat(featureSourcePath)).mode & 0o777, rootScript: JSON.parse(await readFile(rootManifestPath, "utf8")).scripts["user:retained"], rootMetadata: JSON.parse(await readFile(rootManifestPath, "utf8")).userMetadata } }));',
       ].join("\n"),
     );
     await withUnreadableAuthorDirectories(
@@ -1737,7 +2141,33 @@ void describe("原生内容制品安装链", () => {
         };
       };
       readonly addition: { readonly status: string };
+      readonly secondAddition: { readonly status: string };
+      readonly invalidBinding: {
+        readonly status: string;
+        readonly phase: string;
+        readonly errorMessage: string;
+        readonly before: readonly {
+          readonly path: string;
+          readonly state: string;
+        }[];
+        readonly after: readonly {
+          readonly path: string;
+          readonly state: string;
+        }[];
+      };
       readonly generatedAddon: string;
+      readonly secondGeneratedAddon: string;
+      readonly userCustomization: {
+        readonly text: string;
+        readonly mode: number;
+        readonly featureSource: string;
+        readonly featureMode: number;
+        readonly rootScript: string;
+        readonly rootMetadata: {
+          readonly owner: string;
+          readonly ticket: string;
+        };
+      };
       readonly beforeWrongKindTree: readonly {
         readonly path: string;
         readonly state: string;
@@ -1766,7 +2196,21 @@ void describe("原生内容制品安装链", () => {
       ["@fixture/preset"],
     );
     assert.equal(result.addition.status, "success");
+    assert.equal(result.secondAddition.status, "success");
+    assert.equal(result.invalidBinding.status, "operation-failure");
+    assert.equal(result.invalidBinding.phase, "metadata");
+    assert.deepEqual(result.invalidBinding.after, result.invalidBinding.before);
     assert.match(result.generatedAddon, /native-authored:addon/u);
+    assert.match(result.secondGeneratedAddon, /native-authored:addon/u);
+    assert.deepEqual(result.userCustomization, {
+      text: "keep this file\n",
+      mode: 0o640,
+      featureSource:
+        'export const fixtureOrigin = "native-authored:feature";\n// preserved user edit\n',
+      featureMode: 0o640,
+      rootScript: "node --version",
+      rootMetadata: { owner: "human", ticket: "18" },
+    });
     assert.deepEqual(result.afterWrongKindTree, result.beforeWrongKindTree);
     assert.deepEqual(
       await Promise.all(
@@ -2045,11 +2489,15 @@ void describe("原生内容制品安装链", () => {
               result.initialized.generationRecord.presetSelections,
             generatedAddon: result.generatedAddon,
             freshAdd: result.addition.status,
+            secondFreshAdd: result.secondAddition.status,
+            secondGeneratedAddon: result.secondGeneratedAddon,
+            userCustomization: result.userCustomization,
           },
           wrongKind: {
             before: result.beforeWrongKindTree,
             after: result.afterWrongKindTree,
           },
+          invalidBinding: result.invalidBinding,
           missingDependency: {
             exitCode: missingDependencyResult.exitCode,
             stderr: missingDependencyResult.stderr,
