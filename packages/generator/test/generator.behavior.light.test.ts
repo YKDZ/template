@@ -725,6 +725,28 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
         message: /缺少必要节点实例映射/u,
       },
       {
+        label: "package instance",
+        record: (() => {
+          const record = cloneRecord();
+          const packages = record.packages as Record<string, unknown>[];
+          const guide = packages.find(
+            (item) =>
+              contentIdentityKey(item.contentIdentity as ContentIdentity) ===
+              guideIdentityKey,
+          )!;
+          delete (guide.bindings as Record<string, string>)[
+            glossaryIdentityKey
+          ];
+          record.packages = packages.filter(
+            (item) =>
+              contentIdentityKey(item.contentIdentity as ContentIdentity) !==
+              glossaryIdentityKey,
+          );
+          return record;
+        })(),
+        message: /生成记录与蓝图的包实例数量不一致/u,
+      },
+      {
         label: "required binding",
         record: (() => {
           const record = cloneRecord();
