@@ -510,6 +510,9 @@ importers:
       '@ykdz/reference-vue-shared':
         specifier: workspace:*
         version: link:../../references/vue-shared
+      '@ykdz/template-content':
+        specifier: workspace:*
+        version: link:../content
       execa:
         specifier: 'catalog:'
         version: 10.1.1
@@ -1122,6 +1125,9 @@ importers:
       '@ykdz/reference-ts-cli':
         specifier: workspace:*
         version: link:../../references/ts-cli
+      '@ykdz/reference-typescript-config':
+        specifier: workspace:*
+        version: link:../../references/typescript-config
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
@@ -1150,9 +1156,6 @@ importers:
       '@types/spdx-expression-parse':
         specifier: 'catalog:'
         version: 4.0.0
-      '@ykdz/reference-typescript-config':
-        specifier: workspace:*
-        version: link:../../references/typescript-config
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0

@@ -1,5 +1,10 @@
 import { referencePackage } from "@ykdz/reference-rust-bin/template";
-import { definePreset } from "@ykdz/template-core/preset-definition";
+import {
+  definePreset,
+  presetOwnerFromManifest,
+} from "@ykdz/template-core/preset-definition";
+
+import presetPackage from "../package.json" with { type: "json" };
 
 export const preset = definePreset({
   metadata: {
@@ -8,6 +13,7 @@ export const preset = definePreset({
     description: "包含 rustfmt、clippy 和 cargo 测试的 Rust 原生二进制工作区。",
   },
   operations: ["init", "add"],
+  owner: presetOwnerFromManifest(presetPackage, "./template"),
   nodes: {
     binary: { reference: referencePackage },
   },
