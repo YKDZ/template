@@ -470,6 +470,10 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     const originalFeature = identityFor(original, "@fixture/feature");
     const movedFeature = identityFor(moved, "@fixture/feature");
     assert.deepEqual(movedFeature, originalFeature);
+    assert.throws(
+      () => moved.resolve("@fixture/feature/assets/lib/renamed-content.ts"),
+      { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" },
+    );
     assert.notEqual(
       original.members.find(
         (member) => member.identity.packageName === "@fixture/feature",
@@ -513,6 +517,122 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       ),
       'export const fixtureOrigin = "two:feature";\n',
     );
+
+    const freshGenerator = createGenerator({
+      content: moved.members,
+      strategy: createDefaultWorkspaceStrategy(),
+    });
+    const added = await freshGenerator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: identityFor(moved, "@fixture/addon"),
+    });
+    assert.equal(added.status, "success", JSON.stringify(added));
+    assert.equal(
+      await readFile(
+        path.join(
+          targetRoot,
+          featureRecord.definition.path,
+          "lib/renamed-content.ts",
+        ),
+        "utf8",
+      ),
+      'export const fixtureOrigin = "two:feature";\n',
+    );
+    assert.equal(
+      await readFile(
+        path.join(targetRoot, "packages/addon/src/addon.ts"),
+        "utf8",
+      ),
+      'export const fixtureOrigin = "two:addon";\n',
+    );
+  });
+
+  void it("拥有者源码变化传播到本包生成内容而不改共享参考事实", async () => {
+    const original = await createFixture({
+      namespace: "source-propagation",
+      marker: "shared-fact",
+      featureMarker: "before",
+    });
+    const changed = await createFixture({
+      namespace: "source-propagation",
+      marker: "shared-fact",
+      featureMarker: "after",
+    });
+    const generatedRoots = await Promise.all([
+      createWorkspace().then((workspace) => path.join(workspace, "original")),
+      createWorkspace().then((workspace) => path.join(workspace, "changed")),
+    ]);
+    const generated = await Promise.all(
+      [original, changed].map(async (fixture, index) => {
+        const result = await createGenerator({
+          content: fixture.members,
+          strategy: createDefaultWorkspaceStrategy(),
+        }).init({
+          targetRoot: generatedRoots[index]!,
+          selection: {
+            roots: [
+              {
+                preset: {
+                  alias: "authored",
+                  namespace: "source-propagation",
+                },
+              },
+            ],
+          },
+          strategyInput: {
+            repositoryName: "source-propagation",
+            defaultPackageScope: "demo",
+          },
+        });
+        assert.equal(result.status, "success", JSON.stringify(result));
+        if (result.status !== "success") return undefined;
+        return result.generationRecord;
+      }),
+    );
+    assert.ok(generated[0]);
+    assert.ok(generated[1]);
+
+    for (const [index, expected] of [
+      "before:feature",
+      "after:feature",
+    ].entries()) {
+      const record = generated[index]!;
+      const feature = record.packages.find(
+        (pkg) =>
+          contentIdentityKey(pkg.contentIdentity) ===
+          contentIdentityKey(
+            identityFor(index === 0 ? original : changed, "@fixture/feature"),
+          ),
+      );
+      const theme = record.packages.find(
+        (pkg) =>
+          pkg.contentIdentity.packageName === "@fixture/typescript-config",
+      );
+      assert.ok(feature);
+      assert.ok(theme);
+      assert.equal(
+        await readFile(
+          path.join(
+            generatedRoots[index]!,
+            feature.definition.path,
+            "src/content.ts",
+          ),
+          "utf8",
+        ),
+        `export const fixtureOrigin = ${JSON.stringify(expected)};\n`,
+      );
+      assert.equal(
+        await readFile(
+          path.join(
+            generatedRoots[index]!,
+            theme.definition.path,
+            "src/theme.ts",
+          ),
+          "utf8",
+        ),
+        'export const fixtureOrigin = "shared-fact:theme";\n',
+      );
+    }
   });
 
   void it("公开包名变更产生新身份，旧身份不会映射到新成员", async () => {

@@ -159,7 +159,11 @@ void describe("公开模板内容集合", () => {
           preset: vueAppPreset.identity,
           creationInput: { leafName: names[0] },
         });
-        assert.strictEqual(conflict.status, "conflict", JSON.stringify(conflict));
+        assert.strictEqual(
+          conflict.status,
+          "conflict",
+          JSON.stringify(conflict),
+        );
         assert.strictEqual(await snapshotTree(targetRoot), beforeConflict);
         await writeFile(workflowPath, customizedWorkflow.replace(userStep, ""));
       }

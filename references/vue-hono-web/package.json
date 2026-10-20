@@ -16,7 +16,6 @@
       "default": "./src/main.ts"
     },
     "./reference": "./package.json",
-    "./assets/*": "./*",
     "./template": {
       "source": "./template/definition.ts",
       "types": "./template-dist/definition.d.ts",

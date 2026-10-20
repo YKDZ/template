@@ -16,8 +16,8 @@ import type {
   PackageCreationInput,
 } from "@ykdz/template-core/workspace-strategy";
 import { createGenerator } from "@ykdz/template-generator";
-import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 import type { GenerationContext } from "@ykdz/template-workspace-authoring/generation-context";
+import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 import {
   defineReferencePackage,
   type ReferencePackage,
@@ -26,6 +26,10 @@ import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default
 
 const configuration = defineReferencePackage(configurationDefinition);
 const namespace = "ticket-15-first-party";
+
+function resourceRoot(packageName: string): URL {
+  return new URL("../", import.meta.resolve(`${packageName}/template`));
+}
 
 function loadedReference(
   definition: ReferencePackage,
@@ -194,6 +198,7 @@ void describe("参考包 owner prepare 的公开生成器生命周期", () => {
     const missingResource = defineReferencePackage({
       packageName: library.manifest.name,
       resolve: (specifier) => import.meta.resolve(specifier),
+      resourceRoot: resourceRoot(library.manifest.name),
       alias: library.alias,
       instance: library.instance,
       defaultLeafName: library.defaultLeafName,
@@ -231,6 +236,58 @@ void describe("参考包 owner prepare 的公开生成器生命周期", () => {
     await assert.rejects(stat(targetRoot), { code: "ENOENT" });
   });
 
+  void it("所属准备不能读取资源声明范围外的文本", async (context) => {
+    const temporaryRoot = await mkdtemp(
+      path.join(tmpdir(), "template-reference-prepare-out-of-scope-"),
+    );
+    context.after(async () =>
+      rm(temporaryRoot, { recursive: true, force: true }),
+    );
+    const targetRoot = path.join(temporaryRoot, "demo");
+    const outOfScope = defineReferencePackage({
+      packageName: library.manifest.name,
+      resolve: (specifier) => import.meta.resolve(specifier),
+      resourceRoot: resourceRoot(library.manifest.name),
+      alias: library.alias,
+      instance: library.instance,
+      defaultLeafName: library.defaultLeafName,
+      defaultPath: library.defaultPath,
+      role: library.role,
+      resources: ["src"],
+      template: {
+        dependencies: library.templateDependencies,
+        scripts: ["build:template"],
+        resources: [],
+      },
+      prepare(input) {
+        return input.readText("README.md");
+      },
+      foundation: simpleFoundation(),
+      environmentNeeds: [],
+    });
+    const member = loadedReference(outOfScope);
+    const generator = createGenerator({
+      content: [member],
+      strategy: createDefaultWorkspaceStrategy(),
+    });
+    const result = await generator.init({
+      targetRoot,
+      selection: {
+        roots: [{ nodeIdentity: "library", contentIdentity: member.identity }],
+      },
+      strategyInput: { defaultPackageScope: "demo" },
+    });
+
+    assert.equal(result.status, "operation-failure");
+    if (result.status !== "operation-failure") return;
+    assert.equal(result.phase, "planning");
+    assert.match(
+      result.error.message,
+      /@ykdz\/reference-ts-lib.*prepare 阶段失败.*未声明或缺失的文本资源：README\.md/u,
+    );
+    await assert.rejects(stat(targetRoot), { code: "ENOENT" });
+  });
+
   void it("add 的 fresh engine 会先回放 owner 准备，未声明模板依赖不写目标", async (context) => {
     const temporaryRoot = await mkdtemp(
       path.join(tmpdir(), "template-reference-prepare-missing-add-"),
@@ -258,6 +315,7 @@ void describe("参考包 owner prepare 的公开生成器生命周期", () => {
     const missingDependency = defineReferencePackage({
       packageName: vueApp.manifest.name,
       resolve: (specifier) => import.meta.resolve(specifier),
+      resourceRoot: resourceRoot(vueApp.manifest.name),
       alias: vueApp.alias,
       instance: vueApp.instance,
       defaultLeafName: vueApp.defaultLeafName,
@@ -300,6 +358,7 @@ void describe("参考包 owner prepare 的公开生成器生命周期", () => {
     const brokenShared = defineReferencePackage({
       packageName: vueShared.manifest.name,
       resolve: (specifier) => import.meta.resolve(specifier),
+      resourceRoot: resourceRoot(vueShared.manifest.name),
       alias: vueShared.alias,
       instance: vueShared.instance,
       defaultLeafName: vueShared.defaultLeafName,

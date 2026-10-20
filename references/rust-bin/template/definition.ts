@@ -21,6 +21,7 @@ export const referencePackage: ReferencePackage<
 > = defineReferencePackage({
   packageName: "@ykdz/reference-rust-bin",
   resolve: (specifier) => import.meta.resolve(specifier),
+  resourceRoot: new URL("../", import.meta.url),
   alias: "binary",
   instance: "independent",
   defaultLeafName: "app",
@@ -39,9 +40,9 @@ export const referencePackage: ReferencePackage<
     scripts: ["build:template"],
     resources: ["template", "tsconfig.template.json"],
   },
-  prepare({ readText }) {
+  prepare(input) {
     const source = (file: string): CargoFile => {
-      const text = readText(file);
+      const text = input.readText(file);
       return { source: text, data: parse(text) };
     };
     return {

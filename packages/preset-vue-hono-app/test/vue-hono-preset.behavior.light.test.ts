@@ -69,6 +69,10 @@ const content = [api, web, vueShared, configuration, library, preset] as const;
 const missingResourceSharedDefinition = defineReferencePackage({
   packageName: vueShared.definition.manifest.name,
   resolve: vueShared.definition.resolve,
+  resourceRoot: new URL(
+    "../",
+    import.meta.resolve(`${vueShared.definition.manifest.name}/template`),
+  ),
   alias: vueShared.definition.alias,
   instance: vueShared.definition.instance,
   defaultLeafName: vueShared.definition.defaultLeafName,

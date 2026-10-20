@@ -136,6 +136,8 @@ export function defineReferencePackage<
 >(options: {
   readonly packageName: string;
   readonly resolve: (specifier: string) => string;
+  /** 所属包公开准备职责选择的本包资源根目录。 */
+  readonly resourceRoot: URL;
   readonly alias: string;
   readonly instance: "shared" | "independent";
   readonly defaultLeafName: string;
@@ -186,6 +188,7 @@ export function defineReferencePackage<
     return normalized;
   };
   const normalizedResources = options.resources.map(normalizeOwnedResource);
+  const resourceRoot = path.resolve(fileURLToPath(options.resourceRoot));
   const templateResources = (options.template.resources ?? []).map(
     normalizeOwnedResource,
   );
@@ -211,26 +214,32 @@ export function defineReferencePackage<
         normalized === resource || normalized.startsWith(`${resource}/`),
     );
   };
-  const resolveAsset = (file: string): string => {
-    if (!inDeclaredResources(file)) {
+  const resolveOwnedResource = (file: string): string => {
+    const normalized = normalizeOwnedResource(file);
+    if (!inDeclaredResources(normalized)) {
       throw new Error(
         `参考包 ${options.packageName} prepare 阶段资源超出声明范围：${file}`,
       );
     }
-    const resolved = fileURLToPath(
-      options.resolve(
-        `${options.packageName}/assets/${file === "." ? "package.json" : file}`,
-      ),
-    );
-    // 原生清单也是公开资产，作为包资源根的锚点；不定位未公开的邻包内容。
-    return file === "." ? path.dirname(resolved) : resolved;
+    const resolved = path.resolve(resourceRoot, ...normalized.split("/"));
+    const relative = path.relative(resourceRoot, resolved);
+    if (
+      relative === ".." ||
+      relative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relative)
+    ) {
+      throw new Error(
+        `参考包 ${options.packageName} prepare 阶段资源超出所属根目录：${file}`,
+      );
+    }
+    return resolved;
   };
   const sourceCache = new Map<string, TemplateSourceHandle>();
   const source = (file: string): TemplateSourceHandle => {
     const normalized = path.posix.normalize(file);
     const existing = sourceCache.get(normalized);
     if (existing !== undefined) return existing;
-    const handle = createTemplateSourceHandle(resolveAsset(normalized));
+    const handle = createTemplateSourceHandle(resolveOwnedResource(normalized));
     sourceCache.set(normalized, handle);
     return handle;
   };
@@ -288,7 +297,7 @@ export function defineReferencePackage<
         const ignoreFile = path.posix.join(directory, ".gitignore");
         try {
           if (inDeclaredResources(ignoreFile)) {
-            rules.add(readFileSync(resolveAsset(ignoreFile), "utf8"));
+            rules.add(readFileSync(resolveOwnedResource(ignoreFile), "utf8"));
           }
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -313,7 +322,7 @@ export function defineReferencePackage<
       };
       const files = new Set<string>();
       const visit = (directory: string): void => {
-        for (const entry of readdirSync(resolveAsset(directory), {
+        for (const entry of readdirSync(resolveOwnedResource(directory), {
           withFileTypes: true,
         }).sort((left, right) => left.name.localeCompare(right.name))) {
           const file = path.posix.join(directory, entry.name);
@@ -329,7 +338,7 @@ export function defineReferencePackage<
         }
         let entry;
         try {
-          entry = statSync(resolveAsset(resource));
+          entry = statSync(resolveOwnedResource(resource));
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === "ENOENT") {
             throw new Error(`参考资源不存在：${resource}`, { cause: error });
@@ -344,7 +353,7 @@ export function defineReferencePackage<
       const resources = [...files]
         .toSorted((left, right) => left.localeCompare(right))
         .map((file) => {
-          const sourcePath = resolveAsset(file);
+          const sourcePath = resolveOwnedResource(file);
           const sourceText = readFileSync(sourcePath).toString("utf8");
           const mode = statSync(sourcePath).mode & 0o777;
           contents.set(file, sourceText);
@@ -499,8 +508,6 @@ export function defineReferencePackage<
       };
       for (const key of [
         "./reference",
-        "./assets",
-        "./assets/*",
         "./template",
         ...(options.template.exports ?? []),
       ])
