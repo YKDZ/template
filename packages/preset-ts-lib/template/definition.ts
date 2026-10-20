@@ -13,7 +13,7 @@ export const preset = definePreset({
     description: "采用 pnpm catalog 工具配置的严格 TypeScript 包。",
   },
   operations: ["init", "add"],
-  owner: presetOwnerFromManifest(presetPackage),
+  owner: presetOwnerFromManifest(presetPackage, "./template"),
   nodes: {
     library: { reference: referencePackage },
   },

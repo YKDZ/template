@@ -13,7 +13,7 @@ export const preset = definePreset({
     description: "包含 rustfmt、clippy 和 cargo 测试的 Rust 原生二进制工作区。",
   },
   operations: ["init", "add"],
-  owner: presetOwnerFromManifest(presetPackage),
+  owner: presetOwnerFromManifest(presetPackage, "./template"),
   nodes: {
     binary: { reference: referencePackage },
   },
