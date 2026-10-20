@@ -21,19 +21,19 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { templateContent } from "@ykdz/template-content";
 import {
+  installContentCollection,
+  prepareContentCollection,
+  writeContentCollectionEvidence,
+  writeNativeArchiveOverrides,
+  type PreparedContentCollection,
+} from "@ykdz/template-content/artifact-builder";
+import {
   resolveTemplateSource,
   type TemplateSourceHandle,
 } from "@ykdz/template-core/renderer";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 import { execa } from "execa";
 
-import {
-  installContentCollection,
-  prepareContentCollection,
-  writeContentCollectionEvidence,
-  writeNativeArchiveOverrides,
-  type PreparedContentCollection,
-} from "../scripts/build-content-artifacts.ts";
 import { createAuthoredContentFixture } from "../test-support/authored-content-fixture.ts";
 
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -277,9 +277,13 @@ after(async () => {
 void describe("原生内容制品安装链", () => {
   void it("安装TS库最小集合后由普通Node init并在新引擎中add和回放", async () => {
     const buildRoot = await temporaryRoot("preset-content-");
+    const preset = templateContent.find(
+      (member) => member.kind === "preset" && member.alias === "ts-lib",
+    );
+    assert.ok(preset);
     const prepared = await prepareContentCollection({
       content: templateContent,
-      presetAlias: "ts-lib",
+      roots: [preset],
       strategy: createDefaultWorkspaceStrategy(),
       workspaceRoot,
       root: buildRoot,
@@ -666,7 +670,10 @@ void describe("原生内容制品安装链", () => {
     const addon = content.find(
       (member) => member.identity.packageName === "@fixture/addon",
     );
-    assert.ok(addon);
+    const preset = content.find(
+      (member) => member.kind === "preset" && member.alias === "authored",
+    );
+    assert.ok(addon && preset);
     const collectionManifest = JSON.parse(
       await readFile(
         path.join(fixture.root, namespace, "collection", "package.json"),
@@ -676,11 +683,9 @@ void describe("原生内容制品安装链", () => {
     const buildRoot = await temporaryRoot("preset-authored-content-");
     const prepared = await prepareContentCollection({
       content: content as unknown as typeof templateContent,
-      additionalMembers: [addon] as unknown as typeof templateContent,
-      presetAlias: "authored",
+      roots: [preset, addon] as unknown as typeof templateContent,
       strategy: createDefaultWorkspaceStrategy(),
       workspaceRoot,
-      namespace,
       packageName: "@fixture/authored-content",
       collectionVersion: collectionManifest.version,
       root: buildRoot,
@@ -1023,7 +1028,7 @@ void describe("原生内容制品安装链", () => {
     assert.match(missingDependencyResult.stderr, /ERR_MODULE_NOT_FOUND/u);
     assert.match(
       missingDependencyResult.stderr,
-      /Cannot find package '@ykdz\/template-generator'.*@fixture\+authored-content/u,
+      /Cannot find package '@ykdz\/template-generator' imported from .*template-content-provider/su,
     );
     assert.deepEqual(
       await snapshotTree(targetRoot),
