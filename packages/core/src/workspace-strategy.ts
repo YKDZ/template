@@ -9,6 +9,11 @@ import type {
 import type { ProjectProjectionReconciliation } from "./project-projection.ts";
 import type { RenderOperation } from "./renderer.ts";
 
+export {
+  generationRecordSchema,
+  parseGenerationRecordStructure,
+} from "./generation-record.ts";
+
 /** 生成器显式接收的一项内容定义。 */
 export type PackageCreationInput<Variant = unknown> = {
   /** 可由工作区策略解释的有限包布局输入。 */
@@ -94,6 +99,23 @@ export type WorkspaceProjection<OwnerFacts = unknown> = {
   readonly ownerFacts?: OwnerFacts;
 };
 
+/** 所属 workspace owner 通过既有 generator 结果返回的用户输入诊断。 */
+export type WorkspaceStrategyInputIssue = {
+  readonly code: string;
+};
+
+export type WorkspaceStrategyValidationResult =
+  | {
+      readonly status: "input-invalid";
+      readonly issues: readonly WorkspaceStrategyInputIssue[];
+    }
+  | {
+      readonly status: "conflict";
+      /** Owner 自有的冲突代码与事实由调用方原样解释。 */
+      readonly conflict: { readonly code: string; readonly facts: unknown };
+    }
+  | void;
+
 /**
  * 工作区策略拥有自身持久事实、上下文解释和根投影。生成器不解释策略状态，
  * 只负责包实例、绑定、记录演化以及 Before/After 组合。
@@ -135,11 +157,17 @@ export type WorkspaceStrategy<
    */
   validateAddition?(options: {
     readonly targetRoot: string;
+    readonly blueprint: ProjectBlueprint;
+    readonly content: Content;
+    readonly definition: PackageDefinition;
+    readonly creationInput?: CreationInput;
     readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
     readonly contributions: readonly Contribution[];
     readonly nodeInstances: GeneratorNodeInstances;
     readonly presetProjectContributions: readonly PresetProjectContribution[];
-  }): void | Promise<void>;
+  }):
+    | WorkspaceStrategyValidationResult
+    | Promise<WorkspaceStrategyValidationResult>;
   parseState(value: unknown): StrategyState;
   /** 策略把原生依赖声明映射为显式内容身份。 */
   dependencies(options: {

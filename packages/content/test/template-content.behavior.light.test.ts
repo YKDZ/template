@@ -289,7 +289,25 @@ void describe("公开模板内容集合", () => {
 
     assert.strictEqual(retry.status, "conflict", JSON.stringify(retry));
     if (retry.status !== "conflict") throw new Error("缺失链接重试应冲突");
-    assert.match(retry.reason, /不能接受不同的加包输入/u);
+    assert.deepStrictEqual(retry.ownerConflict, {
+      code: "MISSING_LINK",
+      facts: {
+        existing: {
+          name: "@demo/provider",
+          path: "packages/provider",
+          role: "shared-library",
+        },
+        requested: {
+          name: "@demo/provider",
+          path: "packages/provider",
+          role: "shared-library",
+        },
+        missingLink: {
+          consumerPackagePath: "packages/cli",
+          providerPackagePath: "packages/provider",
+        },
+      },
+    });
     assert.deepStrictEqual(retry.actions, []);
     assert.strictEqual(await readFile(recordPath, "utf8"), before.record);
     assert.strictEqual(await readFile(blueprintPath, "utf8"), before.blueprint);
@@ -308,6 +326,74 @@ void describe("公开模板内容集合", () => {
       JSON.parse(before.consumerManifest).dependencies["@demo/provider"],
       undefined,
     );
+
+    const identityRetry = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: library.identity,
+      creationInput: {
+        leafName: "other",
+        packagePath: "packages/provider",
+      } satisfies WorkspaceCreationInput,
+    });
+    assert.strictEqual(
+      identityRetry.status,
+      "conflict",
+      JSON.stringify(identityRetry),
+    );
+    if (identityRetry.status !== "conflict") {
+      throw new Error("包身份占用应返回冲突");
+    }
+    assert.deepStrictEqual(identityRetry.identityConflict, {
+      existing: {
+        name: "@demo/provider",
+        path: "packages/provider",
+        role: "shared-library",
+      },
+      requested: {
+        name: "@demo/other",
+        path: "packages/provider",
+        role: "shared-library",
+      },
+    });
+    assert.deepStrictEqual(identityRetry.actions, []);
+    assert.strictEqual(await readFile(recordPath, "utf8"), before.record);
+    assert.strictEqual(await readFile(blueprintPath, "utf8"), before.blueprint);
+  });
+
+  void it("linkFrom 引用未知 consumer 时返回 input-invalid 且不写入", async () => {
+    const targetRoot = await createTargetRoot(
+      "template-content-link-from-unknown-",
+    );
+    const generator = createGenerator({
+      content: templateContent,
+      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+    });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { roots: [{ preset: tsCliPreset }] },
+      strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+    const before = await snapshotTree(targetRoot);
+
+    const result = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: library.identity,
+      creationInput: {
+        packagePath: "packages/provider",
+        linkFrom: ["packages/missing"],
+      } satisfies WorkspaceCreationInput,
+    });
+
+    assert.deepStrictEqual(result, {
+      status: "input-invalid",
+      issues: [{ code: "UNKNOWN_LINK_FROM" }],
+    });
+    assert.strictEqual(await snapshotTree(targetRoot), before);
   });
 
   void it("linkFrom 拒绝已失去 Node package-name import 能力的当前 consumer", async () => {
@@ -351,11 +437,10 @@ void describe("公开模板内容集合", () => {
       creationInput,
     });
 
-    assert.strictEqual(
-      result.status,
-      "operation-failure",
-      JSON.stringify(result),
-    );
+    assert.deepStrictEqual(result, {
+      status: "input-invalid",
+      issues: [{ code: "UNSUPPORTED_LINK" }],
+    });
     assert.strictEqual(
       await readFile(consumerManifestPath, "utf8"),
       changedCurrentManifest,

@@ -38,3 +38,28 @@ export const templateContent = [
   vikeMigrations,
   vikeAppPreset,
 ] as const;
+
+type TemplateContentMember = (typeof templateContent)[number];
+
+/** 从唯一内容集合派生的可选择预设成员。 */
+export type TemplatePreset = Extract<
+  TemplateContentMember,
+  { readonly kind: "preset" }
+>;
+
+/** 从唯一内容集合派生的原生参考包闭包。 */
+export type TemplateReferencePackage = Extract<
+  TemplateContentMember,
+  { readonly manifest: unknown }
+>;
+
+export const templatePresets: readonly TemplatePreset[] =
+  templateContent.filter(
+    (member): member is TemplatePreset =>
+      "kind" in member && member.kind === "preset",
+  );
+
+export const templateReferencePackages: readonly TemplateReferencePackage[] =
+  templateContent.filter(
+    (member): member is TemplateReferencePackage => "manifest" in member,
+  );

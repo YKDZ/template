@@ -3,7 +3,12 @@ import {
   tsCliPublicCandidateCreationInput,
   type TsCliCreationInput,
 } from "@ykdz/reference-ts-cli/template";
-import { definePreset } from "@ykdz/template-core/preset-definition";
+import {
+  definePreset,
+  presetOwnerFromManifest,
+} from "@ykdz/template-core/preset-definition";
+
+import presetPackage from "../package.json" with { type: "json" };
 
 export const preset = definePreset({
   metadata: {
@@ -12,6 +17,7 @@ export const preset = definePreset({
     description: "采用 pnpm catalog 工具配置的 TypeScript 命令行包。",
   },
   operations: ["init", "add"],
+  owner: presetOwnerFromManifest(presetPackage),
   nodes: {
     cli: {
       reference: referencePackage,

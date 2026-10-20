@@ -8,6 +8,29 @@ export type PresetOwnerSelection = {
   readonly exportPath: string;
 };
 
+/** 从包清单实际公开指向预设声明的出口推导其持久身份。 */
+export function presetOwnerFromManifest(
+  manifest: unknown,
+): PresetOwnerSelection {
+  if (!isRecord(manifest) || typeof manifest.name !== "string") {
+    throw new Error("预设所属包清单缺少包名");
+  }
+  requireText(manifest.name, "所属包名");
+  if (!isRecord(manifest.exports)) {
+    throw new Error("预设所属包清单缺少公开出口");
+  }
+  const entry = Object.entries(manifest.exports).find(
+    ([exportPath, definition]) =>
+      (exportPath === "." || exportPath.startsWith("./")) &&
+      isRecord(definition) &&
+      definition.source === "./template/definition.ts",
+  );
+  if (entry === undefined) {
+    throw new Error("预设所属包清单未公开当前模板入口");
+  }
+  return { packageName: manifest.name, exportPath: entry[0] };
+}
+
 /** 预设只计算项目要求；实际写入仍由工作区策略解释并投影。 */
 export type PresetProjectOptions<Context, Contribution> = {
   readonly context: Context;
