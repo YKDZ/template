@@ -2,16 +2,8 @@ import assert from "node:assert/strict";
 import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import {
-  builtInPresetRegistry,
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
-import {
-  canConsumeNodePackageNameImport,
-  canLinkNodePackageRoles,
-  canProvideSourceConditionPackageNameImport,
-} from "@ykdz/template-workspace/project-linking";
+import { templateContent } from "@ykdz/template-content";
+import { canLinkNodePackageRoles } from "@ykdz/template-workspace/project-linking";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
 
@@ -21,44 +13,29 @@ function requireLinkableAddition(): {
   readonly presetName: string;
   readonly consumerPath: string;
 } {
-  const context = createGenerationContext({
-    targetDir: "project",
-    defaultPackageScope: "acme",
-    toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
-  });
-  for (const definition of builtInPresetRegistry.all()) {
-    const packageLeafName = "utility";
-    const packagePath = definition.defaultPackagePath?.({
-      context,
-      packageLeafName,
-    });
-    if (packagePath === undefined || !definition.planPackageAddition) continue;
-    const provider = definition.planPackageAddition({
-      context,
-      packageLeafName,
-      packagePath,
-    });
-    if (!canProvideSourceConditionPackageNameImport(provider)) continue;
-    const consumers = planGeneratedRepositoryInitialization({
-      definition,
-      context,
-    }).packageContributions;
-    const consumer = consumers.find(
-      (candidate) =>
-        canConsumeNodePackageNameImport(candidate) &&
-        canLinkNodePackageRoles(
-          candidate.definition.role,
-          provider.definition.role,
-        ),
-    );
-    if (consumer !== undefined) {
+  const presets = templateContent.filter((content) => "kind" in content);
+  for (const preset of presets) {
+    if (
+      !preset.operations.includes("init") ||
+      !preset.operations.includes("add")
+    ) {
+      continue;
+    }
+    const [node] = Object.values(preset.nodes);
+    if (
+      node !== undefined &&
+      node.reference.defaultPath !== undefined &&
+      canLinkNodePackageRoles(node.reference.role, node.reference.role)
+    ) {
       return {
-        presetName: definition.metadata.name,
-        consumerPath: consumer.definition.path,
+        presetName: preset.metadata.alias,
+        consumerPath: node.reference.defaultPath,
       };
     }
   }
-  throw new Error("add package journey requires a linkable addable Preset");
+  throw new Error(
+    "add package journey requires a linkable preset in the content collection",
+  );
 }
 
 const { presetName: addablePresetName, consumerPath } =
@@ -113,8 +90,14 @@ async function rewriteRootManifest(
 async function readGenerationRecordToolchain(project: string) {
   const record = JSON.parse(
     await readFile(path.join(project, ".template/generation.json"), "utf8"),
-  ) as { readonly toolchain: { readonly nodeLtsMajor: string } };
-  return record.toolchain;
+  ) as {
+    readonly schemaVersion: number;
+    readonly strategyState: {
+      readonly toolchain: { readonly nodeLtsMajor: string };
+    };
+  };
+  assert.equal(record.schemaVersion, 1);
+  return record.strategyState.toolchain;
 }
 
 const upgradedNode = "22";

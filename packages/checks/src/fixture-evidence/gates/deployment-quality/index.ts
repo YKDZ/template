@@ -1,7 +1,8 @@
 import { fileURLToPath } from "node:url";
 
-import type { GeneratedRepositoryPlan } from "@ykdz/template-builtin-presets";
+import type { DeploymentCheckRequirement } from "@ykdz/template-workspace-authoring/project-requirements";
 
+import type { SuccessfulScenarioResult } from "../../../generated-content.ts";
 import {
   deriveFixtureGateContractIdentity,
   normalizedFixtureDependencyInstallationPlan,
@@ -9,30 +10,27 @@ import {
 } from "../../kernel/index.ts";
 
 export type DeploymentQualityPlanInput = {
-  readonly plan: GeneratedRepositoryPlan & {
-    readonly deploymentCheck: NonNullable<
-      GeneratedRepositoryPlan["deploymentCheck"]
-    >;
-  };
+  readonly scenarioId: string;
+  readonly requirement: DeploymentCheckRequirement;
 };
 
 export function deriveDeploymentQualityPlanInput(
-  plan: GeneratedRepositoryPlan,
+  result: SuccessfulScenarioResult,
+  scenarioId: string,
 ): DeploymentQualityPlanInput | undefined {
-  return plan.deploymentCheck === undefined
+  const requirement = result.projection.ownerFacts.requirements.deploymentCheck;
+  return requirement === undefined
     ? undefined
     : {
-        plan: {
-          ...plan,
-          deploymentCheck: plan.deploymentCheck,
-        },
+        scenarioId,
+        requirement,
       };
 }
 
 export function deploymentQualityExecutionResources(
   deployment: DeploymentQualityPlanInput,
 ): readonly FixtureEvidenceExecutionResource[] {
-  return deployment.plan.deploymentCheck.environmentNeeds.some(
+  return deployment.requirement.environmentNeeds.some(
     (need) => need.kind === "docker-engine",
   )
     ? ["docker"]

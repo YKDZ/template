@@ -1,5 +1,5 @@
-import { generationRecordSchema } from "@ykdz/template-builtin-presets";
 import { projectBlueprintSchema } from "@ykdz/template-core/project-blueprint";
+import { generationRecordSchema } from "@ykdz/template-generator";
 import * as v from "valibot";
 
 import { standardSchema } from "./standard-schema.ts";

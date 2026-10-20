@@ -4,23 +4,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import formatterConfig from "@ykdz/reference-typescript-config/oxfmt";
-import {
-  loadLocalTemplateMetadata,
-  type GeneratedRepositoryPlan,
-} from "@ykdz/template-builtin-presets";
 import { inspectTaskGate } from "@ykdz/template-workspace/task-gates";
 import { format } from "oxfmt";
 import { parse as parseToml } from "smol-toml";
 
+import { validateGeneratedScenarioReceipt } from "../src/registry-checks.ts";
+import { sourceGeneratedScenarioRuntime } from "../src/source-generated-runtime.ts";
 import {
   deriveFixtureMatrix,
   deriveFocusedProjectLinkScenarios,
-  validateGeneratedDevelopmentContainerProjection,
-  validatePlanDependencyCatalog,
-} from "../src/registry-checks.ts";
-import {
-  assertGeneratedManifestPublicationPolicy,
   materializeGeneratedScenario,
+  type GeneratedScenarioReceipt,
 } from "./generated-scenario.ts";
 
 async function outputFiles(root: string, relative = ""): Promise<string[]> {
@@ -36,16 +30,15 @@ async function outputFiles(root: string, relative = ""): Promise<string[]> {
   return files.sort();
 }
 
-/** 检查实际落盘结果；不安装生成工作区，也不执行其检查任务。 */
-export async function validateGeneratedOutput(options: {
-  readonly projectDir: string;
-  readonly plan: GeneratedRepositoryPlan;
-}): Promise<void> {
-  const { projectDir, plan } = options;
-  loadLocalTemplateMetadata(projectDir);
-  await validatePlanDependencyCatalog(plan, projectDir);
-  await assertGeneratedManifestPublicationPolicy(options);
-  await validateGeneratedDevelopmentContainerProjection(options);
+/** 检查生成器实际写入的文件与有限owner事实。 */
+export async function validateGeneratedOutput(
+  receipt: GeneratedScenarioReceipt,
+): Promise<void> {
+  const { projectDir } = receipt;
+  await validateGeneratedScenarioReceipt({
+    receipt,
+    runtime: sourceGeneratedScenarioRuntime,
+  });
   for (const file of await outputFiles(projectDir)) {
     if (
       !/\.(?:[cm]?[jt]sx?|vue|jsonc?|ya?ml|toml|md|html|css)$/u.test(file) &&
@@ -84,29 +77,34 @@ export async function checkGeneratedOutputs(): Promise<void> {
   );
   try {
     for (const scenario of [
-      ...deriveFixtureMatrix(),
-      ...deriveFocusedProjectLinkScenarios(),
+      ...deriveFixtureMatrix(sourceGeneratedScenarioRuntime),
+      ...deriveFocusedProjectLinkScenarios(sourceGeneratedScenarioRuntime),
     ]) {
-      const result = await materializeGeneratedScenario({
+      const receipt = await materializeGeneratedScenario({
+        runtime: sourceGeneratedScenarioRuntime,
         workspace,
         scenario,
-        initializationOverrides: {
-          scope: "output-audit",
-          ...(scenario.base.initialPrimaryPackage === undefined
-            ? {}
-            : { name: "custom-main", path: "products/custom-main" }),
-        },
+        strategyInput: { defaultPackageScope: "output-audit" },
+        ...(Object.keys(scenario.base.nodes).length === 1
+          ? {
+              initializationCreationInput: {
+                leafName: "custom-main",
+                packagePath: "products/custom-main",
+              },
+            }
+          : {}),
         ...(scenario.addition === undefined
           ? {}
           : {
               additionIdentity: {
-                name: `custom-${scenario.addition.metadata.name}`,
-                path: `modules/custom-${scenario.addition.metadata.name}`,
+                name: `custom-${scenario.addition.metadata.alias}`,
+                path: `modules/custom-${scenario.addition.metadata.alias}`,
               },
             }),
       });
+      if (receipt.status === "not-applicable") continue;
       try {
-        await validateGeneratedOutput(result);
+        await validateGeneratedOutput(receipt);
       } catch (error) {
         throw new Error(`${scenario.id} 最终生成检查失败`, { cause: error });
       }

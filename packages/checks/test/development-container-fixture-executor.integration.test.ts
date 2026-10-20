@@ -200,7 +200,7 @@ void describe("Development Container Fixture Executor", () => {
         calls.filter(({ command }) => command === "pnpm" || command === "node"),
         [],
       );
-      const capabilityProbes = registryCapabilityProbes(workspace);
+      const capabilityProbes = await registryCapabilityProbes(workspace);
       assert.deepStrictEqual(
         new Set(capabilityProbes.map((probe) => probe.identity)),
         requiredCapabilityProbeIdentities,

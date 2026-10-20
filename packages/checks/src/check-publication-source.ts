@@ -1,60 +1,39 @@
-import { readFile } from "node:fs/promises";
-
 import {
-  deriveVerificationPlans,
-  planSourceReferences,
-  type VerificationRuntime,
-} from "./registry-checks.ts";
-
-export type PublicationSourceRuntime = VerificationRuntime & {
-  readonly builtin: VerificationRuntime["builtin"] &
-    Pick<
-      typeof import("@ykdz/template-builtin-presets"),
-      "referencePackagePublicationContexts" | "resolveBuiltInTemplateSource"
-    >;
-};
+  deriveFixtureMatrix,
+  forEachGeneratedScenario,
+  type GeneratedScenarioRuntime,
+} from "./generated-content.ts";
+import { validatePlanSources } from "./registry-checks.ts";
 
 /**
- * 由正式发布验收传入同一已安装制品的公开模块。实际读取默认描述的公开资产，
- * 并回放完整初始化与加包计划；源码包不参与制品句柄的解析或渲染。
+ * 验证注入运行时生成的真实操作所引用的已安装模板来源。
+ * 调用者必须从正在验收的已安装公开包构造 runtime。
  */
 export async function checkPresetPublicationSources(
-  runtime: PublicationSourceRuntime,
+  runtime: GeneratedScenarioRuntime,
 ): Promise<{
-  readonly plansVerified: number;
+  readonly scenariosVerified: number;
   readonly resourcesRead: number;
 }> {
-  const resources = new Set<string>();
-  const readResource = async (file: string, owner: string): Promise<void> => {
-    if (resources.has(file)) return;
-    try {
-      await readFile(file);
-    } catch (cause) {
-      throw new Error(`${owner}: 发布制品中的公开资源不可读取：${file}`, {
-        cause,
+  const references = new Set<string>();
+  let scenariosVerified = 0;
+  await forEachGeneratedScenario({
+    runtime,
+    scenarios: deriveFixtureMatrix(runtime),
+    inspect: async (receipt) => {
+      const scenarioReferences = await validatePlanSources({
+        receipt,
+        runtime,
       });
-    }
-    resources.add(file);
+      scenariosVerified += 1;
+      for (const reference of scenarioReferences) {
+        references.add(reference.sourceFile);
+      }
+    },
+    workspacePrefix: "template-installed-publication-",
+  });
+  return {
+    scenariosVerified,
+    resourcesRead: references.size,
   };
-
-  for (const context of runtime.builtin.referencePackagePublicationContexts()) {
-    for (const [source, target] of context.assets) {
-      await readResource(source, `${context.name} 生成 ${target}`);
-    }
-  }
-  const plans = await deriveVerificationPlans(runtime);
-  for (const { definition, plan } of plans) {
-    const references = planSourceReferences({
-      definition,
-      plan,
-      resolveSource: runtime.builtin.resolveBuiltInTemplateSource,
-    });
-    for (const reference of references) {
-      await readResource(
-        reference.sourceFile,
-        `${reference.definitionName} 生成 ${reference.generatedPath}`,
-      );
-    }
-  }
-  return { plansVerified: plans.length, resourcesRead: resources.size };
 }

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { referenceDefinition as typescriptConfigurationDefinition } from "@ykdz/reference-typescript-config/template";
 import type {
   PackageLinkIntent,
   PackageDefinition,
@@ -55,6 +56,7 @@ import { projectCliPublication } from "./cli-publication-projection.ts";
 import {
   assertDefaultPackageDefinition,
   assertDefaultProjectBlueprint,
+  validateDefaultPackagePath,
 } from "./default-package-identity.ts";
 import {
   collectGeneratedManifestCatalogReferences,
@@ -64,6 +66,7 @@ import { browserTestDevelopmentContainerToolLayer } from "./development-containe
 import {
   assertReusablePackageExposure,
   readPackageAdditionVersionFacts,
+  WorkspacePackageAdditionFailure,
 } from "./package-addition-facts.ts";
 import {
   projectCheckWorkflow,
@@ -73,6 +76,9 @@ import {
 import {
   planExplicitProjectLinks,
   promoteInjectedProviderRuntimeDependencies,
+  canConsumeNodePackageNameImportForRole,
+  canLinkNodePackageRoles,
+  canProvideSourceConditionPackageNameImportForRole,
   readProjectLinkManifestTruth,
 } from "./project-linking.ts";
 import { releaseToolchainSnapshot } from "./release-toolchain-snapshot.ts";
@@ -110,6 +116,11 @@ export type DefaultWorkspaceCreationInput<
   readonly linkFrom?: readonly string[];
 };
 
+export type DefaultWorkspaceConfigurationIdentity = Pick<
+  PackageDefinition,
+  "name" | "path" | "role"
+>;
+
 export type DefaultWorkspaceState = {
   readonly repositoryName: string;
   readonly defaultPackageScope: string;
@@ -146,6 +157,15 @@ export type DefaultWorkspaceOwnerFacts = {
   readonly nextSteps: readonly NextStepInstruction[];
 };
 
+export type DefaultWorkspaceMissingLinkConflict = {
+  readonly code: "MISSING_LINK";
+  readonly facts: {
+    readonly existing: Pick<PackageDefinition, "name" | "path" | "role">;
+    readonly requested: Pick<PackageDefinition, "name" | "path" | "role">;
+    readonly missingLink: PackageLinkIntent;
+  };
+};
+
 export type NextStepInstruction = { readonly display: string };
 
 /** 默认策略把单个包节点放入指定目录，并按参考包名派生其默认叶名。 */
@@ -166,13 +186,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** 识别默认工作区 owner 返回的既有包补链冲突。 */
+export function isDefaultWorkspaceMissingLinkConflict(
+  value: unknown,
+): value is DefaultWorkspaceMissingLinkConflict {
+  if (
+    !isRecord(value) ||
+    value.code !== "MISSING_LINK" ||
+    !isRecord(value.facts)
+  ) {
+    return false;
+  }
+  const { existing, requested, missingLink } = value.facts;
+  const isPackageIdentity = (candidate: unknown): boolean =>
+    isRecord(candidate) &&
+    typeof candidate.name === "string" &&
+    typeof candidate.path === "string" &&
+    typeof candidate.role === "string";
+  return (
+    isPackageIdentity(existing) &&
+    isPackageIdentity(requested) &&
+    isRecord(missingLink) &&
+    typeof missingLink.consumerPackagePath === "string" &&
+    typeof missingLink.providerPackagePath === "string"
+  );
+}
+
 function requestedLinkFrom(value: unknown): readonly string[] {
   if (!isRecord(value) || value.linkFrom === undefined) return [];
   if (
     !Array.isArray(value.linkFrom) ||
     !value.linkFrom.every(
-      (packagePath): packagePath is string =>
-        typeof packagePath === "string" && packagePath.length > 0,
+      (packagePath): packagePath is string => typeof packagePath === "string",
     )
   ) {
     throw new Error("默认工作区的 linkFrom 必须是非空包路径数组");
@@ -262,14 +307,15 @@ function defaultContext(
   targetRoot: string,
   state: DefaultWorkspaceState,
 ): GenerationContext {
+  const configuration = defaultWorkspaceConfigurationIdentity(
+    state.defaultPackageScope,
+  );
   return {
     targetDir: path.resolve(targetRoot),
     repositoryName: state.repositoryName,
     defaultPackageScope: state.defaultPackageScope,
     foundationPackages: {
-      typescriptConfiguration: {
-        name: "@" + state.defaultPackageScope + "/typescript-config",
-      },
+      typescriptConfiguration: { name: configuration.name },
     },
     toolchain: {
       nodeLtsMajor: state.toolchain.nodeLtsMajor,
@@ -281,6 +327,18 @@ function defaultContext(
         ? {}
         : { rustVersion: state.toolchain.rustVersion }),
     },
+  };
+}
+
+/** 由实际原生配置包声明推导默认工作区的配置包身份。 */
+export function defaultWorkspaceConfigurationIdentity(
+  scope: string,
+): DefaultWorkspaceConfigurationIdentity {
+  const leafName = typescriptConfigurationDefinition.defaultLeafName;
+  return {
+    name: `@${scope}/${leafName}`,
+    path: `packages/${leafName}`,
+    role: typescriptConfigurationDefinition.role,
   };
 }
 
@@ -1189,6 +1247,12 @@ export function createDefaultWorkspaceStrategy<
 > {
   return {
     identity: "default",
+    diagnoseFailure(error) {
+      if (error instanceof WorkspacePackageAdditionFailure) {
+        return { message: error.message, suggestion: error.suggestion };
+      }
+      return undefined;
+    },
     initialize({ targetRoot, input, selection }) {
       const repositoryName =
         input.repositoryName ?? path.basename(path.resolve(targetRoot));
@@ -1303,9 +1367,172 @@ export function createDefaultWorkspaceStrategy<
     },
     validateAddition({
       targetRoot,
+      blueprint,
+      content,
+      definition,
+      creationInput,
+      packages,
       contributions,
+      getAdditionContributions,
       presetProjectContributions,
     }) {
+      const requestedInput =
+        creationInput === undefined ? undefined : creationInput;
+      const linkFromValue = isRecord(requestedInput as unknown)
+        ? (requestedInput as unknown as Record<string, unknown>).linkFrom
+        : undefined;
+      const linkIssues: { code: string }[] = [];
+      if (linkFromValue !== undefined) {
+        if (!Array.isArray(linkFromValue)) {
+          linkIssues.push({ code: "INVALID_LINK_FROM" });
+        } else {
+          for (const packagePath of linkFromValue) {
+            if (typeof packagePath !== "string" || packagePath.length === 0) {
+              linkIssues.push({ code: "INVALID_LINK_FROM" });
+              continue;
+            }
+            const validation = validateDefaultPackagePath(packagePath);
+            if (!validation.hasValidShape) {
+              linkIssues.push({ code: "INVALID_LINK_FROM" });
+            }
+            if (validation.reservedWorkspaceCollection !== undefined) {
+              linkIssues.push({ code: "RESERVED_LINK_FROM" });
+            }
+          }
+        }
+      }
+      if (linkIssues.length > 0) {
+        return { status: "input-invalid", issues: linkIssues } as const;
+      }
+      const linkFrom = requestedLinkFrom(requestedInput);
+      if (
+        linkFrom.some(
+          (packagePath) =>
+            !blueprint.packages.some(
+              (candidate) => candidate.path === packagePath,
+            ),
+        )
+      ) {
+        return {
+          status: "input-invalid",
+          issues: [{ code: "UNKNOWN_LINK_FROM" }],
+        } as const;
+      }
+      if (linkFrom.length > 0) {
+        const addition = getAdditionContributions().find(
+          (contribution) => contribution.definition.path === definition.path,
+        );
+        if (addition === undefined) {
+          throw new Error("默认工作区校验缺少本次加包贡献：" + definition.path);
+        }
+        const contributionByPath = new Map(
+          contributions.map((contribution) => [
+            contribution.definition.path,
+            contribution,
+          ]),
+        );
+        const requestedBlueprint: ProjectBlueprint = {
+          ...blueprint,
+          packageLinkIntents: [
+            ...(blueprint.packageLinkIntents ?? []),
+            ...linkFrom.map((consumerPackagePath): PackageLinkIntent => ({
+              consumerPackagePath,
+              providerPackagePath: definition.path,
+            })),
+          ],
+        };
+        const currentManifests = readProjectLinkManifestTruth({
+          repositoryRoot: targetRoot,
+          blueprint: requestedBlueprint,
+          contributions,
+        });
+        const unsupported =
+          !canProvideSourceConditionPackageNameImportForRole(
+            definition.role,
+            addition.manifest,
+          ) ||
+          linkFrom.some((consumerPackagePath) => {
+            const consumer = contributionByPath.get(consumerPackagePath);
+            if (consumer === undefined) return true;
+            const manifest =
+              currentManifests.get(consumerPackagePath) ?? consumer.manifest;
+            if (manifest.name !== consumer.definition.name) {
+              throw new Error(
+                `Project Linking Manifest Truth for ${consumer.definition.path} must have package name ${consumer.definition.name}`,
+              );
+            }
+            return (
+              !canConsumeNodePackageNameImportForRole(
+                consumer.definition.role,
+                manifest,
+              ) ||
+              !canLinkNodePackageRoles(
+                consumer.definition.role,
+                definition.role,
+              )
+            );
+          });
+        if (unsupported) {
+          return {
+            status: "input-invalid",
+            issues: [{ code: "UNSUPPORTED_LINK" }],
+          } as const;
+        }
+        const occupiedDefinition = blueprint.packages.find(
+          (candidate) =>
+            candidate.name === definition.name ||
+            candidate.path === definition.path,
+        );
+        const prior = packages.find(
+          (item) =>
+            item.definition.packageDefinitionId ===
+            occupiedDefinition?.packageDefinitionId,
+        );
+        const samePackageIdentity =
+          occupiedDefinition !== undefined &&
+          prior?.contentIdentity === content.identity &&
+          prior.definition.name === definition.name &&
+          prior.definition.path === definition.path;
+        if (
+          samePackageIdentity &&
+          occupiedDefinition !== undefined &&
+          prior !== undefined
+        ) {
+          const existingLinks = blueprint.packageLinkIntents ?? [];
+          const missingConsumer = linkFrom.find(
+            (consumerPackagePath) =>
+              !existingLinks.some(
+                (intent) =>
+                  intent.consumerPackagePath === consumerPackagePath &&
+                  intent.providerPackagePath === definition.path,
+              ),
+          );
+          if (missingConsumer !== undefined) {
+            return {
+              status: "conflict",
+              conflict: {
+                code: "MISSING_LINK",
+                facts: {
+                  existing: {
+                    name: occupiedDefinition.name,
+                    path: occupiedDefinition.path,
+                    role: occupiedDefinition.role,
+                  },
+                  requested: {
+                    name: definition.name,
+                    path: definition.path,
+                    role: definition.role,
+                  },
+                  missingLink: {
+                    consumerPackagePath: missingConsumer,
+                    providerPackagePath: definition.path,
+                  },
+                },
+              },
+            } as const;
+          }
+        }
+      }
       const packageByName = new Map(
         contributions.map((contribution) => [
           contribution.definition.name,
@@ -1351,6 +1578,7 @@ export function createDefaultWorkspaceStrategy<
         packageByName,
         manifestTruthByPackagePath,
       });
+      return;
     },
     parseState(value) {
       if (!isRecord(value) || !isRecord(value.toolchain)) {

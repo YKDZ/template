@@ -1,11 +1,12 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
-  builtInPresetRegistry,
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
-import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
+  deriveInitializationScenarios,
+  materializeGeneratedScenario,
+} from "../src/generated-content.ts";
+import { sourceGeneratedScenarioRuntime } from "../src/source-generated-runtime.ts";
 
 export const requiredCapabilityProbeIdentities = new Set([
   "cargo",
@@ -14,23 +15,28 @@ export const requiredCapabilityProbeIdentities = new Set([
   "shellcheck",
 ]);
 
-export function registryCapabilityProbes(root: string) {
-  return builtInPresetRegistry
-    .all()
-    .flatMap(
-      (definition) =>
-        planGeneratedRepositoryInitialization({
-          definition,
-          context: createGenerationContext({
-            targetDir: path.join(root, `probe-${definition.metadata.name}`),
-            defaultPackageScope: "fixture",
-            toolchain: {
-              nodeLtsMajor: "24",
-              packageManagerPin: "pnpm@11.11.0",
-              nodeVersion: releaseToolchainSnapshot.nodeVersion,
-            },
-          }),
-        }).developmentContainer.probes,
-    )
-    .filter((probe) => requiredCapabilityProbeIdentities.has(probe.identity));
+/** 汇总真实初始化投影中 default owner 提供的能力探针。 */
+export async function registryCapabilityProbes(root: string) {
+  const workspace = await mkdtemp(
+    path.join(tmpdir(), `template-probes-${path.basename(root)}-`),
+  );
+  try {
+    const probes = [];
+    for (const scenario of deriveInitializationScenarios(
+      sourceGeneratedScenarioRuntime,
+    )) {
+      const receipt = await materializeGeneratedScenario({
+        runtime: sourceGeneratedScenarioRuntime,
+        scenario,
+        workspace,
+      });
+      if (receipt.status === "not-applicable") continue;
+      probes.push(...receipt.result.projection.ownerFacts.container.probes);
+    }
+    return probes.filter((probe) =>
+      requiredCapabilityProbeIdentities.has(probe.identity),
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
 }

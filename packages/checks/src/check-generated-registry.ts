@@ -62,7 +62,9 @@ import {
   deriveFocusedProjectLinkScenarios,
   deriveInitializationScenarios,
   type GeneratedScenario,
-} from "./registry-checks.ts";
+} from "./generated-content.ts";
+import { validateGeneratedScenarioReceipt } from "./registry-checks.ts";
+import { sourceGeneratedScenarioRuntime } from "./source-generated-runtime.ts";
 
 type GeneratedScenarioSet =
   | "init"
@@ -501,31 +503,32 @@ function fixtureEvidenceFromEnvironment(
 
 export async function generatedScenariosFor(
   set: GeneratedScenarioSet,
+  runtime = sourceGeneratedScenarioRuntime,
 ): Promise<readonly GeneratedScenario[]> {
   switch (set) {
     case "init":
-      return deriveInitializationScenarios();
+      return deriveInitializationScenarios(runtime);
     case "package-addition-matrix":
-      return deriveFixtureMatrix();
+      return deriveFixtureMatrix(runtime);
     case "focused":
-      return deriveFocusedProjectLinkScenarios();
+      return deriveFocusedProjectLinkScenarios(runtime);
     case "deployment":
-      return deriveInitializationScenarios().filter(
-        (scenario) => scenario.base.metadata.name === "vike-app",
+      return deriveInitializationScenarios(runtime).filter(
+        (scenario) => scenario.base.metadata.alias === "vike-app",
       );
     case "capabilities":
       return [
-        ...deriveInitializationScenarios().filter(
-          (scenario) => scenario.base.metadata.name === "vue-hono-app",
+        ...deriveInitializationScenarios(runtime).filter(
+          (scenario) => scenario.base.metadata.alias === "vue-hono-app",
         ),
-        ...deriveFixtureMatrix().filter(
+        ...deriveFixtureMatrix(runtime).filter(
           ({ base, addition }) =>
-            (base.metadata.name === "ts-lib" &&
+            (base.metadata.alias === "ts-lib" &&
               ["rust-bin", "vue-app"].includes(
-                addition?.metadata.name ?? "",
+                addition?.metadata.alias ?? "",
               )) ||
-            (base.metadata.name === "vue-app" &&
-              addition?.metadata.name === "vue-app"),
+            (base.metadata.alias === "vue-app" &&
+              addition?.metadata.alias === "vue-app"),
         ),
       ];
   }
@@ -536,10 +539,10 @@ function scenarioDiagnostics(scenario: GeneratedScenario) {
     id: scenario.id,
     label: scenario.label,
     presetIdentities: [
-      scenario.base.metadata.name,
+      scenario.base.metadata.alias,
       ...(scenario.addition === undefined
         ? []
-        : [scenario.addition.metadata.name]),
+        : [scenario.addition.metadata.alias]),
     ],
   };
 }
@@ -611,37 +614,49 @@ async function runScenario(
     }
   };
   let customization: SharedVueCustomization | undefined;
-  const {
-    projectDir,
-    plan: finalPlan,
-    initialPlan: initialization,
-  } = await materializeGeneratedScenario({
+  const receipt = await materializeGeneratedScenario({
+    runtime: sourceGeneratedScenarioRuntime,
     scenario,
     workspace: options.workspace,
     ...(options.cancelSignal === undefined
       ? {}
       : { cancelSignal: options.cancelSignal }),
-    afterInitialization: async (initialPlan, projectDir) => {
+    afterInitialization: async (initialization, projectDir) => {
       await prepareGeneratedRepositoryForContainerWrites(projectDir);
       await initializeFixtureGitRepository({ repositoryRoot: projectDir, run });
-      if (mode === "capabilities" && scenario.base.metadata.name === "vue-app")
-        customization = await customizeSharedVue(initialPlan, projectDir);
+      if (mode === "capabilities" && scenario.base.metadata.alias === "vue-app")
+        customization = await customizeSharedVue(
+          initialization,
+          projectDir,
+          sourceGeneratedScenarioRuntime,
+        );
       if (mode !== "init")
         await stageFixtureGitRepository({ repositoryRoot: projectDir, run });
     },
   });
-  if (mode === "capabilities" && scenario.addition?.metadata.name === "vue-app")
+  if (receipt.status === "not-applicable") return "not-applicable";
+  await validateGeneratedScenarioReceipt({
+    receipt,
+    runtime: sourceGeneratedScenarioRuntime,
+  });
+  const { projectDir, result: finalResult } = receipt;
+  const initialization = receipt.initialization;
+  if (
+    mode === "capabilities" &&
+    scenario.addition?.metadata.alias === "vue-app"
+  )
     await verifySharedVueCombination({
-      initialPlan: initialization,
-      finalPlan,
+      initialization,
+      result: finalResult,
       projectDir,
+      runtime: sourceGeneratedScenarioRuntime,
       ...(customization === undefined ? {} : { customization }),
     });
   const fullQuality = mode !== "init" && mode !== "focused";
   const rootGate = fullQuality ? "check:full" : "check";
   const includeFix = fullQuality;
   const deployment = fullQuality
-    ? deriveDeploymentQualityPlanInput(finalPlan)
+    ? deriveDeploymentQualityPlanInput(finalResult, scenario.id)
     : undefined;
   if (mode === "deployment" && deployment === undefined) {
     return "not-applicable";
@@ -714,7 +729,7 @@ async function runScenario(
     [
       ...new Set<FixtureEvidenceExecutionResource>([
         "development-container-session",
-        ...generatedRootQualityExecutionResources(finalPlan, { rootGate }),
+        ...generatedRootQualityExecutionResources(finalResult, { rootGate }),
         ...(deployment === undefined
           ? []
           : deploymentQualityExecutionResources(deployment)),
@@ -722,7 +737,7 @@ async function runScenario(
     ];
   const containerSession = createDevelopmentContainerFixtureSession({
     projectDir,
-    probes: finalPlan.developmentContainer.probes,
+    probes: finalResult.projection.ownerFacts.container.probes,
     ...(options.cancelSignal === undefined
       ? {}
       : { cancelSignal: options.cancelSignal }),
@@ -828,7 +843,7 @@ async function runScenario(
     const executeRootQuality = async () => {
       await executeSemanticGate({
         gate: "generated-root-quality",
-        resources: generatedRootQualityExecutionResources(finalPlan, {
+        resources: generatedRootQualityExecutionResources(finalResult, {
           rootGate,
         }),
         execute: async () => {
@@ -885,7 +900,7 @@ async function runScenario(
         run,
       });
       const contractIdentity = await deriveGeneratedRootQualityContractIdentity(
-        finalPlan,
+        finalResult,
         {
           rootGate,
           includeFix,
@@ -908,10 +923,9 @@ async function runScenario(
       });
 
       if (mode === "focused") {
-        const focusedPlan = deriveFocusedPackageLinkPlanInput({
-          initialPlan: initialization,
-          finalPlan,
-          consumerPackagePaths: scenario.linkFrom ?? [],
+        const focusedPlan = await deriveFocusedPackageLinkPlanInput({
+          receipt,
+          consumerPackagePaths: receipt.linkFrom,
         });
         await runFixtureEvidenceGate({
           gate: "focused-package-link",
@@ -929,8 +943,8 @@ async function runScenario(
                   scenarioLabel: scenario.label,
                   projectDir,
                   fixtureWorkspace: options.workspace,
-                  consumerPackagePath: focusedPlan.consumerPackagePath,
-                  providerPackagePath: focusedPlan.providerPackagePath,
+                  consumerPackagePath: focusedPlan.consumer.path,
+                  providerPackagePath: focusedPlan.provider.path,
                   run: containerSession.run,
                 });
               },

@@ -25,6 +25,7 @@ const reservedWorkspaceCollections = new Set([
   "target",
 ]);
 const reservedPackageNames = new Set(["node_modules", "favicon.ico"]);
+const defaultPackageScope = /^[a-z0-9][a-z0-9._-]*$/u;
 
 export type DefaultPackagePathValidation = {
   readonly hasValidShape: boolean;
@@ -63,6 +64,11 @@ export function isValidDefaultNpmPackageName(value: string): boolean {
     encodeURIComponent(leaf) === leaf &&
     (scope === undefined || encodeURIComponent(scope) === scope)
   );
+}
+
+/** 默认工作区 scope 的 npm 身份片段规则。 */
+export function isValidDefaultPackageScope(value: string): boolean {
+  return defaultPackageScope.test(value);
 }
 
 /** 默认工作区包采用两段目录，并保留工作区工具目录。 */
