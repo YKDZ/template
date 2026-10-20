@@ -4,10 +4,7 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
 import { mapPackageNamesInJson } from "@ykdz/template-core/package-name-projection";
-import type {
-  PackageDefinition,
-  PackageRole,
-} from "@ykdz/template-core/project-blueprint";
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import {
   createTemplateSourceHandle,
   type CopyFileOperation,
@@ -18,6 +15,7 @@ import { resourceIgnoreSnapshot } from "@ykdz/template-core/workspace-policy-sna
 import ignore, { type Ignore } from "ignore";
 import { parse, type ParseError } from "jsonc-parser";
 
+import type { DefaultPackageRole } from "./default-package-role.ts";
 import type { PackageContribution } from "./package-contribution.ts";
 import type { GenerationContext } from "./preset-definition.ts";
 
@@ -47,7 +45,7 @@ export type ReferencePackage = {
   readonly instance: "shared" | "independent";
   readonly defaultLeafName: string;
   readonly defaultPath: string;
-  readonly role: PackageRole;
+  readonly role: DefaultPackageRole;
   readonly manifest: ReferencePackageManifest;
   readonly authoringDependencies: readonly string[];
   readonly publicationIdentitySource?: TemplateSourceHandle;
@@ -74,7 +72,7 @@ export function defineReferencePackage(options: {
   readonly instance: "shared" | "independent";
   readonly defaultLeafName: string;
   readonly defaultPath?: string;
-  readonly role: PackageRole;
+  readonly role: DefaultPackageRole;
   readonly resources: readonly string[];
   readonly resourceIgnore?: string;
   readonly authoring: {

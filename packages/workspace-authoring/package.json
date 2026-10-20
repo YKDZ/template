@@ -7,6 +7,11 @@
   ],
   "type": "module",
   "exports": {
+    "./default-package-role": {
+      "source": "./src/default-package-role.ts",
+      "types": "./dist/default-package-role.d.ts",
+      "default": "./dist/default-package-role.js"
+    },
     "./package-contribution": {
       "source": "./src/package-contribution.ts",
       "types": "./dist/package-contribution.d.ts",

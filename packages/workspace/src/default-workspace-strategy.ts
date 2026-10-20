@@ -11,7 +11,6 @@ import type {
   PackageDefinition,
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
-import { assertProjectBlueprint } from "@ykdz/template-core/project-blueprint";
 import type { ProjectProjectionReconciliation } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
@@ -46,6 +45,10 @@ import type {
 } from "@ykdz/template-workspace-authoring/project-requirements";
 import type { ReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
+import {
+  assertDefaultPackageDefinition,
+  assertDefaultProjectBlueprint,
+} from "./default-package-identity.ts";
 import { browserTestDevelopmentContainerToolLayer } from "./development-container.ts";
 import {
   assertReusablePackageExposure,
@@ -273,8 +276,10 @@ function samePackageDefinition(
   left: PackageDefinition,
   right: PackageDefinition,
 ): boolean {
-  const leftId = "packageDefinitionId" in left ? left.packageDefinitionId : undefined;
-  const rightId = "packageDefinitionId" in right ? right.packageDefinitionId : undefined;
+  const leftId =
+    "packageDefinitionId" in left ? left.packageDefinitionId : undefined;
+  const rightId =
+    "packageDefinitionId" in right ? right.packageDefinitionId : undefined;
   return (
     left.name === right.name &&
     left.path === right.path &&
@@ -441,7 +446,7 @@ function projectRequirements(
     return true;
   });
   return {
-    blueprint: assertProjectBlueprint(
+    blueprint: assertDefaultProjectBlueprint(
       packageLinkIntents.length === 0 &&
         blueprint.packageLinkIntents === undefined
         ? {
@@ -592,7 +597,10 @@ function projectOperations(options: {
   readonly contributions: readonly PackageContribution[];
 }): WorkspaceProjection {
   const { context, contributions } = options;
-  const projectState = projectRequirements(options.blueprint, contributions);
+  const projectState = projectRequirements(
+    assertDefaultProjectBlueprint(options.blueprint),
+    contributions,
+  );
   const { blueprint, requirements } = projectState;
   const hasDeployment = requirements.deploymentCheck !== undefined;
   const hasJointE2e = requirements.vueHonoJointE2e !== undefined;
@@ -1055,7 +1063,7 @@ export function createDefaultWorkspaceStrategy<
     },
     createDefinition({ context, content, creationInput }) {
       const selectedLeaf = creationInput?.leafName ?? content.defaultLeafName;
-      return {
+      return assertDefaultPackageDefinition({
         name: "@" + context.defaultPackageScope + "/" + selectedLeaf,
         path:
           creationInput?.packagePath ??
@@ -1063,7 +1071,7 @@ export function createDefaultWorkspaceStrategy<
             ? content.defaultPath
             : siblingPackagePath(content.defaultPath, selectedLeaf)),
         role: content.role,
-      };
+      });
     },
     project(options) {
       return projectOperations(options);
