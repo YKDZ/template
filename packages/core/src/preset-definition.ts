@@ -15,10 +15,7 @@ export type PresetProjectOptions<Context, Contribution> = {
   readonly nodeInstances: ReadonlyMap<string, PackageDefinition>;
 };
 
-type PresetProjectFields<
-  Options,
-  ProjectContribution,
-> = {
+type PresetProjectFields<Options, ProjectContribution> = {
   readonly owner?: PresetOwnerSelection;
   readonly project?: [Options] extends [never]
     ? never
