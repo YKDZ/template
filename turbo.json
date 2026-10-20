@@ -302,8 +302,8 @@
       "outputs": [],
       "tags": ["quality:light"]
     },
-    "//#check:author-planning-roles": {
-      "inputs": ["$TURBO_DEFAULT$", "packages/**", "references/**"],
+    "check:author-planning-roles": {
+      "cache": false,
       "outputs": [],
       "tags": ["quality:light"]
     },

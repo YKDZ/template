@@ -5,7 +5,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { findPlanningIoViolations } from "../scripts/check-author-planning-roles.ts";
+import { findPlanningEffectViolations } from "../scripts/check-author-planning-roles.ts";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -48,9 +48,12 @@ void describe("author planning role check", () => {
       await Promise.all([
         writeFile(
           projectEntry,
-          `import { definePreset } from "@ykdz/template-core/preset-definition";
+          `import { readFileSync } from "node:fs";
+import { definePreset } from "@ykdz/template-core/preset-definition";
 import type { PresetProjectOptions } from "@ykdz/template-core/preset-definition";
 import { readOwnerValue } from "./planning-helper.ts";
+
+const projectHelperAlias = readOwnerValue;
 
 export const preset = definePreset({
   metadata: { alias: "fixture", title: "Fixture", description: "Fixture" },
@@ -58,17 +61,20 @@ export const preset = definePreset({
   nodes: { service: { reference: { alias: "service", instance: "shared" } } },
   owner: { packageName: "@fixture/planning-owner", exportPath: "./template" },
   project(_options: PresetProjectOptions<unknown, unknown>) {
-    return readOwnerValue();
+    [1].map(() => readFileSync(new URL("./owner.txt", import.meta.url), "utf8"));
+    return projectHelperAlias();
   },
 });
 `,
         ),
         writeFile(
           projectHelper,
-          `import { readFileSync } from "node:fs";
+          `import { readFileSync as readOwnerFile } from "node:fs";
+
+const readOwnerFileAlias = readOwnerFile;
 
 export function readOwnerValue(): string {
-  return readFileSync(new URL("./owner.txt", import.meta.url), "utf8");
+  return readOwnerFileAlias(new URL("./owner.txt", import.meta.url), "utf8");
 }
 `,
         ),
@@ -104,7 +110,7 @@ export const referencePackage = defineReferencePackage({
         ),
       ]);
 
-      const violations = findPlanningIoViolations(
+      const violations = findPlanningEffectViolations(
         [
           {
             entryFile: projectEntry,
@@ -120,14 +126,241 @@ export const referencePackage = defineReferencePackage({
         path.join(repositoryRoot, "tsconfig.json"),
       );
 
+      assert.equal(violations.length, 2);
+      assert.deepEqual(
+        violations.find(({ file }) => file === projectHelper),
+        {
+          role: "@fixture/planning-owner#./template:preset.project",
+          effect: "filesystem",
+          file: projectHelper,
+          line: 6,
+          column: 10,
+        },
+      );
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  void it("根据公开 SDK 的已安装声明识别规划角色", async () => {
+    const fixtureRoot = await mkdtemp(
+      path.join(os.tmpdir(), "author-planning-declaration-"),
+    );
+    try {
+      const packageRoot = path.join(fixtureRoot, "owner");
+      const sdkRoot = path.join(
+        packageRoot,
+        "node_modules/@ykdz/template-core",
+      );
+      await mkdir(sdkRoot, { recursive: true });
+      await Promise.all([
+        writeFile(
+          path.join(packageRoot, "package.json"),
+          JSON.stringify({ name: "@fixture/installed-owner", type: "module" }),
+        ),
+        writeFile(
+          path.join(sdkRoot, "package.json"),
+          JSON.stringify({
+            name: "@ykdz/template-core",
+            type: "module",
+            exports: {
+              "./preset-definition": {
+                types: "./preset-definition.d.ts",
+              },
+            },
+          }),
+        ),
+        writeFile(
+          path.join(sdkRoot, "preset-definition.d.ts"),
+          `export type PresetProjectOptions = Readonly<Record<string, unknown>>;
+export declare function definePreset(options: {
+  readonly owner: { readonly packageName: string; readonly exportPath: string };
+  project(options: PresetProjectOptions): unknown;
+}): unknown;
+`,
+        ),
+      ]);
+      const entryFile = path.join(packageRoot, "template.ts");
+      await writeFile(
+        entryFile,
+        `import { readFileSync } from "node:fs";
+import { definePreset } from "@ykdz/template-core/preset-definition";
+
+export const preset = definePreset({
+  owner: { packageName: "@fixture/installed-owner", exportPath: "./template" },
+  project() {
+    return readFileSync(new URL("./owner.txt", import.meta.url), "utf8");
+  },
+});
+`,
+      );
+
+      const violations = findPlanningEffectViolations(
+        [
+          {
+            entryFile,
+            packageRoot,
+            identity: "@fixture/installed-owner#./template",
+          },
+        ],
+        path.join(repositoryRoot, "tsconfig.json"),
+      );
+
       assert.equal(violations.length, 1);
-      assert.deepEqual(violations[0], {
-        role: "@fixture/planning-owner#./template:preset.project",
-        effect: "filesystem",
-        file: projectHelper,
-        line: 4,
-        column: 10,
-      });
+      assert.equal(
+        violations[0]?.role,
+        "@fixture/installed-owner#./template:preset.project",
+      );
+      assert.equal(violations[0]?.file, entryFile);
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  void it("拒绝规划 helper 中的进程全局、require 和计算式动态加载", async () => {
+    const fixtureRoot = await mkdtemp(
+      path.join(os.tmpdir(), "author-planning-effects-"),
+    );
+    try {
+      await symlink(
+        path.join(repositoryRoot, "node_modules"),
+        path.join(fixtureRoot, "node_modules"),
+        "dir",
+      );
+      const packageRoot = path.join(fixtureRoot, "owner");
+      await mkdir(packageRoot);
+      await writeFile(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({ name: "@fixture/effect-owner", type: "module" }),
+      );
+      const entryFile = path.join(packageRoot, "template.ts");
+      const helperFile = path.join(packageRoot, "planning-helper.ts");
+      await Promise.all([
+        writeFile(
+          entryFile,
+          `import { definePreset } from "@ykdz/template-core/preset-definition";
+import { inspectOwnerState, loadComputedModule } from "./planning-helper.ts";
+
+export const preset = definePreset({
+  metadata: { alias: "fixture", title: "Fixture", description: "Fixture" },
+  operations: ["init"],
+  nodes: { service: { reference: { alias: "service", instance: "shared" } } },
+  owner: { packageName: "@fixture/effect-owner", exportPath: "./template" },
+  project() {
+    inspectOwnerState();
+    loadComputedModule();
+    return undefined;
+  },
+});
+`,
+        ),
+        writeFile(
+          helperFile,
+          `export function inspectOwnerState(): string | undefined {
+  return process.env.NODE_ENV;
+}
+
+export function loadComputedModule(): void {
+  require("node:fs");
+  const moduleName = "./resource";
+  void import(moduleName + ".ts");
+}
+`,
+        ),
+      ]);
+
+      const violations = findPlanningEffectViolations(
+        [
+          {
+            entryFile,
+            packageRoot,
+            identity: "@fixture/effect-owner#./template",
+          },
+        ],
+        path.join(repositoryRoot, "tsconfig.json"),
+      );
+
+      assert.deepEqual(
+        [...new Set(violations.map(({ effect }) => effect))].sort(),
+        ["computed-dynamic-import", "process-global", "require"],
+      );
+      assert.ok(
+        violations.every(
+          (violation) =>
+            violation.role ===
+              "@fixture/effect-owner#./template:preset.project" &&
+            violation.file === helperFile,
+        ),
+      );
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  void it("拒绝规划代码绕过 prepare 直接导入所属数据资源", async () => {
+    const fixtureRoot = await mkdtemp(
+      path.join(os.tmpdir(), "author-planning-data-"),
+    );
+    try {
+      await symlink(
+        path.join(repositoryRoot, "node_modules"),
+        path.join(fixtureRoot, "node_modules"),
+        "dir",
+      );
+      const packageRoot = path.join(fixtureRoot, "owner");
+      await mkdir(packageRoot);
+      await Promise.all([
+        writeFile(
+          path.join(packageRoot, "package.json"),
+          JSON.stringify({
+            name: "@fixture/data-owner",
+            type: "module",
+            dependencies: { "@ykdz/template-core": "workspace:*" },
+          }),
+        ),
+        writeFile(
+          path.join(packageRoot, "owner.json"),
+          JSON.stringify({ value: "owner fact" }),
+        ),
+      ]);
+      const entryFile = path.join(packageRoot, "template.ts");
+      await writeFile(
+        entryFile,
+        `import ownerData from "./owner.json" with { type: "json" };
+import { definePreset } from "@ykdz/template-core/preset-definition";
+
+const ownerDataAlias = ownerData;
+
+export const preset = definePreset({
+  metadata: { alias: "fixture", title: "Fixture", description: "Fixture" },
+  operations: ["init"],
+  nodes: { service: { reference: { alias: "service", instance: "shared" } } },
+  owner: { packageName: "@fixture/data-owner", exportPath: "./template" },
+  project() {
+    return ownerDataAlias.value;
+  },
+});
+`,
+      );
+
+      const violations = findPlanningEffectViolations(
+        [
+          {
+            entryFile,
+            packageRoot,
+            identity: "@fixture/data-owner#./template",
+          },
+        ],
+        path.join(repositoryRoot, "tsconfig.json"),
+      );
+
+      assert.equal(violations.length, 1);
+      assert.equal(violations[0]?.effect, "data-as-code");
+      assert.equal(
+        violations[0]?.role,
+        "@fixture/data-owner#./template:preset.project",
+      );
+      assert.equal(violations[0]?.file, entryFile);
     } finally {
       await rm(fixtureRoot, { recursive: true, force: true });
     }

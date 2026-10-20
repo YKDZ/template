@@ -21,6 +21,7 @@
     }
   },
   "scripts": {
+    "check:author-planning-roles": "pnpm --workspace-root run check:author-planning-roles:workspace -- --owner-directory \"$PWD\"",
     "build": "cargo build --workspace",
     "build:template": "tsc -p tsconfig.template.json --pretty false",
     "format:check": "cargo fmt --all -- --check && oxfmt --list-different .",
