@@ -459,27 +459,21 @@ export function loadComputedModule(): void {
       );
       const packageRoot = path.join(fixtureRoot, "owner");
       await mkdir(packageRoot);
-      await Promise.all([
-        writeFile(
-          path.join(packageRoot, "package.json"),
-          JSON.stringify({
-            name: "@fixture/data-owner",
-            type: "module",
-            dependencies: { "@ykdz/template-core": "workspace:*" },
-          }),
-        ),
-        writeFile(
-          path.join(packageRoot, "owner.json"),
-          JSON.stringify({ value: "owner fact" }),
-        ),
-      ]);
+      await writeFile(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({
+          name: "@fixture/data-owner",
+          type: "module",
+          dependencies: { "@ykdz/template-core": "workspace:*" },
+        }),
+      );
       const entryFile = path.join(packageRoot, "template.ts");
       await writeFile(
         entryFile,
-        `import ownerData from "./owner.json" with { type: "json" };
+        `import ownerManifest from "./package.json" with { type: "json" };
 import { definePreset } from "@ykdz/template-core/preset-definition";
 
-const ownerDataAlias = ownerData;
+const ownerManifestAlias = ownerManifest;
 
 export const preset = definePreset({
   metadata: { alias: "fixture", title: "Fixture", description: "Fixture" },
@@ -487,7 +481,7 @@ export const preset = definePreset({
   nodes: { service: { reference: { alias: "service", instance: "shared" } } },
   owner: { packageName: "@fixture/data-owner", exportPath: "./template" },
   project() {
-    return ownerDataAlias.value;
+    return ownerManifestAlias.name;
   },
 });
 `,
@@ -533,7 +527,10 @@ export const preset = definePreset({
         JSON.stringify({
           name: "@fixture/json-type-owner",
           type: "module",
-          dependencies: { "@ykdz/template-core": "workspace:*" },
+          dependencies: {
+            "@ykdz/template-core": "workspace:*",
+            "@ykdz/template-workspace-authoring": "workspace:*",
+          },
         }),
       );
       const entryFile = path.join(packageRoot, "template.ts");
@@ -541,18 +538,26 @@ export const preset = definePreset({
         entryFile,
         `import manifest from "./package.json" with { type: "json" };
 import { definePreset } from "@ykdz/template-core/preset-definition";
+import { defineNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
 
-export const preset = definePreset({
-  metadata: { alias: "fixture", title: "Fixture", description: "Fixture" },
-  operations: ["init"],
-  nodes: { service: { reference: { alias: "service", instance: "shared" } } },
-  owner: { packageName: manifest.name, exportPath: "./template" },
-  project() {
-    const result: Pick<typeof manifest, "name"> = { name: "generated" };
-    const qualifiedResult: typeof manifest.name = "generated";
-    return result.name + qualifiedResult;
+export const preset = defineNativeContentArtifact(
+  definePreset({
+    metadata: { alias: "fixture", title: "Fixture", description: "Fixture" },
+    operations: ["init"],
+    nodes: { service: { reference: { alias: "service", instance: "shared" } } },
+    owner: { packageName: manifest.name, exportPath: "./template" },
+    project() {
+      const result: Pick<typeof manifest, "name"> = { name: "generated" };
+      const qualifiedResult: typeof manifest.name = "generated";
+      return result.name + qualifiedResult;
+    },
+  }),
+  {
+    manifest,
+    resourceRoot: new URL("./", import.meta.url),
+    exportPath: "./template",
   },
-});
+);
 `,
       );
 
