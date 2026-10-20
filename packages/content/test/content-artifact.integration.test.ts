@@ -1019,7 +1019,7 @@ void describe("原生内容制品安装链", () => {
           "const newRecord = addition.generationRecord.packages.find((record) => record.contentIdentity.packageName === member.identity.packageName && !baseline.packages.some((previous) => previous.packageDefinitionId === record.packageDefinitionId));",
           "assert.ok(newRecord);",
           "assert.ok(addition.blueprint.packages.some((definition) => definition.packageDefinitionId === newRecord.packageDefinitionId && definition.path === creationInput.packagePath));",
-          'await writeFile(process.argv[7], JSON.stringify({ status: addition.status, identity: member.identity, packageDefinitionId: newRecord.packageDefinitionId, path: creationInput.packagePath, userCustomization: { text: await readFile(userFile, "utf8"), mode: (await stat(userFile)).mode & 0o777 } }));',
+          'await writeFile(process.argv[7], JSON.stringify({ status: addition.status, identity: member.identity, packageDefinitionId: newRecord.packageDefinitionId, path: creationInput.packagePath, retainedPackages: baseline.packages.length, retainedDefinitions: baseline.definitions.length, retainedNodeInstances: Object.keys(baseline.nodeInstances).length, userCustomization: { text: await readFile(userFile, "utf8"), mode: (await stat(userFile)).mode & 0o777 } }));',
         ].join("\n"),
       );
       await withUnreadableAuthorDirectories(
@@ -1063,6 +1063,9 @@ void describe("原生内容制品安装链", () => {
         readonly identity: { readonly packageName: string };
         readonly packageDefinitionId: string;
         readonly path: string;
+        readonly retainedPackages: number;
+        readonly retainedDefinitions: number;
+        readonly retainedNodeInstances: number;
         readonly userCustomization: {
           readonly text: string;
           readonly mode: number;
@@ -1256,7 +1259,22 @@ void describe("原生内容制品安装链", () => {
               package: replayResult.identity,
               packageDefinitionId: replayResult.packageDefinitionId,
               path: replayResult.path,
+              retainedPackages: replayResult.retainedPackages,
+              retainedDefinitions: replayResult.retainedDefinitions,
+              retainedNodeInstances: replayResult.retainedNodeInstances,
               userCustomization: replayResult.userCustomization,
+              authorDirectories: [
+                ...replayAuthorRoots.map((authorPath) => ({
+                  path: authorPath,
+                  mode: 0,
+                  readableByConsumer: false,
+                })),
+                {
+                  path: workspaceRoot,
+                  mode: 0,
+                  readableByConsumer: false,
+                },
+              ],
               providers: replayClosure.packages,
               links: replayClosure.links,
             },
