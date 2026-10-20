@@ -17,7 +17,7 @@ import type {
 } from "@ykdz/template-core/workspace-strategy";
 import { createGenerator } from "@ykdz/template-generator";
 import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
-import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
+import type { GenerationContext } from "@ykdz/template-workspace-authoring/generation-context";
 import {
   defineReferencePackage,
   type ReferencePackage,

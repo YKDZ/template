@@ -15,19 +15,12 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import {
-  createGenerationContext,
-  loadLocalTemplateMetadata,
-  planGeneratedRepositoryInitialization,
-  planGeneratedRepositoryPackageAddition,
-} from "@ykdz/template-builtin-presets";
-import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
-import { renderNewProject } from "@ykdz/template-core/renderer";
+import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
+import { templateContent, templatePresets } from "@ykdz/template-content";
+import { createGenerator } from "@ykdz/template-generator";
+import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
-
-import { tsCliDefinition } from "../ts-cli/definition.ts";
-import { tsLibDefinition } from "../ts-lib/definition.ts";
 
 type ArtifactModule =
   typeof import("@ykdz/template-workspace/publication/artifact");
@@ -57,6 +50,38 @@ SOFTWARE.
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function workspaceGenerator() {
+  return createGenerator({
+    content: templateContent,
+    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+  });
+}
+
+async function initializePublicCli(targetRoot: string) {
+  const tsCliPreset = templatePresets.find(
+    (preset) => preset.owner?.packageName === "@ykdz/preset-ts-cli",
+  );
+  assert.ok(tsCliPreset);
+  const generator = workspaceGenerator();
+  const initialized = await generator.init({
+    targetRoot,
+    selection: { roots: [{ preset: tsCliPreset }] },
+    strategyInput: {
+      repositoryName: path.basename(targetRoot),
+      defaultPackageScope: "seed",
+    },
+  });
+  assert.strictEqual(
+    initialized.status,
+    "success",
+    JSON.stringify(initialized),
+  );
+  if (initialized.status !== "success") {
+    throw new Error("公开 CLI 预设初始化失败");
+  }
+  return { generator, initialized };
 }
 
 async function configurePublicOwnerFacts(options: {
@@ -163,27 +188,9 @@ void describe("ts-cli publication owner-fact integration", () => {
       path.join(tmpdir(), "template-publication-fix-stability-"),
     );
     const repositoryRoot = path.join(workspace, "generated-repository");
-    const plan = planGeneratedRepositoryInitialization({
-      definition: tsCliDefinition,
-      context: createGenerationContext({
-        targetDir: repositoryRoot,
-        defaultPackageScope: "seed",
-        toolchain: {
-          nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-            0,
-            releaseToolchainSnapshot.nodeVersion.indexOf("."),
-          ),
-          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-          nodeVersion: releaseToolchainSnapshot.nodeVersion,
-        },
-      }),
-    });
 
     try {
-      await renderNewProject({
-        targetRoot: repositoryRoot,
-        operations: [...plan.operations],
-      });
+      await initializePublicCli(repositoryRoot);
       await execa("git", ["init", "--quiet"], { cwd: repositoryRoot });
       await execa("pnpm", ["install"], { cwd: repositoryRoot });
       await execa("git", ["add", "--all", "--", "."], {
@@ -222,27 +229,9 @@ void describe("ts-cli publication owner-fact integration", () => {
         path.join(tmpdir(), "template-publication-artifact-"),
       );
       const repositoryRoot = path.join(workspace, "recorded-repository");
-      const plan = planGeneratedRepositoryInitialization({
-        definition: tsCliDefinition,
-        context: createGenerationContext({
-          targetDir: repositoryRoot,
-          defaultPackageScope: "seed",
-          toolchain: {
-            nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-              0,
-              releaseToolchainSnapshot.nodeVersion.indexOf("."),
-            ),
-            packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-            nodeVersion: releaseToolchainSnapshot.nodeVersion,
-          },
-        }),
-      });
 
       try {
-        await renderNewProject({
-          targetRoot: repositoryRoot,
-          operations: [...plan.operations],
-        });
+        await initializePublicCli(repositoryRoot);
         await execa("pnpm", ["install"], { cwd: repositoryRoot });
         const rootManifest = JSON.parse(
           await readFile(path.join(repositoryRoot, "package.json"), "utf8"),
@@ -650,33 +639,21 @@ void describe("ts-cli publication owner-fact integration", () => {
         path.join(tmpdir(), "template-publication-owner-facts-"),
       );
       const repositoryRoot = path.join(workspace, "recorded-repository");
-      const plan = planGeneratedRepositoryInitialization({
-        definition: tsCliDefinition,
-        context: createGenerationContext({
-          targetDir: repositoryRoot,
-          defaultPackageScope: "seed",
-          toolchain: {
-            nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-              0,
-              releaseToolchainSnapshot.nodeVersion.indexOf("."),
-            ),
-            packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-            nodeVersion: releaseToolchainSnapshot.nodeVersion,
-          },
-        }),
-      });
-      const initialCandidate = plan.blueprint.packages.find(
+      const { generator, initialized } =
+        await initializePublicCli(repositoryRoot);
+      const tsLibPreset = templatePresets.find(
+        (preset) => preset.owner?.packageName === "@ykdz/preset-ts-lib",
+      );
+      assert.ok(tsLibPreset);
+      const initialCandidate = initialized.blueprint.packages.find(
         (item) => item.path === "packages/cli",
       )!;
-      const initialGenerationRecord = plan.generationRecord.packages.find(
-        (item) => item.path === "packages/cli",
-      )!;
+      const initialGenerationRecord =
+        initialized.generationRecord.packages.find(
+          (item) => item.definition.path === "packages/cli",
+        )!;
 
       try {
-        await renderNewProject({
-          targetRoot: repositoryRoot,
-          operations: [...plan.operations],
-        });
         await execa("pnpm", ["install"], { cwd: repositoryRoot });
 
         await configurePublicOwnerFacts({
@@ -696,16 +673,16 @@ void describe("ts-cli publication owner-fact integration", () => {
           "packages/cli/package.json",
         );
         const publicManifestBytes = await readFile(publicManifestPath, "utf8");
-        const addition = planGeneratedRepositoryPackageAddition({
-          definition: tsLibDefinition,
-          localTemplateMetadata: loadLocalTemplateMetadata(repositoryRoot),
-          packageLeafName: "lib",
+        const addition = await generator.add({
+          repositoryRoot,
+          preset: tsLibPreset,
+          creationInput: { leafName: "lib", packagePath: "packages/lib" },
         });
-        const applied = await reconcileAndApplyProjectProjections({
-          targetRoot: repositoryRoot,
-          ...addition.projectProjections,
-        });
-        if (!applied.ok) throw new Error(JSON.stringify(applied, null, 2));
+        assert.strictEqual(
+          addition.status,
+          "success",
+          JSON.stringify(addition),
+        );
 
         assert.strictEqual(
           await readFile(publicManifestPath, "utf8"),
@@ -736,16 +713,25 @@ void describe("ts-cli publication owner-fact integration", () => {
             "utf8",
           ),
         ) as {
-          readonly repositoryName: string;
-          readonly defaultPackageScope: string;
+          readonly strategyState: {
+            readonly repositoryName: string;
+            readonly defaultPackageScope: string;
+          };
           readonly packages: readonly Record<string, unknown>[];
         };
-        assert.partialDeepStrictEqual(generation, {
+        assert.partialDeepStrictEqual(generation.strategyState, {
           repositoryName: "recorded-repository",
           defaultPackageScope: "seed",
         });
         assert.deepStrictEqual(
-          generation.packages.find((item) => item.path === "packages/cli"),
+          generation.packages.find((item) => {
+            return (
+              typeof item.definition === "object" &&
+              item.definition !== null &&
+              "path" in item.definition &&
+              item.definition.path === "packages/cli"
+            );
+          }),
           initialGenerationRecord,
         );
 

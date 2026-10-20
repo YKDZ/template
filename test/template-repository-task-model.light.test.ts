@@ -154,10 +154,12 @@ void describe("Template Repository native task model", () => {
       assert.equal(task.resolvedTaskDefinition.cache, true);
       assert.deepEqual(task.resolvedTaskDefinition.outputs, ["dist/**"]);
       assert.ok(Object.hasOwn(task.inputs, "package.json"));
-      assert.ok(Object.hasOwn(task.inputs, "tsconfig.build.json"));
-      assert.ok(
-        Object.keys(task.inputs).some((input) => input.startsWith("src/")),
-      );
+      if (taskId !== "@ykdz/template-builtin-presets#build") {
+        assert.ok(Object.hasOwn(task.inputs, "tsconfig.build.json"));
+        assert.ok(
+          Object.keys(task.inputs).some((input) => input.startsWith("src/")),
+        );
+      }
       assert.ok(
         task.resolvedTaskDefinition.inputs.every(
           (input) => !input.startsWith("../"),
@@ -197,7 +199,15 @@ void describe("Template Repository native task model", () => {
       ],
       [
         "@ykdz/template-checks#build",
-        ["@ykdz/template-core#build", "@ykdz/template-builtin-presets#build"],
+        [
+          "@ykdz/reference-ts-cli#build",
+          "@ykdz/reference-typescript-config#build",
+          "@ykdz/template-content#build",
+          "@ykdz/template-core#build",
+          "@ykdz/template-generator#build",
+          "@ykdz/template-workspace#build",
+          "@ykdz/template-workspace-authoring#build",
+        ],
       ],
     ] as const)
       for (const dependency of dependencies)

@@ -9,7 +9,7 @@ import type {
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
-import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
+import type { GenerationContext } from "@ykdz/template-workspace-authoring/generation-context";
 import {
   defineReferencePackage,
   type ReferencePackage,

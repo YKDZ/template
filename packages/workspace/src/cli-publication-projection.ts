@@ -29,10 +29,15 @@ export type CliPublicationProjection = {
   readonly tsconfigInclude: readonly string[];
 };
 
+type PublicCliCandidate = {
+  readonly contribution: PackageContribution;
+  readonly record: GeneratorPackageRecord;
+};
+
 function publicCliCandidate(
   packages: readonly GeneratorPackageRecord[],
   contributions: readonly PackageContribution[],
-): PackageContribution | undefined {
+): PublicCliCandidate | undefined {
   const recordsByPackagePath = new Map(
     packages.map((record) => [record.definition.path, record]),
   );
@@ -53,20 +58,33 @@ function publicCliCandidate(
       `工作区最多只能选择一个公开 CLI 候选：${candidates.map((candidate) => `${candidate.definition.name} 位于 ${candidate.definition.path}`).join("、")}`,
     );
   }
-  const candidate = candidates[0];
-  if (candidate !== undefined && candidate.definition.role !== "cli-tool") {
+  const contribution = candidates[0];
+  if (
+    contribution !== undefined &&
+    contribution.definition.role !== "cli-tool"
+  ) {
     throw new Error(
-      `公开 CLI 候选必须使用 cli-tool 包角色：${candidate.definition.name}`,
+      `公开 CLI 候选必须使用 cli-tool 包角色：${contribution.definition.name}`,
     );
   }
-  return candidate;
+  if (contribution === undefined) return undefined;
+  const record = recordsByPackagePath.get(contribution.definition.path);
+  if (record === undefined || record.creationInput === undefined) {
+    throw new Error(
+      `公开 CLI 候选缺少生成记录创建事实：${contribution.definition.name}`,
+    );
+  }
+  return { contribution, record };
 }
 
 function publicationOperations(
-  candidate: PackageContribution | undefined,
+  candidate: PublicCliCandidate | undefined,
 ): RenderOperation[] {
   if (candidate === undefined) return [];
   const identitySource = tsCliReferencePackage.publicationIdentitySource;
+  const candidateSelectionSource = tsCliReferencePackage.source(
+    "template/creation-input.ts",
+  );
   if (identitySource === undefined) {
     throw new Error("公开 CLI 候选缺少原生身份资源");
   }
@@ -84,6 +102,7 @@ function publicationOperations(
           "RELEASING.md",
           "publication.config.json",
           "cli-command-identity.ts",
+          "cli-candidate-selection.ts",
         ].includes(path.posix.basename(operation.to)),
     ),
     ...copyWorkspaceDirectory(
@@ -94,13 +113,23 @@ function publicationOperations(
     {
       kind: "writeJson",
       to: "scripts/npm-publication/publication.config.json",
-      value: { packagePath: candidate.definition.path },
+      value: {
+        packagePath: candidate.contribution.definition.path,
+        packageDefinitionId: candidate.record.definition.packageDefinitionId,
+        creationInput: candidate.record.creationInput,
+      },
     },
     {
       kind: "copyFile",
       source: identitySource,
       from: ".",
       to: "scripts/npm-publication/cli-command-identity.ts",
+    },
+    {
+      kind: "copyFile",
+      source: candidateSelectionSource,
+      from: ".",
+      to: "scripts/npm-publication/cli-candidate-selection.ts",
     },
     {
       kind: "setExecutable",
@@ -119,10 +148,10 @@ export function projectCliPublication(options: {
   readonly packages: readonly GeneratorPackageRecord[];
   readonly contributions: readonly PackageContribution[];
 }): CliPublicationProjection {
-  const candidate = publicCliCandidate(options.packages, options.contributions);
-  if (candidate === undefined) {
+  const selected = publicCliCandidate(options.packages, options.contributions);
+  if (selected === undefined) {
     return {
-      candidate,
+      candidate: undefined,
       operations: [],
       imports: undefined,
       scriptInsertions: [],
@@ -132,8 +161,8 @@ export function projectCliPublication(options: {
     };
   }
   return {
-    candidate,
-    operations: publicationOperations(candidate),
+    candidate: selected.contribution,
+    operations: publicationOperations(selected),
     imports: { "#npm-publication/*": "./scripts/npm-publication/*.ts" },
     scriptInsertions: [
       {

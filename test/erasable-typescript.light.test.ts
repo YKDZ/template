@@ -15,21 +15,15 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import {
-  builtInPresetRegistry,
-  referencePackagePublicationContexts,
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
-import {
-  renderNewProject,
-  resolveTemplateSource,
-} from "@ykdz/template-core/renderer";
-import type {
-  CopyFileOperation,
-  RenderOperation,
-} from "@ykdz/template-core/renderer";
-import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
+  templateContent,
+  templatePresets,
+  templateReferencePackages,
+} from "@ykdz/template-content";
+import { resolveTemplateSource } from "@ykdz/template-core/renderer";
+import { createGenerator } from "@ykdz/template-generator";
+import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 import { execa } from "execa";
 import ts from "typescript";
 
@@ -102,23 +96,30 @@ function readTypeScriptSource(absolutePath: string): ts.SourceFile {
   );
 }
 
-/** 投影进 Generated Repository 且正文直接导入 TypeScript 6 编程 API 的脚本生成路径。 */
-function compilerApiScriptPaths(
-  operations: readonly RenderOperation[],
-): readonly string[] {
-  return operations
-    .filter(
-      (operation): operation is CopyFileOperation =>
-        operation.kind === "copyFile" && operation.to.endsWith(".ts"),
-    )
-    .filter((operation) =>
-      importsTypeScript6Api(
-        readTypeScriptSource(
-          resolveTemplateSource(operation.source, operation.from),
-        ),
-      ),
-    )
-    .map((operation) => operation.to);
+/** 真实生成仓库内直接导入 TypeScript 编程 API 的脚本路径。 */
+async function compilerApiScriptPaths(
+  root: string,
+): Promise<readonly string[]> {
+  const scriptPaths: string[] = [];
+  async function visit(directory: string, relative = ""): Promise<void> {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.name === "node_modules") continue;
+      const absolutePath = path.join(directory, entry.name);
+      const filePath = path.posix.join(relative, entry.name);
+      if (entry.isDirectory()) {
+        await visit(absolutePath, filePath);
+      } else if (
+        entry.isFile() &&
+        entry.name.endsWith(".ts") &&
+        filePath.split("/").includes("scripts") &&
+        importsTypeScript6Api(readTypeScriptSource(absolutePath))
+      ) {
+        scriptPaths.push(filePath);
+      }
+    }
+  }
+  await visit(root);
+  return scriptPaths.toSorted();
 }
 
 async function compilerApiImports(
@@ -161,43 +162,46 @@ void describe("Erasable TypeScript enforcement", () => {
     );
 
     try {
-      const generatedPresetTargets = builtInPresetRegistry
-        .all()
-        .map((definition) => ({
-          definition,
-          targetDir: path.join(projectRoot, definition.metadata.name),
-        }));
-      await Promise.all(
-        generatedPresetTargets.map(async ({ definition, targetDir }) => {
-          const plan = planGeneratedRepositoryInitialization({
-            definition,
-            context: createGenerationContext({
-              targetDir,
-              defaultPackageScope: "erasable",
-              toolchain: {
-                nodeLtsMajor: "24",
-                packageManagerPin: "pnpm@11.11.0",
-                nodeVersion: releaseToolchainSnapshot.nodeVersion,
-              },
-            }),
-          });
-          await renderNewProject({
+      const generatedPresetTargets = await Promise.all(
+        templatePresets.map(async (preset) => {
+          const targetDir = path.join(
+            projectRoot,
+            preset.owner?.packageName ?? preset.metadata.alias,
+          );
+          const initialized = await createGenerator({
+            content: templateContent,
+            strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+          }).init({
             targetRoot: targetDir,
-            operations: [...plan.operations],
+            selection: { roots: [{ preset }] },
+            strategyInput: {
+              repositoryName: path.basename(targetDir),
+              defaultPackageScope: "erasable",
+            },
           });
+          assert.strictEqual(
+            initialized.status,
+            "success",
+            JSON.stringify(initialized),
+          );
+          if (initialized.status !== "success") {
+            throw new Error(`公开预设初始化失败：${preset.metadata.alias}`);
+          }
           await mkdir(path.join(targetDir, "node_modules/@vue"), {
             recursive: true,
           });
           await mkdir(path.join(targetDir, "node_modules/@erasable"), {
             recursive: true,
           });
-          const sharedConfiguration =
-            referencePackagePublicationContexts().find(
-              (reference) => reference.name === "@ykdz/reference-vue-shared",
-            )!;
-          const sourceConfiguration = [...sharedConfiguration.assets].find(
-            ([, target]) => target === "tsconfig.app.base.json",
-          )![0];
+          const sharedConfiguration = templateReferencePackages.find(
+            (reference) =>
+              reference.manifest.name === "@ykdz/reference-vue-shared",
+          );
+          assert.ok(sharedConfiguration);
+          const sourceConfiguration = resolveTemplateSource(
+            sharedConfiguration.source("tsconfig.app.base.json"),
+            ".",
+          );
           const vueConfiguration = createRequire(sourceConfiguration).resolve(
             "@vue/tsconfig/tsconfig.dom.json",
           );
@@ -206,7 +210,7 @@ void describe("Erasable TypeScript enforcement", () => {
             path.join(targetDir, "node_modules/@vue/tsconfig"),
             "dir",
           );
-          for (const packageDefinition of plan.blueprint.packages) {
+          for (const packageDefinition of initialized.blueprint.packages) {
             const linked = path.join(
               targetDir,
               "node_modules",
@@ -219,6 +223,7 @@ void describe("Erasable TypeScript enforcement", () => {
               "dir",
             );
           }
+          return { targetDir };
         }),
       );
       const uiConfigPaths = (
@@ -317,7 +322,13 @@ void describe("Erasable TypeScript enforcement", () => {
     }
   });
 
-  void it("keeps compiler ownership truthful in every package manifest", async () => {
+  void it("keeps compiler ownership truthful in every package manifest", async (testContext) => {
+    const generatedRoot = await mkdtemp(
+      path.join(tmpdir(), "template-compiler-ownership-"),
+    );
+    testContext.after(async () =>
+      rm(generatedRoot, { recursive: true, force: true }),
+    );
     const repositoryPackages = [
       ".",
       "packages/builtin-presets",
@@ -334,33 +345,57 @@ void describe("Erasable TypeScript enforcement", () => {
         ) as Manifest,
       })),
     );
-    const generatedPlans = builtInPresetRegistry.all().map((definition) =>
-      planGeneratedRepositoryInitialization({
-        definition,
-        context: createGenerationContext({
-          targetDir: path.join(
-            "generated-repository",
-            "manifest-truth",
-            definition.metadata.name,
-          ),
-          defaultPackageScope: "manifest-truth",
-          toolchain: {
-            nodeLtsMajor: "24",
-            packageManagerPin: "pnpm@11.11.0",
-            nodeVersion: releaseToolchainSnapshot.nodeVersion,
+    const generatedProjects = await Promise.all(
+      templatePresets.map(async (preset) => {
+        const targetDir = path.join(
+          generatedRoot,
+          preset.owner?.packageName ?? preset.metadata.alias,
+        );
+        const initialized = await createGenerator({
+          content: templateContent,
+          strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+        }).init({
+          targetRoot: targetDir,
+          selection: { roots: [{ preset }] },
+          strategyInput: {
+            repositoryName: path.basename(targetDir),
+            defaultPackageScope: "manifest-truth",
           },
-        }),
+        });
+        assert.strictEqual(
+          initialized.status,
+          "success",
+          JSON.stringify(initialized),
+        );
+        if (initialized.status !== "success") {
+          throw new Error(`公开预设初始化失败：${preset.metadata.alias}`);
+        }
+        return { initialized, targetDir };
       }),
     );
-    const generatedManifests = generatedPlans.flatMap(
-      ({ manifests }) => manifests as readonly Manifest[],
+    const generatedManifests = await Promise.all(
+      generatedProjects.flatMap(({ initialized, targetDir }) => [
+        readFile(path.join(targetDir, "package.json"), "utf8").then(
+          (contents) => JSON.parse(contents) as Manifest,
+        ),
+        ...initialized.blueprint.packages.map((definition) =>
+          readFile(
+            path.join(targetDir, definition.path, "package.json"),
+            "utf8",
+          ).then((contents) => JSON.parse(contents) as Manifest),
+        ),
+      ]),
     );
-    /** 由 checked Template Source 投影、正文直接导入 TypeScript 6 编程 API 的生成脚本路径。 */
+    /** 真实生成文件中直接导入 TypeScript 6 编程 API 的脚本路径。 */
     const typescript6ApiScripts = [
       ...new Set(
-        generatedPlans.flatMap(({ operations }) =>
-          compilerApiScriptPaths(operations),
-        ),
+        (
+          await Promise.all(
+            generatedProjects.map(({ targetDir }) =>
+              compilerApiScriptPaths(targetDir),
+            ),
+          )
+        ).flat(),
       ),
     ].toSorted();
 
@@ -448,6 +483,10 @@ void describe("Erasable TypeScript enforcement", () => {
           manifest.bundleDependencies.includes("@ykdz/template-core"),
           "@ykdz/template owns the flattened runtime closure of its bundled private packages",
         );
+        assert.strictEqual((await compilerApiImports(packageRoot)).length, 0);
+        continue;
+      }
+      if (manifest.name === "@ykdz/template-builtin-presets") {
         assert.strictEqual((await compilerApiImports(packageRoot)).length, 0);
         continue;
       }

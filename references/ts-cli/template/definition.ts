@@ -1,27 +1,29 @@
 import path from "node:path";
 
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
+import type { GenerationContext } from "@ykdz/template-workspace-authoring/generation-context";
 import { validateCliCommandName } from "@ykdz/template-workspace-authoring/package-contribution";
-import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
 import type { PackageLinkRequirement } from "@ykdz/template-workspace-authoring/project-requirements";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
-export type TsCliCreationVariant = "private" | "public-candidate";
+import {
+  isTsCliPublicCandidateCreationInput,
+  tsCliPublicCandidateCreationInput,
+  type TsCliCreationVariant,
+} from "./creation-input.ts";
+
+export type { TsCliCreationVariant } from "./creation-input.ts";
 export type TsCliCreationInput = PackageCreationInput<TsCliCreationVariant> & {
   /** 要连接的已选参考包节点；目标角色和来源条件由默认 workspace 策略校验。 */
   readonly linkToNodeIdentity?: string;
 };
-export const tsCliPublicCandidateCreationInput = {
-  variant: "public-candidate",
-} as const satisfies TsCliCreationInput;
+export { tsCliPublicCandidateCreationInput };
 
 function publicationNodeEngine(
   toolchain: GenerationContext["toolchain"],
-  creationOrigin: "new" | "replay",
 ): string {
   const nodeVersion = toolchain.nodeVersion;
   if (nodeVersion === undefined) {
-    if (creationOrigin === "replay") return `>=${toolchain.nodeLtsMajor}`;
     throw new Error(
       "新建公开 ts-cli 发布候选要求 Generation Context 提供精确三段 toolchain.nodeVersion，实际缺失；不能从 nodeLtsMajor 猜 patch 派生公开 caret 范围。",
     );
@@ -56,7 +58,7 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
         purpose: "template-execution",
       },
     ],
-    exports: ["./command-identity"],
+    exports: ["./command-identity", "./creation-input"],
     scripts: ["build:template"],
     resources: ["template", "tsconfig.template.json"],
   },
@@ -72,10 +74,8 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
   project(contribution, input) {
     const creationInput = input.creationInput as TsCliCreationInput | undefined;
     const publicCandidate =
-      input.createdBy === undefined
-        ? input.planningIdentity === "cli-publication-candidate"
-        : input.createdBy === "initialization" &&
-          creationInput?.variant === "public-candidate";
+      input.createdBy === "initialization" &&
+      isTsCliPublicCandidateCreationInput(creationInput);
     const commandName = validateCliCommandName(
       input.definition.name.slice(input.definition.name.lastIndexOf("/") + 1),
     );
@@ -119,12 +119,7 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
         devDependencies,
         engines: {
           node: publicCandidate
-            ? publicationNodeEngine(
-                input.context.toolchain,
-                input.createdBy === undefined
-                  ? (input.creationOrigin ?? "new")
-                  : "replay",
-              )
+            ? publicationNodeEngine(input.context.toolchain)
             : `>=${input.context.toolchain.nodeLtsMajor}`,
         },
       },

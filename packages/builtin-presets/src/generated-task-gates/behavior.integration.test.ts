@@ -5,63 +5,70 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
-import { renderNewProject } from "@ykdz/template-core/renderer";
-import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
+import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
+import { templateContent, templatePresets } from "@ykdz/template-content";
+import { createGenerator } from "@ykdz/template-generator";
+import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 import { execa } from "execa";
 
 import {
   installedIntegrationSignal,
   throwIfInstalledIntegrationWasCancelled,
 } from "../../test-support/installed-integration-signal.ts";
-import {
-  builtInPresetRegistry,
-  createGenerationContext,
-  loadLocalTemplateMetadata,
-  planGeneratedRepositoryPackageAddition,
-  planGeneratedRepositoryInitialization,
-} from "../foundation.ts";
+function presetFor(packageName: string) {
+  const preset = templatePresets.find(
+    (candidate) => candidate.owner?.packageName === packageName,
+  );
+  assert.ok(preset, `缺少公开预设：${packageName}`);
+  return preset;
+}
 
-const runtimeToolchain = {
-  nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.split(".")[0]!,
-  packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-  nodeVersion: releaseToolchainSnapshot.nodeVersion,
-};
+function generator() {
+  return createGenerator({
+    content: templateContent,
+    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+  });
+}
 
 void describe("生成任务公共入口", () => {
   void it(
-    "通过原生 glob 执行生成包测试并拒绝空文件和空套件",
+    "正式生成包按原生 glob 执行测试并拒绝空文件和空套件",
     { timeout: 180_000 },
     async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-node-gates-"),
       );
       const targetRoot = path.join(workspace, "generated-library");
-      const definition = builtInPresetRegistry.require("ts-lib");
-      const context = createGenerationContext({
-        targetDir: targetRoot,
-        defaultPackageScope: "generated",
-        toolchain: runtimeToolchain,
-      });
-      const plan = planGeneratedRepositoryInitialization({
-        definition,
-        context,
-      });
+      const preset = presetFor("@ykdz/preset-ts-lib");
+      const currentGenerator = generator();
 
       try {
-        await renderNewProject({
+        const initialized = await currentGenerator.init({
           targetRoot,
-          operations: [...plan.operations],
+          selection: { roots: [{ preset }] },
+          strategyInput: {
+            repositoryName: "generated-library",
+            defaultPackageScope: "generated",
+          },
         });
-        const addedPackage = planGeneratedRepositoryPackageAddition({
-          definition,
-          localTemplateMetadata: loadLocalTemplateMetadata(targetRoot),
-          packageLeafName: "utilities",
+        assert.strictEqual(
+          initialized.status,
+          "success",
+          JSON.stringify(initialized),
+        );
+        const addedPackage = await currentGenerator.add({
+          repositoryRoot: targetRoot,
+          preset,
+          creationInput: {
+            leafName: "utilities",
+            packagePath: "packages/utilities",
+          },
         });
-        await reconcileAndApplyProjectProjections({
-          targetRoot,
-          ...addedPackage.projectProjections,
-        });
+        assert.strictEqual(
+          addedPackage.status,
+          "success",
+          JSON.stringify(addedPackage),
+        );
         throwIfInstalledIntegrationWasCancelled();
         await execa("pnpm", ["install"], {
           cwd: targetRoot,
@@ -226,32 +233,30 @@ void describe("生成任务公共入口", () => {
     },
   );
   void it(
-    "rejects a native Cargo zero-test result when build warnings contain test-summary text",
+    "原生 Cargo 构建警告不能冒充真实测试结果",
     { timeout: 180_000 },
     async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-cargo-zero-tests-"),
       );
       const targetRoot = path.join(workspace, "generated-rust");
-      const definition = builtInPresetRegistry.require("rust-bin");
-      const context = createGenerationContext({
-        targetDir: targetRoot,
-        defaultPackageScope: "generated",
-        toolchain: {
-          ...runtimeToolchain,
-          rustVersion: releaseToolchainSnapshot.rustVersion,
-        },
-      });
-      const plan = planGeneratedRepositoryInitialization({
-        definition,
-        context,
-      });
+      const preset = presetFor("@ykdz/preset-rust-bin");
+      const currentGenerator = generator();
 
       try {
-        await renderNewProject({
+        const initialized = await currentGenerator.init({
           targetRoot,
-          operations: [...plan.operations],
+          selection: { roots: [{ preset }] },
+          strategyInput: {
+            repositoryName: "generated-rust",
+            defaultPackageScope: "generated",
+          },
         });
+        assert.strictEqual(
+          initialized.status,
+          "success",
+          JSON.stringify(initialized),
+        );
         await writeFile(
           path.join(targetRoot, "packages/app/src/main.rs"),
           "fn main() {}\n",

@@ -13,6 +13,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 
 import { preset as presetDefinition } from "@ykdz/preset-vue-app/template";
+import { referencePackage as libraryDefinition } from "@ykdz/reference-ts-lib/template";
 import { referencePackage as vueAppDefinition } from "@ykdz/reference-vue-app/template";
 import { referencePackage as vueSharedDefinition } from "@ykdz/reference-vue-shared/template";
 import {
@@ -33,6 +34,7 @@ const content = await loadContentSource({
   members: [
     "@ykdz/reference-vue-app/template",
     "@ykdz/reference-vue-shared/template",
+    "@ykdz/reference-ts-lib/template",
     "@ykdz/reference-typescript-config/template",
     "@ykdz/preset-vue-app/template",
   ],
@@ -51,6 +53,13 @@ const vueApp = contentIndex.fromDefinition(
   "reference"
 >;
 const vueShared = contentIndex.fromDefinition(vueSharedDefinition, "reference");
+const library = contentIndex.fromDefinition(
+  libraryDefinition,
+  "reference",
+) as LoadedContentMember<
+  ReturnType<typeof defineReferencePackage>,
+  "reference"
+>;
 const configuration = contentIndex.resolve(
   {
     namespace: "ykdz",
@@ -100,6 +109,69 @@ async function snapshotTree(
 }
 
 void describe("Vue 独立组合预设", () => {
+  void it("保留现有 Editor 推荐顺序并在末尾追加新能力", async (testContext) => {
+    const temporaryRoot = await mkdtemp(
+      path.join(tmpdir(), "template-vue-editor-order-"),
+    );
+    testContext.after(async () =>
+      rm(temporaryRoot, { recursive: true, force: true }),
+    );
+    const targetRoot = path.join(temporaryRoot, "demo");
+    const generator = createGenerator({
+      content,
+      strategy: createDefaultWorkspaceStrategy(),
+    });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: {
+        roots: [{ nodeIdentity: "library", contentIdentity: library.identity }],
+      },
+      strategyInput: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+
+    const extensionsPath = path.join(targetRoot, ".vscode/extensions.json");
+    const extensions = JSON.parse(await readFile(extensionsPath, "utf8")) as {
+      recommendations: string[];
+    };
+    const initialRecommendation = extensions.recommendations[0];
+    assert.ok(initialRecommendation);
+    extensions.recommendations = [
+      "user.first",
+      initialRecommendation,
+      "user.last",
+    ];
+    await writeFile(extensionsPath, `${JSON.stringify(extensions, null, 2)}\n`);
+
+    const added = await generator.add({
+      repositoryRoot: targetRoot,
+      preset: preset.identity,
+      creationInput: { leafName: "dashboard" },
+    });
+    assert.strictEqual(added.status, "success", JSON.stringify(added));
+
+    const updated = JSON.parse(await readFile(extensionsPath, "utf8")) as {
+      recommendations: string[];
+    };
+    assert.deepStrictEqual(updated.recommendations.slice(0, 3), [
+      "user.first",
+      initialRecommendation,
+      "user.last",
+    ]);
+    assert.deepStrictEqual(updated.recommendations.slice(3), [
+      "Vue.volar",
+      "bradlc.vscode-tailwindcss",
+      "vitest.explorer",
+    ]);
+  });
+
   void it("连续新增独立应用并保留应用、共享模块、配置和根定制", async (testContext) => {
     const temporaryRoot = await mkdtemp(
       path.join(tmpdir(), "template-vue-composition-preset-"),

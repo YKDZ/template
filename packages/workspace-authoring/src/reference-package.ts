@@ -20,9 +20,9 @@ import ignore, { type Ignore } from "ignore";
 import { parse, type ParseError } from "jsonc-parser";
 
 import type { DefaultPackageRole } from "./default-package-role.ts";
+import type { GenerationContext } from "./generation-context.ts";
 import type { PackageContribution } from "./package-contribution.ts";
 import { mapPackageNamesInJson } from "./package-name-projection.ts";
-import type { GenerationContext } from "./preset-definition.ts";
 import { resourceIgnoreSnapshot } from "./resource-ignore-snapshot.ts";
 import { mapTypeScriptModuleSpecifiers } from "./typescript-module-specifiers.ts";
 
@@ -72,13 +72,10 @@ export type ReferenceContributionOptions<
   readonly context: GenerationContext;
   readonly definition: PackageDefinition;
   readonly bindings?: ReadonlyMap<string, PackageDefinition>;
-  /** 公开生成器传入的持久创建语义；旧调用适配器可暂时省略。 */
+  /** 公开生成器传入的持久创建语义。 */
   readonly createdBy?: GeneratorPackageCreatedBy;
   readonly creationInput?: CreationInput;
   readonly nodeInstances?: GeneratorNodeInstances;
-  /** 仅旧 BuiltIn 回放适配器使用，后续由新生成记录取代。 */
-  readonly planningIdentity?: string;
-  readonly creationOrigin?: "new" | "replay";
   /** 已由公开生成器或所属适配器执行的同一包准备结果。 */
   readonly preparation?: unknown;
 };
