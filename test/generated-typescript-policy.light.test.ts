@@ -97,7 +97,7 @@ async function localExtendsChain(
 
 void describe("Generated Repository TypeScript policy", () => {
   for (const preset of templatePresets) {
-    const presetName = preset.metadata.alias;
+    const presetName = preset.alias;
     void describe(`${presetName} generated repository TypeScript policy`, () => {
       void it("inherits one strict policy with explicit ecosystem exceptions", async () => {
         const workspace = await mkdtemp(
@@ -110,7 +110,7 @@ void describe("Generated Repository TypeScript policy", () => {
             strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
           }).init({
             targetRoot: targetDir,
-            selection: { roots: [{ preset }] },
+            selection: { roots: [{ preset: preset.identity }] },
             strategyInput: {
               repositoryName: "repository",
               defaultPackageScope: "policy",

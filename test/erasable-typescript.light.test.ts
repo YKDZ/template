@@ -164,16 +164,13 @@ void describe("Erasable TypeScript enforcement", () => {
     try {
       const generatedPresetTargets = await Promise.all(
         templatePresets.map(async (preset) => {
-          const targetDir = path.join(
-            projectRoot,
-            preset.owner?.packageName ?? preset.metadata.alias,
-          );
+          const targetDir = path.join(projectRoot, preset.identity.packageName);
           const initialized = await createGenerator({
             content: templateContent,
             strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
           }).init({
             targetRoot: targetDir,
-            selection: { roots: [{ preset }] },
+            selection: { roots: [{ preset: preset.identity }] },
             strategyInput: {
               repositoryName: path.basename(targetDir),
               defaultPackageScope: "erasable",
@@ -185,7 +182,7 @@ void describe("Erasable TypeScript enforcement", () => {
             JSON.stringify(initialized),
           );
           if (initialized.status !== "success") {
-            throw new Error(`公开预设初始化失败：${preset.metadata.alias}`);
+            throw new Error(`公开预设初始化失败：${preset.alias}`);
           }
           await mkdir(path.join(targetDir, "node_modules/@vue"), {
             recursive: true,
@@ -195,11 +192,11 @@ void describe("Erasable TypeScript enforcement", () => {
           });
           const sharedConfiguration = templateReferencePackages.find(
             (reference) =>
-              reference.manifest.name === "@ykdz/reference-vue-shared",
+              reference.identity.packageName === "@ykdz/reference-vue-shared",
           );
           assert.ok(sharedConfiguration);
           const sourceConfiguration = resolveTemplateSource(
-            sharedConfiguration.source("tsconfig.app.base.json"),
+            sharedConfiguration.definition.source("tsconfig.app.base.json"),
             ".",
           );
           const vueConfiguration = createRequire(sourceConfiguration).resolve(
@@ -347,16 +344,13 @@ void describe("Erasable TypeScript enforcement", () => {
     );
     const generatedProjects = await Promise.all(
       templatePresets.map(async (preset) => {
-        const targetDir = path.join(
-          generatedRoot,
-          preset.owner?.packageName ?? preset.metadata.alias,
-        );
+        const targetDir = path.join(generatedRoot, preset.identity.packageName);
         const initialized = await createGenerator({
           content: templateContent,
           strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
         }).init({
           targetRoot: targetDir,
-          selection: { roots: [{ preset }] },
+          selection: { roots: [{ preset: preset.identity }] },
           strategyInput: {
             repositoryName: path.basename(targetDir),
             defaultPackageScope: "manifest-truth",
@@ -368,7 +362,7 @@ void describe("Erasable TypeScript enforcement", () => {
           JSON.stringify(initialized),
         );
         if (initialized.status !== "success") {
-          throw new Error(`公开预设初始化失败：${preset.metadata.alias}`);
+          throw new Error(`公开预设初始化失败：${preset.alias}`);
         }
         return { initialized, targetDir };
       }),

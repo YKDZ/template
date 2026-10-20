@@ -39,7 +39,7 @@ void describe("生成项目包清单策略", () => {
       try {
         const initialized = await generator().init({
           targetRoot,
-          selection: { roots: [{ preset }] },
+          selection: { roots: [{ preset: preset.identity }] },
           strategyInput: {
             repositoryName,
             defaultPackageScope: "manifest-policy",
@@ -65,7 +65,7 @@ void describe("生成项目包清单策略", () => {
         assert.strictEqual(
           rootManifest.scripts["lint:fix"],
           `oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs ${
-            preset.owner?.packageName === "@ykdz/preset-vue-hono-app"
+            preset.identity.packageName === "@ykdz/preset-vue-hono-app"
               ? "scripts test"
               : "scripts"
           } --fix`,
@@ -78,7 +78,7 @@ void describe("生成项目包清单策略", () => {
         );
         assert.strictEqual(
           candidateRecords.length,
-          preset.owner?.packageName === "@ykdz/preset-ts-cli" ? 1 : 0,
+          preset.identity.packageName === "@ykdz/preset-ts-cli" ? 1 : 0,
         );
 
         for (const definition of initialized.blueprint.packages) {

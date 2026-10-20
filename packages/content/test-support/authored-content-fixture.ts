@@ -1,23 +1,24 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 
 import {
   loadContentSource,
   type LoadedSourceMember,
 } from "@ykdz/template-generator/content-source";
 
-const repositoryRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../..",
-);
+const defineReferencePackageURL = import.meta
+  .resolve("@ykdz/template-workspace-authoring/reference-package");
+const definePresetURL = import.meta
+  .resolve("@ykdz/template-core/preset-definition");
 
 export type AuthoredContentFixtureOptions = {
   readonly namespace: string;
   readonly marker: string;
   readonly featureAlias?: string;
   readonly featureResourcePath?: string;
+  readonly featurePackageName?: string;
   readonly includeTheme?: boolean;
   readonly includeAddon?: boolean;
 };
@@ -62,7 +63,7 @@ function referenceDefinition(options: {
 }): string {
   const resourceDirectory = path.posix.dirname(options.resourcePath);
   return [
-    'import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";',
+    `import { defineReferencePackage } from ${JSON.stringify(defineReferencePackageURL)};`,
     "",
     "export const referencePackage = defineReferencePackage({",
     `  packageName: ${JSON.stringify(options.packageName)},`,
@@ -92,6 +93,7 @@ async function writeReferencePackage(options: {
   readonly collectionRoot: string;
   readonly authorsRoot: string;
   readonly leafName: string;
+  readonly packageName?: string;
   readonly marker: string;
   readonly alias: string;
   readonly defaultLeafName?: string;
@@ -100,10 +102,8 @@ async function writeReferencePackage(options: {
   readonly dependencies?: Readonly<Record<string, string>>;
 }): Promise<void> {
   const packageRoot = path.join(options.authorsRoot, options.leafName);
-  const manifest = packageManifest(
-    `@fixture/${options.leafName}`,
-    options.dependencies,
-  );
+  const packageName = options.packageName ?? `@fixture/${options.leafName}`;
+  const manifest = packageManifest(packageName, options.dependencies);
   await mkdir(path.join(packageRoot, "template"), { recursive: true });
   await mkdir(path.dirname(path.join(packageRoot, options.resourcePath)), {
     recursive: true,
@@ -112,17 +112,10 @@ async function writeReferencePackage(options: {
     path.join(packageRoot, "package.json"),
     JSON.stringify(manifest, null, 2),
   );
-  const packageScopedModules = path.join(packageRoot, "node_modules", "@ykdz");
-  await mkdir(path.dirname(packageScopedModules), { recursive: true });
-  await symlink(
-    path.join(repositoryRoot, "node_modules", "@ykdz"),
-    packageScopedModules,
-    "dir",
-  );
   await writeFile(
     path.join(packageRoot, "template", "definition.mjs"),
     referenceDefinition({
-      packageName: `@fixture/${options.leafName}`,
+      packageName,
       alias: options.alias,
       defaultLeafName: options.defaultLeafName ?? options.alias,
       instance: options.instance,
@@ -141,7 +134,10 @@ async function writeReferencePackage(options: {
   await mkdir(scopeDirectory, { recursive: true });
   await symlink(
     packageRoot,
-    path.join(scopeDirectory, options.leafName),
+    path.join(
+      scopeDirectory,
+      packageName.slice(packageName.lastIndexOf("/") + 1),
+    ),
     "dir",
   );
 }
@@ -149,6 +145,7 @@ async function writeReferencePackage(options: {
 async function writePresetPackage(options: {
   readonly collectionRoot: string;
   readonly authorsRoot: string;
+  readonly featurePackageName: string;
 }): Promise<void> {
   const packageRoot = path.join(options.authorsRoot, "preset");
   await mkdir(path.join(packageRoot, "template"), { recursive: true });
@@ -156,32 +153,32 @@ async function writePresetPackage(options: {
     path.join(packageRoot, "package.json"),
     JSON.stringify(
       packageManifest("@fixture/preset", {
-        "@fixture/feature": "workspace:*",
+        [options.featurePackageName]: "workspace:*",
+        "@ykdz/template-core": "workspace:*",
       }),
       null,
       2,
     ),
   );
   const packageNodeModules = path.join(packageRoot, "node_modules");
-  const packageYkdzModules = path.join(packageNodeModules, "@ykdz");
   const fixtureScope = path.join(packageNodeModules, "@fixture");
   await mkdir(packageNodeModules, { recursive: true });
   await mkdir(fixtureScope, { recursive: true });
   await symlink(
-    path.join(repositoryRoot, "node_modules", "@ykdz"),
-    packageYkdzModules,
-    "dir",
-  );
-  await symlink(
     path.join(options.authorsRoot, "feature"),
-    path.join(fixtureScope, "feature"),
+    path.join(
+      fixtureScope,
+      options.featurePackageName.slice(
+        options.featurePackageName.lastIndexOf("/") + 1,
+      ),
+    ),
     "dir",
   );
   await writeFile(
     path.join(packageRoot, "template", "definition.mjs"),
     [
-      'import { referencePackage as feature } from "@fixture/feature/template";',
-      'import { definePreset, presetOwnerFromManifest } from "@ykdz/template-core/preset-definition";',
+      `import { referencePackage as feature } from ${JSON.stringify(`${options.featurePackageName}/template`)};`,
+      `import { definePreset, presetOwnerFromManifest } from ${JSON.stringify(definePresetURL)};`,
       'import presetManifest from "../package.json" with { type: "json" };',
       "",
       "export const preset = definePreset({",
@@ -211,17 +208,14 @@ export async function createAuthoredContentFixture(
   const authorsRoot = path.join(root, options.namespace, "authors");
   const nodeModulesRoot = path.join(collectionRoot, "node_modules");
   await mkdir(nodeModulesRoot, { recursive: true });
-  await symlink(
-    path.join(repositoryRoot, "node_modules", "@ykdz"),
-    path.join(nodeModulesRoot, "@ykdz"),
-    "dir",
-  );
 
+  const featurePackageName = options.featurePackageName ?? "@fixture/feature";
   const featureResourcePath = options.featureResourcePath ?? "src/content.ts";
   await writeReferencePackage({
     collectionRoot,
     authorsRoot,
     leafName: "feature",
+    packageName: featurePackageName,
     marker: `${options.marker}:feature`,
     alias: options.featureAlias ?? "feature",
     instance: "independent",
@@ -247,7 +241,11 @@ export async function createAuthoredContentFixture(
     instance: "independent",
     resourcePath: "src/addon.ts",
   });
-  await writePresetPackage({ collectionRoot, authorsRoot });
+  await writePresetPackage({
+    collectionRoot,
+    authorsRoot,
+    featurePackageName,
+  });
   const featureScope = path.join(
     authorsRoot,
     "feature",
@@ -271,7 +269,7 @@ export async function createAuthoredContentFixture(
   );
   const resolve = collectionModule.resolve as (specifier: string) => string;
   const memberSpecifiers = [
-    "@fixture/feature/template",
+    `${featurePackageName}/template`,
     ...(options.includeTheme === false
       ? []
       : ["@fixture/typescript-config/template"]),

@@ -59,7 +59,7 @@ async function generatedRepository(
     strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
   }).init({
     targetRoot: repositoryRoot,
-    selection: { roots: [{ preset: cliPreset }] },
+    selection: { roots: [{ preset: cliPreset.identity }] },
     strategyInput: {
       repositoryName: "demo-cli",
       defaultPackageScope: "demo",

@@ -204,7 +204,7 @@ void describe("公开模板内容集合", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-        selection: { roots: [{ preset: tsLibPreset.identity }] },
+      selection: { roots: [{ preset: tsLibPreset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -218,7 +218,7 @@ void describe("公开模板内容集合", () => {
     await mkdir(workflowPath);
     const added = await generator.add({
       repositoryRoot: targetRoot,
-      preset: tsLibPreset,
+      preset: tsLibPreset.identity,
       creationInput: { leafName: "utilities" },
     });
 
@@ -752,6 +752,8 @@ void describe("公开模板内容集合", () => {
     });
 
     assert.strictEqual(cliResult.status, "success", JSON.stringify(cliResult));
+    const cliNode = tsCliPreset.definition.nodes.cli;
+    assert.ok(cliNode?.creationInput);
     const cliManifest = JSON.parse(
       await readFile(path.join(cliRoot, "packages/cli/package.json"), "utf8"),
     ) as {

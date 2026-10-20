@@ -179,14 +179,9 @@ void describe("template CLI command control", () => {
       assert.match(output.stdout(), /^内置预设/mu);
       assert.equal(output.stdout(), repeat.stdout());
       assert.match(output.stdout(), /\n  [^:\s]+:/u);
-      const cliPreset = templatePresets
-        .map((member) => member.definition)
-        .find((preset) =>
-          Object.values(preset.nodes).some(
-            ({ reference }) =>
-              reference.manifest.name === "@ykdz/reference-ts-cli",
-          ),
-        );
+      const cliPreset = templatePresets.find(
+        (member) => member.identity.packageName === "@ykdz/preset-ts-cli",
+      )?.definition;
       if (cliPreset === undefined)
         throw new Error("Expected a CLI preset in the content collection");
       assert.ok(

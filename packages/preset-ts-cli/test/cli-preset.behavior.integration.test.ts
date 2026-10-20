@@ -12,21 +12,35 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { preset } from "@ykdz/preset-ts-cli/template";
-import { referencePackage as rust } from "@ykdz/reference-rust-bin/template";
-import {
-  referencePackage as cli,
-  type TsCliCreationInput,
-} from "@ykdz/reference-ts-cli/template";
-import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
-import { referenceDefinition as configurationDefinition } from "@ykdz/reference-typescript-config/template";
+import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import { createGenerator } from "@ykdz/template-generator";
+import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 import { execa } from "execa";
 
-const configuration = defineReferencePackage(configurationDefinition);
-const content = [cli, library, rust, configuration, preset];
+const content = await loadContentSource({
+  namespace: "ykdz",
+  resolve: (specifier) => import.meta.resolve(specifier),
+  members: [
+    "@ykdz/reference-ts-cli/template",
+    "@ykdz/reference-ts-lib/template",
+    "@ykdz/reference-rust-bin/template",
+    "@ykdz/reference-typescript-config/template",
+    "@ykdz/preset-ts-cli/template",
+  ],
+  prepareReferenceDefinition(definition) {
+    return defineReferencePackage(
+      definition as Parameters<typeof defineReferencePackage>[0],
+    );
+  },
+});
+const preset = content.find(
+  (member) =>
+    member.kind === "preset" &&
+    member.identity.packageName === "@ykdz/preset-ts-cli",
+);
+assert.ok(preset);
 
 async function readManifest(
   packageRoot: string,
@@ -60,7 +74,7 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
 
       const initialized = await generator().init({
         targetRoot,
-        selection: { roots: [{ preset }] },
+        selection: { roots: [{ preset: preset.identity }] },
         strategyInput: {
           repositoryName: "demo-cli",
           defaultPackageScope: "demo",

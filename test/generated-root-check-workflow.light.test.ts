@@ -22,7 +22,7 @@ async function renderRootCheckWorkflow(): Promise<{
   );
   try {
     for (const preset of templatePresets) {
-      const generatedRoot = path.join(workspace, preset.metadata.alias);
+      const generatedRoot = path.join(workspace, preset.alias);
       const receipt = await initializePreset({
         preset,
         targetRoot: generatedRoot,

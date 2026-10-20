@@ -13,7 +13,6 @@ import path from "node:path";
 import { describe, it } from "node:test";
 
 import { preset as presetDefinition } from "@ykdz/preset-vue-app/template";
-import { referencePackage as libraryDefinition } from "@ykdz/reference-ts-lib/template";
 import { referencePackage as vueAppDefinition } from "@ykdz/reference-vue-app/template";
 import { referencePackage as vueSharedDefinition } from "@ykdz/reference-vue-shared/template";
 import {
@@ -53,13 +52,14 @@ const vueApp = contentIndex.fromDefinition(
   "reference"
 >;
 const vueShared = contentIndex.fromDefinition(vueSharedDefinition, "reference");
-const library = contentIndex.fromDefinition(
-  libraryDefinition,
+const library = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/reference-ts-lib",
+    exportPath: "./template",
+  },
   "reference",
-) as LoadedContentMember<
-  ReturnType<typeof defineReferencePackage>,
-  "reference"
->;
+);
 const configuration = contentIndex.resolve(
   {
     namespace: "ykdz",
