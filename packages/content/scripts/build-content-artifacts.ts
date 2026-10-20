@@ -780,40 +780,13 @@ function generatedProviderAggregateSource(
       `import { templateContent as provider${index} } from ${JSON.stringify(name)};`,
   );
   return [
+    'import { deriveTemplateMembers } from "./template-members.js";',
     ...imports,
     "",
+    "export { deriveTemplateMembers };",
     "export const templateContent = [",
     ...packageNames.map((_, index) => `  ...provider${index},`),
     "] as const;",
-    "export function deriveTemplateMembers<Content extends readonly unknown[]>(",
-    "  content: Content,",
-    "): {",
-    "  readonly presets: readonly Extract<",
-    '    Content[number], { readonly kind: "preset" }',
-    ">[];",
-    "  readonly referencePackages: readonly Extract<",
-    '    Content[number], { readonly kind: "reference" }',
-    ">[];",
-    "} {",
-    '  const presets: Extract<Content[number], { readonly kind: "preset" }>[] = [];',
-    "  const referencePackages: Extract<",
-    '    Content[number], { readonly kind: "reference" }',
-    ">[] = [];",
-    "  for (const member of content) {",
-    '    if (typeof member !== "object" || member === null) continue;',
-    '    if ("kind" in member && member.kind === "preset") {',
-    "      presets.push(",
-    '        member as Extract<Content[number], { readonly kind: "preset" }>,',
-    "      );",
-    "    }",
-    '    if ("kind" in member && member.kind === "reference") {',
-    "      referencePackages.push(",
-    '        member as Extract<Content[number], { readonly kind: "reference" }>,',
-    "      );",
-    "    }",
-    "  }",
-    "  return { presets, referencePackages };",
-    "}",
     "const templateMembers = deriveTemplateMembers(templateContent);",
     "export const templatePresets = templateMembers.presets;",
     "export const templateReferencePackages = templateMembers.referencePackages;",
@@ -834,6 +807,7 @@ async function createModulePackageRoot(options: {
   readonly packageName: string;
   readonly packageVersion: string;
   readonly source: string;
+  readonly additionalSources?: ReadonlyMap<string, string>;
   readonly dependencies: Readonly<Record<string, string>>;
   readonly packageRoots: ReadonlyMap<string, string>;
   readonly sdkPackageRoots: ReadonlyMap<string, string>;
@@ -890,6 +864,9 @@ async function createModulePackageRoot(options: {
     )}\n`,
   );
   await writeFile(path.join(sourceRoot, "index.ts"), options.source);
+  for (const [fileName, source] of options.additionalSources ?? []) {
+    await writeFile(path.join(sourceRoot, fileName), source);
+  }
 
   for (const [name, packageRoot] of options.sdkPackageRoots) {
     await linkPackage(nodeModulesRoot, name, packageRoot);
@@ -1014,6 +991,10 @@ async function createCollectionInstallRoot(options: {
     }
     dependencies[name] = version;
   }
+  const memberModuleSource = await readFile(
+    fileURLToPath(new URL("../src/template-members.ts", import.meta.url)),
+    "utf8",
+  );
   return await createModulePackageRoot({
     root: options.root,
     packageName: options.packageName,
@@ -1021,6 +1002,7 @@ async function createCollectionInstallRoot(options: {
     source: generatedProviderAggregateSource(
       options.providers.map(({ packageName }) => packageName),
     ),
+    additionalSources: new Map([["template-members.ts", memberModuleSource]]),
     dependencies,
     packageRoots,
     sdkPackageRoots: options.sdkPackageRoots,
