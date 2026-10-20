@@ -22,7 +22,10 @@ import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
 import { referencePackage as vueApp } from "@ykdz/reference-vue-app/template";
 import { templateContent } from "@ykdz/template-content";
-import { createGenerator } from "@ykdz/template-generator";
+import {
+  createGenerator,
+  parseGenerationRecord,
+} from "@ykdz/template-generator";
 import {
   createDefaultWorkspaceStrategy,
   defaultWorkspaceConfigurationIdentity,
@@ -603,14 +606,54 @@ void describe("公开模板内容集合", () => {
       await readFile(path.join(cliRoot, "packages/cli/package.json"), "utf8"),
     ) as { files: string[] };
     assert.deepStrictEqual(cliManifest.files, ["dist"]);
-    assert.deepStrictEqual(
-      JSON.parse(
-        await readFile(
-          path.join(cliRoot, "scripts/npm-publication/publication.config.json"),
-          "utf8",
-        ),
+    const publicationConfig = JSON.parse(
+      await readFile(
+        path.join(cliRoot, "scripts/npm-publication/publication.config.json"),
+        "utf8",
       ),
-      { packagePath: "packages/cli" },
+    ) as {
+      readonly packageDefinitionId: string;
+      readonly packagePath: string;
+      readonly creationInput: TsCliCreationInput;
+    };
+    assert.strictEqual(publicationConfig.packagePath, "packages/cli");
+    assert.deepStrictEqual(
+      publicationConfig.creationInput,
+      tsCliPreset.nodes.cli.creationInput.init,
+    );
+    const blueprint = JSON.parse(
+      await readFile(path.join(cliRoot, ".template/blueprint.json"), "utf8"),
+    ) as {
+      readonly packages: readonly {
+        readonly packageDefinitionId: string;
+        readonly path: string;
+      }[];
+    };
+    const matchingDefinitions = blueprint.packages.filter(
+      ({ packageDefinitionId }) =>
+        packageDefinitionId === publicationConfig.packageDefinitionId,
+    );
+    assert.strictEqual(matchingDefinitions.length, 1);
+    assert.strictEqual(
+      matchingDefinitions[0]?.path,
+      publicationConfig.packagePath,
+    );
+    const generationRecord = parseGenerationRecord<TsCliCreationInput>(
+      JSON.parse(
+        await readFile(path.join(cliRoot, ".template/generation.json"), "utf8"),
+      ),
+    );
+    const matchingRecords = generationRecord.packages.filter(
+      ({ definition }) =>
+        definition.packageDefinitionId ===
+        publicationConfig.packageDefinitionId,
+    );
+    assert.strictEqual(matchingRecords.length, 1);
+    assert.strictEqual(matchingRecords[0]?.createdBy, "initialization");
+    assert.strictEqual(matchingRecords[0]?.definition.path, "packages/cli");
+    assert.deepStrictEqual(
+      matchingRecords[0]?.creationInput,
+      publicationConfig.creationInput,
     );
 
     const rustRoot = await createTargetRoot("template-content-rust-bin-");
