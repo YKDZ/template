@@ -206,7 +206,7 @@ export async function validateGeneratedDevelopmentContainerProjection(options: {
 function recordByPackageId(result: SuccessfulScenarioResult) {
   return new Map(
     result.generationRecord.packages.map((record) => [
-      record.definition.packageDefinitionId,
+      record.packageDefinitionId,
       record,
     ]),
   );
@@ -246,10 +246,10 @@ export async function validatePlanDependencyCatalog(
 
   const packageRecordById = recordByPackageId(result);
   const packageRecordByPath = new Map(
-    result.generationRecord.packages.map((record) => [
-      record.definition.path,
-      record,
-    ]),
+    result.blueprint.packages.flatMap((definition) => {
+      const record = packageRecordById.get(definition.packageDefinitionId);
+      return record === undefined ? [] : [[definition.path, record] as const];
+    }),
   );
   const templateCatalog = loadTemplateDependencyCatalog();
   const references = new Set<string>();
@@ -282,7 +282,7 @@ export async function validatePlanDependencyCatalog(
           providerRecord !== undefined &&
           packageRecord !== undefined &&
           Object.values(packageRecord.bindings).includes(
-            providerRecord.definition.packageDefinitionId,
+            providerRecord.packageDefinitionId,
           );
         const isLinkIntent =
           field === "dependencies" &&

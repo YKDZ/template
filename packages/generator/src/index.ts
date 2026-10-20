@@ -18,7 +18,6 @@ import {
 } from "@ykdz/template-core/package-contribution";
 import type {
   PresetDefinition,
-  PresetOwnerSelection,
   PresetProjectOptions,
   PresetReference,
 } from "@ykdz/template-core/preset-definition";
@@ -44,6 +43,7 @@ import type {
   GeneratorNodeInstanceIds,
   GeneratorNodeInstances,
   GeneratorPackageRecord,
+  GeneratorPackageState,
   GeneratorSelectionRoot,
   PackageCreationInput,
   WorkspaceStrategyFailureDiagnostic,
@@ -282,11 +282,11 @@ function readJson(value: unknown, label: string): Record<string, unknown> {
   return value;
 }
 
-function presetOwnerKey(owner: PresetOwnerSelection): string {
-  return contentIdentityKey(owner);
+function presetSelectionKey(identity: ContentIdentity): string {
+  return contentIdentityKey(identity);
 }
 
-function parsePresetSelections(value: unknown): PresetOwnerSelection[] {
+function parsePresetSelections(value: unknown): ContentIdentity[] {
   if (!Array.isArray(value)) throw new Error("生成记录的预设选择无效");
   const seen = new Set<string>();
   return value.map((item) => {
@@ -295,7 +295,7 @@ function parsePresetSelections(value: unknown): PresetOwnerSelection[] {
       "生成记录预设选择",
     ) as unknown as ContentIdentity;
     assertContentIdentity(selection);
-    const key = presetOwnerKey(selection);
+    const key = presetSelectionKey(selection);
     if (seen.has(key)) throw new Error("生成记录的预设选择重复");
     seen.add(key);
     return { ...selection };
@@ -307,8 +307,26 @@ export function parseGenerationRecord<
 >(value: unknown): GenerationRecord<CreationInput> {
   const record = parseGenerationRecordStructure<CreationInput>(value);
   const nodeInstances = record.nodeInstances;
+  const packageIds = new Set<string>();
   for (const packageRecord of record.packages) {
     assertContentIdentity(packageRecord.contentIdentity);
+    if (packageIds.has(packageRecord.packageDefinitionId)) {
+      throw new Error(
+        "生成记录包含重复包实例：" + packageRecord.packageDefinitionId,
+      );
+    }
+    packageIds.add(packageRecord.packageDefinitionId);
+  }
+  for (const packageRecord of record.packages) {
+    for (const [identity, packageDefinitionId] of Object.entries(
+      packageRecord.bindings,
+    )) {
+      if (identity.length === 0 || !packageIds.has(packageDefinitionId)) {
+        throw new Error(
+          `生成记录中的内容 ${contentIdentityLabel(packageRecord.contentIdentity)} 包含无效实例绑定：${identity}`,
+        );
+      }
+    }
   }
   for (const [nodeIdentity, packageDefinitionId] of Object.entries(
     nodeInstances,
@@ -316,21 +334,19 @@ export function parseGenerationRecord<
     if (
       nodeIdentity.length === 0 ||
       typeof packageDefinitionId !== "string" ||
-      !record.packages.some(
-        (packageRecord) =>
-          packageRecord.definition.packageDefinitionId === packageDefinitionId,
-      )
+      !packageIds.has(packageDefinitionId)
     ) {
       throw new Error("生成记录的节点实例映射无效");
     }
   }
+  const presetSelections = parsePresetSelections(record.presetSelections);
   return {
-    schemaVersion: 1,
+    schemaVersion: 3,
     strategyIdentity: record.strategyIdentity,
     strategyState: record.strategyState,
     packages: record.packages,
     nodeInstances: nodeInstances,
-    presetSelections: parsePresetSelections(record.presetSelections),
+    presetSelections,
   };
 }
 
@@ -427,18 +443,16 @@ export function createGenerator<
     >,
     "preset"
   >;
-  const projectPresetsByOwner = new Map<string, LoadedPreset>();
+  const presetsByIdentity = new Map<string, LoadedPreset>();
   for (const presetMember of presetMembers) {
     const preset = presetMember.definition as LoadedPreset["definition"];
-    if (preset.project !== undefined) {
-      const ownerKey = contentIdentityKey(presetMember.identity);
-      if (projectPresetsByOwner.has(ownerKey)) {
-        throw new Error(
-          `项目预设规范身份重复：${contentIdentityLabel(presetMember.identity)}`,
-        );
-      }
-      projectPresetsByOwner.set(ownerKey, presetMember as LoadedPreset);
+    const identityKey = contentIdentityKey(presetMember.identity);
+    if (presetsByIdentity.has(identityKey)) {
+      throw new Error(
+        `预设规范身份重复：${contentIdentityLabel(presetMember.identity)}`,
+      );
     }
+    presetsByIdentity.set(identityKey, presetMember as LoadedPreset);
     for (const node of Object.values(preset.nodes)) {
       try {
         contentIndex.fromDefinition(node.reference, "reference", {
@@ -497,11 +511,11 @@ export function createGenerator<
   }
 
   function findByPackageId(
-    records: readonly GeneratorPackageRecord<CreationInput>[],
+    records: readonly GeneratorPackageState<CreationInput>[],
     id: string,
-  ): GeneratorPackageRecord<CreationInput> {
+  ): GeneratorPackageState<CreationInput> {
     const record = records.find(
-      (candidate) => candidate.definition.packageDefinitionId === id,
+      (candidate) => candidate.packageDefinitionId === id,
     );
     if (record === undefined) {
       throw new Error("生成记录引用了不存在的包实例：" + id);
@@ -509,8 +523,99 @@ export function createGenerator<
     return record;
   }
 
-  function resolveNodeInstances(
+  function resolvePackageStates(
     records: readonly GeneratorPackageRecord<CreationInput>[],
+    blueprint: ProjectBlueprint,
+  ): GeneratorPackageState<CreationInput>[] {
+    const definitionsById = new Map(
+      blueprint.packages.map((definition) => [
+        definition.packageDefinitionId,
+        definition,
+      ]),
+    );
+    if (definitionsById.size !== records.length) {
+      throw new Error("生成记录与蓝图的包实例数量不一致");
+    }
+    for (const definition of blueprint.packages) {
+      if (
+        !records.some(
+          (record) =>
+            record.packageDefinitionId === definition.packageDefinitionId,
+        )
+      ) {
+        throw new Error(
+          `蓝图包实例缺少生成记录事实：${definition.packageDefinitionId}`,
+        );
+      }
+    }
+    return records.map((record) => {
+      const definition = definitionsById.get(record.packageDefinitionId);
+      if (definition === undefined) {
+        throw new Error(
+          `蓝图缺少内容 ${contentIdentityLabel(record.contentIdentity)} 对应的包实例：${record.packageDefinitionId}`,
+        );
+      }
+      return { ...record, definition };
+    });
+  }
+
+  function validateRequiredBindings(
+    records: readonly GeneratorPackageState<CreationInput>[],
+  ): void {
+    for (const record of records) {
+      const content = requireContent(record.contentIdentity);
+      for (const dependency of options.strategy.dependencies({
+        content,
+        contentByIdentity,
+      })) {
+        const dependencyKey = contentIdentityKey(dependency);
+        const packageDefinitionId = record.bindings[dependencyKey];
+        if (packageDefinitionId === undefined) {
+          throw new Error(
+            `生成记录中的内容 ${contentIdentityLabel(record.contentIdentity)} 缺少必要实例绑定：${contentIdentityLabel(dependency)}`,
+          );
+        }
+        const provider = findByPackageId(records, packageDefinitionId);
+        if (contentIdentityKey(provider.contentIdentity) !== dependencyKey) {
+          throw new Error(
+            `生成记录中的内容 ${contentIdentityLabel(record.contentIdentity)} 将依赖绑定到错误实例：${contentIdentityLabel(dependency)}`,
+          );
+        }
+      }
+    }
+  }
+
+  function validateNodeInstances(
+    records: readonly GeneratorPackageState<CreationInput>[],
+    nodeInstances: GeneratorNodeInstanceIds,
+  ): void {
+    const mappedIds = new Set(Object.values(nodeInstances));
+    for (const record of records) {
+      if (
+        record.createdBy === "initialization" &&
+        !mappedIds.has(record.packageDefinitionId)
+      ) {
+        throw new Error(
+          `生成记录中的内容 ${contentIdentityLabel(record.contentIdentity)} 缺少必要节点实例映射：${record.packageDefinitionId}`,
+        );
+      }
+    }
+  }
+
+  function validatePresetSelections(
+    selections: readonly ContentIdentity[],
+  ): void {
+    for (const selection of selections) {
+      if (!presetsByIdentity.has(presetSelectionKey(selection))) {
+        throw new Error(
+          `生成记录所选预设不可用：${contentIdentityLabel(selection)}`,
+        );
+      }
+    }
+  }
+
+  function resolveNodeInstances(
+    records: readonly GeneratorPackageState<CreationInput>[],
     nodeInstances: GeneratorNodeInstanceIds,
   ): GeneratorNodeInstances {
     return new Map(
@@ -524,23 +629,14 @@ export function createGenerator<
   }
 
   function addRecordNodes(
-    records: readonly GeneratorPackageRecord<CreationInput>[],
-    blueprint: ProjectBlueprint,
+    records: readonly GeneratorPackageState<CreationInput>[],
   ): PackageNode<Context, Contribution, CreationInput, Content>[] {
     return records.map((record) => {
-      const definition = blueprint.packages.find(
-        (candidate) =>
-          candidate.packageDefinitionId ===
-          record.definition.packageDefinitionId,
-      );
-      if (definition === undefined) {
-        throw new Error("蓝图缺少生成记录包实例：" + record.definition.path);
-      }
       return {
         content: requireContent(record.contentIdentity),
-        definition,
+        definition: record.definition,
         createdBy: record.createdBy,
-        ...(record.creationInput === undefined
+        ...(record.creationInput === null
           ? {}
           : { creationInput: record.creationInput }),
         providers: new Map(),
@@ -552,7 +648,7 @@ export function createGenerator<
   function createContribution(
     node: PackageNode<Context, Contribution, CreationInput, Content>,
     context: Context,
-    allRecords: readonly GeneratorPackageRecord<CreationInput>[],
+    allRecords: readonly GeneratorPackageState<CreationInput>[],
     nodeInstances: GeneratorNodeInstances,
   ): Contribution {
     if (node.contribution !== undefined) return node.contribution;
@@ -568,7 +664,7 @@ export function createGenerator<
         if (provider.record === undefined) {
           throw new Error("内容闭包的包实例尚未登记：" + identity);
         }
-        providerDefinitions.set(identity, provider.record.definition);
+        providerDefinitions.set(identity, provider.definition);
       }
     }
     const nativeBindings = options.strategy.bindings({
@@ -596,7 +692,7 @@ export function createGenerator<
       contributionDefinition.role !== node.definition.role ||
       ("packageDefinitionId" in contributionDefinition &&
         contributionDefinition.packageDefinitionId !==
-          node.record?.definition.packageDefinitionId)
+          node.record?.packageDefinitionId)
     ) {
       throw new Error(
         `内容 ${contentIdentityLabel(node.content.identity)} 返回的包定义与已分配实例不一致：${node.definition.path}`,
@@ -618,35 +714,31 @@ export function createGenerator<
 
   function storedRecord(
     state: State,
-    records: readonly GeneratorPackageRecord<CreationInput>[],
+    records: readonly GeneratorPackageState<CreationInput>[],
     nodeInstances: GeneratorNodeInstanceIds,
-    presetSelections: readonly PresetOwnerSelection[],
+    presetSelections: readonly ContentIdentity[],
   ): GeneratorRecord<CreationInput> {
     return {
-      schemaVersion: 1,
+      schemaVersion: 3,
       strategyIdentity: options.strategy.identity,
       strategyState: state,
-      packages: records,
+      packages: records.map(({ definition: _definition, ...record }) => record),
       nodeInstances,
       presetSelections,
     };
   }
 
-  function projectOwner(
-    preset: LoadedPreset,
-  ): PresetOwnerSelection | undefined {
-    return preset.definition.project === undefined
-      ? undefined
-      : preset.identity;
+  function selectedPreset(preset: LoadedPreset): ContentIdentity {
+    return preset.identity;
   }
 
   function mergePresetSelections(
-    existing: readonly PresetOwnerSelection[],
-    added: readonly PresetOwnerSelection[],
-  ): PresetOwnerSelection[] {
-    const selections = new Map<string, PresetOwnerSelection>();
+    existing: readonly ContentIdentity[],
+    added: readonly ContentIdentity[],
+  ): ContentIdentity[] {
+    const selections = new Map<string, ContentIdentity>();
     for (const selection of [...existing, ...added]) {
-      selections.set(presetOwnerKey(selection), selection);
+      selections.set(presetSelectionKey(selection), selection);
     }
     return [...selections.values()];
   }
@@ -655,15 +747,16 @@ export function createGenerator<
     context: Context,
     contributions: readonly Contribution[],
     nodeInstances: GeneratorNodeInstances,
-    presetSelections: readonly PresetOwnerSelection[],
+    presetSelections: readonly ContentIdentity[],
   ): PresetProjectContribution[] {
-    return presetSelections.map((selection) => {
-      const presetMember = projectPresetsByOwner.get(presetOwnerKey(selection));
-      if (presetMember?.definition.project === undefined) {
+    return presetSelections.flatMap((selection) => {
+      const presetMember = presetsByIdentity.get(presetSelectionKey(selection));
+      if (presetMember === undefined) {
         throw new Error(
           `生成记录所选预设不可用：${contentIdentityLabel(selection)}`,
         );
       }
+      if (presetMember.definition.project === undefined) return [];
       return presetMember.definition.project({
         context,
         contributions,
@@ -676,10 +769,10 @@ export function createGenerator<
     context: Context,
     state: State,
     blueprint: ProjectBlueprint,
-    records: readonly GeneratorPackageRecord<CreationInput>[],
+    records: readonly GeneratorPackageState<CreationInput>[],
     contributions: readonly Contribution[],
     nodeInstances: GeneratorNodeInstanceIds,
-    presetSelections: readonly PresetOwnerSelection[],
+    presetSelections: readonly ContentIdentity[],
   ) {
     const resolvedNodeInstances = resolveNodeInstances(records, nodeInstances);
     const presetProjectContributions = computePresetProjectContributions(
@@ -701,10 +794,7 @@ export function createGenerator<
       projection.blueprint ?? blueprint,
     );
     const allocatedDefinitions = new Map(
-      records.map((record) => [
-        record.definition.packageDefinitionId,
-        record.definition,
-      ]),
+      records.map((record) => [record.packageDefinitionId, record.definition]),
     );
     if (projectedBlueprint.packages.length !== allocatedDefinitions.size) {
       throw new Error("策略蓝图必须引用完整且唯一的已分配包实例");
@@ -886,10 +976,8 @@ export function createGenerator<
       node.record = {
         contentIdentity: node.content.identity,
         createdBy: node.createdBy,
-        definition: persisted,
-        ...(node.creationInput === undefined
-          ? {}
-          : { creationInput: node.creationInput }),
+        packageDefinitionId: persisted.packageDefinitionId,
+        creationInput: node.creationInput ?? null,
         bindings: {},
       };
     }
@@ -899,7 +987,7 @@ export function createGenerator<
           if (provider.record === undefined) {
             throw new Error("内容闭包绑定缺少包实例：" + identity);
           }
-          return [identity, provider.record.definition.packageDefinitionId];
+          return [identity, provider.record.packageDefinitionId];
         }),
       );
       node.record = { ...node.record!, bindings };
@@ -915,7 +1003,7 @@ export function createGenerator<
       Content
     >[],
     context: Context,
-    records: readonly GeneratorPackageRecord<CreationInput>[],
+    records: readonly GeneratorPackageState<CreationInput>[],
     nodeInstances: GeneratorNodeInstances,
   ): Contribution[] {
     return nodes.map((node) =>
@@ -939,16 +1027,12 @@ export function createGenerator<
     readonly dryRun?: boolean;
   }): Promise<GeneratorResult<CreationInput, OwnerFacts>> {
     try {
-      const selectedProjectPresets: PresetOwnerSelection[] = [];
+      const selectedPresets: ContentIdentity[] = [];
       for (const root of initOptions.selection.roots) {
         if (!("preset" in root)) continue;
-        const owner = projectOwner(resolvePreset(root.preset));
-        if (owner !== undefined) selectedProjectPresets.push(owner);
+        selectedPresets.push(selectedPreset(resolvePreset(root.preset)));
       }
-      const presetSelections = mergePresetSelections(
-        [],
-        selectedProjectPresets,
-      );
+      const presetSelections = mergePresetSelections([], selectedPresets);
       const selectionRoots = initOptions.selection.roots.flatMap((root) =>
         "preset" in root
           ? expandPreset({
@@ -1028,27 +1112,27 @@ export function createGenerator<
           if (root.record === undefined) {
             throw new Error("显式初始化节点没有持久实例：" + root.nodeIdentity);
           }
-          return [
-            root.nodeIdentity,
-            root.record.definition.packageDefinitionId,
-          ];
+          return [root.nodeIdentity, root.record.packageDefinitionId];
         }),
       );
       const blueprint = assertProjectBlueprint({
         schemaVersion: 3,
-        packages: records.map((record) => record.definition),
+        packages: nodes.map((node) => node.definition),
       });
+      const packageStates = resolvePackageStates(records, blueprint);
+      validateRequiredBindings(packageStates);
+      validateNodeInstances(packageStates, nodeInstances);
       const contributions = persistedContributions(
         nodes,
         prepared.context,
-        records,
-        resolveNodeInstances(records, nodeInstances),
+        packageStates,
+        resolveNodeInstances(packageStates, nodeInstances),
       );
       const projectPlan = project(
         prepared.context,
         prepared.state,
         blueprint,
-        records,
+        packageStates,
         contributions,
         nodeInstances,
         presetSelections,
@@ -1102,25 +1186,41 @@ export function createGenerator<
   ): Promise<GeneratorResult<CreationInput, OwnerFacts>> {
     try {
       const repositoryRoot = path.resolve(addOptions.repositoryRoot);
-      const blueprintValue = JSON.parse(
-        await readFile(
-          path.join(repositoryRoot, ".template/blueprint.json"),
-          "utf8",
-        ),
-      ) as unknown;
-      const blueprint = assertProjectBlueprint(blueprintValue);
-      const record = parseGenerationRecord<CreationInput>(
-        JSON.parse(
+      let blueprint: ProjectBlueprint;
+      let record: GeneratorRecord<CreationInput>;
+      let packageStates: GeneratorPackageState<CreationInput>[];
+      let state: State;
+      try {
+        const blueprintValue = JSON.parse(
           await readFile(
-            path.join(repositoryRoot, ".template/generation.json"),
+            path.join(repositoryRoot, ".template/blueprint.json"),
             "utf8",
           ),
-        ) as unknown,
-      );
-      if (record.strategyIdentity !== options.strategy.identity) {
-        throw new Error("目标仓库使用了不兼容的工作区策略");
+        ) as unknown;
+        blueprint = assertProjectBlueprint(blueprintValue);
+        record = parseGenerationRecord<CreationInput>(
+          JSON.parse(
+            await readFile(
+              path.join(repositoryRoot, ".template/generation.json"),
+              "utf8",
+            ),
+          ) as unknown,
+        );
+        if (record.strategyIdentity !== options.strategy.identity) {
+          throw new Error("目标仓库使用了不兼容的工作区策略");
+        }
+        state = options.strategy.parseState(record.strategyState);
+        packageStates = resolvePackageStates(record.packages, blueprint);
+        validateRequiredBindings(packageStates);
+        validateNodeInstances(packageStates, record.nodeInstances);
+        validatePresetSelections(record.presetSelections);
+      } catch (error) {
+        return fail(
+          "metadata",
+          error,
+          options.strategy.diagnoseFailure?.(error),
+        );
       }
-      const state = options.strategy.parseState(record.strategyState);
       const additionRoots =
         "preset" in addOptions
           ? expandPreset({
@@ -1148,13 +1248,19 @@ export function createGenerator<
       }
       const selected = requireContent(selectionRoot.contentIdentity);
       const creationInput = selectionRoot.creationInput;
+      const addedPresetMember =
+        "preset" in addOptions ? resolvePreset(addOptions.preset) : undefined;
+      const addedPreset =
+        addedPresetMember === undefined
+          ? undefined
+          : selectedPreset(addedPresetMember);
       const addedProjectPreset =
-        "preset" in addOptions
-          ? projectOwner(resolvePreset(addOptions.preset))
-          : undefined;
-      const existingNodes = addRecordNodes(record.packages, blueprint);
+        addedPresetMember?.definition.project === undefined
+          ? undefined
+          : addedPreset;
+      const existingNodes = addRecordNodes(packageStates);
       const currentNodeInstances = resolveNodeInstances(
-        record.packages,
+        packageStates,
         record.nodeInstances,
       );
       try {
@@ -1173,7 +1279,7 @@ export function createGenerator<
           state,
           content: selected,
           contentByIdentity,
-          packages: record.packages,
+          packages: packageStates,
           nodeInstances: currentNodeInstances,
           ...(creationInput === undefined ? {} : { creationInput }),
         });
@@ -1185,12 +1291,7 @@ export function createGenerator<
         );
       }
       const existingContributions = existingNodes.map((node) =>
-        createContribution(
-          node,
-          context,
-          record.packages,
-          currentNodeInstances,
-        ),
+        createContribution(node, context, packageStates, currentNodeInstances),
       );
       const definition = options.strategy.createDefinition({
         context,
@@ -1224,10 +1325,13 @@ export function createGenerator<
               Content
             >[];
             readonly records: GeneratorPackageRecord<CreationInput>[];
+            readonly packages: GeneratorPackageState<CreationInput>[];
+            readonly blueprint: ProjectBlueprint;
+            readonly nodeInstances: GeneratorNodeInstances;
             readonly contributions: Contribution[];
           }
         | undefined;
-      const prepareAdditionNodes = () => {
+      const prepareAdditionNodes = (): NonNullable<typeof preparedAddition> => {
         if (preparedAddition !== undefined) return preparedAddition;
         try {
           const nodes = hydrateNewNodes({
@@ -1235,15 +1339,24 @@ export function createGenerator<
             existing: existingNodes,
             context,
             occupiedIds: new Set(
-              record.packages.map(
-                (item) => item.definition.packageDefinitionId,
-              ),
+              record.packages.map((item) => item.packageDefinitionId),
             ),
           });
           const records = nodes.flatMap((node) =>
             node.record === undefined ? [] : [node.record],
           );
           const allRecords = [...record.packages, ...records];
+          const afterBlueprint: ProjectBlueprint = {
+            ...blueprint,
+            packages: [
+              ...blueprint.packages,
+              ...nodes.map(
+                (node) => node.definition as PersistedPackageDefinition,
+              ),
+            ],
+          };
+          const packages = resolvePackageStates(allRecords, afterBlueprint);
+          validateRequiredBindings(packages);
           const nodeInstanceIds: Record<string, PackageDefinitionId> = {
             ...record.nodeInstances,
           };
@@ -1260,19 +1373,19 @@ export function createGenerator<
               );
             }
             nodeInstanceIds[selectionRoot.nodeIdentity] =
-              addedRoot.record.definition.packageDefinitionId;
+              addedRoot.record.packageDefinitionId;
           }
-          const nodeInstances = resolveNodeInstances(
-            allRecords,
-            nodeInstanceIds,
-          );
+          const nodeInstances = resolveNodeInstances(packages, nodeInstanceIds);
           preparedAddition = {
             nodes,
             records,
+            packages,
+            blueprint: afterBlueprint,
+            nodeInstances,
             contributions: persistedContributions(
               nodes,
               context,
-              allRecords,
+              packages,
               nodeInstances,
             ),
           };
@@ -1295,7 +1408,7 @@ export function createGenerator<
           content: selected,
           definition,
           ...(creationInput === undefined ? {} : { creationInput }),
-          packages: record.packages,
+          packages: packageStates,
           contributions: existingContributions,
           getAdditionContributions: () => prepareAdditionNodes().contributions,
           nodeInstances: currentNodeInstances,
@@ -1328,10 +1441,9 @@ export function createGenerator<
           candidate.path === definition.path,
       );
       if (conflicting !== undefined) {
-        const prior = record.packages.find(
+        const prior = packageStates.find(
           (item) =>
-            item.definition.packageDefinitionId ===
-            conflicting.packageDefinitionId,
+            item.packageDefinitionId === conflicting.packageDefinitionId,
         );
         if (
           prior !== undefined &&
@@ -1339,7 +1451,10 @@ export function createGenerator<
             contentIdentityKey(selected.identity) &&
           prior.definition.name === definition.name &&
           prior.definition.path === definition.path &&
-          isDeepStrictEqual(prior.creationInput, selectionRoot.creationInput)
+          isDeepStrictEqual(
+            prior.creationInput ?? undefined,
+            selectionRoot.creationInput,
+          )
         ) {
           return {
             status: "success",
@@ -1372,8 +1487,8 @@ export function createGenerator<
       }
       const prepared = prepareAdditionNodes();
       const additions = prepared.nodes;
-      const newRecords = prepared.records;
-      const allRecords = [...record.packages, ...newRecords];
+      const allRecords = prepared.packages;
+      const afterBlueprint = assertProjectBlueprint(prepared.blueprint);
       const afterNodeInstanceIds: Record<string, PackageDefinitionId> = {
         ...record.nodeInstances,
       };
@@ -1392,25 +1507,17 @@ export function createGenerator<
           );
         }
         afterNodeInstanceIds[selectionRoot.nodeIdentity] =
-          addedRoot.record.definition.packageDefinitionId;
+          addedRoot.record.packageDefinitionId;
       }
       const afterPresetSelections = mergePresetSelections(
         record.presetSelections,
-        addedProjectPreset === undefined ? [] : [addedProjectPreset],
+        addedPreset === undefined ? [] : [addedPreset],
       );
-      const allDefinitions = [
-        ...blueprint.packages,
-        ...newRecords.map((item) => item.definition),
-      ];
-      const afterBlueprint = assertProjectBlueprint({
-        ...blueprint,
-        packages: allDefinitions,
-      });
       const beforeContributions = persistedContributions(
         existingNodes,
         context,
-        record.packages,
-        resolveNodeInstances(record.packages, record.nodeInstances),
+        packageStates,
+        currentNodeInstances,
       );
       const afterNodes = [...existingNodes, ...additions];
       const afterContributions = persistedContributions(
@@ -1423,7 +1530,7 @@ export function createGenerator<
         context,
         state,
         blueprint,
-        record.packages,
+        packageStates,
         beforeContributions,
         record.nodeInstances,
         record.presetSelections,

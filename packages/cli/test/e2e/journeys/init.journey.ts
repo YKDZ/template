@@ -188,7 +188,7 @@ const journey: CliJourney = {
         readonly toolchain: Record<string, unknown>;
       };
     };
-    assert.equal(generationRecord.schemaVersion, 1);
+    assert.equal(generationRecord.schemaVersion, 3);
     assert.deepEqual(generationRecord.strategyState.toolchain, {
       nodeLtsMajor: snapshotNodeMajor,
       nodeVersion: releaseToolchainSnapshot.nodeVersion,

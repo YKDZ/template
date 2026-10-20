@@ -44,12 +44,17 @@ void describe("唯一内容集合的真实生成检查场景", () => {
           scenario,
           workspace,
         });
-        if (receipt.status === "not-applicable") continue;
+        assert.notEqual(receipt.status, "not-applicable", scenario.id);
+        if (receipt.status === "not-applicable") {
+          throw new Error(
+            `${scenario.id}: product matrix scenario was skipped`,
+          );
+        }
         assert.strictEqual(
           receipt.initialization.generationRecord.schemaVersion,
-          1,
+          3,
         );
-        assert.strictEqual(receipt.result.generationRecord.schemaVersion, 1);
+        assert.strictEqual(receipt.result.generationRecord.schemaVersion, 3);
         await validateGeneratedScenarioReceipt({
           receipt,
           runtime: sourceGeneratedScenarioRuntime,
@@ -63,15 +68,16 @@ void describe("唯一内容集合的真实生成检查场景", () => {
             "utf8",
           ),
         ) as { readonly schemaVersion: number };
-        assert.strictEqual(persistedRecord.schemaVersion, 1);
+        assert.strictEqual(persistedRecord.schemaVersion, 3);
         if (scenario.addition !== undefined) {
+          const addition = receipt.result.generationRecord.packages.find(
+            (record) => record.createdBy === "addition",
+          );
+          assert.ok(addition);
           assert.ok(
             receipt.result.blueprint.packages.some(
               (definition) =>
-                definition.path ===
-                receipt.result.generationRecord.packages.find(
-                  (record) => record.createdBy === "addition",
-                )?.definition.path,
+                definition.packageDefinitionId === addition.packageDefinitionId,
             ),
           );
         }
@@ -180,11 +186,16 @@ void describe("唯一内容集合的真实生成检查场景", () => {
         (record) => record.createdBy === "addition",
       );
       assert.ok(providerRecord);
+      const providerDefinition = receipt.result.blueprint.packages.find(
+        (definition) =>
+          definition.packageDefinitionId === providerRecord.packageDefinitionId,
+      );
+      assert.ok(providerDefinition);
       const providerManifest = JSON.parse(
         await readFile(
           path.join(
             receipt.projectDir,
-            providerRecord.definition.path,
+            providerDefinition.path,
             "package.json",
           ),
           "utf8",
@@ -201,7 +212,7 @@ void describe("唯一内容集合的真实生成检查场景", () => {
         receipt.result.blueprint.packageLinkIntents?.some(
           (intent) =>
             intent.consumerPackagePath === "packages/cli" &&
-            intent.providerPackagePath === providerRecord.definition.path,
+            intent.providerPackagePath === providerDefinition.path,
         ),
       );
       await validateGeneratedScenarioReceipt({ receipt, runtime });

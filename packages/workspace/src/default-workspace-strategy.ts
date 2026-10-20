@@ -20,7 +20,7 @@ import {
 } from "@ykdz/template-core/renderer";
 import type {
   GeneratorContent,
-  GeneratorPackageRecord,
+  GeneratorPackageState,
   PackageCreationInput,
   WorkspaceProjection,
   WorkspaceStrategy,
@@ -238,7 +238,7 @@ function requestedLinkFrom(value: unknown): readonly string[] {
 
 function includeRequestedLinkFromIntents(
   blueprint: ProjectBlueprint,
-  packages: readonly GeneratorPackageRecord[],
+  packages: readonly GeneratorPackageState[],
 ): ProjectBlueprint {
   const requested = packages.flatMap((packageRecord) =>
     packageRecord.createdBy === "addition"
@@ -810,7 +810,7 @@ function projectOperations(options: {
   readonly context: GenerationContext;
   readonly state: DefaultWorkspaceState;
   readonly blueprint: ProjectBlueprint;
-  readonly packages: readonly GeneratorPackageRecord[];
+  readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
   readonly presetProjectContributions: readonly (readonly ProjectRequirement[])[];
 }): WorkspaceProjection<DefaultWorkspaceOwnerFacts> {
@@ -1374,7 +1374,7 @@ export function createDefaultWorkspaceStrategy<
           bindings: nativeBindings(contentByIdentity, providerDefinitions),
           createdBy: packageRecord.createdBy,
           nodeInstances,
-          ...(packageRecord.creationInput === undefined
+          ...(packageRecord.creationInput === null
             ? {}
             : { creationInput: packageRecord.creationInput }),
         };

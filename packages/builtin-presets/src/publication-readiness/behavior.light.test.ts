@@ -255,6 +255,7 @@ async function runReadinessCaller(
       path.join(moduleRoot, "cli-candidate-selection.ts"),
     ),
   ]);
+  await useStandalonePublicationRuntime(repositoryRoot);
   const callerPath = path.join(
     repositoryRoot,
     "scripts/npm-publication/check-readiness.ts",
@@ -264,6 +265,43 @@ async function runReadinessCaller(
     reject: false,
     all: true,
   });
+}
+
+async function useStandalonePublicationRuntime(
+  repositoryRoot: string,
+): Promise<void> {
+  const nodeModulesPath = path.join(repositoryRoot, "node_modules");
+  await rm(nodeModulesPath, { recursive: true, force: true });
+  await mkdir(nodeModulesPath, { recursive: true });
+  for (const dependency of ["semver", "spdx-expression-parse"]) {
+    await symlink(
+      path.resolve(import.meta.dirname, "../../node_modules", dependency),
+      path.join(nodeModulesPath, dependency),
+      "dir",
+    );
+  }
+  const authoringPackages = [
+    "@ykdz/template-core",
+    "@ykdz/template-generator",
+    "@ykdz/template-workspace-authoring",
+  ];
+  const resolutionCheck = await execa(
+    "node",
+    [
+      "--input-type=module",
+      "--eval",
+      `for (const name of ${JSON.stringify(authoringPackages)}) {\n` +
+        "  try {\n" +
+        "    import.meta.resolve(name);\n" +
+        "    throw new Error(`Unexpectedly resolved ${name}`);\n" +
+        "  } catch (error) {\n" +
+        '    if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;\n' +
+        "  }\n" +
+        "}\n",
+    ],
+    { cwd: repositoryRoot, reject: false, all: true },
+  );
+  assert.strictEqual(resolutionCheck.exitCode, 0, resolutionCheck.all);
 }
 
 async function runReadinessThroughPnpm(
@@ -507,6 +545,11 @@ void describe("Generated Repository npm publication readiness", () => {
       repositoryRoot,
       "scripts/npm-publication/publication.config.json",
     );
+    const blueprintPath = path.join(repositoryRoot, ".template/blueprint.json");
+    const generationPath = path.join(
+      repositoryRoot,
+      ".template/generation.json",
+    );
     const publicationConfig = JSON.parse(
       await readFile(publicationConfigPath, "utf8"),
     ) as {
@@ -515,9 +558,10 @@ void describe("Generated Repository npm publication readiness", () => {
       readonly creationInput?: unknown;
     };
     assert.strictEqual(publicationConfig.packagePath, "packages/cli");
+    const candidatePackageDefinitionId = publicationConfig.packageDefinitionId;
     assert.ok(
-      typeof publicationConfig.packageDefinitionId === "string" &&
-        publicationConfig.packageDefinitionId.length > 0,
+      typeof candidatePackageDefinitionId === "string" &&
+        candidatePackageDefinitionId.length > 0,
     );
     assert.ok(
       typeof publicationConfig.creationInput === "object" &&
@@ -586,13 +630,50 @@ void describe("Generated Repository npm publication readiness", () => {
     });
     assert.strictEqual(consistent.kind, "ready");
 
-    const blueprintPath = path.join(repositoryRoot, ".template/blueprint.json");
+    await rm(generationPath);
+    const missingGeneration = await inspectNpmPublicationReadiness({
+      repositoryRoot,
+      packagePath: "packages/cli",
+    });
+    assert.strictEqual(missingGeneration.kind, "blocked");
+    if (missingGeneration.kind !== "blocked") {
+      throw new Error("Expected blockers");
+    }
+    assert.deepStrictEqual(
+      missingGeneration.blockers.map(({ code, owner }) => [code, owner.path]),
+      [["local-template-metadata-missing", ".template/generation.json"]],
+    );
+    const copiedMissingGeneration = await runReadinessCaller(repositoryRoot, [
+      "--require-ready",
+    ]);
+    assert.strictEqual(copiedMissingGeneration.exitCode, 1);
+    assert.ok(
+      copiedMissingGeneration.stdout.includes(
+        "BLOCKER local-template-metadata-missing",
+      ),
+      copiedMissingGeneration.all,
+    );
+    assert.deepStrictEqual(
+      await Promise.all([
+        snapshotFile(publicationConfigPath),
+        snapshotFile(packageManifestPath),
+        snapshotFile(userReadmePath),
+      ]),
+      beforeReadiness,
+    );
+
+    await writeLocalTemplateMetadata(repositoryRoot, "demo-cli");
+
     const blueprint = JSON.parse(await readFile(blueprintPath, "utf8")) as {
       packages: readonly Record<string, unknown>[];
     };
     await writeJson(blueprintPath, {
       ...blueprint,
-      packages: [{ ...blueprint.packages[0], name: "@different/identity" }],
+      packages: blueprint.packages.map((item) =>
+        item.path === "packages/cli"
+          ? { ...item, name: "@different/identity" }
+          : item,
+      ),
     });
     const contradictory = await inspectNpmPublicationReadiness({
       repositoryRoot,
@@ -606,17 +687,24 @@ void describe("Generated Repository npm publication readiness", () => {
     );
 
     await writeLocalTemplateMetadata(repositoryRoot, "demo-cli");
-    const generationPath = path.join(
-      repositoryRoot,
-      ".template/generation.json",
-    );
     const generation = JSON.parse(await readFile(generationPath, "utf8")) as {
       strategyState: Record<string, unknown>;
+      nodeInstances: Record<string, string>;
       packages: readonly Record<string, unknown>[];
     };
+    const candidateRecord = generation.packages.find(
+      (item) => item.packageDefinitionId === candidatePackageDefinitionId,
+    );
+    assert.ok(candidateRecord);
     await writeJson(generationPath, {
       ...generation,
-      packages: [generation.packages[0], generation.packages[0]],
+      packages: [
+        candidateRecord,
+        candidateRecord,
+        ...generation.packages.filter(
+          (item) => item.packageDefinitionId !== candidatePackageDefinitionId,
+        ),
+      ],
     });
     const duplicateRecord = await inspectNpmPublicationReadiness({
       repositoryRoot,
@@ -628,32 +716,52 @@ void describe("Generated Repository npm publication readiness", () => {
     }
     assert.deepStrictEqual(
       duplicateRecord.blockers.map(({ code }) => code),
-      ["local-template-metadata-mismatch"],
+      ["local-template-metadata-invalid"],
     );
 
     await writeLocalTemplateMetadata(repositoryRoot, "demo-cli");
-    const packageRecord = generation.packages[0]!;
-    assert.ok(
-      typeof packageRecord.definition === "object" &&
-        packageRecord.definition !== null,
-    );
+    const unlinkedPackageDefinitionId =
+      candidatePackageDefinitionId === `package-${"0".repeat(64)}`
+        ? `package-${"1".repeat(64)}`
+        : `package-${"0".repeat(64)}`;
     await writeJson(generationPath, {
       ...generation,
-      packages: [
-        {
-          ...packageRecord,
-          definition: { ...packageRecord.definition, path: "packages/other" },
-        },
-      ],
+      nodeInstances: Object.fromEntries(
+        Object.entries(generation.nodeInstances).map(([nodeIdentity, id]) => [
+          nodeIdentity,
+          id === candidatePackageDefinitionId
+            ? unlinkedPackageDefinitionId
+            : id,
+        ]),
+      ),
+      packages: generation.packages.map((item) => ({
+        ...item,
+        packageDefinitionId:
+          item.packageDefinitionId === candidatePackageDefinitionId
+            ? unlinkedPackageDefinitionId
+            : item.packageDefinitionId,
+        bindings: Object.fromEntries(
+          Object.entries(item.bindings as Record<string, string>).map(
+            ([identity, id]) => [
+              identity,
+              id === candidatePackageDefinitionId
+                ? unlinkedPackageDefinitionId
+                : id,
+            ],
+          ),
+        ),
+      })),
     });
-    const pathMismatch = await inspectNpmPublicationReadiness({
+    const recordBlueprintMismatch = await inspectNpmPublicationReadiness({
       repositoryRoot,
       packagePath: "packages/cli",
     });
-    assert.strictEqual(pathMismatch.kind, "blocked");
-    if (pathMismatch.kind !== "blocked") throw new Error("Expected blockers");
+    assert.strictEqual(recordBlueprintMismatch.kind, "blocked");
+    if (recordBlueprintMismatch.kind !== "blocked") {
+      throw new Error("Expected blockers");
+    }
     assert.deepStrictEqual(
-      pathMismatch.blockers.map(({ code }) => code),
+      recordBlueprintMismatch.blockers.map(({ code }) => code),
       ["local-template-metadata-mismatch"],
     );
 
@@ -712,8 +820,31 @@ void describe("Generated Repository npm publication readiness", () => {
     };
     const generation = JSON.parse(await readFile(generationPath, "utf8")) as {
       readonly strategyState: Record<string, unknown>;
+      readonly nodeInstances: Readonly<Record<string, string>>;
       readonly packages: readonly Record<string, unknown>[];
     };
+    const publicationConfig = JSON.parse(
+      await readFile(
+        path.join(
+          repositoryRoot,
+          "scripts/npm-publication/publication.config.json",
+        ),
+        "utf8",
+      ),
+    ) as { readonly packageDefinitionId: string };
+    const candidateRecord = generation.packages.find(
+      (item) =>
+        item.packageDefinitionId === publicationConfig.packageDefinitionId,
+    );
+    assert.ok(candidateRecord);
+    const cliDefinition = blueprint.packages.find(
+      (item) => item.path === "packages/cli",
+    );
+    assert.ok(cliDefinition);
+    assert.strictEqual(
+      cliDefinition.packageDefinitionId,
+      publicationConfig.packageDefinitionId,
+    );
     const { inspectNpmPublicationReadiness } =
       await import("@ykdz/template-workspace/publication/readiness");
 
@@ -722,7 +853,7 @@ void describe("Generated Repository npm publication readiness", () => {
       packages: [
         ...blueprint.packages,
         {
-          ...blueprint.packages[0],
+          ...cliDefinition,
           name: "@demo/other",
           path: "packages/other",
         },
@@ -743,16 +874,24 @@ void describe("Generated Repository npm publication readiness", () => {
     );
 
     await writeJson(blueprintPath, blueprint);
-    for (const changedRecord of [
-      { ...generation.packages[0]!, createdBy: "addition" },
-      {
-        ...generation.packages[0]!,
-        creationInput: { variant: "private" },
-      },
-    ]) {
+    const changedCandidates: readonly (readonly [
+      string,
+      Record<string, unknown>,
+    ])[] = [
+      ["creation semantics", { ...candidateRecord, createdBy: "addition" }],
+      [
+        "private CLI instance",
+        { ...candidateRecord, creationInput: { variant: "private" } },
+      ],
+    ];
+    for (const [label, changedRecord] of changedCandidates) {
       await writeJson(generationPath, {
         ...generation,
-        packages: [changedRecord, ...generation.packages.slice(1)],
+        packages: generation.packages.map((item) =>
+          item.packageDefinitionId === publicationConfig.packageDefinitionId
+            ? changedRecord
+            : item,
+        ),
       });
       const rejectedCandidate = await inspectNpmPublicationReadiness({
         repositoryRoot,
@@ -766,8 +905,117 @@ void describe("Generated Repository npm publication readiness", () => {
         rejectedCandidate.blockers.some(
           (blocker) => blocker.code === "local-template-metadata-mismatch",
         ),
+        label,
       );
     }
+
+    for (const schemaVersion of [1, 2]) {
+      await writeJson(generationPath, { ...generation, schemaVersion });
+      const unsupportedSchema = await inspectNpmPublicationReadiness({
+        repositoryRoot,
+        packagePath: "packages/cli",
+      });
+      assert.strictEqual(unsupportedSchema.kind, "blocked");
+      if (unsupportedSchema.kind !== "blocked") {
+        throw new Error("Expected blockers");
+      }
+      assert.ok(
+        unsupportedSchema.blockers.some(
+          (blocker) =>
+            blocker.code === "local-template-metadata-invalid" &&
+            blocker.owner.path === ".template/generation.json",
+        ),
+      );
+    }
+
+    await writeJson(generationPath, {
+      ...generation,
+      strategyIdentity: "unsupported-workspace-strategy",
+    });
+    const unsupportedStrategy = await inspectNpmPublicationReadiness({
+      repositoryRoot,
+      packagePath: "packages/cli",
+    });
+    assert.strictEqual(unsupportedStrategy.kind, "blocked");
+    if (unsupportedStrategy.kind !== "blocked") {
+      throw new Error("Expected blockers");
+    }
+    assert.ok(
+      unsupportedStrategy.blockers.some(
+        (blocker) =>
+          blocker.code === "local-template-metadata-invalid" &&
+          blocker.owner.path === ".template/generation.json",
+      ),
+    );
+
+    const generationWithoutNodeInstances: Record<string, unknown> = {
+      ...generation,
+    };
+    delete generationWithoutNodeInstances.nodeInstances;
+    await writeJson(generationPath, generationWithoutNodeInstances);
+    const missingNodeInstances = await inspectNpmPublicationReadiness({
+      repositoryRoot,
+      packagePath: "packages/cli",
+    });
+    assert.strictEqual(missingNodeInstances.kind, "blocked");
+    if (missingNodeInstances.kind !== "blocked") {
+      throw new Error("Expected blockers");
+    }
+    assert.ok(
+      missingNodeInstances.blockers.some(
+        (blocker) =>
+          blocker.code === "local-template-metadata-invalid" &&
+          blocker.owner.path === ".template/generation.json",
+      ),
+    );
+
+    const missingRepositoryName = { ...generation.strategyState };
+    delete missingRepositoryName.repositoryName;
+    await writeJson(generationPath, {
+      ...generation,
+      strategyState: missingRepositoryName,
+    });
+    const missingStrategyFact = await inspectNpmPublicationReadiness({
+      repositoryRoot,
+      packagePath: "packages/cli",
+    });
+    assert.strictEqual(missingStrategyFact.kind, "blocked");
+    if (missingStrategyFact.kind !== "blocked") {
+      throw new Error("Expected blockers");
+    }
+    assert.ok(
+      missingStrategyFact.blockers.some(
+        (blocker) =>
+          blocker.code === "local-template-metadata-invalid" &&
+          blocker.owner.path === ".template/generation.json",
+      ),
+    );
+
+    const recordWithoutCreationInput = { ...candidateRecord };
+    delete recordWithoutCreationInput.creationInput;
+    await writeJson(generationPath, {
+      ...generation,
+      packages: generation.packages.map((item) =>
+        item.packageDefinitionId === publicationConfig.packageDefinitionId
+          ? recordWithoutCreationInput
+          : item,
+      ),
+    });
+    const missingCreationInput = await inspectNpmPublicationReadiness({
+      repositoryRoot,
+      packagePath: "packages/cli",
+    });
+    assert.strictEqual(missingCreationInput.kind, "blocked");
+    if (missingCreationInput.kind !== "blocked") {
+      throw new Error("Expected blockers");
+    }
+    assert.ok(
+      missingCreationInput.blockers.some(
+        (blocker) =>
+          blocker.code === "local-template-metadata-invalid" &&
+          blocker.owner.path === ".template/generation.json",
+      ),
+    );
 
     await writeJson(generationPath, {
       ...generation,

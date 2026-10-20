@@ -414,13 +414,19 @@ void describe("manual npm publication capability", () => {
     const publicationConfig = JSON.parse(
       await output("scripts/npm-publication/publication.config.json"),
     ) as Record<string, unknown>;
+    const publicCandidateDefinition = initialized.blueprint.packages.find(
+      (definition) => definition.path === "packages/cli",
+    );
+    assert.ok(publicCandidateDefinition);
     const publicCandidate = initialized.generationRecord.packages.find(
-      (record) => record.definition.path === "packages/cli",
+      (record) =>
+        record.packageDefinitionId ===
+        publicCandidateDefinition.packageDefinitionId,
     );
     assert.ok(publicCandidate);
     assert.deepStrictEqual(publicationConfig, {
       packagePath: "packages/cli",
-      packageDefinitionId: publicCandidate.definition.packageDefinitionId,
+      packageDefinitionId: publicCandidate.packageDefinitionId,
       creationInput: publicCandidate.creationInput,
     });
     const releaseSource = await output(".github/workflows/release.yml");

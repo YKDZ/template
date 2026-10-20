@@ -175,6 +175,131 @@ function parseJsonFact(fact: TextFact): JsonObject | undefined {
   }
 }
 
+function hasExactKeys(value: JsonObject, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return (
+    keys.length === expected.length &&
+    expected.every((key) => Object.hasOwn(value, key))
+  );
+}
+
+function isSchema3ContentIdentity(value: unknown): value is JsonObject {
+  return (
+    isObject(value) &&
+    hasExactKeys(value, ["namespace", "packageName", "exportPath"]) &&
+    typeof value.namespace === "string" &&
+    typeof value.packageName === "string" &&
+    typeof value.exportPath === "string"
+  );
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return (
+    isObject(value) &&
+    Object.values(value).every((entry) => typeof entry === "string")
+  );
+}
+
+function isSchema3PackageRecord(value: unknown): value is JsonObject & {
+  readonly packageDefinitionId: string;
+  readonly bindings: Record<string, string>;
+} {
+  return (
+    isObject(value) &&
+    hasExactKeys(value, [
+      "contentIdentity",
+      "createdBy",
+      "packageDefinitionId",
+      "creationInput",
+      "bindings",
+    ]) &&
+    isSchema3ContentIdentity(value.contentIdentity) &&
+    (value.createdBy === "initialization" ||
+      value.createdBy === "addition" ||
+      value.createdBy === "shared-dependency") &&
+    typeof value.packageDefinitionId === "string" &&
+    /^package-[a-f0-9]{64}$/u.test(value.packageDefinitionId) &&
+    Object.hasOwn(value, "creationInput") &&
+    isObject(value.bindings) &&
+    Object.values(value.bindings).every(
+      (providerId) => typeof providerId === "string",
+    )
+  );
+}
+
+function generationPublicationProblem(
+  generation: JsonObject | undefined,
+): string | undefined {
+  if (generation === undefined) {
+    return "Generation Record is not a readable JSON object.";
+  }
+  if (
+    !hasExactKeys(generation, [
+      "schemaVersion",
+      "strategyIdentity",
+      "strategyState",
+      "packages",
+      "nodeInstances",
+      "presetSelections",
+    ])
+  ) {
+    return "Generation Record 缺少 schema3 公共字段或包含未知字段。";
+  }
+  if (generation.schemaVersion !== 3) {
+    return `不支持 Generation Record schema ${display(generation.schemaVersion)}；当前要求 schema3。`;
+  }
+  if (generation.strategyIdentity !== "default") {
+    return `不支持工作区策略身份 ${display(generation.strategyIdentity)}；发布准备要求 default。`;
+  }
+  if (!isObject(generation.strategyState)) {
+    return "schema3 Generation Record 缺少工作区策略状态。";
+  }
+  const repositoryName = generation.strategyState.repositoryName;
+  if (
+    typeof repositoryName !== "string" ||
+    repositoryName.trim().length === 0
+  ) {
+    return "default 工作区策略状态缺少 repositoryName。";
+  }
+  if (
+    !Array.isArray(generation.packages) ||
+    !generation.packages.every(isSchema3PackageRecord)
+  ) {
+    return "schema3 Generation Record 包记录缺少公开候选校验所需事实。";
+  }
+  const packageIds = new Set<string>();
+  for (const packageRecord of generation.packages) {
+    if (packageIds.has(packageRecord.packageDefinitionId)) {
+      return `schema3 Generation Record 包实例 ID 重复：${packageRecord.packageDefinitionId}。`;
+    }
+    packageIds.add(packageRecord.packageDefinitionId);
+  }
+  if (
+    !isStringRecord(generation.nodeInstances) ||
+    Object.values(generation.nodeInstances).some(
+      (packageDefinitionId) => !packageIds.has(packageDefinitionId as string),
+    )
+  ) {
+    return "schema3 Generation Record 节点实例引用了缺失的包记录。";
+  }
+  if (
+    !Array.isArray(generation.presetSelections) ||
+    !generation.presetSelections.every(isSchema3ContentIdentity)
+  ) {
+    return "schema3 Generation Record 缺少规范预设选择事实。";
+  }
+  for (const packageRecord of generation.packages) {
+    if (
+      Object.values(packageRecord.bindings).some(
+        (packageDefinitionId) => !packageIds.has(packageDefinitionId),
+      )
+    ) {
+      return "schema3 Generation Record 包绑定引用了缺失的包记录。";
+    }
+  }
+  return undefined;
+}
+
 async function readCandidateSelection(options: {
   readonly repositoryRoot: string;
   readonly packagePath: string;
@@ -933,30 +1058,19 @@ async function addMetadataBlockers(options: {
       }),
     );
   }
+  const generationProblem = generationPublicationProblem(generation);
   const generationPackages =
-    generation?.schemaVersion === 1 &&
-    typeof generation.strategyIdentity === "string" &&
-    generation.strategyIdentity.trim().length > 0 &&
-    isObject(generation.strategyState) &&
-    typeof generation.strategyState.repositoryName === "string" &&
-    generation.strategyState.repositoryName.trim().length > 0 &&
-    typeof generation.strategyState.defaultPackageScope === "string" &&
-    generation.strategyState.defaultPackageScope.trim().length > 0 &&
-    typeof generation.strategyState.todo === "boolean" &&
-    isObject(generation.strategyState.toolchain) &&
-    typeof generation.strategyState.toolchain.nodeLtsMajor === "string" &&
-    typeof generation.strategyState.toolchain.nodeVersion === "string" &&
-    typeof generation.strategyState.toolchain.packageManagerPin === "string" &&
-    Array.isArray(generation.packages)
-      ? generation.packages
+    generationProblem === undefined && generation !== undefined
+      ? (generation.packages as JsonObject[])
       : undefined;
   if (generationFact.kind === "present" && generationPackages === undefined) {
     options.blockers.push(
       blocker({
         code: "local-template-metadata-invalid",
         path: generationPath,
-        observed: "Unreadable Generation Record publication facts",
-        expected: "Generation Record schema 1，包含默认工作区事实和包记录。",
+        observed: generationProblem ?? "Unreadable Generation Record facts",
+        expected:
+          "schema3 Generation Record，使用 default 策略及其持久仓库事实和包记录。",
         nextAction: "Restore the canonical Generation Record.",
       }),
     );
@@ -972,15 +1086,14 @@ async function addMetadataBlockers(options: {
     (item): item is JsonObject =>
       isObject(item) && item.path === options.packagePath,
   );
+  const definition = definitions[0];
+  const targetId = options.candidateSelection?.packageDefinitionId;
   const records = generationPackages.filter(
     (item): item is JsonObject =>
-      isObject(item) &&
-      isObject(item.definition) &&
-      item.definition.path === options.packagePath,
+      definition !== undefined &&
+      item.packageDefinitionId === definition.packageDefinitionId,
   );
-  const definition = definitions[0];
   const record = records[0];
-  const targetId = options.candidateSelection?.packageDefinitionId;
   const definitionsWithTargetId =
     targetId === undefined
       ? []
@@ -992,20 +1105,9 @@ async function addMetadataBlockers(options: {
     targetId === undefined
       ? []
       : generationPackages.filter(
-          (item): item is JsonObject =>
-            isObject(item) &&
-            isObject(item.definition) &&
-            item.definition.packageDefinitionId === targetId,
+          (item): item is JsonObject => item.packageDefinitionId === targetId,
         );
-  const recordDefinition =
-    record !== undefined && isObject(record.definition)
-      ? record.definition
-      : undefined;
   const selectedRecord = recordsWithTargetId[0];
-  const selectedRecordDefinition =
-    selectedRecord !== undefined && isObject(selectedRecord.definition)
-      ? selectedRecord.definition
-      : undefined;
   const definitionMatches =
     definitions.length === 1 &&
     definition !== undefined &&
@@ -1023,9 +1125,7 @@ async function addMetadataBlockers(options: {
     definition !== undefined &&
     recordsWithTargetId.length === 1 &&
     selectedRecord === record &&
-    recordDefinition !== undefined &&
-    recordDefinition.packageDefinitionId === definition.packageDefinitionId &&
-    recordDefinition.path === options.packagePath &&
+    record.packageDefinitionId === definition.packageDefinitionId &&
     record.createdBy === "initialization" &&
     isTsCliPublicCandidateCreationInput(record.creationInput) &&
     options.candidateSelection !== undefined &&
@@ -1036,7 +1136,7 @@ async function addMetadataBlockers(options: {
       record.creationInput,
       options.candidateSelection.creationInput,
     ) &&
-    selectedRecordDefinition?.packageDefinitionId === targetId;
+    selectedRecord.packageDefinitionId === targetId;
   const repositoryMatches =
     isObject(generation.strategyState) &&
     generation.strategyState.repositoryName === options.rootManifest?.name;

@@ -650,7 +650,8 @@ void describe("ts-cli publication owner-fact integration", () => {
       )!;
       const initialGenerationRecord =
         initialized.generationRecord.packages.find(
-          (item) => item.definition.path === "packages/cli",
+          (item) =>
+            item.packageDefinitionId === initialCandidate.packageDefinitionId,
         )!;
 
       try {
@@ -724,14 +725,10 @@ void describe("ts-cli publication owner-fact integration", () => {
           defaultPackageScope: "seed",
         });
         assert.deepStrictEqual(
-          generation.packages.find((item) => {
-            return (
-              typeof item.definition === "object" &&
-              item.definition !== null &&
-              "path" in item.definition &&
-              item.definition.path === "packages/cli"
-            );
-          }),
+          generation.packages.find(
+            (item) =>
+              item.packageDefinitionId === initialCandidate.packageDefinitionId,
+          ),
           initialGenerationRecord,
         );
 

@@ -73,11 +73,8 @@ const preset = contentIndex.fromDefinition(presetDefinition, "preset");
 type PersistedPackage = {
   readonly contentIdentity: ContentIdentity;
   readonly createdBy: string;
-  readonly definition: {
-    readonly packageDefinitionId: string;
-    readonly path: string;
-    readonly role: string;
-  };
+  readonly packageDefinitionId: string;
+  readonly creationInput: unknown;
   readonly bindings: Readonly<Record<string, string>>;
 };
 
@@ -156,6 +153,9 @@ void describe("Vue 独立组合预设", () => {
       creationInput: { leafName: "dashboard" },
     });
     assert.strictEqual(added.status, "success", JSON.stringify(added));
+    assert.deepStrictEqual(added.generationRecord.presetSelections, [
+      preset.identity,
+    ]);
 
     const updated = JSON.parse(await readFile(extensionsPath, "utf8")) as {
       recommendations: string[];
@@ -334,6 +334,23 @@ void describe("Vue 独立组合预设", () => {
       nodeInstances: Record<string, string>;
       packages: PersistedPackage[];
     };
+    const blueprint = JSON.parse(
+      await readFile(path.join(targetRoot, ".template/blueprint.json"), "utf8"),
+    ) as {
+      packages: {
+        packageDefinitionId: string;
+        path: string;
+        role: string;
+      }[];
+    };
+    function definitionFor(record: PersistedPackage) {
+      const definition = blueprint.packages.find(
+        (candidate) =>
+          candidate.packageDefinitionId === record.packageDefinitionId,
+      );
+      assert.ok(definition);
+      return definition;
+    }
     const packages = generation.packages;
     const apps = packages.filter(
       (item) =>
@@ -341,26 +358,28 @@ void describe("Vue 独立组合预设", () => {
         contentIdentityKey(vueApp.identity),
     );
     assert.deepStrictEqual(
-      apps.map((item) => item.definition.path).toSorted(),
+      apps.map((item) => definitionFor(item).path).toSorted(),
       ["apps/admin", "apps/portal", "apps/web"].toSorted(),
     );
-    assert.ok(apps.every((item) => item.definition.role === "runtime-service"));
+    assert.ok(
+      apps.every((item) => definitionFor(item).role === "runtime-service"),
+    );
     assert.strictEqual(
-      new Set(apps.map((item) => item.definition.packageDefinitionId)).size,
+      new Set(apps.map((item) => item.packageDefinitionId)).size,
       3,
     );
     assert.strictEqual(
       generation.nodeInstances.web,
-      apps.find((item) => item.definition.path === "apps/web")?.definition
-        .packageDefinitionId,
+      apps.find((item) => definitionFor(item).path === "apps/web")
+        ?.packageDefinitionId,
     );
     assert.strictEqual(
-      apps.find((item) => item.definition.path === "apps/web")?.createdBy,
+      apps.find((item) => definitionFor(item).path === "apps/web")?.createdBy,
       "initialization",
     );
     assert.deepStrictEqual(
       apps
-        .filter((item) => item.definition.path !== "apps/web")
+        .filter((item) => definitionFor(item).path !== "apps/web")
         .map((item) => item.createdBy)
         .toSorted(),
       ["addition", "addition"],
@@ -380,11 +399,11 @@ void describe("Vue 独立组合预设", () => {
     for (const app of apps) {
       assert.strictEqual(
         app.bindings[contentIdentityKey(vueShared.identity)],
-        sharedInstances[0]!.definition.packageDefinitionId,
+        sharedInstances[0]!.packageDefinitionId,
       );
       assert.strictEqual(
         app.bindings[contentIdentityKey(configuration.identity)],
-        configurationInstances[0]!.definition.packageDefinitionId,
+        configurationInstances[0]!.packageDefinitionId,
       );
     }
   });
@@ -439,14 +458,14 @@ void describe("Vue 独立组合预设", () => {
 
     const generationPath = path.join(targetRoot, ".template/generation.json");
     const record = JSON.parse(await readFile(generationPath, "utf8")) as {
+      nodeInstances: Record<string, string>;
       packages: {
-        contentIdentity: ContentIdentity;
-        definition: { path: string };
+        packageDefinitionId: string;
         bindings: Record<string, string>;
       }[];
     };
     const web = record.packages.find(
-      (item) => item.definition.path === "apps/web",
+      (item) => item.packageDefinitionId === record.nodeInstances.web,
     );
     assert.ok(web);
     assert.ok(web.bindings[contentIdentityKey(vueShared.identity)]);
@@ -573,6 +592,15 @@ void describe("Vue 独立组合预设", () => {
       JSON.stringify(initialized),
     );
     if (initialized.status !== "success") return;
+    const initializedHome = initialized.generationRecord.packages.find(
+      (record) =>
+        contentIdentityKey(record.contentIdentity) ===
+        contentIdentityKey(vueApp.identity),
+    );
+    assert.ok(initializedHome);
+    assert.deepStrictEqual(initializedHome.creationInput, {
+      leafName: "caller-home",
+    });
     assert.ok(
       initialized.blueprint.packages.some(
         (definition) =>
