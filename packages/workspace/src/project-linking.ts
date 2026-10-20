@@ -35,9 +35,20 @@ export function canConsumeNodePackageNameImport(
   contribution: PackageContribution,
   manifest: PackageManifest = contribution.manifest,
 ): boolean {
+  return canConsumeNodePackageNameImportForRole(
+    contribution.definition.role,
+    manifest,
+  );
+}
+
+/** 用已公开的 Package Role 与真实 manifest 判断是否能消费包名导入。 */
+export function canConsumeNodePackageNameImportForRole(
+  role: string,
+  manifest: PackageManifest,
+): boolean {
   return (
-    isDefaultPackageRole(contribution.definition.role) &&
-    contribution.definition.role !== "native-package" &&
+    isDefaultPackageRole(role) &&
+    role !== "native-package" &&
     manifest.type === "module"
   );
 }
@@ -133,9 +144,20 @@ export function canProvideSourceConditionPackageNameImport(
   contribution: PackageContribution,
   manifest: PackageManifest = contribution.manifest,
 ): boolean {
+  return canProvideSourceConditionPackageNameImportForRole(
+    contribution.definition.role,
+    manifest,
+  );
+}
+
+/** 用内容拥有的公开角色与 manifest 判断是否能提供 source 条件导入。 */
+export function canProvideSourceConditionPackageNameImportForRole(
+  role: string,
+  manifest: PackageManifest,
+): boolean {
   return (
-    isDefaultPackageRole(contribution.definition.role) &&
-    contribution.definition.role !== "native-package" &&
+    isDefaultPackageRole(role) &&
+    role !== "native-package" &&
     exposesSourceCondition(manifest)
   );
 }
