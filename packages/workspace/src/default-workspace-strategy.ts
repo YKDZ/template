@@ -3,6 +3,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { referenceDefinition as typescriptConfigurationDefinition } from "@ykdz/reference-typescript-config/template";
+import type { ContentIdentity } from "@ykdz/template-core/content-identity";
+import {
+  contentIdentityKey,
+  contentIdentityLabel,
+} from "@ykdz/template-core/content-identity";
 import type {
   PackageLinkIntent,
   PackageDefinition,
@@ -14,6 +19,7 @@ import {
   type RenderOperation,
 } from "@ykdz/template-core/renderer";
 import type {
+  GeneratorContent,
   GeneratorPackageRecord,
   PackageCreationInput,
   WorkspaceProjection,
@@ -107,6 +113,11 @@ export type DefaultWorkspaceInput = {
   /** 是否在同次初始化投影中生成后续步骤文档；默认 SDK 保持关闭。 */
   readonly todo?: boolean;
 };
+
+type DefaultReferenceContent<CreationInput extends PackageCreationInput> =
+  GeneratorContent<GenerationContext, PackageContribution, CreationInput> & {
+    readonly definition: ReferencePackage<CreationInput>;
+  };
 
 /** 默认策略拥有的有限加包输入；生成器只透传其中的创建语义。 */
 export type DefaultWorkspaceCreationInput<
@@ -342,7 +353,10 @@ export function defaultWorkspaceConfigurationIdentity(
   };
 }
 
-function nativeDependencyNames(reference: ReferencePackage): readonly string[] {
+function nativeDependencyNames(
+  content: DefaultReferenceContent<PackageCreationInput>,
+): readonly string[] {
+  const reference = content.definition;
   const authoring = new Set(reference.authoringDependencies);
   return [
     ...new Set(
@@ -369,22 +383,50 @@ function nativeDependencyNames(reference: ReferencePackage): readonly string[] {
 }
 
 function nativeDependencyIdentities(
-  content: ReferencePackage,
-  contentByIdentity: ReadonlyMap<string, ReferencePackage>,
-): readonly string[] {
+  content: DefaultReferenceContent<PackageCreationInput>,
+  contentByIdentity: ReadonlyMap<
+    string,
+    DefaultReferenceContent<PackageCreationInput>
+  >,
+): readonly ContentIdentity[] {
+  const reference = content.definition;
   return nativeDependencyNames(content).map((nativeName) => {
-    const provider = [...contentByIdentity.values()].find(
-      (candidate) => candidate.manifest.name === nativeName,
-    );
-    if (provider === undefined) {
-      throw new Error("显式内容缺少本地依赖：" + nativeName);
+    let resolved: string;
+    try {
+      resolved = new URL(reference.resolve(`${nativeName}/template`)).href;
+    } catch (error) {
+      throw new Error(
+        `内容${contentIdentityLabel(content.identity)}无法解析必要模板依赖${nativeName}：${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-    return provider.identity;
+    const matchingSources = [...contentByIdentity.values()].filter(
+      (candidate) => candidate.source.moduleURL === resolved,
+    );
+    const sameNamespace = matchingSources.filter(
+      (candidate) =>
+        candidate.identity.namespace === content.identity.namespace,
+    );
+    const providers =
+      sameNamespace.length > 0 ? sameNamespace : matchingSources;
+    if (providers.length === 0) {
+      throw new Error(
+        `内容${contentIdentityLabel(content.identity)}的必要模板依赖未登记：${nativeName}`,
+      );
+    }
+    if (providers.length > 1) {
+      throw new Error(
+        `内容${contentIdentityLabel(content.identity)}的必要模板依赖来源歧义：${nativeName}`,
+      );
+    }
+    return providers[0]!.identity;
   });
 }
 
 function nativeBindings(
-  contentByIdentity: ReadonlyMap<string, ReferencePackage>,
+  contentByIdentity: ReadonlyMap<
+    string,
+    DefaultReferenceContent<PackageCreationInput>
+  >,
   providers: ReadonlyMap<string, PackageDefinition>,
 ): ReadonlyMap<string, PackageDefinition> {
   return new Map(
@@ -393,7 +435,7 @@ function nativeBindings(
       if (provider === undefined) {
         throw new Error("工作区策略无法解释内容绑定：" + identity);
       }
-      return [provider.manifest.name, definition];
+      return [provider.definition.manifest.name, definition];
     }),
   );
 }
@@ -1240,7 +1282,7 @@ export function createDefaultWorkspaceStrategy<
   DefaultWorkspaceState,
   PackageContribution,
   CreationInput,
-  ReferencePackage,
+  DefaultReferenceContent<CreationInput>,
   DefaultWorkspaceNodeLayout,
   readonly ProjectRequirement[],
   DefaultWorkspaceOwnerFacts
@@ -1253,12 +1295,12 @@ export function createDefaultWorkspaceStrategy<
       }
       return undefined;
     },
-    initialize({ targetRoot, input, selection }) {
+    initialize({ targetRoot, input, selection, contentByIdentity }) {
       const repositoryName =
         input.repositoryName ?? path.basename(path.resolve(targetRoot));
       const defaultPackageScope = input.defaultPackageScope ?? repositoryName;
       const nodeVersion = releaseToolchainSnapshot.nodeVersion;
-      const rustVersion = initialRustVersion(selection);
+      const rustVersion = initialRustVersion(selection, contentByIdentity);
       const state: DefaultWorkspaceState = {
         repositoryName,
         defaultPackageScope,
@@ -1285,6 +1327,7 @@ export function createDefaultWorkspaceStrategy<
         targetRoot,
         packages,
         contentIdentity: content.identity,
+        contentByIdentity,
       });
       const context = defaultContext(targetRoot, {
         ...state,
@@ -1301,12 +1344,12 @@ export function createDefaultWorkspaceStrategy<
       );
       const existingContributions = packages.map((packageRecord) => {
         const existingContent = contentByIdentity.get(
-          packageRecord.contentIdentity,
+          contentIdentityKey(packageRecord.contentIdentity),
         );
         if (existingContent === undefined) {
           throw new Error(
             "生成记录引用了显式内容之外的身份：" +
-              packageRecord.contentIdentity,
+              contentIdentityLabel(packageRecord.contentIdentity),
           );
         }
         const providerDefinitions = new Map<string, PackageDefinition>();
@@ -1331,7 +1374,7 @@ export function createDefaultWorkspaceStrategy<
             ? {}
             : { creationInput: packageRecord.creationInput }),
         };
-        return existingContent.contribute(contributionOptions);
+        return existingContent.definition.contribute(contributionOptions);
       });
       const existingContributionByPackageId = new Map(
         packages.map((packageRecord, index) => [
@@ -1343,9 +1386,11 @@ export function createDefaultWorkspaceStrategy<
         content,
         contentByIdentity,
       )) {
-        const provider = contentByIdentity.get(identity);
+        const provider = contentByIdentity.get(contentIdentityKey(identity));
         const existing = packages.filter(
-          (item) => item.contentIdentity === identity,
+          (item) =>
+            contentIdentityKey(item.contentIdentity) ===
+            contentIdentityKey(identity),
         );
         if (provider === undefined || existing.length !== 1) continue;
         const providerRecord = existing[0]!;
@@ -1490,7 +1535,9 @@ export function createDefaultWorkspaceStrategy<
         );
         const samePackageIdentity =
           occupiedDefinition !== undefined &&
-          prior?.contentIdentity === content.identity &&
+          prior !== undefined &&
+          contentIdentityKey(prior.contentIdentity) ===
+            contentIdentityKey(content.identity) &&
           prior.definition.name === definition.name &&
           prior.definition.path === definition.path;
         if (
@@ -1605,11 +1652,12 @@ export function createDefaultWorkspaceStrategy<
       return nativeBindings(contentByIdentity, providers);
     },
     createDefinition({ context, content, creationInput, layout }) {
-      const selectedLeaf = creationInput?.leafName ?? content.defaultLeafName;
+      const reference = content.definition;
+      const selectedLeaf = creationInput?.leafName ?? reference.defaultLeafName;
       const defaultPath =
         layout === undefined
-          ? content.defaultPath
-          : path.posix.join(layout.packageDirectory, content.defaultLeafName);
+          ? reference.defaultPath
+          : path.posix.join(layout.packageDirectory, reference.defaultLeafName);
       return assertDefaultPackageDefinition({
         name: "@" + context.defaultPackageScope + "/" + selectedLeaf,
         path:
@@ -1617,7 +1665,7 @@ export function createDefaultWorkspaceStrategy<
           (creationInput?.leafName === undefined
             ? defaultPath
             : siblingPackagePath(defaultPath, selectedLeaf)),
-        role: content.role,
+        role: reference.role,
       });
     },
     project(options) {

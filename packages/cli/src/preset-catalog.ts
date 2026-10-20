@@ -1,4 +1,5 @@
 import { deriveTemplateMembers, templateContent } from "@ykdz/template-content";
+import { createContentIndex } from "@ykdz/template-core/content-identity";
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
 import { createGenerator } from "@ykdz/template-generator";
 import {
@@ -13,9 +14,11 @@ export type CliPreset = Extract<
 
 export const cliPresets: readonly CliPreset[] =
   deriveTemplateMembers(templateContent).presets;
+const presetIndex = createContentIndex(cliPresets);
 
 export function presetByAlias(alias: string): CliPreset | undefined {
-  return cliPresets.find((preset) => preset.metadata.alias === alias);
+  if (!cliPresets.some((preset) => preset.alias === alias)) return undefined;
+  return presetIndex.resolve(alias, "preset");
 }
 
 export const cliWorkspaceStrategy =

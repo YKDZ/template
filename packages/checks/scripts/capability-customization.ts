@@ -3,6 +3,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import formatterConfig from "@ykdz/reference-typescript-config/oxfmt";
+import {
+  contentIdentityKey,
+  type ContentIdentity,
+} from "@ykdz/template-core/content-identity";
 import { format } from "oxfmt";
 
 import type {
@@ -20,18 +24,18 @@ export type SharedVueCustomization = {
 function referenceIdentity(
   runtime: GeneratedScenarioRuntime,
   packageName: string,
-): string {
-  const reference = runtime.content.find(
+): ContentIdentity {
+  const references = runtime.content.filter(
     (member) =>
-      typeof member === "object" &&
-      member !== null &&
-      "manifest" in member &&
-      member.manifest.name === packageName,
+      member.kind === "reference" &&
+      member.identity.packageName === packageName,
   );
-  if (reference === undefined || !("identity" in reference)) {
-    throw new Error(`唯一内容集合未公开 ${packageName} reference`);
+  if (references.length !== 1) {
+    throw new Error(
+      `唯一内容集合必须明确公开一个${packageName} reference，实际为${references.length}项`,
+    );
   }
-  return reference.identity;
+  return references[0]!.identity;
 }
 
 /** 在实际生成的共同组件中加入定制，供后续真实浏览器入口观察。 */
@@ -41,10 +45,11 @@ export async function customizeSharedVue(
   runtime: GeneratedScenarioRuntime,
 ): Promise<SharedVueCustomization> {
   const identity = referenceIdentity(runtime, sharedSource);
+  const identityKey = contentIdentityKey(identity);
   const shared = result.generationRecord.packages.find(
     (item) =>
       item.createdBy === "shared-dependency" &&
-      item.contentIdentity === identity,
+      contentIdentityKey(item.contentIdentity) === identityKey,
   );
   assert.ok(shared);
   const file = path.join(
@@ -72,10 +77,11 @@ export async function verifySharedVueCombination(options: {
   readonly customization?: SharedVueCustomization;
 }): Promise<void> {
   const identity = referenceIdentity(options.runtime, sharedSource);
+  const identityKey = contentIdentityKey(identity);
   const initial = options.initialization.generationRecord.packages.filter(
     (item) =>
       item.createdBy === "shared-dependency" &&
-      item.contentIdentity === identity,
+      contentIdentityKey(item.contentIdentity) === identityKey,
   );
   const record = JSON.parse(
     await readFile(
@@ -86,7 +92,7 @@ export async function verifySharedVueCombination(options: {
   const shared = record.packages.filter(
     (item) =>
       item.createdBy === "shared-dependency" &&
-      item.contentIdentity === identity,
+      contentIdentityKey(item.contentIdentity) === identityKey,
   );
   assert.equal(shared.length, 1);
   const provider = shared[0]!;
@@ -98,12 +104,12 @@ export async function verifySharedVueCombination(options: {
     assert.equal(provider.definition.path, initial[0]!.definition.path);
   }
   const consumers = options.result.generationRecord.packages.filter(
-    (item) => item.bindings[identity] !== undefined,
+    (item) => item.bindings[identityKey] !== undefined,
   );
   assert.equal(consumers.length, initial.length === 0 ? 1 : 2);
   for (const consumer of consumers) {
     assert.equal(
-      consumer.bindings[identity],
+      consumer.bindings[identityKey],
       provider.definition.packageDefinitionId,
     );
   }

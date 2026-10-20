@@ -4,7 +4,7 @@ import { defineReferencePackage } from "@ykdz/template-workspace-authoring/refer
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vue-shared",
   resolve: (specifier) => import.meta.resolve(specifier),
-  identity: "vue-shared",
+  alias: "vue-shared",
   instance: "shared",
   defaultLeafName: "vue-shared",
   role: "shared-library",

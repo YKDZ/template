@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { templateContent } from "@ykdz/template-content";
+import { templatePresets } from "@ykdz/template-content";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 import type { CliJourney } from "../journey.ts";
@@ -12,7 +12,7 @@ const snapshotNodeMajor = releaseToolchainSnapshot.nodeVersion.slice(
   releaseToolchainSnapshot.nodeVersion.indexOf("."),
 );
 
-const presets = templateContent.filter((content) => "kind" in content);
+const presets = templatePresets.map((member) => member.definition);
 
 function requireAddablePreset() {
   const preset = presets.find(

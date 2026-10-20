@@ -1,5 +1,7 @@
 import { describe, it, mock } from "node:test";
 
+import { contentIdentityKey } from "@ykdz/template-core/content-identity";
+
 import { findFixtureEvidenceArchitectureFindings } from "../src/check-fixture-evidence-architecture.ts";
 import { sourceGeneratedScenarioRuntime } from "../src/source-generated-runtime.ts";
 import {
@@ -94,7 +96,7 @@ void describe("Fixture Verification Evidence", () => {
           scenario: {
             id: scenario.id,
             label: scenario.label,
-            presetIdentities: [scenario.base.metadata.alias],
+            presetIdentities: [contentIdentityKey(scenario.base.identity)],
           },
           producerCommit: "same-run",
           storage,
@@ -111,7 +113,9 @@ void describe("Fixture Verification Evidence", () => {
           scenario: {
             id: matrixScenario!.id,
             label: matrixScenario!.label,
-            presetIdentities: [matrixScenario!.base.metadata.alias],
+            presetIdentities: [
+              contentIdentityKey(matrixScenario!.base.identity),
+            ],
           },
           producerCommit: "same-run",
           storage,
@@ -1700,8 +1704,9 @@ void describe("Fixture Verification Evidence", () => {
             generation.packages
               .map(({ definitionName }) => definitionName)
               .includes(
-                scenario.addition?.metadata.alias ??
-                  scenario.base.metadata.alias,
+                scenario.addition?.identity === undefined
+                  ? contentIdentityKey(scenario.base.identity)
+                  : contentIdentityKey(scenario.addition.identity),
               ),
           );
           assert.ok(
@@ -1948,10 +1953,10 @@ void describe("Fixture Verification Evidence", () => {
               id: scenario.id,
               label: scenario.label,
               presetIdentities: [
-                scenario.base.metadata.alias,
+                contentIdentityKey(scenario.base.identity),
                 ...(scenario.addition === undefined
                   ? []
-                  : [scenario.addition.metadata.alias]),
+                  : [contentIdentityKey(scenario.addition.identity)]),
               ],
             },
             producerCommit: "cold-producer",

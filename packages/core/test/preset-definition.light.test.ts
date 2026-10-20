@@ -39,7 +39,7 @@ void describe("预设声明", () => {
 
   void it("保留稳定节点、来源成员和允许操作", () => {
     const library = {
-      identity: "library",
+      alias: "library",
       instance: "independent" as const,
     };
     const layout = { packageDirectory: "modules" };
@@ -74,7 +74,7 @@ void describe("预设声明", () => {
       operations: ["init"],
       nodes: {
         application: {
-          reference: { identity: "application", instance: "independent" },
+          reference: { alias: "application", instance: "independent" },
         },
       },
       owner: { packageName: "@demo/application-preset", exportPath: "." },
@@ -89,7 +89,7 @@ void describe("预设声明", () => {
 
   void it("拒绝无节点、空操作、无效节点名和重复独立参考", () => {
     const library = {
-      identity: "library",
+      alias: "library",
       instance: "independent" as const,
     };
     const metadata = {

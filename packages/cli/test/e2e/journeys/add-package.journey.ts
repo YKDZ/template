@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { templateContent } from "@ykdz/template-content";
+import { templatePresets } from "@ykdz/template-content";
 import { canLinkNodePackageRoles } from "@ykdz/template-workspace/project-linking";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
@@ -13,7 +13,7 @@ function requireLinkableAddition(): {
   readonly presetName: string;
   readonly consumerPath: string;
 } {
-  const presets = templateContent.filter((content) => "kind" in content);
+  const presets = templatePresets.map((member) => member.definition);
   for (const preset of presets) {
     if (
       !preset.operations.includes("init") ||

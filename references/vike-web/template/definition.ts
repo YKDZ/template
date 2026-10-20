@@ -9,7 +9,7 @@ import { defineReferencePackage } from "@ykdz/template-workspace-authoring/refer
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vike-web",
   resolve: (specifier) => import.meta.resolve(specifier),
-  identity: "vike-web",
+  alias: "vike-web",
   instance: "independent",
   defaultLeafName: "web",
   defaultPath: "apps/web",

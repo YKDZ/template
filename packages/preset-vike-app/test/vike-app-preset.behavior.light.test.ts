@@ -11,18 +11,54 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { preset } from "@ykdz/preset-vike-app/template";
-import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
-import { referenceDefinition as configurationDefinition } from "@ykdz/reference-typescript-config/template";
-import { referencePackage as database } from "@ykdz/reference-vike-db/template";
-import { referencePackage as migrations } from "@ykdz/reference-vike-migrations/template";
-import { referencePackage as web } from "@ykdz/reference-vike-web/template";
-import { referencePackage as vueShared } from "@ykdz/reference-vue-shared/template";
+import { preset as presetDefinition } from "@ykdz/preset-vike-app/template";
+import { referencePackage as libraryDefinition } from "@ykdz/reference-ts-lib/template";
+import { referencePackage as databaseDefinition } from "@ykdz/reference-vike-db/template";
+import { referencePackage as migrationsDefinition } from "@ykdz/reference-vike-migrations/template";
+import { referencePackage as webDefinition } from "@ykdz/reference-vike-web/template";
+import { referencePackage as vueSharedDefinition } from "@ykdz/reference-vue-shared/template";
+import { createContentIndex } from "@ykdz/template-core/content-identity";
 import { createGenerator } from "@ykdz/template-generator";
+import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
-const configuration = defineReferencePackage(configurationDefinition);
+const loadedContent = await loadContentSource({
+  namespace: "ykdz",
+  resolve: (specifier) => import.meta.resolve(specifier),
+  members: [
+    "@ykdz/reference-vike-web/template",
+    "@ykdz/reference-vike-db/template",
+    "@ykdz/reference-vike-migrations/template",
+    "@ykdz/reference-vue-shared/template",
+    "@ykdz/reference-ts-lib/template",
+    "@ykdz/reference-typescript-config/template",
+    "@ykdz/preset-vike-app/template",
+  ],
+  prepareReferenceDefinition(definition) {
+    return defineReferencePackage(
+      definition as Parameters<typeof defineReferencePackage>[0],
+    );
+  },
+});
+const contentIndex = createContentIndex(loadedContent);
+const web = contentIndex.fromDefinition(webDefinition, "reference");
+const database = contentIndex.fromDefinition(databaseDefinition, "reference");
+const migrations = contentIndex.fromDefinition(
+  migrationsDefinition,
+  "reference",
+);
+const vueShared = contentIndex.fromDefinition(vueSharedDefinition, "reference");
+const library = contentIndex.fromDefinition(libraryDefinition, "reference");
+const configuration = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/reference-typescript-config",
+    exportPath: "./template",
+  },
+  "reference",
+);
+const preset = contentIndex.fromDefinition(presetDefinition, "preset");
 const content = [
   web,
   database,
@@ -32,13 +68,19 @@ const content = [
   configuration,
   preset,
 ];
-const unsupportedPreset = {
-  ...preset,
-  project: (options: Parameters<NonNullable<typeof preset.project>>[0]) => [
-    ...preset.project!(options),
+const unsupportedPresetDefinition = {
+  ...presetDefinition,
+  project: (
+    options: Parameters<NonNullable<typeof presetDefinition.project>>[0],
+  ) => [
+    ...presetDefinition.project!(options),
     JSON.parse('{"kind":"unsupported-documentation"}'),
   ],
 };
+const unsupportedPreset = Object.freeze({
+  ...preset,
+  definition: unsupportedPresetDefinition,
+});
 const contentWithUnsupportedProjectRequirement = content.map((item) =>
   item === preset ? unsupportedPreset : item,
 );
@@ -86,7 +128,7 @@ void describe("Vike 应用公开预设", () => {
 
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -192,7 +234,7 @@ void describe("Vike 应用公开预设", () => {
     const beforeRejectedPresetAdd = await snapshotTree(targetRoot);
     const rejectedPresetAdd = await replayGenerator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
     });
     assert.strictEqual(rejectedPresetAdd.status, "operation-failure");
     assert.strictEqual(await snapshotTree(targetRoot), beforeRejectedPresetAdd);
@@ -215,7 +257,7 @@ void describe("Vike 应用公开预设", () => {
       targetRoot,
       selection: {
         roots: [
-          { preset },
+          { preset: preset.identity },
           { nodeIdentity: "duplicate-web", contentIdentity: web.identity },
         ],
       },
@@ -241,7 +283,7 @@ void describe("Vike 应用公开预设", () => {
 
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
 
@@ -264,7 +306,7 @@ void describe("Vike 应用公开预设", () => {
 
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: unsupportedPreset }] },
+      selection: { roots: [{ preset: unsupportedPreset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
 
@@ -291,7 +333,7 @@ void describe("Vike 应用公开预设", () => {
       strategy: createDefaultWorkspaceStrategy(),
     }).init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -333,7 +375,7 @@ void describe("Vike 应用公开预设", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -363,7 +405,7 @@ void describe("Vike 应用公开预设", () => {
     const missingNodeRoot = path.join(temporaryRoot, "missing-node");
     const secondInitialization = await generator.init({
       targetRoot: missingNodeRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(

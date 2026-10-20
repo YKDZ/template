@@ -85,7 +85,7 @@ export async function checkGeneratedOutputs(): Promise<void> {
         workspace,
         scenario,
         strategyInput: { defaultPackageScope: "output-audit" },
-        ...(Object.keys(scenario.base.nodes).length === 1
+        ...(Object.keys(scenario.base.definition.nodes).length === 1
           ? {
               initializationCreationInput: {
                 leafName: "custom-main",
@@ -97,8 +97,8 @@ export async function checkGeneratedOutputs(): Promise<void> {
           ? {}
           : {
               additionIdentity: {
-                name: `custom-${scenario.addition.metadata.alias}`,
-                path: `modules/custom-${scenario.addition.metadata.alias}`,
+                name: `custom-${scenario.addition.definition.metadata.alias}`,
+                path: `modules/custom-${scenario.addition.definition.metadata.alias}`,
               },
             }),
       });

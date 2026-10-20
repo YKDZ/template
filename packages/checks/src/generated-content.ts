@@ -2,6 +2,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
+import {
+  contentIdentityKey,
+  createContentIndex,
+  type ContentIdentity,
+} from "@ykdz/template-core/content-identity";
 import type { ProjectBlueprint } from "@ykdz/template-core/project-blueprint";
 import type { GeneratorResult } from "@ykdz/template-generator";
 import type {
@@ -56,8 +61,16 @@ export type GeneratedScenarioReceipt = {
   readonly linkFrom: readonly string[];
 };
 
-function scenarioId(...parts: readonly string[]): string {
-  return parts.join("--");
+function scenarioId(
+  kind: string,
+  ...identities: readonly ContentIdentity[]
+): string {
+  return [
+    kind,
+    ...identities.map((identity) =>
+      Buffer.from(contentIdentityKey(identity)).toString("base64url"),
+    ),
+  ].join("--");
 }
 
 function presetsIn(runtime: GeneratedScenarioRuntime): readonly ChecksPreset[] {
@@ -71,9 +84,10 @@ function presetsIn(runtime: GeneratedScenarioRuntime): readonly ChecksPreset[] {
 }
 
 function initializationScenario(base: ChecksPreset): GeneratedScenario {
+  const definition = base.definition;
   return {
-    id: scenarioId("init", base.metadata.alias),
-    label: `initialize ${base.metadata.alias}`,
+    id: scenarioId("init", base.identity),
+    label: `initialize ${definition.metadata.alias}`,
     base,
   };
 }
@@ -82,7 +96,7 @@ export function deriveInitializationScenarios(
   runtime: GeneratedScenarioRuntime,
 ): readonly GeneratedScenario[] {
   return presetsIn(runtime)
-    .filter((preset) => preset.operations.includes("init"))
+    .filter((preset) => preset.definition.operations.includes("init"))
     .map(initializationScenario);
 }
 
@@ -91,29 +105,24 @@ export function deriveFixtureMatrix(
 ): readonly GeneratedScenario[] {
   const presets = presetsIn(runtime);
   const initializers = presets.filter((preset) =>
-    preset.operations.includes("init"),
+    preset.definition.operations.includes("init"),
   );
   const additions = presets.filter((preset) =>
-    preset.operations.includes("add"),
+    preset.definition.operations.includes("add"),
   );
   const multiNodeAddition = additions.find(
-    (preset) => Object.keys(preset.nodes).length !== 1,
+    (preset) => Object.keys(preset.definition.nodes).length !== 1,
   );
   if (multiNodeAddition !== undefined) {
     throw new Error(
-      `Add operation ${multiNodeAddition.metadata.alias} must declare exactly one node`,
+      `Add operation ${multiNodeAddition.definition.metadata.alias} must declare exactly one node`,
     );
   }
   return initializers.flatMap((base) => [
     initializationScenario(base),
     ...additions.map((addition) => ({
-      id: scenarioId(
-        "fixture",
-        base.metadata.alias,
-        "add",
-        addition.metadata.alias,
-      ),
-      label: `initialize ${base.metadata.alias}, then add ${addition.metadata.alias}`,
+      id: scenarioId("fixture", base.identity, addition.identity),
+      label: `initialize ${base.definition.metadata.alias}, then add ${addition.definition.metadata.alias}`,
       base,
       addition,
     })),
@@ -131,10 +140,10 @@ export function deriveFocusedProjectLinkScenarios(
         ...scenario,
         id: scenarioId(
           "focused-link",
-          scenario.base.metadata.alias,
-          addition.metadata.alias,
+          scenario.base.identity,
+          addition.identity,
         ),
-        label: `initialize ${scenario.base.metadata.alias}, then add ${addition.metadata.alias} with a focused package link`,
+        label: `initialize ${scenario.base.definition.metadata.alias}, then add ${addition.definition.metadata.alias} with a focused package link`,
         focusedLink: true,
       },
     ];
@@ -220,7 +229,7 @@ export async function materializeGeneratedScenario(options: {
       selection: {
         roots: [
           {
-            preset: options.scenario.base,
+            preset: options.scenario.base.identity,
             ...(options.initializationCreationInput === undefined
               ? {}
               : { creationInput: options.initializationCreationInput }),
@@ -257,17 +266,26 @@ export async function materializeGeneratedScenario(options: {
 
   let linkFrom: readonly string[] = [];
   if (options.scenario.focusedLink === true) {
-    const providerNode = Object.values(options.scenario.addition.nodes)[0];
+    const providerNode = Object.values(
+      options.scenario.addition.definition.nodes,
+    )[0];
     if (providerNode === undefined) {
       throw new Error(
         `${options.scenario.id}: focused provider node is missing`,
       );
     }
+    const provider = createContentIndex(options.runtime.content).resolve(
+      {
+        alias: providerNode.reference.alias,
+        namespace: options.scenario.addition.identity.namespace,
+      },
+      "reference",
+    );
     const consumer = await focusedConsumerPath({
       projectDir,
       blueprint: initialization.blueprint,
       generationRecord: initialization.generationRecord,
-      providerRole: providerNode.reference.role,
+      providerRole: provider.definition.role,
       canConsumePackageNameImport:
         options.runtime.canConsumeNodePackageNameImportForRole,
     });
@@ -276,11 +294,11 @@ export async function materializeGeneratedScenario(options: {
   }
   const additionResult = await generator.add({
     repositoryRoot: projectDir,
-    preset: options.scenario.addition,
+    preset: options.scenario.addition.identity,
     creationInput: {
       leafName:
         options.additionIdentity?.name ??
-        `fixture-${options.scenario.addition.metadata.alias}`,
+        `fixture-${options.scenario.addition.definition.metadata.alias}`,
       ...(options.additionIdentity?.path === undefined
         ? {}
         : { packagePath: options.additionIdentity.path }),

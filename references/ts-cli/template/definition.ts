@@ -44,7 +44,7 @@ function publicationNodeEngine(
 export const referencePackage = defineReferencePackage<TsCliCreationInput>({
   packageName: "@ykdz/reference-ts-cli",
   resolve: (specifier) => import.meta.resolve(specifier),
-  identity: "cli-package-addition",
+  alias: "cli-package-addition",
   instance: "independent",
   defaultLeafName: "cli",
   role: "cli-tool",

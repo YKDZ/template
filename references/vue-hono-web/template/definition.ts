@@ -4,7 +4,7 @@ import { defineReferencePackage } from "@ykdz/template-workspace-authoring/refer
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vue-hono-web",
   resolve: (specifier) => import.meta.resolve(specifier),
-  identity: "vue-hono-web",
+  alias: "vue-hono-web",
   instance: "independent",
   defaultLeafName: "web",
   defaultPath: "apps/web",

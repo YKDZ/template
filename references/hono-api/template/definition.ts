@@ -3,7 +3,7 @@ import { defineReferencePackage } from "@ykdz/template-workspace-authoring/refer
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-hono-api",
   resolve: (specifier) => import.meta.resolve(specifier),
-  identity: "hono-api",
+  alias: "hono-api",
   instance: "independent",
   defaultLeafName: "api",
   defaultPath: "apps/api",
