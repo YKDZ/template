@@ -151,10 +151,6 @@ function packedFilename(stdout: string): string {
 }
 
 try {
-  await execa("pnpm", ["exec", "turbo", "run", "build", "--filter=."], {
-    cwd: packageRoot,
-    stdio: "inherit",
-  });
   prepared = await prepareContentCollection({
     content: templateContent,
     roots: templateContent,
