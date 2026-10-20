@@ -1,4 +1,4 @@
-import { rename } from "node:fs/promises";
+import { mkdir, rename } from "node:fs/promises";
 import path from "node:path";
 
 import { templateContent } from "@ykdz/template-content";
@@ -17,21 +17,26 @@ if (
 const owner = templateContent.find(
   (member) =>
     member.kind === "reference" &&
-    member.identity.packageName === "@ykdz/reference-ts-lib",
+    member.identity.packageName === "@ykdz/reference-ts-cli",
 );
 if (owner?.kind !== "reference") {
-  throw new Error("唯一内容集合缺少参考库资源拥有者");
+  throw new Error("唯一内容集合缺少公开 CLI 资源拥有者");
 }
 const resourcePath = resolveTemplateSource(
-  owner.definition.source("tsconfig.template.json"),
+  owner.definition.source("src/publication/cli-command-identity.ts"),
   ".",
 );
-const backupPath = `${resourcePath}.ticket-20-${process.pid}.bak`;
+const backupPath = path.join(
+  workDir,
+  ".owner-resource-backup",
+  path.basename(resourcePath),
+);
 const cliEntry =
   mode === "source"
     ? ["--conditions=source", path.join(packageRoot, "src/cli.ts")]
     : [path.join(packageRoot, "dist/cli.js")];
 
+await mkdir(path.dirname(backupPath), { recursive: true });
 await rename(resourcePath, backupPath);
 try {
   const result = await execa(
@@ -41,7 +46,7 @@ try {
       "init",
       "owner-resource-project",
       "--preset",
-      "ts-lib",
+      "ts-cli",
       "--scope",
       "acme",
     ],

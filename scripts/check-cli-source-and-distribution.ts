@@ -434,7 +434,7 @@ async function main(): Promise<void> {
       return !/^packages\/[^/]+\/dist(?:\/|$)/u.test(relativePath);
     },
   });
-  for (const packageName of ["builtin-presets", "checks", "cli", "core"]) {
+  for (const packageName of ["checks", "cli", "core"]) {
     await rm(path.join(repositoryRoot, "packages", packageName, "dist"), {
       recursive: true,
       force: true,

@@ -328,7 +328,6 @@ void describe("Erasable TypeScript enforcement", () => {
     );
     const repositoryPackages = [
       ".",
-      "packages/builtin-presets",
       "packages/checks",
       "packages/cli",
       "packages/core",
@@ -434,7 +433,6 @@ void describe("Erasable TypeScript enforcement", () => {
         !new Set([
           "@ykdz/template-repository",
           "@ykdz/template",
-          "@ykdz/template-builtin-presets",
           "@ykdz/template-checks",
           "@ykdz/template-core",
           "@ykdz/template-workspace-authoring",
@@ -472,10 +470,6 @@ void describe("Erasable TypeScript enforcement", () => {
         continue;
       }
       if (manifest.name === "@ykdz/template") {
-        assert.strictEqual((await compilerApiImports(packageRoot)).length, 0);
-        continue;
-      }
-      if (manifest.name === "@ykdz/template-builtin-presets") {
         assert.strictEqual((await compilerApiImports(packageRoot)).length, 0);
         continue;
       }

@@ -20,20 +20,15 @@ const packages = {
     name: "@ykdz/template-core",
     mayImport: [] as const,
   },
-  "builtin-presets": {
-    directory: "packages/builtin-presets",
-    name: "@ykdz/template-builtin-presets",
-    mayImport: ["core"] as const,
-  },
   cli: {
     directory: "packages/cli",
     name: "@ykdz/template",
-    mayImport: ["core", "builtin-presets"] as const,
+    mayImport: ["core"] as const,
   },
   checks: {
     directory: "packages/checks",
     name: "@ykdz/template-checks",
-    mayImport: ["core", "builtin-presets"] as const,
+    mayImport: ["core"] as const,
   },
 } as const;
 
@@ -147,7 +142,7 @@ void describe("Template Repository dependency DAG", () => {
       await readFile("turbo.json", "utf8"),
     ) as TurboBoundaries;
     const tags = turbo.boundaries.tags;
-    for (const tag of ["template-core", "template-builtin-presets"]) {
+    for (const tag of ["template-core"]) {
       assert.ok(!tags[tag]?.dependencies.allow.includes("template-cli"));
     }
     assert.ok(
