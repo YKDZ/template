@@ -57,6 +57,7 @@ async function fixture(
     options: {
       packageName: "@author/application",
       resolve,
+      resourceRoot: pathToFileURL(source),
       alias: "application",
       instance: "independent" as const,
       defaultLeafName: "application",

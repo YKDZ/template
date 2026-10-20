@@ -26,7 +26,7 @@ export const generationRecordSchema = v.strictObject({
       ]),
       packageDefinitionId: v.pipe(
         v.string(),
-        v.regex(/^package-[a-f0-9]{64}$/u),
+        v.regex(/^package-[a-f0-9]{64}$/),
       ),
       creationInput: v.nullable(v.unknown()),
       bindings: v.record(v.string(), v.string()),

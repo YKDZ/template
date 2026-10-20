@@ -96,7 +96,7 @@ async function readGenerationRecordToolchain(project: string) {
       readonly toolchain: { readonly nodeLtsMajor: string };
     };
   };
-  assert.equal(record.schemaVersion, 1);
+  assert.equal(record.schemaVersion, 3);
   return record.strategyState.toolchain;
 }
 

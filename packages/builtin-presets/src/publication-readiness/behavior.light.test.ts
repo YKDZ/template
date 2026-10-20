@@ -255,6 +255,7 @@ async function runReadinessCaller(
       path.join(moduleRoot, "cli-candidate-selection.ts"),
     ),
   ]);
+  await useStandalonePublicationRuntime(repositoryRoot);
   const callerPath = path.join(
     repositoryRoot,
     "scripts/npm-publication/check-readiness.ts",
@@ -264,6 +265,43 @@ async function runReadinessCaller(
     reject: false,
     all: true,
   });
+}
+
+async function useStandalonePublicationRuntime(
+  repositoryRoot: string,
+): Promise<void> {
+  const nodeModulesPath = path.join(repositoryRoot, "node_modules");
+  await rm(nodeModulesPath, { recursive: true, force: true });
+  await mkdir(nodeModulesPath, { recursive: true });
+  for (const dependency of ["semver", "spdx-expression-parse"]) {
+    await symlink(
+      path.resolve(import.meta.dirname, "../../node_modules", dependency),
+      path.join(nodeModulesPath, dependency),
+      "dir",
+    );
+  }
+  const authoringPackages = [
+    "@ykdz/template-core",
+    "@ykdz/template-generator",
+    "@ykdz/template-workspace-authoring",
+  ];
+  const resolutionCheck = await execa(
+    "node",
+    [
+      "--input-type=module",
+      "--eval",
+      `for (const name of ${JSON.stringify(authoringPackages)}) {\n` +
+        "  try {\n" +
+        "    import.meta.resolve(name);\n" +
+        "    throw new Error(`Unexpectedly resolved ${name}`);\n" +
+        "  } catch (error) {\n" +
+        '    if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;\n' +
+        "  }\n" +
+        "}\n",
+    ],
+    { cwd: repositoryRoot, reject: false, all: true },
+  );
+  assert.strictEqual(resolutionCheck.exitCode, 0, resolutionCheck.all);
 }
 
 async function runReadinessThroughPnpm(

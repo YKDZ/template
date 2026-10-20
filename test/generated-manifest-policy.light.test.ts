@@ -19,15 +19,14 @@ function generator() {
 
 void describe("生成项目包清单策略", () => {
   void it("公开预设通过正式生成保留私有包隔离与发布候选事实", async () => {
-    const nativeConfigurationManifest = JSON.parse(
-      await readFile(
-        new URL(
-          import.meta
-            .resolve("@ykdz/reference-typescript-config/assets/package.json"),
-        ),
-        "utf8",
-      ),
-    ) as { readonly version: string };
+    const nativeConfiguration = templateContent.find(
+      (member) =>
+        member.kind === "reference" &&
+        member.identity.packageName === "@ykdz/reference-typescript-config",
+    );
+    assert.ok(nativeConfiguration);
+    const nativeConfigurationManifest = nativeConfiguration.definition
+      .manifest as { readonly version: string };
 
     for (const preset of templatePresets) {
       const workspace = await mkdtemp(
@@ -95,14 +94,12 @@ void describe("生成项目包清单策略", () => {
           assert.strictEqual(manifest.name, definition.name);
           const record = initialized.generationRecord.packages.find(
             (item) =>
-              item.definition.packageDefinitionId ===
-              definition.packageDefinitionId,
+              item.packageDefinitionId === definition.packageDefinitionId,
           );
           assert.ok(record, `缺少生成记录：${definition.path}`);
           const isPublicCandidate = candidateRecords.some(
             (candidate) =>
-              candidate.definition.packageDefinitionId ===
-              definition.packageDefinitionId,
+              candidate.packageDefinitionId === definition.packageDefinitionId,
           );
 
           if (isPublicCandidate) {
