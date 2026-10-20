@@ -53,7 +53,11 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
     dependencies: ["@ykdz/template-core", "@ykdz/template-workspace-authoring"],
     exports: ["./command-identity"],
     scripts: ["build:template"],
-    resources: ["template", "tsconfig.template.json"],
+    resources: [
+      "template",
+      "tsconfig.template.json",
+      "tsconfig.command-identity-types.json",
+    ],
   },
   environmentNeeds: [],
   foundation: {

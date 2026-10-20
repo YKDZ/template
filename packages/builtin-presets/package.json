@@ -15,7 +15,7 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && node --conditions=source scripts/build-reference-payload.ts",
+    "build": "rm -rf dist && node --conditions=source scripts/build-reference-payload.ts",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix --ignore-pattern dist .",

@@ -720,8 +720,21 @@ void describe("公开模板内容集合", () => {
     assert.strictEqual(cliResult.status, "success", JSON.stringify(cliResult));
     const cliManifest = JSON.parse(
       await readFile(path.join(cliRoot, "packages/cli/package.json"), "utf8"),
-    ) as { files: string[] };
+    ) as {
+      files: string[];
+      scripts?: Readonly<Record<string, string>>;
+    };
     assert.deepStrictEqual(cliManifest.files, ["dist"]);
+    assert.strictEqual(
+      cliManifest.scripts?.build,
+      tsCli.manifest.scripts?.build,
+    );
+    await assert.rejects(
+      readFile(
+        path.join(cliRoot, "packages/cli/tsconfig.command-identity-types.json"),
+      ),
+      { code: "ENOENT" },
+    );
     const publicationConfig = JSON.parse(
       await readFile(
         path.join(cliRoot, "scripts/npm-publication/publication.config.json"),
