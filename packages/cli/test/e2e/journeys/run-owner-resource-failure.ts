@@ -1,6 +1,8 @@
 import { rename } from "node:fs/promises";
 import path from "node:path";
 
+import { templateContent } from "@ykdz/template-content";
+import { resolveTemplateSource } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 
 const [mode, packageRoot, workDir] = process.argv.slice(2);
@@ -12,9 +14,17 @@ if (
   throw new Error("必须提供 CLI 模式、包目录和旅程工作目录");
 }
 
-const resourcePath = path.resolve(
-  packageRoot,
-  "../../references/ts-lib/tsconfig.template.json",
+const owner = templateContent.find(
+  (member) =>
+    member.kind === "reference" &&
+    member.identity.packageName === "@ykdz/reference-ts-lib",
+);
+if (owner?.kind !== "reference") {
+  throw new Error("唯一内容集合缺少参考库资源拥有者");
+}
+const resourcePath = resolveTemplateSource(
+  owner.definition.source("tsconfig.template.json"),
+  ".",
 );
 const backupPath = `${resourcePath}.ticket-20-${process.pid}.bak`;
 const cliEntry =
