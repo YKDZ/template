@@ -29,7 +29,7 @@
     "lint": "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
     "typecheck": "node --conditions=source scripts/run-vue-tsc.ts --build --noEmit --pretty false",
-    "build:template": "tsc -p tsconfig.template.json --pretty false",
+    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
     "browser:prepare": "playwright install chromium",
     "test:browser": "vitest run --project=browser --reporter=agent --silent=passed-only",
     "build": "vite build",
