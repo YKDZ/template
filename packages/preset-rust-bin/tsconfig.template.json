@@ -1,0 +1,10 @@
+{
+  "extends": "@ykdz/reference-typescript-config/node.json",
+  "compilerOptions": {
+    "outDir": "template-dist",
+    "rootDir": "template",
+    "declaration": true,
+    "types": ["node"]
+  },
+  "include": ["template/**/*.ts"]
+}

@@ -674,12 +674,24 @@ importers:
 
   packages/content:
     dependencies:
+      '@ykdz/preset-rust-bin':
+        specifier: workspace:*
+        version: link:../preset-rust-bin
+      '@ykdz/preset-ts-cli':
+        specifier: workspace:*
+        version: link:../preset-ts-cli
       '@ykdz/preset-ts-lib':
         specifier: workspace:*
         version: link:../preset-ts-lib
       '@ykdz/preset-vue-app':
         specifier: workspace:*
         version: link:../preset-vue-app
+      '@ykdz/reference-rust-bin':
+        specifier: workspace:*
+        version: link:../../references/rust-bin
+      '@ykdz/reference-ts-cli':
+        specifier: workspace:*
+        version: link:../../references/ts-cli
       '@ykdz/reference-ts-lib':
         specifier: workspace:*
         version: link:../../references/ts-lib
@@ -801,6 +813,89 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  packages/preset-rust-bin:
+    dependencies:
+      '@ykdz/reference-rust-bin':
+        specifier: workspace:*
+        version: link:../../references/rust-bin
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
+      '@ykdz/reference-typescript-config':
+        specifier: workspace:*
+        version: link:../../references/typescript-config
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../generator
+      '@ykdz/template-workspace':
+        specifier: workspace:*
+        version: link:../workspace
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../workspace-authoring
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  packages/preset-ts-cli:
+    dependencies:
+      '@ykdz/reference-ts-cli':
+        specifier: workspace:*
+        version: link:../../references/ts-cli
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/reference-rust-bin':
+        specifier: workspace:*
+        version: link:../../references/rust-bin
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
+      '@ykdz/reference-typescript-config':
+        specifier: workspace:*
+        version: link:../../references/typescript-config
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../generator
+      '@ykdz/template-workspace':
+        specifier: workspace:*
+        version: link:../workspace
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../workspace-authoring
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
