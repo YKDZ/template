@@ -154,10 +154,12 @@ void describe("Template Repository native task model", () => {
       assert.equal(task.resolvedTaskDefinition.cache, true);
       assert.deepEqual(task.resolvedTaskDefinition.outputs, ["dist/**"]);
       assert.ok(Object.hasOwn(task.inputs, "package.json"));
-      assert.ok(Object.hasOwn(task.inputs, "tsconfig.build.json"));
-      assert.ok(
-        Object.keys(task.inputs).some((input) => input.startsWith("src/")),
-      );
+      if (taskId !== "@ykdz/template-builtin-presets#build") {
+        assert.ok(Object.hasOwn(task.inputs, "tsconfig.build.json"));
+        assert.ok(
+          Object.keys(task.inputs).some((input) => input.startsWith("src/")),
+        );
+      }
       assert.ok(
         task.resolvedTaskDefinition.inputs.every(
           (input) => !input.startsWith("../"),

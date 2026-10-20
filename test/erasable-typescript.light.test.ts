@@ -486,6 +486,10 @@ void describe("Erasable TypeScript enforcement", () => {
         assert.strictEqual((await compilerApiImports(packageRoot)).length, 0);
         continue;
       }
+      if (manifest.name === "@ykdz/template-builtin-presets") {
+        assert.strictEqual((await compilerApiImports(packageRoot)).length, 0);
+        continue;
+      }
       assert.notStrictEqual((await compilerApiImports(packageRoot)).length, 0);
     }
 
