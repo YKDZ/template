@@ -28,6 +28,8 @@ function localSdkPackageRoots(): ReadonlyMap<string, string> {
 export type AuthoredContentFixtureOptions = {
   readonly namespace: string;
   readonly marker: string;
+  /** 为并存的原生同名来源提供可区分的精确坐标。 */
+  readonly contentVersion?: string;
   readonly featureMarker?: string;
   readonly featureAlias?: string;
   readonly featureResourcePath?: string;
@@ -60,12 +62,13 @@ function packageManifest(
   dependencies: Readonly<Record<string, string>> = {},
   devDependencies: Readonly<Record<string, string>> = {},
   sdkVersions: ReadonlyMap<string, string> = new Map(),
+  version = "1.0.0",
 ): Record<string, unknown> {
   const authoringVersion =
     sdkVersions.get("@ykdz/template-workspace-authoring") ?? "workspace:*";
   return {
     name: packageName,
-    version: "1.0.0",
+    version,
     private: true,
     type: "module",
     files: ["template-dist"],
@@ -164,6 +167,7 @@ async function writeReferencePackage(options: {
   readonly leafName: string;
   readonly packageName?: string;
   readonly marker: string;
+  readonly version: string;
   readonly alias: string;
   readonly defaultLeafName?: string;
   readonly instance: "shared" | "independent";
@@ -181,6 +185,7 @@ async function writeReferencePackage(options: {
     options.dependencies,
     options.devDependencies,
     options.sdkVersions,
+    options.version,
   );
   await mkdir(path.join(packageRoot, "template"), { recursive: true });
   await mkdir(path.dirname(path.join(packageRoot, options.resourcePath)), {
@@ -234,6 +239,7 @@ async function writePresetPackage(options: {
   readonly collectionRoot: string;
   readonly authorsRoot: string;
   readonly featurePackageName: string;
+  readonly version: string;
   readonly sdkVersions: ReadonlyMap<string, string>;
   readonly nativeWorkspace: boolean;
 }): Promise<void> {
@@ -251,6 +257,7 @@ async function writePresetPackage(options: {
         },
         {},
         options.sdkVersions,
+        options.version,
       ),
       null,
       2,
@@ -319,6 +326,7 @@ export async function createAuthoredContentFixture(
     nativeWorkspace,
     sdkVersions,
     packageName: featurePackageName,
+    version: options.contentVersion ?? "1.0.0",
     marker: `${options.featureMarker ?? options.marker}:feature`,
     alias: options.featureAlias ?? "feature",
     instance: "independent",
@@ -338,6 +346,7 @@ export async function createAuthoredContentFixture(
     collectionRoot,
     authorsRoot,
     leafName: "typescript-config",
+    version: options.contentVersion ?? "1.0.0",
     nativeWorkspace,
     sdkVersions,
     marker: `${options.marker}:theme`,
@@ -350,6 +359,7 @@ export async function createAuthoredContentFixture(
     collectionRoot,
     authorsRoot,
     leafName: "addon",
+    version: options.contentVersion ?? "1.0.0",
     nativeWorkspace,
     sdkVersions,
     marker: `${options.marker}:addon`,
@@ -361,6 +371,7 @@ export async function createAuthoredContentFixture(
     collectionRoot,
     authorsRoot,
     featurePackageName,
+    version: options.contentVersion ?? "1.0.0",
     sdkVersions,
     nativeWorkspace,
   });
@@ -387,6 +398,7 @@ export async function createAuthoredContentFixture(
         collectionDependencies,
         {},
         sdkVersions,
+        options.contentVersion ?? "1.0.0",
       ),
       null,
       2,
