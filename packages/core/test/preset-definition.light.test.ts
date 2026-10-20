@@ -1,0 +1,73 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import { definePreset } from "../src/preset-definition.ts";
+
+void describe("预设声明", () => {
+  void it("保留稳定节点、来源成员和允许操作", () => {
+    const library = {
+      identity: "library",
+      instance: "independent" as const,
+    };
+    const preset = definePreset({
+      metadata: {
+        alias: "ts-lib",
+        title: "TypeScript 库",
+        description: "严格 TypeScript 库。",
+      },
+      operations: ["init", "add"],
+      nodes: { library: { reference: library } },
+    });
+
+    assert.strictEqual(preset.kind, "preset");
+    assert.strictEqual(preset.nodes.library?.reference, library);
+    assert.deepStrictEqual(preset.operations, ["init", "add"]);
+  });
+
+  void it("拒绝无节点、空操作、无效节点名和重复独立参考", () => {
+    const library = {
+      identity: "library",
+      instance: "independent" as const,
+    };
+    const metadata = {
+      alias: "ts-lib",
+      title: "TypeScript 库",
+      description: "严格 TypeScript 库。",
+    };
+
+    assert.throws(
+      () => definePreset({ metadata, operations: ["init"], nodes: {} }),
+      /至少声明一个节点/u,
+    );
+    assert.throws(
+      () =>
+        definePreset({
+          metadata,
+          operations: [],
+          nodes: { library: { reference: library } },
+        }),
+      /至少允许一种操作/u,
+    );
+    assert.throws(
+      () =>
+        definePreset({
+          metadata,
+          operations: ["init"],
+          nodes: { "bad node": { reference: library } },
+        }),
+      /节点身份无效/u,
+    );
+    assert.throws(
+      () =>
+        definePreset({
+          metadata,
+          operations: ["init"],
+          nodes: {
+            first: { reference: library },
+            second: { reference: library },
+          },
+        }),
+      /重复选择独立参考/u,
+    );
+  });
+});
