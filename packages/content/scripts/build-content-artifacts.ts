@@ -322,26 +322,19 @@ type PnpmDependencyNode = {
 type ResolvedPackages = {
   readonly versions: ReadonlyMap<string, string>;
   readonly paths: ReadonlyMap<string, string>;
-  /** pnpm list 的 from 保留 catalog alias 指向的真实 npm 包名。 */
-  readonly packageNames: ReadonlyMap<string, string>;
 };
+
+type OwnerResolvedDependencies = ReadonlyMap<string, PnpmDependencyNode>;
 
 function collectResolvedPackages(
   value: unknown,
   versions: Map<string, string>,
   paths: Map<string, string>,
-  packageNames: Map<string, string>,
   fallbackName?: string,
 ): void {
   if (Array.isArray(value)) {
     for (const item of value) {
-      collectResolvedPackages(
-        item,
-        versions,
-        paths,
-        packageNames,
-        fallbackName,
-      );
+      collectResolvedPackages(item, versions, paths, fallbackName);
     }
     return;
   }
@@ -358,13 +351,6 @@ function collectResolvedPackages(
   if (name !== undefined && typeof node.path === "string") {
     paths.set(name, node.path);
   }
-  if (
-    name !== undefined &&
-    typeof node.from === "string" &&
-    node.from !== name
-  ) {
-    packageNames.set(name, node.from);
-  }
   for (const field of [
     "dependencies",
     "devDependencies",
@@ -378,16 +364,10 @@ function collectResolvedPackages(
       !Array.isArray(children)
     ) {
       for (const [childName, child] of Object.entries(children)) {
-        collectResolvedPackages(
-          child,
-          versions,
-          paths,
-          packageNames,
-          childName,
-        );
+        collectResolvedPackages(child, versions, paths, childName);
       }
     } else {
-      collectResolvedPackages(children, versions, paths, packageNames);
+      collectResolvedPackages(children, versions, paths);
     }
   }
 }
@@ -399,37 +379,69 @@ async function resolvedVersions(
 ): Promise<ResolvedPackages> {
   const versions = new Map<string, string>();
   const paths = new Map<string, string>();
-  const resolvedPackageNames = new Map<string, string>();
   for (const name of projectsToResolve) {
     const stdout = await runPnpm(
       ["--filter", name, "list", "--depth", "Infinity", "--json"],
       workspaceRoot,
       commandLog,
     );
-    collectResolvedPackages(
-      JSON.parse(stdout),
-      versions,
-      paths,
-      resolvedPackageNames,
-    );
+    collectResolvedPackages(JSON.parse(stdout), versions, paths);
   }
-  return { versions, paths, packageNames: resolvedPackageNames };
+  return { versions, paths };
 }
 
-function versionForDependency(
+async function resolvedOwnerDependencies(
+  ownerRoot: string,
+  commandLog: string[],
+): Promise<OwnerResolvedDependencies> {
+  const stdout = await runPnpm(
+    ["list", "--depth", "0", "--json"],
+    ownerRoot,
+    commandLog,
+  );
+  const projects = JSON.parse(stdout) as unknown;
+  const project = Array.isArray(projects) ? projects[0] : projects;
+  if (typeof project !== "object" || project === null) {
+    throw new Error(`原生包管理器未返回所属包的项目依赖：${ownerRoot}`);
+  }
+  const node = project as PnpmDependencyNode;
+  const dependencies = new Map<string, PnpmDependencyNode>();
+  for (const field of [
+    "dependencies",
+    "devDependencies",
+    "optionalDependencies",
+    "peerDependencies",
+  ] as const) {
+    for (const [name, dependency] of Object.entries(node[field] ?? {})) {
+      dependencies.set(name, dependency);
+    }
+  }
+  return dependencies;
+}
+
+function ownerVersionForDependency(
   name: string,
   specifier: string,
   workspace: ReadonlyMap<string, WorkspaceProject>,
-  resolved: ResolvedPackages,
+  resolved: OwnerResolvedDependencies,
 ): string {
-  const project = workspace.get(name);
-  if (project?.version !== undefined) return project.version;
-  const version = resolved.versions.get(name);
-  if (version !== undefined) {
-    const packageName = resolved.packageNames.get(name);
-    return packageName === undefined
+  const dependency = resolved.get(name);
+  const packageName = dependency?.from;
+  const version = dependency?.version;
+  if (version !== undefined && !version.startsWith("link:")) {
+    return packageName === undefined || packageName === name
       ? version
       : `npm:${packageName}@${version}`;
+  }
+  if (version?.startsWith("link:")) {
+    const project =
+      workspace.get(name) ??
+      (packageName === undefined ? undefined : workspace.get(packageName));
+    if (project?.version !== undefined) {
+      return packageName === undefined || packageName === name
+        ? project.version
+        : `npm:${packageName}@${project.version}`;
+    }
   }
   if (!/^(?:workspace|catalog|link):/u.test(specifier)) return specifier;
   throw new Error(
@@ -443,7 +455,7 @@ function artifactInstallDependencies(
   members: readonly NativeMember[],
   artifacts: ReadonlyMap<string, PreparedNativeContentArtifact>,
   workspace: ReadonlyMap<string, WorkspaceProject>,
-  resolved: ResolvedPackages,
+  resolved: OwnerResolvedDependencies,
 ): Readonly<Record<string, string>> {
   const dependencies: Record<string, string> = {};
   for (const dependency of artifact.dependencies) {
@@ -497,7 +509,7 @@ function artifactInstallDependencies(
       );
     }
     if (!dependency.purposes.includes("template-execution")) continue;
-    dependencies[dependency.name] = versionForDependency(
+    dependencies[dependency.name] = ownerVersionForDependency(
       dependency.name,
       dependency.specifier,
       workspace,
@@ -1075,6 +1087,15 @@ export async function prepareContentCollection(
       artifact,
     ]),
   );
+  const ownerDependenciesByRoot = new Map<string, OwnerResolvedDependencies>();
+  for (const { packageRoot: ownerRoot } of preparedOwners) {
+    if (!ownerDependenciesByRoot.has(ownerRoot)) {
+      ownerDependenciesByRoot.set(
+        ownerRoot,
+        await resolvedOwnerDependencies(ownerRoot, commandLog),
+      );
+    }
+  }
   const owners: {
     member: NativeMember;
     artifact: PreparedNativeContentArtifact;
@@ -1091,7 +1112,7 @@ export async function prepareContentCollection(
       members,
       artifactsByIdentity,
       workspace,
-      resolved,
+      ownerDependenciesByRoot.get(ownerRoot) ?? new Map(),
     );
     const identitySuffix = createHash("sha256")
       .update(identityKey)

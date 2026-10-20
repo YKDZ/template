@@ -1093,6 +1093,9 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../../references/typescript-config
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../core
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
