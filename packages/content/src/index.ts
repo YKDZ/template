@@ -39,7 +39,7 @@ export const templateContent = [
   vikeAppPreset,
 ] as const;
 
-type TemplateContentMember = (typeof templateContent)[number];
+export type TemplateContentMember = (typeof templateContent)[number];
 
 /** 从唯一内容集合派生的可选择预设成员。 */
 export type TemplatePreset = Extract<
@@ -53,13 +53,42 @@ export type TemplateReferencePackage = Extract<
   { readonly manifest: unknown }
 >;
 
-export const templatePresets: readonly TemplatePreset[] =
-  templateContent.filter(
-    (member): member is TemplatePreset =>
-      "kind" in member && member.kind === "preset",
-  );
+/** 从唯一内容序列派生可选预设和打包所需参考包输入。 */
+export function deriveTemplateMembers<Content extends readonly unknown[]>(
+  content: Content,
+): {
+  readonly presets: readonly Extract<
+    Content[number],
+    { readonly kind: "preset" }
+  >[];
+  readonly referencePackages: readonly Extract<
+    Content[number],
+    { readonly manifest: unknown }
+  >[];
+} {
+  const presets: Extract<Content[number], { readonly kind: "preset" }>[] = [];
+  const referencePackages: Extract<
+    Content[number],
+    { readonly manifest: unknown }
+  >[] = [];
+  for (const member of content) {
+    if (typeof member !== "object" || member === null) continue;
+    if ("kind" in member && member.kind === "preset") {
+      presets.push(
+        member as Extract<Content[number], { readonly kind: "preset" }>,
+      );
+    }
+    if ("manifest" in member) {
+      referencePackages.push(
+        member as Extract<Content[number], { readonly manifest: unknown }>,
+      );
+    }
+  }
+  return { presets, referencePackages };
+}
 
+const templateMembers = deriveTemplateMembers(templateContent);
+export const templatePresets: readonly TemplatePreset[] =
+  templateMembers.presets;
 export const templateReferencePackages: readonly TemplateReferencePackage[] =
-  templateContent.filter(
-    (member): member is TemplateReferencePackage => "manifest" in member,
-  );
+  templateMembers.referencePackages;

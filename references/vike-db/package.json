@@ -2,7 +2,8 @@
   "name": "@ykdz/reference-vike-db",
   "private": true,
   "files": [
-    "dist"
+    "dist",
+    "template-dist"
   ],
   "type": "module",
   "imports": {

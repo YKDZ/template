@@ -167,20 +167,9 @@ async function focusedConsumerPath(options: {
   readonly projectDir: string;
   readonly blueprint: SuccessfulScenarioResult["blueprint"];
   readonly generationRecord: SuccessfulScenarioResult["generationRecord"];
-  readonly addition: ChecksPreset;
+  readonly providerRole: string;
   readonly canConsumePackageNameImport: GeneratedScenarioRuntime["canConsumeNodePackageNameImportForRole"];
-  readonly canProvideSourceConditionPackageNameImport: GeneratedScenarioRuntime["canProvideSourceConditionPackageNameImportForRole"];
 }): Promise<string | undefined> {
-  const [providerNode] = Object.values(options.addition.nodes);
-  if (
-    providerNode === undefined ||
-    !options.canProvideSourceConditionPackageNameImport(
-      providerNode.reference.role,
-      providerNode.reference.manifest,
-    )
-  ) {
-    return undefined;
-  }
   const initializedPaths = new Set(
     options.generationRecord.packages
       .filter((record) => record.createdBy === "initialization")
@@ -188,7 +177,7 @@ async function focusedConsumerPath(options: {
   );
   for (const consumer of options.blueprint.packages) {
     if (!initializedPaths.has(consumer.path)) continue;
-    if (!canLinkNodePackageRoles(consumer.role, providerNode.reference.role)) {
+    if (!canLinkNodePackageRoles(consumer.role, options.providerRole)) {
       continue;
     }
     const manifest = JSON.parse(
@@ -268,36 +257,44 @@ export async function materializeGeneratedScenario(options: {
 
   let linkFrom: readonly string[] = [];
   if (options.scenario.focusedLink === true) {
+    const providerNode = Object.values(options.scenario.addition.nodes)[0];
+    if (providerNode === undefined) {
+      throw new Error(
+        `${options.scenario.id}: focused provider node is missing`,
+      );
+    }
     const consumer = await focusedConsumerPath({
       projectDir,
       blueprint: initialization.blueprint,
       generationRecord: initialization.generationRecord,
-      addition: options.scenario.addition,
+      providerRole: providerNode.reference.role,
       canConsumePackageNameImport:
         options.runtime.canConsumeNodePackageNameImportForRole,
-      canProvideSourceConditionPackageNameImport:
-        options.runtime.canProvideSourceConditionPackageNameImportForRole,
     });
     if (consumer === undefined) return { status: "not-applicable" };
     linkFrom = [consumer];
   }
-  const result = requireSuccess(
-    await generator.add({
-      repositoryRoot: projectDir,
-      preset: options.scenario.addition,
-      creationInput: {
-        leafName:
-          options.additionIdentity?.name ??
-          `fixture-${options.scenario.addition.metadata.alias}`,
-        ...(options.additionIdentity?.path === undefined
-          ? {}
-          : { packagePath: options.additionIdentity.path }),
-        ...(linkFrom.length === 0 ? {} : { linkFrom }),
-      },
-    }),
-    "addition",
-    options.scenario,
-  );
+  const additionResult = await generator.add({
+    repositoryRoot: projectDir,
+    preset: options.scenario.addition,
+    creationInput: {
+      leafName:
+        options.additionIdentity?.name ??
+        `fixture-${options.scenario.addition.metadata.alias}`,
+      ...(options.additionIdentity?.path === undefined
+        ? {}
+        : { packagePath: options.additionIdentity.path }),
+      ...(linkFrom.length === 0 ? {} : { linkFrom }),
+    },
+  });
+  if (
+    options.scenario.focusedLink === true &&
+    additionResult.status === "input-invalid" &&
+    additionResult.issues.some((issue) => issue.code === "UNSUPPORTED_LINK")
+  ) {
+    return { status: "not-applicable" };
+  }
+  const result = requireSuccess(additionResult, "addition", options.scenario);
   if (result.projection === null) {
     throw new Error(`${options.scenario.id}: addition omitted its projection`);
   }
