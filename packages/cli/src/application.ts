@@ -6,6 +6,7 @@ import {
   prepareGeneratedRepositoryPackageAddition,
   validateGeneratedRepositoryInitializationInput,
   prepareGeneratedRepositoryInitialization,
+  validateProjectBlueprint,
   type GeneratedRepositoryPlan,
   type InitializationInputIssue,
   type PackageAdditionInputIssue,
@@ -14,7 +15,6 @@ import {
   type PublicationSetupHandoff,
   type ResolvedInitialization,
 } from "@ykdz/template-builtin-presets";
-import { validateProjectBlueprint } from "@ykdz/template-core/project-blueprint";
 import {
   reconcileAndApplyProjectProjections,
   materializeProjectProjection,

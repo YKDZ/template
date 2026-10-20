@@ -3,101 +3,36 @@ import { describe, it } from "node:test";
 
 import {
   assertProjectBlueprintDraft,
-  isValidNewNpmPackageName,
-  validateNewPackagePath,
   validateProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
 
 const packageDefinitionId = `package-${"1".repeat(64)}` as const;
 
-function blueprintWithPackage(name: string) {
+function blueprintWithPackage(
+  name: string,
+  packagePath = "packages/tool",
+  role = "cli-tool",
+) {
   return {
     schemaVersion: 3,
     packages: [
       {
         packageDefinitionId,
         name,
-        path: "packages/tool",
-        role: "cli-tool",
+        path: packagePath,
+        role,
       },
     ],
   } as const;
 }
 
 void describe("Project Blueprint v3 Package Definitions", () => {
-  void it("exposes the canonical npm package-name length boundary", () => {
-    assert.strictEqual(isValidNewNpmPackageName("a".repeat(214)), true);
-    assert.strictEqual(isValidNewNpmPackageName("a".repeat(215)), false);
-    assert.strictEqual(isValidNewNpmPackageName(`@s/${"a".repeat(211)}`), true);
-    assert.strictEqual(
-      isValidNewNpmPackageName(`@s/${"a".repeat(212)}`),
-      false,
+  void it("keeps package identity and role opaque while accepting a safe nested path", () => {
+    const blueprint = blueprintWithPackage(
+      "north:overview",
+      "docs/guides/overview",
+      "documentation",
     );
-  });
-
-  void it("distinguishes a reserved unscoped name from its valid scoped form", () => {
-    assert.strictEqual(isValidNewNpmPackageName("http"), false);
-    assert.strictEqual(isValidNewNpmPackageName("@acme/http"), true);
-  });
-
-  for (const name of [
-    "some-package",
-    "example.com",
-    "under_score",
-    "123numeric",
-    "@npm/thingy",
-    "@jane/foo.js",
-    "@scope/_hidden",
-    "@scope/-hidden",
-  ]) {
-    void it(`accepts the npm new-package name ${name}`, () => {
-      const blueprint = blueprintWithPackage(name);
-
-      assert.deepStrictEqual(validateProjectBlueprint(blueprint), {
-        ok: true,
-        value: blueprint,
-      });
-    });
-  }
-
-  for (const name of [
-    "Uppercase",
-    "@scope/Uppercase",
-    " leading-space",
-    "trailing-space ",
-    "contain:colons",
-    "excited!",
-    ".hidden",
-    "_hidden",
-    "-hidden",
-    "@scope/.hidden",
-    "node_modules",
-    "http",
-    "inspector",
-    "@scope",
-    "@scope/",
-    "@scope/name/extra",
-    `@scope/${"a".repeat(208)}`,
-  ]) {
-    void it(`rejects the npm new-package name ${name}`, () => {
-      assert.deepStrictEqual(
-        validateProjectBlueprint(blueprintWithPackage(name)),
-        {
-          ok: false,
-          issues: [
-            {
-              path: ".packages[0].name",
-              message:
-                "Package name must be a valid npm package name for new packages",
-            },
-          ],
-        },
-      );
-    });
-  }
-
-  void it("accepts the CLI Tool Package Role as a distinct Package Definition intent", () => {
-    const blueprint = blueprintWithPackage("@demo/tool");
 
     assert.deepStrictEqual(validateProjectBlueprint(blueprint), {
       ok: true,
@@ -105,7 +40,7 @@ void describe("Project Blueprint v3 Package Definitions", () => {
     });
   });
 
-  void it("reports every supported role when an unknown Package Role is persisted", () => {
+  void it("requires a string role in the generic package shape", () => {
     assert.deepStrictEqual(
       validateProjectBlueprint({
         schemaVersion: 3,
@@ -114,7 +49,7 @@ void describe("Project Blueprint v3 Package Definitions", () => {
             packageDefinitionId,
             name: "@demo/tool",
             path: "packages/tool",
-            role: "command",
+            role: 42,
           },
         ],
       }),
@@ -123,8 +58,7 @@ void describe("Project Blueprint v3 Package Definitions", () => {
         issues: [
           {
             path: ".packages[0].role",
-            message:
-              "Package Role must be cli-tool, runtime-service, shared-library, or native-package",
+            message: "Package Role must be a string",
           },
         ],
       },
@@ -217,49 +151,28 @@ void describe("Project Blueprint v3 Package Definitions", () => {
 });
 
 void describe("Project Blueprint v3 Package Paths", () => {
-  void it("exposes canonical Package Path shape and reservation facts", () => {
-    assert.deepStrictEqual(validateNewPackagePath("packages/tool"), {
-      hasValidShape: true,
-    });
-    assert.deepStrictEqual(validateNewPackagePath("packages/nested/tool"), {
-      hasValidShape: false,
-    });
-    assert.deepStrictEqual(validateNewPackagePath(".git/tool"), {
-      hasValidShape: false,
-      reservedWorkspaceCollection: ".git",
-    });
-  });
-
-  for (const workspaceCollection of [
-    ".git",
-    ".github",
-    ".devcontainer",
-    ".template",
-    "node_modules",
-    "dist",
-    "target",
+  for (const packagePath of [
+    "",
+    ".",
+    "../escape",
+    "/absolute/path",
+    "C:/outside",
+    "packages\\tool",
+    "packages//tool",
+    "packages/./tool",
+    "packages/tool/",
   ]) {
-    void it(`rejects the ADR0063 reserved workspace collection ${workspaceCollection}`, () => {
-      const packagePath = `${workspaceCollection}/evil`;
-
+    void it(`rejects unsafe relative Package Path ${JSON.stringify(packagePath)}`, () => {
       assert.deepStrictEqual(
-        validateProjectBlueprint({
-          schemaVersion: 3,
-          packages: [
-            {
-              packageDefinitionId,
-              name: "@demo/evil",
-              path: packagePath,
-              role: "shared-library",
-            },
-          ],
-        }),
+        validateProjectBlueprint(
+          blueprintWithPackage("@demo/tool", packagePath),
+        ),
         {
           ok: false,
           issues: [
             {
               path: ".packages[0].path",
-              message: `Package Path ${packagePath} uses reserved workspace collection ${workspaceCollection}`,
+              message: "Package Path must be a normalized safe relative path",
             },
           ],
         },
@@ -269,23 +182,23 @@ void describe("Project Blueprint v3 Package Paths", () => {
 });
 
 void describe("Project Blueprint draft semantics", () => {
-  void it("rejects invalid preset topology before Foundation assigns durable identity", () => {
+  void it("rejects unsafe package paths before assigning durable identity", () => {
     assert.throws(
       () =>
         assertProjectBlueprintDraft({
           schemaVersion: 3,
           packages: [
             {
-              name: "@demo/evil",
-              path: "dist/evil",
-              role: "shared-library",
+              name: "north:overview",
+              path: "../escape",
+              role: "documentation",
             },
           ],
         }),
       (error) =>
         error instanceof Error &&
         error.message.includes(
-          ".packages[0].path: Package Path dist/evil uses reserved workspace collection dist",
+          ".packages[0].path: Package Path must be a normalized safe relative path",
         ),
     );
   });

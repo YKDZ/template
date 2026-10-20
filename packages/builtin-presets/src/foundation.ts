@@ -29,11 +29,6 @@ import {
   shellCheckEnvironmentNeed,
 } from "@ykdz/template-core/module-graph";
 import {
-  assertProjectBlueprint,
-  assertProjectBlueprintDraft,
-  isValidNewNpmPackageName,
-  validateNewPackagePath,
-  validateProjectBlueprint as validateCoreProjectBlueprint,
   type PackageDefinition,
   type PackageDefinitionId,
   type PersistedPackageDefinition,
@@ -69,6 +64,13 @@ import type {
   PlannedPackageContribution,
   ResolvedPrimaryPackageIdentity,
 } from "@ykdz/template-workspace-authoring/preset-definition";
+import {
+  assertDefaultProjectBlueprint,
+  assertDefaultProjectBlueprintDraft,
+  isValidDefaultNpmPackageName,
+  validateDefaultPackagePath,
+  validateDefaultProjectBlueprint,
+} from "@ykdz/template-workspace/default-package-identity";
 import {
   assertReusablePackageExposure,
   readPackageAdditionVersionFacts,
@@ -136,10 +138,10 @@ export type {
   PackageDefinition,
   PackageDefinitionId,
   PackageLinkIntent,
-  PackageRole,
   PersistedPackageDefinition,
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
+export type { DefaultPackageRole } from "@ykdz/template-workspace-authoring/default-package-role";
 export type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 
 export type BuiltInGenerationContext = GenerationContext;
@@ -300,7 +302,7 @@ export function resolveBuiltInTemplateSource(
 }
 
 export function validateProjectBlueprint(value: unknown) {
-  return validateCoreProjectBlueprint(value);
+  return validateDefaultProjectBlueprint(value);
 }
 
 class PresetRegistry {
@@ -905,7 +907,7 @@ export function loadLocalTemplateMetadata(
   const blueprintPath = path.join(resolvedRoot, ".template/blueprint.json");
   let blueprint: ProjectBlueprint;
   try {
-    blueprint = assertProjectBlueprint(
+    blueprint = assertDefaultProjectBlueprint(
       readJsonFile(blueprintPath, "Project Blueprint facts"),
     );
   } catch (error) {
@@ -2969,7 +2971,7 @@ function foundationPlan(options: {
    */
   readonly rootNodeDeclaration: string;
 }): GeneratedRepositoryPlan {
-  assertProjectBlueprint(options.blueprint);
+  assertDefaultProjectBlueprint(options.blueprint);
   const configContribution = options.foundationContribution;
   const configDefinition = configContribution.definition;
   if (
@@ -3796,7 +3798,9 @@ function foundationPlan(options: {
 }
 
 type PreparedPresetInitialization = {
-  readonly presetBlueprint: ReturnType<typeof assertProjectBlueprintDraft>;
+  readonly presetBlueprint: ReturnType<
+    typeof assertDefaultProjectBlueprintDraft
+  >;
   readonly contributions: readonly PlannedPackageContribution[];
   readonly resolvedPackageIdentity?: ResolvedPrimaryPackageIdentity;
 };
@@ -3939,12 +3943,12 @@ function collectInitializationInput(
   }
   let validNameOverride =
     nameOverride !== undefined &&
-    isValidNewNpmPackageName(`@x/${nameOverride}`);
+    isValidDefaultNpmPackageName(`@x/${nameOverride}`);
   if (nameOverride !== undefined && !validNameOverride) {
     issues.push({ code: "INVALID_PACKAGE_NAME" });
   }
   if (pathOverride !== undefined) {
-    const pathValidation = validateNewPackagePath(pathOverride);
+    const pathValidation = validateDefaultPackagePath(pathOverride);
     if (!pathValidation.hasValidShape) {
       issues.push({ code: "INVALID_PACKAGE_PATH" });
     }
@@ -3956,13 +3960,13 @@ function collectInitializationInput(
     normalizedScope !== undefined &&
     scopeOverride === scopeOverride?.trim() &&
     isValidDefaultPackageScope(normalizedScope) &&
-    isValidNewNpmPackageName(`@${normalizedScope}/typescript-config`);
+    isValidDefaultNpmPackageName(`@${normalizedScope}/typescript-config`);
   if (normalizedScope !== undefined && !validScopeOverride) {
     issues.push({ code: "INVALID_PACKAGE_SCOPE" });
   }
   let validRepositoryScope =
     isValidDefaultPackageScope(repositoryName) &&
-    isValidNewNpmPackageName(`@${repositoryName}/typescript-config`);
+    isValidDefaultNpmPackageName(`@${repositoryName}/typescript-config`);
   if (normalizedScope === undefined && !validRepositoryScope) {
     issues.push({ code: "INVALID_REPOSITORY_SCOPE" });
   }
@@ -3982,7 +3986,7 @@ function collectInitializationInput(
         : undefined;
   if (
     resolvedLeaf !== undefined &&
-    !isValidNewNpmPackageName(`@${resolvedScope}/${resolvedLeaf}`)
+    !isValidDefaultNpmPackageName(`@${resolvedScope}/${resolvedLeaf}`)
   ) {
     if (nameOverride !== undefined) {
       validNameOverride = false;
@@ -4057,7 +4061,7 @@ function preparePresetInitialization(options: {
     let presetBlueprint: PreparedPresetInitialization["presetBlueprint"];
     let contributions: readonly PlannedPackageContribution[] | undefined;
     try {
-      presetBlueprint = assertProjectBlueprintDraft(
+      presetBlueprint = assertDefaultProjectBlueprintDraft(
         options.definition.blueprint(options.context),
       );
     } catch (error) {
@@ -4092,7 +4096,7 @@ function preparePresetInitialization(options: {
   let presetBlueprint: PreparedPresetInitialization["presetBlueprint"];
   let contribution: PlannedPackageContribution | undefined;
   try {
-    presetBlueprint = assertProjectBlueprintDraft({
+    presetBlueprint = assertDefaultProjectBlueprintDraft({
       schemaVersion: 3,
       packages: [resolvedPackageIdentity.definition],
     });
@@ -4140,7 +4144,9 @@ function referencePlanningFacts(
 function planPreparedRepositoryInitialization(options: {
   readonly definition: BuiltInPresetDefinition;
   readonly context: BuiltInGenerationContext;
-  readonly presetBlueprint: ReturnType<typeof assertProjectBlueprintDraft>;
+  readonly presetBlueprint: ReturnType<
+    typeof assertDefaultProjectBlueprintDraft
+  >;
   readonly contributions: readonly PlannedPackageContribution[];
   readonly rootNodeDeclaration: string;
 }): GeneratedRepositoryPlan {
@@ -4326,7 +4332,8 @@ export function prepareGeneratedRepositoryInitialization(options: {
     } catch {
       return { status: "operation-failure", phase: "preset" };
     }
-    const derivedPathValidation = validateNewPackagePath(derivedPackagePath);
+    const derivedPathValidation =
+      validateDefaultPackagePath(derivedPackagePath);
     if (
       !derivedPathValidation.hasValidShape ||
       derivedPathValidation.reservedWorkspaceCollection !== undefined
@@ -4443,7 +4450,7 @@ function planGeneratedRepositoryPackageAdditionFromPreparedContribution(options:
     options.localTemplateMetadata;
   const { rootNodeDeclaration } =
     options.localTemplateMetadata[localTemplateMetadataStateKey];
-  assertProjectBlueprint(persistedBlueprint);
+  assertDefaultProjectBlueprint(persistedBlueprint);
   const contribution = options.contribution;
   const requestedPackageLinkIntents = [...new Set(options.linkFrom ?? [])].map(
     (consumerPackagePath) => ({
@@ -4581,7 +4588,7 @@ function planGeneratedRepositoryPackageAdditionFromPreparedContribution(options:
         }
       : {}),
   };
-  assertProjectBlueprint(blueprint);
+  assertDefaultProjectBlueprint(blueprint);
   for (const item of additions) {
     for (const provider of Object.values(item.referenceBindings ?? {})) {
       if (
@@ -4748,11 +4755,11 @@ function collectPackageAdditionInput(options: {
   if (definition === undefined) issues.push({ code: "PRESET_UNKNOWN" });
   else if (definition.planPackageAddition === undefined)
     issues.push({ code: "PRESET_NOT_ADDABLE" });
-  if (!isValidNewNpmPackageName(`@x/${options.packageLeafName}`)) {
+  if (!isValidDefaultNpmPackageName(`@x/${options.packageLeafName}`)) {
     issues.push({ code: "INVALID_PACKAGE_NAME" });
   }
   if (options.packagePath !== undefined) {
-    const validation = validateNewPackagePath(options.packagePath);
+    const validation = validateDefaultPackagePath(options.packagePath);
     if (!validation.hasValidShape)
       issues.push({ code: "INVALID_PACKAGE_PATH" });
     if (validation.reservedWorkspaceCollection !== undefined) {
@@ -4761,7 +4768,7 @@ function collectPackageAdditionInput(options: {
   }
   const linkFrom = [...new Set(options.linkFrom ?? [])];
   for (const consumerPackagePath of linkFrom) {
-    const validation = validateNewPackagePath(consumerPackagePath);
+    const validation = validateDefaultPackagePath(consumerPackagePath);
     if (!validation.hasValidShape) {
       issues.push({ code: "INVALID_LINK_FROM" });
     }
@@ -4843,7 +4850,7 @@ export function prepareGeneratedRepositoryPackageAddition(options: {
     const defaultPathValidation =
       packagePath === undefined
         ? undefined
-        : validateNewPackagePath(packagePath);
+        : validateDefaultPackagePath(packagePath);
     if (
       defaultPathValidation === undefined ||
       !defaultPathValidation.hasValidShape ||
