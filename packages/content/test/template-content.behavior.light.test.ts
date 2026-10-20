@@ -758,14 +758,16 @@ void describe("公开模板内容集合", () => {
     assert.strictEqual(cliResult.status, "success", JSON.stringify(cliResult));
     const cliNode = tsCliPreset.definition.nodes.cli;
     assert.ok(cliNode?.creationInput);
-    const cliManifest = JSON.parse(
-      await readFile(path.join(cliRoot, "packages/cli/package.json"), "utf8"),
-    ) as {
+    const cliManifestPath = path.join(cliRoot, "packages/cli/package.json");
+    const cliManifestBeforeAddition = await readFile(cliManifestPath, "utf8");
+    const cliManifest = JSON.parse(cliManifestBeforeAddition) as {
       files: string[];
       exports?: Readonly<Record<string, unknown>>;
       scripts?: Readonly<Record<string, string>>;
+      engines: { readonly node: string };
     };
     assert.deepStrictEqual(cliManifest.files, ["dist"]);
+    assert.strictEqual(cliManifest.engines.node, "^24.21.0");
     assert.strictEqual(
       cliManifest.scripts?.build,
       tsCli.manifest.scripts?.build,
@@ -775,12 +777,15 @@ void describe("公开模板内容集合", () => {
       readFile(path.join(cliRoot, "packages/cli/template/creation-input.ts")),
       { code: "ENOENT" },
     );
-    const publicationConfig = JSON.parse(
-      await readFile(
-        path.join(cliRoot, "scripts/npm-publication/publication.config.json"),
-        "utf8",
-      ),
-    ) as {
+    const publicationConfigPath = path.join(
+      cliRoot,
+      "scripts/npm-publication/publication.config.json",
+    );
+    const publicationConfigBeforeAddition = await readFile(
+      publicationConfigPath,
+      "utf8",
+    );
+    const publicationConfig = JSON.parse(publicationConfigBeforeAddition) as {
       readonly packageDefinitionId: string;
       readonly packagePath: string;
       readonly creationInput: TsCliCreationInput;
@@ -829,6 +834,108 @@ void describe("公开模板内容集合", () => {
       matchingRecords[0]?.creationInput,
       publicationConfig.creationInput,
     );
+
+    const privateCreationInput = {
+      variant: "private",
+      leafName: "private-cli",
+      packagePath: "packages/private-cli",
+    } satisfies TsCliCreationInput;
+    const privateAddition = await generator.add({
+      repositoryRoot: cliRoot,
+      preset: tsCliPreset.identity,
+      creationInput: privateCreationInput,
+    });
+    assert.strictEqual(
+      privateAddition.status,
+      "success",
+      JSON.stringify(privateAddition),
+    );
+    if (privateAddition.status !== "success") return;
+    const privateRecord = privateAddition.generationRecord.packages.find(
+      (packageRecord) =>
+        contentIdentityKey(packageRecord.contentIdentity) ===
+          contentIdentityKey(tsCliMember.identity) &&
+        packageRecord.createdBy === "addition" &&
+        packageRecord.creationInput?.leafName === "private-cli",
+    );
+    assert.ok(privateRecord);
+    assert.deepStrictEqual(privateRecord.creationInput, privateCreationInput);
+    assert.notStrictEqual(
+      privateRecord.packageDefinitionId,
+      publicationConfig.packageDefinitionId,
+    );
+    const privateDefinition = privateAddition.blueprint.packages.find(
+      ({ packageDefinitionId }) =>
+        packageDefinitionId === privateRecord.packageDefinitionId,
+    );
+    assert.ok(privateDefinition);
+    assert.strictEqual(privateDefinition.name, "@demo/private-cli");
+    assert.strictEqual(privateDefinition.path, "packages/private-cli");
+    assert.strictEqual(
+      JSON.parse(
+        await readFile(
+          path.join(cliRoot, "packages/private-cli/package.json"),
+          "utf8",
+        ),
+      ).engines.node,
+      ">=24",
+    );
+    assert.strictEqual(
+      await readFile(publicationConfigPath, "utf8"),
+      publicationConfigBeforeAddition,
+    );
+    assert.strictEqual(
+      await readFile(cliManifestPath, "utf8"),
+      cliManifestBeforeAddition,
+    );
+    const addedGenerationRecord = parseGenerationRecord<TsCliCreationInput>(
+      JSON.parse(
+        await readFile(path.join(cliRoot, ".template/generation.json"), "utf8"),
+      ),
+    );
+    assert.deepStrictEqual(
+      privateAddition.generationRecord,
+      addedGenerationRecord,
+    );
+    const persistedCandidateRecord = addedGenerationRecord.packages.find(
+      ({ packageDefinitionId }) =>
+        packageDefinitionId === publicationConfig.packageDefinitionId,
+    );
+    assert.ok(persistedCandidateRecord);
+    assert.strictEqual(
+      contentIdentityKey(persistedCandidateRecord.contentIdentity),
+      contentIdentityKey(tsCliMember.identity),
+    );
+    assert.strictEqual(persistedCandidateRecord.createdBy, "initialization");
+    assert.deepStrictEqual(
+      persistedCandidateRecord.creationInput,
+      publicationConfig.creationInput,
+    );
+    const cliTreeBeforeReplay = await snapshotTree(cliRoot);
+    const freshEngineReplay = await createGenerator({
+      content: templateContent,
+      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+    }).add({
+      repositoryRoot: cliRoot,
+      preset: tsCliPreset.identity,
+      creationInput: privateCreationInput,
+    });
+    assert.strictEqual(
+      freshEngineReplay.status,
+      "success",
+      JSON.stringify(freshEngineReplay),
+    );
+    if (freshEngineReplay.status !== "success") return;
+    assert.strictEqual(freshEngineReplay.projection, null);
+    assert.deepStrictEqual(
+      freshEngineReplay.generationRecord,
+      addedGenerationRecord,
+    );
+    assert.strictEqual(
+      await readFile(publicationConfigPath, "utf8"),
+      publicationConfigBeforeAddition,
+    );
+    assert.strictEqual(await snapshotTree(cliRoot), cliTreeBeforeReplay);
 
     const rustRoot = await createTargetRoot("template-content-rust-bin-");
     const rustResult = await generator.init({
