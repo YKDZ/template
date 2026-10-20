@@ -1204,9 +1204,6 @@ importers:
 
   packages/workspace-authoring:
     dependencies:
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../core
       '@ykdz/template-environment':
         specifier: workspace:*
         version: link:../environment
