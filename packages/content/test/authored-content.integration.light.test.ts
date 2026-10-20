@@ -18,6 +18,7 @@ import {
   type ContentIdentity,
 } from "@ykdz/template-core/content-identity";
 import { createGenerator } from "@ykdz/template-generator";
+import type { ReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
 import {
@@ -279,6 +280,162 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       assert.ok(followupDefinition);
       assert.equal(followupDefinition.path, "packages/addon-next");
     }
+  });
+
+  void it("统一依赖用途并在fresh add回放中保留目标加执行共享依赖", async () => {
+    const fixture = await createFixture({
+      namespace: "dependency-uses",
+      marker: "uses",
+      featureNativeDevDependencies: {
+        "@fixture/execution-only": "workspace:*",
+        "@fixture/build-only": "workspace:*",
+      },
+      featureTemplateDependencies: [
+        {
+          name: "@ykdz/template-workspace-authoring",
+          purpose: "template-execution",
+        },
+        { name: "@fixture/typescript-config", purpose: "target" },
+        {
+          name: "@fixture/typescript-config",
+          purpose: "template-execution",
+        },
+        { name: "@fixture/execution-only", purpose: "template-execution" },
+        { name: "@fixture/build-only", purpose: "template-build" },
+      ],
+    });
+    const workspace = await createWorkspace();
+    const targetRoot = path.join(workspace, "project");
+    const featureMember = fixture.members.find(
+      (member) => member.identity.packageName === "@fixture/feature",
+    );
+    assert.ok(featureMember);
+    const initialized = await createGenerator({
+      content: fixture.members,
+      strategy: createDefaultWorkspaceStrategy(),
+    }).init({
+      targetRoot,
+      selection: { roots: [{ preset: { alias: "authored" } }] },
+      strategyInput: {
+        repositoryName: "dependency-uses",
+        defaultPackageScope: "uses",
+      },
+    });
+    assert.equal(initialized.status, "success", JSON.stringify(initialized));
+    if (initialized.status !== "success") return;
+
+    const preparation = (
+      featureMember.definition as unknown as ReferencePackage
+    ).prepare();
+    assert.deepEqual(
+      preparation.dependencyUses.find(
+        (dependency) => dependency.name === "@fixture/typescript-config",
+      )?.purposes,
+      ["target", "template-execution"],
+    );
+    assert.deepEqual(
+      preparation.dependencyUses.find(
+        (dependency) => dependency.name === "@fixture/execution-only",
+      )?.purposes,
+      ["template-execution"],
+    );
+    assert.deepEqual(
+      preparation.dependencyUses.find(
+        (dependency) =>
+          dependency.name === "@ykdz/template-workspace-authoring",
+      )?.purposes,
+      ["template-execution"],
+    );
+    assert.deepEqual(
+      preparation.dependencyUses.find(
+        (dependency) => dependency.name === "@fixture/build-only",
+      )?.purposes,
+      ["template-build"],
+    );
+
+    const featureIdentity = identityFor(fixture, "@fixture/feature");
+    const themeIdentity = identityFor(fixture, "@fixture/typescript-config");
+    const featureRecord = initialized.generationRecord.packages.find(
+      (record) =>
+        contentIdentityKey(record.contentIdentity) ===
+        contentIdentityKey(featureIdentity),
+    );
+    const themeRecord = initialized.generationRecord.packages.find(
+      (record) =>
+        contentIdentityKey(record.contentIdentity) ===
+        contentIdentityKey(themeIdentity),
+    );
+    assert.ok(featureRecord);
+    assert.ok(themeRecord);
+    assert.equal(
+      featureRecord.bindings[contentIdentityKey(themeIdentity)],
+      themeRecord.packageDefinitionId,
+    );
+    const featureDefinition = initialized.blueprint.packages.find(
+      (definition) =>
+        definition.packageDefinitionId === featureRecord.packageDefinitionId,
+    );
+    assert.ok(featureDefinition);
+    const readGeneratedManifest = async () =>
+      JSON.parse(
+        await readFile(
+          path.join(targetRoot, featureDefinition.path, "package.json"),
+          "utf8",
+        ),
+      ) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+    const assertTargetDependencies = async () => {
+      const manifest = await readGeneratedManifest();
+      assert.ok(manifest.dependencies?.["@uses/typescript-config"]);
+      for (const field of ["dependencies", "devDependencies"] as const) {
+        assert.equal(
+          Object.hasOwn(manifest[field] ?? {}, "@fixture/execution-only"),
+          false,
+        );
+        assert.equal(
+          Object.hasOwn(manifest[field] ?? {}, "@fixture/build-only"),
+          false,
+        );
+      }
+      assert.equal(
+        Object.hasOwn(
+          manifest.devDependencies ?? {},
+          "@ykdz/template-workspace-authoring",
+        ),
+        false,
+      );
+    };
+    await assertTargetDependencies();
+
+    const added = await createGenerator({
+      content: fixture.members,
+      strategy: createDefaultWorkspaceStrategy(),
+    }).add({
+      repositoryRoot: targetRoot,
+      contentIdentity: identityFor(fixture, "@fixture/addon"),
+      creationInput: { leafName: "uses-addon" },
+    });
+    assert.equal(added.status, "success", JSON.stringify(added));
+    if (added.status !== "success") return;
+    const retainedFeature = added.generationRecord.packages.find(
+      (record) =>
+        contentIdentityKey(record.contentIdentity) ===
+        contentIdentityKey(featureIdentity),
+    );
+    const retainedTheme = added.generationRecord.packages.find(
+      (record) =>
+        contentIdentityKey(record.contentIdentity) ===
+        contentIdentityKey(themeIdentity),
+    );
+    assert.ok(retainedFeature);
+    assert.ok(retainedTheme);
+    assert.equal(
+      retainedFeature.bindings[contentIdentityKey(themeIdentity)],
+      retainedTheme.packageDefinitionId,
+    );
+    await assertTargetDependencies();
   });
 
   void it("当前内容修订经fresh engine回放时保留旧包与用户定制", async () => {

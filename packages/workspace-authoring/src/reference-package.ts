@@ -35,9 +35,20 @@ export type ReferencePackageManifest = Readonly<Record<string, unknown>> & {
   readonly devDependencies?: Readonly<Record<string, string>>;
 };
 
+export type ReferenceTemplateDependencyPurpose =
+  | "target"
+  | "template-execution"
+  | "template-build";
+
 export type ReferenceTemplateDependency = {
   readonly name: string;
-  readonly purpose: "template-execution" | "template-build";
+  readonly purpose: ReferenceTemplateDependencyPurpose;
+};
+
+/** 按所属声明归一化后的同一依赖用途事实。 */
+export type ReferenceDependencyUse = {
+  readonly name: string;
+  readonly purposes: readonly ReferenceTemplateDependencyPurpose[];
 };
 
 export type PreparedReferenceResource = {
@@ -50,6 +61,7 @@ export type PreparedReferenceResource = {
 /** 所属自定义读取器仅能消费已声明并准备的文本资源。 */
 export type ReferencePackagePreparationInput = {
   readonly manifest: ReferencePackageManifest;
+  readonly dependencyUses: readonly ReferenceDependencyUse[];
   readonly resources: readonly PreparedReferenceResource[];
   readonly executionData: readonly PreparedReferenceResource[];
   readText(path: string): string;
@@ -66,6 +78,7 @@ export type ReferencePackagePreparation<OwnerFacts = unknown> = {
   /** 模板执行阶段会读取的数据；它可以与目标排除资源重叠。 */
   readonly executionData: readonly PreparedReferenceResource[];
   readonly templateDependencies: readonly ReferenceTemplateDependency[];
+  readonly dependencyUses: readonly ReferenceDependencyUse[];
   readonly ownerFacts: OwnerFacts;
 };
 
@@ -109,6 +122,8 @@ export type ReferencePackage<
   readonly requiresRootRustToolchain?: true;
   readonly manifest: ReferencePackageManifest;
   readonly templateDependencies: readonly ReferenceTemplateDependency[];
+  /** prepare 后可供策略和贡献共同消费的用途归一化事实。 */
+  readonly dependencyUses: readonly ReferenceDependencyUse[];
   /** prepare完成后从所属资源集合中取得的CLI发布身份来源。 */
   readonly publicationIdentitySource?: TemplateSourceHandle;
   prepare(): ReferencePackagePreparation<OwnerFacts>;
@@ -119,6 +134,74 @@ export type ReferencePackage<
     options: ReferenceContributionOptions<CreationInput>,
   ): PackageContribution;
 };
+
+const dependencyPurposeOrder: readonly ReferenceTemplateDependencyPurpose[] = [
+  "target",
+  "template-execution",
+  "template-build",
+];
+
+function normalizeDependencyUses(
+  manifest: ReferencePackageManifest,
+  templateDependencies: readonly ReferenceTemplateDependency[],
+): readonly ReferenceDependencyUse[] {
+  const uses = new Map<string, Set<ReferenceTemplateDependencyPurpose>>();
+  for (const field of [
+    "dependencies",
+    "devDependencies",
+    "optionalDependencies",
+    "peerDependencies",
+  ]) {
+    const dependencies = manifest[field];
+    if (typeof dependencies !== "object" || dependencies === null) continue;
+    for (const name of Object.keys(dependencies)) {
+      if (!uses.has(name)) uses.set(name, new Set(["target"]));
+    }
+  }
+
+  const declared = new Set<string>();
+  const seen = new Set<string>();
+  for (const dependency of templateDependencies) {
+    if (
+      !dependencyPurposeOrder.includes(dependency.purpose) ||
+      typeof dependency.name !== "string" ||
+      dependency.name.length === 0
+    ) {
+      throw new Error(
+        `模板依赖用途无效：${String(dependency.name)} (${String(dependency.purpose)})`,
+      );
+    }
+    const purposes = uses.get(dependency.name);
+    if (purposes === undefined) {
+      throw new Error(
+        `模板依赖未在原生清单声明：${dependency.name} (${dependency.purpose})`,
+      );
+    }
+    const identity = `${dependency.name}\u0000${dependency.purpose}`;
+    if (seen.has(identity)) {
+      throw new Error(
+        `模板依赖用途重复：${dependency.name} (${dependency.purpose})`,
+      );
+    }
+    seen.add(identity);
+    if (!declared.has(dependency.name)) {
+      purposes.clear();
+      declared.add(dependency.name);
+    }
+    purposes.add(dependency.purpose);
+  }
+
+  return Object.freeze(
+    [...uses].map(([name, purposes]) =>
+      Object.freeze({
+        name,
+        purposes: Object.freeze(
+          dependencyPurposeOrder.filter((purpose) => purposes.has(purpose)),
+        ),
+      }),
+    ),
+  );
+}
 
 function contextual<
   Value,
@@ -265,38 +348,10 @@ export function defineReferencePackage<
   const prepare = (): ReferencePackagePreparation<OwnerFacts> => {
     if (preparation !== undefined) return preparation;
     try {
-      const nativeDependencies = new Set(
-        [
-          manifest.dependencies,
-          manifest.devDependencies,
-          manifest.optionalDependencies,
-          manifest.peerDependencies,
-        ].flatMap((record) =>
-          typeof record === "object" && record !== null
-            ? Object.keys(record)
-            : [],
-        ),
+      const dependencyUses = normalizeDependencyUses(
+        manifest,
+        templateDependencies,
       );
-      const seenTemplateDependencies = new Set<string>();
-      for (const dependency of templateDependencies) {
-        if (
-          dependency.purpose !== "template-execution" &&
-          dependency.purpose !== "template-build"
-        ) {
-          throw new Error(
-            `模板依赖用途无效：${dependency.name} (${String(dependency.purpose)})`,
-          );
-        }
-        if (seenTemplateDependencies.has(dependency.name)) {
-          throw new Error(`模板依赖用途重复：${dependency.name}`);
-        }
-        seenTemplateDependencies.add(dependency.name);
-        if (!nativeDependencies.has(dependency.name)) {
-          throw new Error(
-            `模板依赖未在原生清单声明：${dependency.name} (${dependency.purpose})`,
-          );
-        }
-      }
 
       type IgnoreScope = { readonly directory: string; readonly rules: Ignore };
       const scopes = new Map<string, IgnoreScope>();
@@ -429,6 +484,7 @@ export function defineReferencePackage<
       const preparedResourcePaths = new Set(preparedResourcesByPath.keys());
       const ownerFacts = options.prepare?.({
         manifest,
+        dependencyUses,
         resources,
         executionData,
         readText(resourcePath) {
@@ -457,6 +513,7 @@ export function defineReferencePackage<
         resources: Object.freeze(resources),
         executionData: Object.freeze(executionData),
         templateDependencies,
+        dependencyUses,
         ownerFacts: ownerFacts as OwnerFacts,
       });
       return preparation;
@@ -505,6 +562,9 @@ export function defineReferencePackage<
       : { requiresRootRustToolchain: options.requiresRootRustToolchain }),
     manifest,
     templateDependencies,
+    get dependencyUses() {
+      return requirePreparation().dependencyUses;
+    },
     prepare,
     source,
     operations,
@@ -561,10 +621,10 @@ export function defineReferencePackage<
         const dependencies = {
           ...(projected[field] as Record<string, string>),
         };
-        for (const name of templateDependencies
-          .filter((dependency) => dependency.purpose === "template-execution")
-          .map((dependency) => dependency.name))
-          delete dependencies[name];
+        for (const dependency of prepared.dependencyUses) {
+          if (!dependency.purposes.includes("target"))
+            delete dependencies[dependency.name];
+        }
         for (const [nativeName, definition] of bindings) {
           const native = (manifest[field] as Record<string, string>)[
             nativeName
