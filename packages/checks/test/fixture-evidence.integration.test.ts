@@ -1,8 +1,10 @@
 import { describe, it, mock } from "node:test";
 
 import { contentIdentityKey } from "@ykdz/template-core/content-identity";
+import type { ContentIdentity } from "@ykdz/template-core/content-identity";
 
 import { findFixtureEvidenceArchitectureFindings } from "../src/check-fixture-evidence-architecture.ts";
+import { forEachGeneratedScenario } from "../src/generated-content.ts";
 import { sourceGeneratedScenarioRuntime } from "../src/source-generated-runtime.ts";
 import {
   FileFixtureEvidenceActivityLedger,
@@ -47,6 +49,37 @@ import type {
   FixtureEvidenceLifecycleEvent,
   FixtureEvidenceSchedulerFactory,
 } from "./fixture-evidence.test-support.ts";
+
+const applicableFocusedScenarioCount = async (): Promise<number> => {
+  const applicableScenarios = await forEachGeneratedScenario({
+    runtime: sourceGeneratedScenarioRuntime,
+    scenarios: await generatedScenariosFor("focused"),
+    inspect: async ({ scenario, linkFrom }) => ({
+      basePackageName: scenario.base.identity.packageName,
+      providerPackageName: scenario.addition?.identity.packageName,
+      linkFrom,
+    }),
+  });
+  assert.deepStrictEqual(
+    applicableScenarios
+      .map(({ basePackageName }) => basePackageName)
+      .toSorted(),
+    [
+      "@ykdz/preset-ts-cli",
+      "@ykdz/preset-ts-lib",
+      "@ykdz/preset-vike-app",
+      "@ykdz/preset-vue-app",
+      "@ykdz/preset-vue-hono-app",
+    ],
+  );
+  assert.ok(
+    applicableScenarios.every(
+      ({ providerPackageName, linkFrom }) =>
+        providerPackageName === "@ykdz/preset-ts-lib" && linkFrom.length === 1,
+    ),
+  );
+  return applicableScenarios.length;
+};
 
 void describe("Fixture Verification Evidence", () => {
   void it("初始化内容树相同也不能将轻层证据复用为完整验收", async () => {
@@ -643,6 +676,48 @@ void describe("Fixture Verification Evidence", () => {
       >();
       try {
         for (const scenarioSet of sets) {
+          const scenarios = await generatedScenariosFor(scenarioSet);
+          const renderedScenarios = await forEachGeneratedScenario({
+            runtime: sourceGeneratedScenarioRuntime,
+            scenarios,
+            inspect: async (receipt) => receipt,
+          });
+          if (scenarioSet === "focused") {
+            assert.deepStrictEqual(
+              renderedScenarios
+                .map(({ scenario }) => scenario.base.identity.packageName)
+                .toSorted(),
+              [
+                "@ykdz/preset-ts-cli",
+                "@ykdz/preset-ts-lib",
+                "@ykdz/preset-vike-app",
+                "@ykdz/preset-vue-app",
+                "@ykdz/preset-vue-hono-app",
+              ],
+            );
+            assert.ok(
+              renderedScenarios.every(
+                ({ scenario, linkFrom }) =>
+                  scenario.addition?.identity.packageName ===
+                    "@ykdz/preset-ts-lib" && linkFrom.length === 1,
+              ),
+            );
+          }
+          const browserConstrained = renderedScenarios.filter((receipt) =>
+            generatedRootQualityExecutionResources(receipt.result, {
+              rootGate:
+                scenarioSet === "init" || scenarioSet === "focused"
+                  ? "check"
+                  : "check:full",
+            }).includes("browser"),
+          ).length;
+          const ordinaryOnly = renderedScenarios.length - browserConstrained;
+          const expected =
+            scenarioSet === "deployment"
+              ? 1
+              : Math.min(4, ordinaryOnly + Math.min(browserConstrained, 1));
+          expectedMaxActiveInstalls.set(scenarioSet, expected);
+
           const installs = createBlockedConcurrencyProbe();
           const cli = runGeneratedRegistryCli({
             scenarioSet,
@@ -676,30 +751,6 @@ void describe("Fixture Verification Evidence", () => {
               return {};
             },
           });
-          const scenarios = await generatedScenariosFor(scenarioSet);
-          const renderedScenarios = await Promise.all(
-            scenarios.map(
-              async (scenario) =>
-                await renderMatrixScenario({
-                  scenario,
-                  workspace: path.join(root, "resource-oracle", scenarioSet),
-                }),
-            ),
-          );
-          const browserConstrained = renderedScenarios.filter(({ receipt }) =>
-            generatedRootQualityExecutionResources(receipt.result, {
-              rootGate:
-                scenarioSet === "init" || scenarioSet === "focused"
-                  ? "check"
-                  : "check:full",
-            }).includes("browser"),
-          ).length;
-          const ordinaryOnly = scenarios.length - browserConstrained;
-          const expected =
-            scenarioSet === "deployment"
-              ? 1
-              : Math.min(4, ordinaryOnly + Math.min(browserConstrained, 1));
-          expectedMaxActiveInstalls.set(scenarioSet, expected);
           let observationFailure: unknown;
           try {
             await Promise.race([
@@ -1119,7 +1170,9 @@ void describe("Fixture Verification Evidence", () => {
         },
       });
 
-      const scenarioCount = (await generatedScenariosFor("focused")).length;
+      const candidateScenarioCount = (await generatedScenariosFor("focused"))
+        .length;
+      const scenarioCount = await applicableFocusedScenarioCount();
       assert.strictEqual(
         coldEvents.filter(
           (event) =>
@@ -1173,7 +1226,7 @@ void describe("Fixture Verification Evidence", () => {
         warmCommands.filter(
           ({ command, args }) => command === "git" && args[0] === "init",
         ).length,
-        scenarioCount,
+        candidateScenarioCount,
       );
       assert.strictEqual(
         warmCommands.filter(
@@ -1373,7 +1426,7 @@ void describe("Fixture Verification Evidence", () => {
         },
       });
 
-      const scenarioCount = (await generatedScenariosFor("focused")).length;
+      const scenarioCount = await applicableFocusedScenarioCount();
       assert.strictEqual(
         partialWarmEvents.filter(
           (event) =>
@@ -1476,7 +1529,7 @@ void describe("Fixture Verification Evidence", () => {
           error.message.includes("Root Quality failed"),
       );
 
-      const scenarioCount = (await generatedScenariosFor("focused")).length;
+      const scenarioCount = await applicableFocusedScenarioCount();
       assert.strictEqual(
         events.filter(
           (event) =>
@@ -1696,31 +1749,51 @@ void describe("Fixture Verification Evidence", () => {
             ),
           ) as {
             readonly packages: readonly {
-              readonly path: string;
-              readonly definitionName: string;
+              readonly createdBy: string;
+              readonly packageDefinitionId: string;
             }[];
+            readonly presetSelections: readonly ContentIdentity[];
           };
           assert.ok(
-            generation.packages
-              .map(({ definitionName }) => definitionName)
-              .includes(
-                scenario.addition?.identity === undefined
-                  ? contentIdentityKey(scenario.base.identity)
-                  : contentIdentityKey(scenario.addition.identity),
+            generation.presetSelections.some((selection) =>
+              isDeepStrictEqual(
+                selection,
+                scenario.addition?.identity ?? scenario.base.identity,
               ),
+            ),
           );
-          assert.ok(
-            (
-              await readFile(
-                path.join(
-                  secondWorkspace,
-                  scenario.id,
-                  generation.packages.at(-1)!.path,
-                  "package.json",
-                ),
-                "utf8",
-              )
-            ).includes('"name"'),
+          assert.strictEqual(
+            generation.packages.some(
+              ({ createdBy }) => createdBy === "addition",
+            ),
+            scenario.addition !== undefined,
+          );
+          const expected = await renderMatrixScenario({
+            scenario,
+            workspace: path.join(root, "blueprint-oracle"),
+          });
+          const lastPackageRecord = generation.packages.at(-1);
+          assert.notStrictEqual(lastPackageRecord, undefined);
+          const lastPackageDefinition =
+            expected.receipt.result.blueprint.packages.find(
+              ({ packageDefinitionId }) =>
+                packageDefinitionId === lastPackageRecord!.packageDefinitionId,
+            );
+          assert.notStrictEqual(lastPackageDefinition, undefined);
+          const generatedManifest = JSON.parse(
+            await readFile(
+              path.join(
+                secondWorkspace,
+                scenario.id,
+                lastPackageDefinition!.path,
+                "package.json",
+              ),
+              "utf8",
+            ),
+          ) as { readonly name?: unknown };
+          assert.strictEqual(
+            generatedManifest.name,
+            lastPackageDefinition!.name,
           );
         }
       } finally {
@@ -2267,6 +2340,7 @@ process.exitCode = result.status ?? 1;
               {
                 cwd: process.cwd(),
                 env,
+                extendEnv: false,
               },
             );
           }
@@ -2342,6 +2416,7 @@ process.exitCode = result.status ?? 1;
               {
                 cwd: process.cwd(),
                 env: warmEnv,
+                extendEnv: false,
               },
             )
           ).exitCode,
@@ -2355,6 +2430,7 @@ process.exitCode = result.status ?? 1;
               ...baseEnv,
               TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT: "3",
             },
+            extendEnv: false,
           }),
           (error) => {
             assert.ok(error instanceof Error);
