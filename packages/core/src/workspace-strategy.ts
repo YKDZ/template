@@ -57,10 +57,13 @@ export type WorkspaceStrategy<
     readonly input: Input;
     readonly selection: string;
   }): { readonly context: Context; readonly state: StrategyState };
-  restore(options: {
+  prepareAddition(options: {
     readonly targetRoot: string;
     readonly state: StrategyState;
-  }): Context;
+    readonly content: Content;
+    readonly contentByIdentity: ReadonlyMap<string, Content>;
+    readonly packages: readonly GeneratorPackageRecord[];
+  }): Context | Promise<Context>;
   parseState(value: unknown): StrategyState;
   /** 策略把原生依赖声明映射为显式内容身份。 */
   dependencies(options: {

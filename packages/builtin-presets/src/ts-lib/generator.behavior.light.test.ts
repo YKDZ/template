@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -11,6 +18,29 @@ import { createGenerator } from "@ykdz/template-generator";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
 const configuration = defineReferencePackage(configurationDefinition);
+
+async function snapshotTree(root: string): Promise<string> {
+  const files: { path: string; mode: number; content: string }[] = [];
+  async function visit(directory: string, relative = ""): Promise<void> {
+    for (const entry of (
+      await readdir(directory, { withFileTypes: true })
+    ).sort((left, right) => left.name.localeCompare(right.name))) {
+      const fullPath = path.join(directory, entry.name);
+      const relativePath = path.posix.join(relative, entry.name);
+      if (entry.isDirectory()) {
+        await visit(fullPath, relativePath);
+      } else {
+        files.push({
+          path: relativePath,
+          mode: (await stat(fullPath)).mode & 0o777,
+          content: await readFile(fullPath, "utf8"),
+        });
+      }
+    }
+  }
+  await visit(root);
+  return JSON.stringify(files);
+}
 
 void describe("显式生成器默认库行为", () => {
   void it("通过显式内容和工作区策略初始化库及共享配置", async () => {
@@ -233,6 +263,119 @@ void describe("显式生成器默认库行为", () => {
       blueprint.packages.some((item) => item.path === "packages/another"),
       true,
     );
+  });
+
+  void it("加包从根读取当前 Node 与 pnpm 并保留既有包事实", async () => {
+    const targetRoot = path.join(
+      await mkdtemp(
+        path.join(tmpdir(), "template-generator-current-toolchain-"),
+      ),
+      "demo",
+    );
+    const generator = createGenerator({
+      content: [library, configuration],
+      strategy: createDefaultWorkspaceStrategy(),
+    });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { contentIdentity: "library" },
+      strategyInput: { defaultPackageScope: "demo" },
+    });
+    assert.strictEqual(initialized.status, "success");
+
+    const rootManifestPath = path.join(targetRoot, "package.json");
+    const rootManifest = JSON.parse(
+      await readFile(rootManifestPath, "utf8"),
+    ) as {
+      engines: Record<string, string>;
+      packageManager: string;
+    };
+    rootManifest.engines.node = "26.1.0";
+    rootManifest.packageManager = "pnpm@12.9.2";
+    await writeFile(
+      rootManifestPath,
+      JSON.stringify(rootManifest, null, 2) + "\n",
+    );
+    const existingPackagePath = path.join(
+      targetRoot,
+      "packages/lib/package.json",
+    );
+    const existingPackageBefore = await readFile(existingPackagePath, "utf8");
+
+    const result = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: "library",
+      leafName: "current-node",
+    });
+
+    assert.strictEqual(result.status, "success", JSON.stringify(result));
+    assert.deepStrictEqual(
+      JSON.parse(await readFile(rootManifestPath, "utf8")),
+      rootManifest,
+    );
+    const devcontainer = JSON.parse(
+      await readFile(
+        path.join(targetRoot, ".devcontainer/devcontainer.json"),
+        "utf8",
+      ),
+    ) as { build: { args: Record<string, string> } };
+    assert.strictEqual(devcontainer.build.args.NODE_VERSION, "26.1.0");
+    const addedPackage = JSON.parse(
+      await readFile(
+        path.join(targetRoot, "packages/current-node/package.json"),
+        "utf8",
+      ),
+    ) as { engines: { node: string } };
+    assert.strictEqual(addedPackage.engines.node, "26");
+    assert.strictEqual(
+      await readFile(existingPackagePath, "utf8"),
+      existingPackageBefore,
+    );
+  });
+
+  void it("共享配置缺少原生公开接口时加包失败且目标树零写入", async () => {
+    const targetRoot = path.join(
+      await mkdtemp(
+        path.join(tmpdir(), "template-generator-missing-shared-export-"),
+      ),
+      "demo",
+    );
+    const generator = createGenerator({
+      content: [library, configuration],
+      strategy: createDefaultWorkspaceStrategy(),
+    });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { contentIdentity: "library" },
+      strategyInput: { defaultPackageScope: "demo" },
+    });
+    assert.strictEqual(initialized.status, "success");
+    const configurationPath = path.join(
+      targetRoot,
+      "packages/typescript-config/package.json",
+    );
+    const configurationManifest = JSON.parse(
+      await readFile(configurationPath, "utf8"),
+    ) as { exports: Record<string, unknown> };
+    delete configurationManifest.exports["./base.json"];
+    await writeFile(
+      configurationPath,
+      JSON.stringify(configurationManifest, null, 2) + "\n",
+    );
+    const before = await snapshotTree(targetRoot);
+
+    const result = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: "library",
+      leafName: "missing-export-consumer",
+    });
+
+    assert.strictEqual(
+      result.status,
+      "operation-failure",
+      JSON.stringify(result),
+    );
+    assert.strictEqual(await snapshotTree(targetRoot), before);
   });
 
   void it("新增路径冲突时不改动目标或用户文件", async () => {

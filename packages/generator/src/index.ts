@@ -514,15 +514,23 @@ export function createGenerator<
         throw new Error("目标仓库使用了不兼容的工作区策略");
       }
       const state = options.strategy.parseState(record.strategyState);
-      const context = options.strategy.restore({
-        targetRoot: repositoryRoot,
-        state,
-      });
+      const selected = requireContent(addOptions.contentIdentity);
       const existingNodes = addRecordNodes(record.packages, blueprint);
+      let context: Context;
+      try {
+        context = await options.strategy.prepareAddition({
+          targetRoot: repositoryRoot,
+          state,
+          content: selected,
+          contentByIdentity,
+          packages: record.packages,
+        });
+      } catch (error) {
+        return fail("metadata", error);
+      }
       for (const node of existingNodes) {
         createContribution(node, context, record.packages);
       }
-      const selected = requireContent(addOptions.contentIdentity);
       const definition = options.strategy.createDefinition({
         context,
         content: selected,

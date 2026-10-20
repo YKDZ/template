@@ -39,6 +39,11 @@
       "source": "./src/default-workspace-strategy.ts",
       "types": "./dist/default-workspace-strategy.d.ts",
       "default": "./dist/default-workspace-strategy.js"
+    },
+    "./package-addition-facts": {
+      "source": "./src/package-addition-facts.ts",
+      "types": "./dist/package-addition-facts.d.ts",
+      "default": "./dist/package-addition-facts.js"
     }
   },
   "scripts": {

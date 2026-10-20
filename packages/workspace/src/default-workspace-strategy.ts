@@ -13,7 +13,10 @@ import {
 } from "@ykdz/template-core/module-graph";
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type { GenerationContext } from "@ykdz/template-core/preset-definition";
-import type { ProjectBlueprint } from "@ykdz/template-core/project-blueprint";
+import type {
+  PackageDefinition,
+  ProjectBlueprint,
+} from "@ykdz/template-core/project-blueprint";
 import type { ProjectProjectionReconciliation } from "@ykdz/template-core/project-projection";
 import type { ReferencePackage } from "@ykdz/template-core/reference-package";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
@@ -31,6 +34,10 @@ import {
   planBuiltInDevelopmentContainer,
 } from "@ykdz/template-environment/development-environment";
 
+import {
+  assertReusablePackageExposure,
+  readPackageAdditionVersionFacts,
+} from "./package-addition-facts.ts";
 import {
   projectCheckWorkflow,
   projectDependabotConfig,
@@ -137,6 +144,36 @@ function nativeDependencyNames(reference: ReferencePackage): readonly string[] {
       }),
     ),
   ];
+}
+
+function nativeDependencyIdentities(
+  content: ReferencePackage,
+  contentByIdentity: ReadonlyMap<string, ReferencePackage>,
+): readonly string[] {
+  return nativeDependencyNames(content).map((nativeName) => {
+    const provider = [...contentByIdentity.values()].find(
+      (candidate) => candidate.manifest.name === nativeName,
+    );
+    if (provider === undefined) {
+      throw new Error("显式内容缺少本地依赖：" + nativeName);
+    }
+    return provider.identity;
+  });
+}
+
+function nativeBindings(
+  contentByIdentity: ReadonlyMap<string, ReferencePackage>,
+  providers: ReadonlyMap<string, PackageDefinition>,
+): ReadonlyMap<string, PackageDefinition> {
+  return new Map(
+    [...providers].map(([identity, definition]) => {
+      const provider = contentByIdentity.get(identity);
+      if (provider === undefined) {
+        throw new Error("工作区策略无法解释内容绑定：" + identity);
+      }
+      return [provider.manifest.name, definition];
+    }),
+  );
 }
 
 function maintenancePolicy(contributions: readonly PackageContribution[]) {
@@ -467,8 +504,58 @@ export function createDefaultWorkspaceStrategy(): WorkspaceStrategy<
       };
       return { state, context: defaultContext(targetRoot, state) };
     },
-    restore({ targetRoot, state }) {
-      return defaultContext(targetRoot, state);
+    prepareAddition({
+      targetRoot,
+      state,
+      content,
+      contentByIdentity,
+      packages,
+    }) {
+      const current = readPackageAdditionVersionFacts(targetRoot);
+      const context = defaultContext(targetRoot, {
+        ...state,
+        toolchain: { ...state.toolchain, ...current.toolchain },
+      });
+      const definitionsById = new Map<string, PackageDefinition>(
+        packages.map((item) => [
+          item.definition.packageDefinitionId,
+          item.definition,
+        ]),
+      );
+      for (const identity of nativeDependencyIdentities(
+        content,
+        contentByIdentity,
+      )) {
+        const provider = contentByIdentity.get(identity);
+        const existing = packages.filter(
+          (item) => item.contentIdentity === identity,
+        );
+        if (provider === undefined || existing.length !== 1) continue;
+        const providerRecord = existing[0]!;
+        const providerDefinitions = new Map<string, PackageDefinition>();
+        for (const [providerIdentity, packageDefinitionId] of Object.entries(
+          providerRecord.bindings,
+        )) {
+          const definition = definitionsById.get(packageDefinitionId);
+          if (definition === undefined) {
+            throw new Error(
+              "生成记录包绑定引用了不存在的包实例：" + packageDefinitionId,
+            );
+          }
+          providerDefinitions.set(providerIdentity, definition);
+        }
+        const baseline = provider.contribute({
+          context,
+          definition: providerRecord.definition,
+          bindings: nativeBindings(contentByIdentity, providerDefinitions),
+        });
+        assertReusablePackageExposure({
+          repositoryRoot: targetRoot,
+          packagePath: providerRecord.definition.path,
+          expectedExports: baseline.exposure.exports,
+        });
+      }
+      return context;
     },
     parseState(value) {
       if (!isRecord(value) || !isRecord(value.toolchain)) {
@@ -486,27 +573,10 @@ export function createDefaultWorkspaceStrategy(): WorkspaceStrategy<
       return value as DefaultWorkspaceState;
     },
     dependencies({ content, contentByIdentity }) {
-      const names = nativeDependencyNames(content);
-      return names.map((nativeName) => {
-        const provider = [...contentByIdentity.values()].find(
-          (candidate) => candidate.manifest.name === nativeName,
-        );
-        if (provider === undefined) {
-          throw new Error("显式内容缺少本地依赖：" + nativeName);
-        }
-        return provider.identity;
-      });
+      return nativeDependencyIdentities(content, contentByIdentity);
     },
     bindings({ contentByIdentity, providers }) {
-      return new Map(
-        [...providers].map(([identity, definition]) => {
-          const provider = contentByIdentity.get(identity);
-          if (provider === undefined) {
-            throw new Error("工作区策略无法解释内容绑定：" + identity);
-          }
-          return [provider.manifest.name, definition];
-        }),
-      );
+      return nativeBindings(contentByIdentity, providers);
     },
     createDefinition({
       context,

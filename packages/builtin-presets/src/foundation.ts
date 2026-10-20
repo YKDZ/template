@@ -70,6 +70,11 @@ import {
 } from "@ykdz/template-core/renderer";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
 import {
+  assertReusablePackageExposure,
+  readPackageAdditionVersionFacts,
+  WorkspacePackageAdditionFailure,
+} from "@ykdz/template-workspace/package-addition-facts";
+import {
   projectCheckWorkflow,
   projectDependabotConfig,
 } from "@ykdz/template-workspace/project-github";
@@ -444,15 +449,6 @@ function readGenerationRecord(options: {
 }
 
 /**
- * Package Addition 的目标根 package.json 允许两种 Node 声明：旧仓库的纯大版本
- * （"24"）与精确版本（"24.16.0"），两者都能派生大版本；范围表达式与两段版本拒绝。
- */
-const nodeMajorOrExactVersionPattern = /^(\d+)(?:\.(\d+)\.(\d+))?$/u;
-
-/** 与 npm packageManager 字段一致的精确 pnpm pin（可带预发布或构建元数据）。 */
-const exactPnpmPinPattern = /^pnpm@\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u;
-
-/**
  * 目标根现行版本声明缺失或形状错误时的显式带形状内部失败：点名文件与字段、实际值与修正动作，
  * 由 Package Addition 准备边界传递给命令层；其他 metadata 错误保持通用。
  */
@@ -473,63 +469,6 @@ class PackageAdditionTargetDeclarationFailure extends Error {
     this.field = field;
     this.suggestion = suggestion;
   }
-}
-
-/**
- * Package Addition 的版本上下文来自目标仓库根 package.json 的当前声明，因此升级过
- * Node 或 pnpm 的仓库会继续按自身版本加包；Generation Record 的 toolchain 只保留为
- * 初始化历史。
- */
-function readPackageAdditionVersionFacts(repositoryRoot: string): {
-  readonly toolchain: BuiltInGenerationContext["toolchain"];
-  readonly rootNodeDeclaration: string;
-} {
-  const manifest = readRepositoryJsonRecord({
-    repositoryRoot,
-    relativePath: "package.json",
-    label: "root Manifest",
-  });
-  const nodeDeclaration = isRecord(manifest.engines)
-    ? manifest.engines.node
-    : undefined;
-  const nodeDeclarationMatch =
-    typeof nodeDeclaration === "string"
-      ? nodeMajorOrExactVersionPattern.exec(nodeDeclaration)
-      : undefined;
-  const nodeLtsMajor = nodeDeclarationMatch?.[1];
-  if (nodeLtsMajor === undefined || typeof nodeDeclaration !== "string") {
-    throw new PackageAdditionTargetDeclarationFailure(
-      "package.json",
-      "engines.node",
-      '声明单个 Node 大版本（"24"）或精确 Node 版本（"24.16.0"）',
-      JSON.stringify(nodeDeclaration ?? null),
-      "请先修改根 package.json 的 engines.node 声明再加包。",
-    );
-  }
-  const packageManagerDeclaration = manifest.packageManager;
-  if (
-    typeof packageManagerDeclaration !== "string" ||
-    !exactPnpmPinPattern.test(packageManagerDeclaration)
-  ) {
-    throw new PackageAdditionTargetDeclarationFailure(
-      "package.json",
-      "packageManager",
-      '声明精确 pnpm 版本（"pnpm@11.21.0"）',
-      JSON.stringify(packageManagerDeclaration ?? null),
-      "请先修改根 package.json 的 packageManager 声明再加包。",
-    );
-  }
-  // 根只声明大版本时没有诚实的精确 patch 可传，保持缺省而不伪造。
-  return {
-    toolchain: {
-      nodeLtsMajor,
-      packageManagerPin: packageManagerDeclaration,
-      ...(nodeDeclarationMatch?.[2] === undefined
-        ? {}
-        : { nodeVersion: nodeDeclaration }),
-    },
-    rootNodeDeclaration: nodeDeclaration,
-  };
 }
 
 /** 生成仓库根 Rust 声明的唯一文件名；所有权判定与投影保留都只经这个接缝引用它。 */
@@ -4652,31 +4591,12 @@ function planGeneratedRepositoryPackageAdditionFromPreparedContribution(options:
         throw new ReferenceCompositionFailure(
           `共同包 ${provider.path} 缺少有效 manifest，不能复用。`,
         );
-      for (const exportName of Object.keys(baseline.exposure.exports)) {
-        const target = isRecord(actual.exports)
-          ? actual.exports[exportName]
-          : undefined;
-        // 明确缺失、禁用或非法标量可以在写入前拒绝；条件和回退数组仍由 Node 解释。
-        if (
-          typeof target !== "string" &&
-          !isRecord(target) &&
-          !Array.isArray(target)
-        )
-          throw new ReferenceCompositionFailure(
-            `共同包 ${provider.path} 缺少可用的公开接口 ${exportName}。`,
-          );
-        if (typeof target === "string") {
-          try {
-            if (!target.startsWith("./"))
-              throw new Error("公开资源必须属于该包");
-            readFileSync(path.join(context.targetDir, provider.path, target));
-          } catch {
-            throw new ReferenceCompositionFailure(
-              `共同包 ${provider.path} 的公开接口 ${exportName} 不可读取。`,
-            );
-          }
-        }
-      }
+      assertReusablePackageExposure({
+        repositoryRoot: context.targetDir,
+        packagePath: provider.path,
+        expectedExports: baseline.exposure.exports,
+        actualManifest: actual,
+      });
     }
   }
   const generationRecord: GenerationRecord = {
@@ -4878,6 +4798,7 @@ export function prepareGeneratedRepositoryPackageAddition(options: {
   } catch (error) {
     if (
       error instanceof PackageAdditionTargetDeclarationFailure ||
+      error instanceof WorkspacePackageAdditionFailure ||
       error instanceof ReferenceCompositionFailure
     ) {
       return {
@@ -4965,6 +4886,7 @@ export function prepareGeneratedRepositoryPackageAddition(options: {
     } catch (error) {
       if (
         error instanceof PackageAdditionTargetDeclarationFailure ||
+        error instanceof WorkspacePackageAdditionFailure ||
         error instanceof ReferenceCompositionFailure
       ) {
         return {
@@ -5040,7 +4962,10 @@ export function prepareGeneratedRepositoryPackageAddition(options: {
     if (error instanceof PackageAdditionBusinessConflict) {
       return { status: "conflict", conflict: error };
     }
-    if (error instanceof ReferenceCompositionFailure) {
+    if (
+      error instanceof ReferenceCompositionFailure ||
+      error instanceof WorkspacePackageAdditionFailure
+    ) {
       return {
         status: "operation-failure",
         phase: "planning",
