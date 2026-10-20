@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  readdir,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -314,9 +321,7 @@ function packageRecords(value: unknown): {
   readonly packages: readonly {
     readonly contentIdentity: ContentIdentity;
     readonly createdBy: string;
-    readonly definition: PackageDefinition & {
-      readonly packageDefinitionId: string;
-    };
+    readonly packageDefinitionId: string;
     readonly bindings: Readonly<Record<string, string>>;
   }[];
 } {
@@ -372,7 +377,7 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
     if (firstInitialized.status !== "success") {
       throw new Error("初始化应成功");
     }
-    assert.strictEqual(firstInitialized.generationRecord.schemaVersion, 1);
+    assert.strictEqual(firstInitialized.generationRecord.schemaVersion, 3);
     assert.strictEqual(
       firstInitialized.generationRecord.strategyIdentity,
       "test-policy:first",
@@ -430,7 +435,10 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
 
     const firstOverview = path.join(firstRoot, "docs/overview/README.md");
     const firstOverviewBefore = await readFile(firstOverview, "utf8");
-    const appendixResult = await first.add({
+    const appendixResult = await createDocumentationEngine({
+      policyId: "test-policy:first",
+      author: "作者一",
+    }).add({
       repositoryRoot: firstRoot,
       contentIdentity: guideIdentity,
       creationInput: { leafName: "appendix" },
@@ -471,7 +479,10 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
         ),
       ),
     );
-    const faqAddition = await first.add({
+    const faqAddition = await createDocumentationEngine({
+      policyId: "test-policy:first",
+      author: "作者一",
+    }).add({
       repositoryRoot: firstRoot,
       contentIdentity: guideIdentity,
       creationInput: { leafName: "faq" },
@@ -481,7 +492,10 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
       "success",
       JSON.stringify(faqAddition),
     );
-    const unchanged = await first.add({
+    const unchanged = await createDocumentationEngine({
+      policyId: "test-policy:first",
+      author: "作者一",
+    }).add({
       repositoryRoot: firstRoot,
       contentIdentity: guideIdentity,
       creationInput: { leafName: "faq" },
@@ -502,7 +516,10 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
     }
     const secondRecordPath = path.join(secondRoot, ".template/generation.json");
     const secondRecordBefore = await readFile(secondRecordPath, "utf8");
-    const secondDryRun = await second.add({
+    const secondDryRun = await createDocumentationEngine({
+      policyId: "test-policy:second",
+      author: "作者二",
+    }).add({
       repositoryRoot: secondRoot,
       contentIdentity: guideIdentity,
       creationInput: { leafName: "appendix" },
@@ -537,7 +554,10 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
       secondRecordBefore,
     );
 
-    const secondAdd = await second.add({
+    const secondAdd = await createDocumentationEngine({
+      policyId: "test-policy:second",
+      author: "作者二",
+    }).add({
       repositoryRoot: secondRoot,
       contentIdentity: guideIdentity,
       creationInput: { leafName: "appendix" },
@@ -596,7 +616,7 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
       guideRecords.every(
         (record) =>
           record.bindings[glossaryIdentityKey] ===
-          sharedRecords[0]!.definition.packageDefinitionId,
+          sharedRecords[0]!.packageDefinitionId,
       ),
     );
 
@@ -631,6 +651,111 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
 
     assert.strictEqual(result.status, "operation-failure");
     assert.strictEqual(await pathExists(targetRoot), false);
+  });
+
+  void it("拒绝旧版本和缺失持久事实的记录且所有add模式零写入", async () => {
+    const targetRoot = path.join(
+      await mkdtemp(path.join(tmpdir(), "template-generator-schema3-")),
+      "project",
+    );
+    const generator = createDocumentationEngine({
+      policyId: "test-policy:schema3",
+      author: "schema3测试",
+    });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: {
+        roots: [{ nodeIdentity: "guide", contentIdentity: guideIdentity }],
+      },
+      strategyInput: { collection: "north", edition: "draft" },
+    });
+    assert.equal(initialized.status, "success", JSON.stringify(initialized));
+
+    const userFile = path.join(targetRoot, "user-data.txt");
+    await writeFile(userFile, "保留用户内容\n");
+    await chmod(userFile, 0o640);
+    const recordPath = path.join(targetRoot, ".template/generation.json");
+    const validRecord = JSON.parse(
+      await readFile(recordPath, "utf8"),
+    ) as Record<string, unknown>;
+    const cloneRecord = () =>
+      JSON.parse(JSON.stringify(validRecord)) as Record<string, unknown>;
+    const cases = [
+      {
+        label: "schema2",
+        record: { ...cloneRecord(), schemaVersion: 2 },
+        message: /不支持的生成记录 schema 2/u,
+      },
+      {
+        label: "strategyState",
+        record: (() => {
+          const record = cloneRecord();
+          delete record.strategyState;
+          return record;
+        })(),
+        message: /schema3 结构/u,
+      },
+      {
+        label: "creationInput",
+        record: (() => {
+          const record = cloneRecord();
+          const packages = record.packages as Record<string, unknown>[];
+          delete packages[0]!.creationInput;
+          return record;
+        })(),
+        message: /schema3 结构/u,
+      },
+      {
+        label: "nodeInstances",
+        record: (() => {
+          const record = cloneRecord();
+          delete (record.nodeInstances as Record<string, string>).guide;
+          return record;
+        })(),
+        message: /缺少必要节点实例映射/u,
+      },
+      {
+        label: "required binding",
+        record: (() => {
+          const record = cloneRecord();
+          const packages = record.packages as Record<string, unknown>[];
+          const guide = packages.find(
+            (item) =>
+              contentIdentityKey(item.contentIdentity as ContentIdentity) ===
+              guideIdentityKey,
+          )!;
+          delete (guide.bindings as Record<string, string>)[
+            glossaryIdentityKey
+          ];
+          return record;
+        })(),
+        message: /缺少必要实例绑定/u,
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      await writeFile(recordPath, JSON.stringify(testCase.record));
+      const before = await snapshotTree(targetRoot);
+      for (const dryRun of [true, false]) {
+        const result = await generator.add({
+          repositoryRoot: targetRoot,
+          contentIdentity: guideIdentity,
+          creationInput: { leafName: `rejected-${testCase.label}` },
+          dryRun,
+        });
+        assert.equal(
+          result.status,
+          "operation-failure",
+          JSON.stringify(result),
+        );
+        if (result.status !== "operation-failure") {
+          throw new Error("无效生成记录必须拒绝加包");
+        }
+        assert.equal(result.phase, "metadata");
+        assert.match(result.error.message, testCase.message);
+        assert.equal(await snapshotTree(targetRoot), before);
+      }
+    }
   });
 
   void it("已有目标拒绝初始化时报告渲染失败并保留目标内容", async () => {

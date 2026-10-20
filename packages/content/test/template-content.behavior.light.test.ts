@@ -636,6 +636,16 @@ void describe("公开模板内容集合", () => {
       await readFile(path.join(cliRoot, "packages/cli/package.json"), "utf8"),
     ) as { files: string[] };
     assert.deepStrictEqual(cliManifest.files, ["dist"]);
+    const publicCandidateDefinition = cliResult.blueprint.packages.find(
+      (definition) => definition.path === "packages/cli",
+    );
+    assert.ok(publicCandidateDefinition);
+    const publicCandidate = cliResult.generationRecord.packages.find(
+      (record) =>
+        record.packageDefinitionId ===
+        publicCandidateDefinition.packageDefinitionId,
+    );
+    assert.ok(publicCandidate);
     assert.deepStrictEqual(
       JSON.parse(
         await readFile(
@@ -643,7 +653,11 @@ void describe("公开模板内容集合", () => {
           "utf8",
         ),
       ),
-      { packagePath: "packages/cli" },
+      {
+        packagePath: "packages/cli",
+        packageDefinitionId: publicCandidate.packageDefinitionId,
+        creationInput: publicCandidate.creationInput,
+      },
     );
 
     const rustRoot = await createTargetRoot("template-content-rust-bin-");

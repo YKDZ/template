@@ -6,7 +6,7 @@ import {
   createTemplateSourceHandle,
   type RenderOperation,
 } from "@ykdz/template-core/renderer";
-import type { GeneratorPackageRecord } from "@ykdz/template-core/workspace-strategy";
+import type { GeneratorPackageState } from "@ykdz/template-core/workspace-strategy";
 import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 
 import type { WorkspaceRootInsertion } from "./root-projection.ts";
@@ -31,11 +31,11 @@ export type CliPublicationProjection = {
 
 type PublicCliCandidate = {
   readonly contribution: PackageContribution;
-  readonly record: GeneratorPackageRecord;
+  readonly record: GeneratorPackageState;
 };
 
 function publicCliCandidate(
-  packages: readonly GeneratorPackageRecord[],
+  packages: readonly GeneratorPackageState[],
   contributions: readonly PackageContribution[],
 ): PublicCliCandidate | undefined {
   const recordsByPackagePath = new Map(
@@ -69,7 +69,7 @@ function publicCliCandidate(
   }
   if (contribution === undefined) return undefined;
   const record = recordsByPackagePath.get(contribution.definition.path);
-  if (record === undefined || record.creationInput === undefined) {
+  if (record === undefined || record.creationInput === null) {
     throw new Error(
       `公开 CLI 候选缺少生成记录创建事实：${contribution.definition.name}`,
     );
@@ -115,7 +115,7 @@ function publicationOperations(
       to: "scripts/npm-publication/publication.config.json",
       value: {
         packagePath: candidate.contribution.definition.path,
-        packageDefinitionId: candidate.record.definition.packageDefinitionId,
+        packageDefinitionId: candidate.record.packageDefinitionId,
         creationInput: candidate.record.creationInput,
       },
     },
@@ -145,7 +145,7 @@ function publicationOperations(
 
 /** 默认策略拥有公开 TypeScript CLI 候选的根配置与发版工具投影。 */
 export function projectCliPublication(options: {
-  readonly packages: readonly GeneratorPackageRecord[];
+  readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
 }): CliPublicationProjection {
   const selected = publicCliCandidate(options.packages, options.contributions);

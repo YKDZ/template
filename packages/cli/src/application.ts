@@ -322,21 +322,28 @@ function initOperationFailure(options: {
 function initPackageIdentities(
   presetAlias: string,
   generationRecord: GenerationRecord,
+  blueprint: ProjectBlueprint,
 ): ResolvedInitialization["packages"] {
   const preset = presetByAlias(presetAlias);
   if (preset === undefined) throw new Error("初始化预设在结果映射时不存在");
   return Object.keys(preset.definition.nodes).map((nodeIdentity) => {
     const packageDefinitionId = generationRecord.nodeInstances[nodeIdentity];
     const record = generationRecord.packages.find(
-      (candidate) =>
-        candidate.definition.packageDefinitionId === packageDefinitionId,
+      (candidate) => candidate.packageDefinitionId === packageDefinitionId,
     );
     if (record === undefined) {
       throw new Error("生成结果缺少预设节点对应的包实例：" + nodeIdentity);
     }
+    const definition = blueprint.packages.find(
+      (candidate) =>
+        candidate.packageDefinitionId === record.packageDefinitionId,
+    );
+    if (definition === undefined) {
+      throw new Error("生成结果蓝图缺少预设节点对应的包定义：" + nodeIdentity);
+    }
     return {
-      name: record.definition.name,
-      path: record.definition.path,
+      name: definition.name,
+      path: definition.path,
     };
   });
 }
@@ -422,6 +429,7 @@ export async function runInit(
       packages: initPackageIdentities(
         preset.definition.metadata.alias,
         result.generationRecord,
+        result.blueprint,
       ),
       scope: strategyState.defaultPackageScope,
     },
