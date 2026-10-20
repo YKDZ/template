@@ -7,7 +7,7 @@ import { canLinkNodePackageRoles } from "@ykdz/template-workspace/project-linkin
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
 
-import type { CliJourney } from "../journey.ts";
+import type { CliJourney, CliJourneyCommand } from "../journey.ts";
 
 function requireLinkableAddition(): {
   readonly presetName: string;
@@ -40,6 +40,19 @@ function requireLinkableAddition(): {
 
 const { presetName: addablePresetName, consumerPath } =
   requireLinkableAddition();
+const initializationPresets = templatePresets.filter((member) =>
+  member.definition.operations.includes("init"),
+);
+const additionPresets = templatePresets.filter(
+  (member) =>
+    member.definition.operations.includes("add") &&
+    Object.keys(member.definition.nodes).length === 1,
+);
+const presetMatrix = initializationPresets.flatMap((initialization) =>
+  additionPresets.map((addition) => ({ initialization, addition })),
+);
+const legacyCommandOffset = 9;
+const matrixCommandOffset = legacyCommandOffset + 3;
 
 async function snapshot(
   root: string,
@@ -109,7 +122,7 @@ const journey: CliJourney = {
   async setup() {},
   commands(context) {
     const project = path.join(context.workDir, "project");
-    return [
+    const commands: CliJourneyCommand[] = [
       {
         name: "initialize base",
         args: [
@@ -309,6 +322,121 @@ const journey: CliJourney = {
         ],
       },
     ];
+
+    const legacyProject = path.join(context.workDir, "legacy-project");
+    const legacySnapshot = path.join(context.workDir, "legacy-before.json");
+    const legacyAddition = [
+      "add",
+      "package",
+      "--preset",
+      addablePresetName,
+      "--name",
+      "legacy-addition",
+      "--path",
+      "packages/legacy-addition",
+    ];
+    commands.push(
+      {
+        name: "initialize a project before testing legacy record rejection",
+        args: [
+          "init",
+          "legacy-project",
+          "--preset",
+          addablePresetName,
+          "--scope",
+          "acme",
+        ],
+      },
+      {
+        name: "old v2 dry-run rejection without writes",
+        cwd: legacyProject,
+        async prepare() {
+          const recordPath = path.join(
+            legacyProject,
+            ".template/generation.json",
+          );
+          const record = JSON.parse(await readFile(recordPath, "utf8")) as {
+            schemaVersion: number;
+          };
+          record.schemaVersion = 2;
+          await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+          await writeFile(
+            legacySnapshot,
+            JSON.stringify(await snapshot(legacyProject)),
+          );
+        },
+        args: [...legacyAddition, "--dry-run"],
+      },
+      {
+        name: "old v2 execute rejection without writes",
+        cwd: legacyProject,
+        async prepare() {
+          assert.deepEqual(
+            await snapshot(legacyProject),
+            JSON.parse(await readFile(legacySnapshot, "utf8")),
+            "旧 v2 预览必须保持目标不变",
+          );
+        },
+        args: legacyAddition,
+      },
+    );
+
+    for (const { initialization, addition } of presetMatrix) {
+      const initializationAlias = initialization.definition.metadata.alias;
+      const additionAlias = addition.definition.metadata.alias;
+      const targetName = `matrix-${initializationAlias}-${additionAlias}`;
+      const project = path.join(context.workDir, targetName);
+      commands.push(
+        {
+          name: `为 ${initializationAlias} 项目初始化以添加 ${additionAlias} 预设`,
+          args: [
+            "init",
+            targetName,
+            "--preset",
+            initializationAlias,
+            "--scope",
+            "acme",
+          ],
+        },
+        {
+          name: `在 ${initializationAlias} 项目添加 ${additionAlias} 预设`,
+          cwd: project,
+          async prepare() {
+            await writeFile(
+              path.join(
+                context.workDir,
+                `${targetName}-before-add-record.json`,
+              ),
+              await readFile(
+                path.join(project, ".template/generation.json"),
+                "utf8",
+              ),
+            );
+            await writeFile(
+              path.join(
+                context.workDir,
+                `${targetName}-before-add-blueprint.json`,
+              ),
+              await readFile(
+                path.join(project, ".template/blueprint.json"),
+                "utf8",
+              ),
+            );
+          },
+          args: [
+            "add",
+            "package",
+            "--preset",
+            additionAlias,
+            "--name",
+            additionAlias,
+            "--path",
+            `packages/${initializationAlias}-${additionAlias}`,
+          ],
+        },
+      );
+    }
+    return commands;
   },
   async assertions({ context, results }) {
     assert.equal(results[0]?.exitCode, 0);
@@ -695,6 +823,132 @@ const journey: CliJourney = {
         utilityBuildPlan.dependencies.includes(upgradedBuild.taskId),
       `${upgradedBuild.taskId} 应经无命令的 ${utilityBuildPlan.taskId} 先于 ${consumerBuild.taskId}`,
     );
+
+    assert.equal(results[legacyCommandOffset]?.exitCode, 0);
+    const legacyProject = path.join(context.workDir, "legacy-project");
+    const legacyFailures = results.slice(
+      legacyCommandOffset + 1,
+      matrixCommandOffset,
+    );
+    assert.equal(legacyFailures.length, 2);
+    for (const result of legacyFailures) {
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.stdout, "");
+      const failure = JSON.parse(result.stderr);
+      assert.equal(failure.variant, "operationFailed");
+      assert.equal(failure.data.phase, "metadata");
+      assert.equal(typeof failure.data.error.message, "string");
+      assert.notEqual(failure.data.error.message.length, 0);
+    }
+    assert.deepEqual(
+      await snapshot(legacyProject),
+      JSON.parse(
+        await readFile(
+          path.join(context.workDir, "legacy-before.json"),
+          "utf8",
+        ),
+      ),
+    );
+    await assert.rejects(
+      stat(path.join(legacyProject, "packages/legacy-addition")),
+      { code: "ENOENT" },
+    );
+
+    const matrixResults = results.slice(matrixCommandOffset);
+    assert.equal(matrixResults.length, presetMatrix.length * 2);
+    for (const [
+      index,
+      { initialization, addition },
+    ] of presetMatrix.entries()) {
+      const initializationAlias = initialization.definition.metadata.alias;
+      const additionAlias = addition.definition.metadata.alias;
+      const targetName = `matrix-${initializationAlias}-${additionAlias}`;
+      const project = path.join(context.workDir, targetName);
+      const initializationResult = matrixResults[index * 2]!;
+      const additionResult = matrixResults[index * 2 + 1]!;
+
+      assert.equal(
+        initializationResult.exitCode,
+        0,
+        initializationResult.stderr,
+      );
+      const initialized = JSON.parse(initializationResult.stdout).data;
+      assert.equal(initialized.resolved.preset, initializationAlias);
+      assert.deepEqual(
+        initialized.generationRecord,
+        JSON.parse(
+          await readFile(
+            path.join(context.workDir, `${targetName}-before-add-record.json`),
+            "utf8",
+          ),
+        ),
+      );
+      assert.deepEqual(
+        initialized.blueprint,
+        JSON.parse(
+          await readFile(
+            path.join(
+              context.workDir,
+              `${targetName}-before-add-blueprint.json`,
+            ),
+            "utf8",
+          ),
+        ),
+      );
+      for (const packageEntry of initialized.resolved.packages as readonly {
+        readonly name: string;
+        readonly path: string;
+      }[]) {
+        const manifest = JSON.parse(
+          await readFile(
+            path.join(project, packageEntry.path, "package.json"),
+            "utf8",
+          ),
+        ) as { readonly name: string };
+        assert.equal(manifest.name, packageEntry.name);
+      }
+
+      assert.equal(additionResult.exitCode, 0, additionResult.stderr);
+      const added = JSON.parse(additionResult.stdout);
+      assert.equal(added.variant, "added");
+      const addedPath = `packages/${initializationAlias}-${additionAlias}`;
+      const packageName = `@acme/${additionAlias}`;
+      assert.ok(
+        added.data.actions.some(
+          (action: { readonly path: string }) =>
+            action.path === `${addedPath}/package.json`,
+        ),
+      );
+      const packageManifest = JSON.parse(
+        await readFile(path.join(project, addedPath, "package.json"), "utf8"),
+      ) as { readonly name: string };
+      assert.equal(packageManifest.name, packageName);
+
+      const blueprint = JSON.parse(
+        await readFile(path.join(project, ".template/blueprint.json"), "utf8"),
+      );
+      const addedDefinition = blueprint.packages.find(
+        (definition: { readonly name: string; readonly path: string }) =>
+          definition.name === packageName && definition.path === addedPath,
+      );
+      assert.notEqual(addedDefinition, undefined);
+      const generationRecord = JSON.parse(
+        await readFile(path.join(project, ".template/generation.json"), "utf8"),
+      );
+      assert.equal(generationRecord.schemaVersion, 3);
+      assert.ok(
+        generationRecord.packages.some(
+          (record: { readonly packageDefinitionId: string }) =>
+            record.packageDefinitionId === addedDefinition.packageDefinitionId,
+        ),
+      );
+      assert.ok(
+        generationRecord.presetSelections.some(
+          (selection: { readonly packageName: string }) =>
+            selection.packageName === addition.identity.packageName,
+        ),
+      );
+    }
   },
 };
 
