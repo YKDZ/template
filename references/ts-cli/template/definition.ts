@@ -1,8 +1,19 @@
 import path from "node:path";
 
+import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
 import { validateCliCommandName } from "@ykdz/template-workspace-authoring/package-contribution";
 import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
+import type { PackageLinkRequirement } from "@ykdz/template-workspace-authoring/project-requirements";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
+
+export type TsCliCreationVariant = "private" | "public-candidate";
+export type TsCliCreationInput = PackageCreationInput<TsCliCreationVariant> & {
+  /** 要连接的已选参考包节点；目标角色和来源条件由默认 workspace 策略校验。 */
+  readonly linkToNodeIdentity?: string;
+};
+export const tsCliPublicCandidateCreationInput = {
+  variant: "public-candidate",
+} as const satisfies TsCliCreationInput;
 
 function publicationNodeEngine(
   toolchain: GenerationContext["toolchain"],
@@ -28,7 +39,7 @@ function publicationNodeEngine(
   return `^${nodeVersion}`;
 }
 
-export const referencePackage = defineReferencePackage({
+export const referencePackage = defineReferencePackage<TsCliCreationInput>({
   packageName: "@ykdz/reference-ts-cli",
   resolve: (specifier) => import.meta.resolve(specifier),
   identity: "cli-package-addition",
@@ -53,8 +64,12 @@ export const referencePackage = defineReferencePackage({
     },
   },
   project(contribution, input) {
+    const creationInput = input.creationInput as TsCliCreationInput | undefined;
     const publicCandidate =
-      input.planningIdentity === "cli-publication-candidate";
+      input.createdBy === undefined
+        ? input.planningIdentity === "cli-publication-candidate"
+        : input.createdBy === "initialization" &&
+          creationInput?.variant === "public-candidate";
     const commandName = validateCliCommandName(
       input.definition.name.slice(input.definition.name.lastIndexOf("/") + 1),
     );
@@ -70,6 +85,25 @@ export const referencePackage = defineReferencePackage({
         ? `link:${path.posix.relative(input.definition.path, configuration.path)}`
         : "workspace:*";
     }
+    let packageLinkRequirement: PackageLinkRequirement | undefined;
+    if (creationInput?.linkToNodeIdentity !== undefined) {
+      if (creationInput.linkToNodeIdentity.length === 0) {
+        throw new Error("CLI 包连接要求非空节点身份");
+      }
+      const provider = input.nodeInstances?.get(
+        creationInput.linkToNodeIdentity,
+      );
+      if (provider === undefined) {
+        throw new Error(
+          `CLI 包连接引用了未知节点身份：${creationInput.linkToNodeIdentity}`,
+        );
+      }
+      packageLinkRequirement = {
+        kind: "package-link",
+        consumer: input.definition,
+        provider,
+      };
+    }
     return {
       ...contribution,
       manifest: {
@@ -80,7 +114,9 @@ export const referencePackage = defineReferencePackage({
           node: publicCandidate
             ? publicationNodeEngine(
                 input.context.toolchain,
-                input.creationOrigin ?? "new",
+                input.createdBy === undefined
+                  ? (input.creationOrigin ?? "new")
+                  : "replay",
               )
             : `>=${input.context.toolchain.nodeLtsMajor}`,
         },
@@ -91,6 +127,14 @@ export const referencePackage = defineReferencePackage({
           ? { npmPublication: { kind: "public-cli-candidate" as const } }
           : {}),
       },
+      ...(packageLinkRequirement === undefined
+        ? {}
+        : {
+            projectRequirements: [
+              ...(contribution.projectRequirements ?? []),
+              packageLinkRequirement,
+            ],
+          }),
     };
   },
 });

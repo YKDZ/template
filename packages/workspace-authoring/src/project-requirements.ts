@@ -23,6 +23,13 @@ export type DependencyMaintenancePolicy = {
   readonly interval: "weekly";
 };
 
+/** 内容通过稳定节点身份请求的显式包连接，具体可连接性由工作区策略判定。 */
+export type PackageLinkRequirement = {
+  readonly kind: "package-link";
+  readonly consumer: PackageDefinition;
+  readonly provider: PackageDefinition;
+};
+
 /** Vue-Hono 根策略以实际 web 与 API 实例配置联合浏览器验收。 */
 export type VueHonoJointE2eRequirement = {
   readonly kind: "vue-hono-joint-e2e";
@@ -48,6 +55,7 @@ export type DeploymentCheckRequirement = {
 };
 
 export type ProjectRequirement =
+  | PackageLinkRequirement
   | VueHonoJointE2eRequirement
   | DatabasePreparationRequirement
   | DeploymentCheckRequirement;
