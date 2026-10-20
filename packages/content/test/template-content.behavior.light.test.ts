@@ -16,6 +16,7 @@ import { preset as rustBinPreset } from "@ykdz/preset-rust-bin/template";
 import { preset as tsCliPreset } from "@ykdz/preset-ts-cli/template";
 import { preset } from "@ykdz/preset-ts-lib/template";
 import { preset as vikeAppPreset } from "@ykdz/preset-vike-app/template";
+import { preset as vueAppPreset } from "@ykdz/preset-vue-app/template";
 import { referencePackage as rustBin } from "@ykdz/reference-rust-bin/template";
 import { referencePackage as tsCli } from "@ykdz/reference-ts-cli/template";
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
@@ -80,6 +81,121 @@ void describe("公开模板内容集合", () => {
       path: "packages/typescript-config",
       role: "shared-library",
     });
+  });
+
+  void it("按路径顺序聚合诊断制品并原子拒绝用户覆盖", async () => {
+    const generator = createGenerator({
+      content: templateContent,
+      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+    });
+    const rendered: string[] = [];
+
+    for (const names of [
+      ["web", "admin"],
+      ["admin", "web"],
+    ] as const) {
+      const targetRoot = await createTargetRoot(
+        "template-content-diagnostics-",
+      );
+      const initialized = await generator.init({
+        targetRoot,
+        selection: { roots: [{ preset }] },
+        strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
+      });
+      assert.strictEqual(
+        initialized.status,
+        "success",
+        JSON.stringify(initialized),
+      );
+      const workflowPath = path.join(targetRoot, ".github/workflows/check.yml");
+      const originalWorkflow = await readFile(workflowPath, "utf8");
+      await writeFile(workflowPath, `# 用户工作流策略\n${originalWorkflow}`);
+
+      if (rendered.length === 0) {
+        const userStep =
+          "      - name: Upload User-owned diagnostics\n        run: echo user-owned\n";
+        const customizedWorkflow = (
+          await readFile(workflowPath, "utf8")
+        ).replace(
+          "      - name: Run Heavy Check\n        run: node --conditions=source scripts/task-gates.ts check:heavy\n",
+          `      - name: Run Heavy Check\n        run: node --conditions=source scripts/task-gates.ts check:heavy\n${userStep}`,
+        );
+        assert.notStrictEqual(
+          customizedWorkflow,
+          await readFile(workflowPath, "utf8"),
+        );
+        await writeFile(workflowPath, customizedWorkflow);
+        const beforeConflict = await snapshotTree(targetRoot);
+        const conflict = await generator.add({
+          repositoryRoot: targetRoot,
+          preset: vueAppPreset,
+          creationInput: { leafName: names[0] },
+        });
+        assert.strictEqual(conflict.status, "conflict");
+        assert.strictEqual(await snapshotTree(targetRoot), beforeConflict);
+        await writeFile(workflowPath, customizedWorkflow.replace(userStep, ""));
+      }
+
+      for (const leafName of names) {
+        const added = await generator.add({
+          repositoryRoot: targetRoot,
+          preset: vueAppPreset,
+          creationInput: { leafName },
+        });
+        assert.strictEqual(added.status, "success", JSON.stringify(added));
+      }
+
+      const workflow = await readFile(workflowPath, "utf8");
+      rendered.push(workflow);
+      assert.match(workflow, /^# 用户工作流策略\n/u);
+      assert.ok(
+        workflow.includes(
+          "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/admin\n            apps/web",
+        ),
+      );
+      assert.strictEqual(
+        workflow.match(/PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: \|-/gu)?.length,
+        1,
+      );
+      assert.strictEqual(
+        workflow.match(/Upload Root Check diagnostics/gu)?.length,
+        1,
+      );
+    }
+
+    assert.strictEqual(rendered[0], rendered[1]);
+  });
+
+  void it("非诊断加包不读取未变化的工作流目标", async () => {
+    const targetRoot = await createTargetRoot(
+      "template-content-no-diagnostics-",
+    );
+    const generator = createGenerator({
+      content: templateContent,
+      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+    });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { roots: [{ preset }] },
+      strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+
+    const workflowPath = path.join(targetRoot, ".github/workflows/check.yml");
+    await rm(workflowPath);
+    await mkdir(workflowPath);
+    const added = await generator.add({
+      repositoryRoot: targetRoot,
+      preset,
+      creationInput: { leafName: "utilities" },
+    });
+
+    assert.strictEqual(added.status, "success", JSON.stringify(added));
+    assert.ok((await stat(workflowPath)).isDirectory());
   });
 
   void it("只用集合成员完成库初始化及其公开共享依赖展开", async () => {
@@ -792,6 +908,15 @@ void describe("公开模板内容集合", () => {
           path: "packages/db-migrations",
         },
       },
+    );
+    const checkWorkflow = await readFile(
+      path.join(targetRoot, ".github/workflows/check.yml"),
+      "utf8",
+    );
+    assert.ok(
+      checkWorkflow.includes(
+        "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/vue",
+      ),
     );
     assert.strictEqual(
       await readFile(path.join(targetRoot, "apps/web/+server.ts"), "utf8"),
