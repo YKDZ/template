@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { it } from "node:test";
@@ -14,6 +21,7 @@ import { createVikeProjectContents } from "@ykdz/template-builtin-presets";
 import { createGenerator } from "@ykdz/template-generator";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+import { parse } from "yaml";
 
 const configuration = defineReferencePackage(configurationDefinition);
 const projectContent = createVikeProjectContents({
@@ -25,6 +33,30 @@ const projectContent = createVikeProjectContents({
     migrations: "migrations",
   },
 });
+
+async function repositorySnapshot(
+  repositoryRoot: string,
+): Promise<
+  Record<string, { readonly content: string; readonly mode: number }>
+> {
+  const files: Record<string, { content: string; mode: number }> = {};
+  for (const entry of await readdir(repositoryRoot, {
+    recursive: true,
+    withFileTypes: true,
+  })) {
+    if (!entry.isFile()) continue;
+    const filePath = path.join(entry.parentPath, entry.name);
+    files[path.relative(repositoryRoot, filePath)] = {
+      content: await readFile(filePath, "utf8"),
+      mode: (await stat(filePath)).mode & 0o777,
+    };
+  }
+  return Object.fromEntries(
+    Object.entries(files).toSorted(([left], [right]) =>
+      left.localeCompare(right),
+    ),
+  );
+}
 
 void it("Vike 项目要求用真实 web、数据库和迁移实例生成拓扑并在加包回放", async () => {
   const temporaryRoot = await mkdtemp(
@@ -63,6 +95,31 @@ void it("Vike 项目要求用真实 web、数据库和迁移实例生成拓扑�
       JSON.stringify(initialized),
     );
     if (initialized.status !== "success") return;
+
+    assert.match(
+      await readFile(path.join(targetRoot, "pnpm-workspace.yaml"), "utf8"),
+      /overrides:\n  pinia>typescript: "-"\n  vue>typescript: "-"/u,
+    );
+    const dependabot = parse(
+      await readFile(path.join(targetRoot, ".github/dependabot.yml"), "utf8"),
+    ) as {
+      updates: { "package-ecosystem": string; directory: string }[];
+    };
+    assert.deepStrictEqual(
+      dependabot.updates.map(
+        ({ "package-ecosystem": ecosystem, directory }) => [
+          ecosystem,
+          directory,
+        ],
+      ),
+      [
+        ["devcontainers", "/"],
+        ["npm", "/"],
+        ["github-actions", "/"],
+        ["docker", "/.devcontainer"],
+        ["docker", "/"],
+      ],
+    );
 
     assert.deepStrictEqual(initialized.blueprint.packageLinkIntents, [
       { consumerPackagePath: "apps/web", providerPackagePath: "packages/db" },
@@ -134,6 +191,36 @@ void it("Vike 项目要求用真实 web、数据库和迁移实例生成拓扑�
     await readFile(
       path.join(targetRoot, "packages/domain/package.json"),
       "utf8",
+    );
+
+    const databaseManifestPath = path.join(
+      targetRoot,
+      "packages/db/package.json",
+    );
+    const databaseManifest = JSON.parse(
+      await readFile(databaseManifestPath, "utf8"),
+    ) as { scripts: Record<string, string> };
+    delete databaseManifest.scripts["db:reset"];
+    await writeFile(
+      databaseManifestPath,
+      JSON.stringify(databaseManifest) + "\n",
+    );
+    const beforeInvalidAddition = await repositorySnapshot(targetRoot);
+    const invalidAddition = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: library.identity,
+      creationInput: { leafName: "next" },
+    });
+    assert.strictEqual(invalidAddition.status, "operation-failure");
+    if (invalidAddition.status === "operation-failure") {
+      assert.match(
+        invalidAddition.error.message,
+        /Database Preparation requires exact @demo\/db script db:reset/u,
+      );
+    }
+    assert.deepStrictEqual(
+      await repositorySnapshot(targetRoot),
+      beforeInvalidAddition,
     );
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
