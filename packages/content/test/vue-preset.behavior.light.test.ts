@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 
 import { preset as vuePreset } from "@ykdz/preset-vue-app/template";
+import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import { templateContent } from "@ykdz/template-content";
 import { createGenerator } from "@ykdz/template-generator";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
@@ -20,7 +21,7 @@ void describe("公开内容集合中的 Vue 预设", () => {
     const targetRoot = path.join(temporaryRoot, "demo");
     const generator = createGenerator({
       content: templateContent,
-      strategy: createDefaultWorkspaceStrategy(),
+      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
     });
     assert.ok(
       templateContent.includes(vuePreset),
