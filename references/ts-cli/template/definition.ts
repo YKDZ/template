@@ -47,6 +47,8 @@ function publicationNodeEngine(
 export const referencePackage: ReferencePackage<TsCliCreationInput> =
   defineReferencePackage<TsCliCreationInput>({
     packageName: "@ykdz/reference-ts-cli",
+    // 私有原生清单未声明 npm 版本，给制品显式提供未发布坐标。
+    artifactVersion: "0.0.0",
     resolve: (specifier) => import.meta.resolve(specifier),
     resourceRoot: new URL("../", import.meta.url),
     alias: "cli-package-addition",

@@ -3,18 +3,28 @@ import {
   definePreset,
   presetOwnerFromManifest,
 } from "@ykdz/template-core/preset-definition";
+import { defineNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
 
 import presetPackage from "../package.json" with { type: "json" };
 
-export const preset = definePreset({
-  metadata: {
-    alias: "rust-bin",
-    title: "Rust 二进制程序",
-    description: "包含 rustfmt、clippy 和 cargo 测试的 Rust 原生二进制工作区。",
+export const preset = defineNativeContentArtifact(
+  definePreset({
+    metadata: {
+      alias: "rust-bin",
+      title: "Rust 二进制程序",
+      description:
+        "包含 rustfmt、clippy 和 cargo 测试的 Rust 原生二进制工作区。",
+    },
+    operations: ["init", "add"],
+    owner: presetOwnerFromManifest(presetPackage, "./template"),
+    nodes: {
+      binary: { reference: referencePackage },
+    },
+  }),
+  {
+    manifest: presetPackage,
+    resourceRoot: new URL("../", import.meta.url),
+    exportPath: "./template",
+    executionDependencies: ["@ykdz/template-workspace-authoring"],
   },
-  operations: ["init", "add"],
-  owner: presetOwnerFromManifest(presetPackage, "./template"),
-  nodes: {
-    binary: { reference: referencePackage },
-  },
-});
+);
