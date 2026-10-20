@@ -10,10 +10,8 @@ import {
   inspectPackageReleaseChangelog,
   type ChangelogBlockerCode,
 } from "./changelog.ts";
-import {
-  cliCommandIdentity,
-  isTsCliPublicCandidateCreationInput,
-} from "./cli-command-identity.ts";
+import { isTsCliPublicCandidateCreationInput } from "./cli-candidate-selection.ts";
+import { cliCommandIdentity } from "./cli-command-identity.ts";
 
 export type NpmPublicationReadinessBlockerCode =
   | "package-name"

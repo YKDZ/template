@@ -21,6 +21,11 @@
       "types": "./template-dist/definition.d.ts",
       "default": "./template-dist/definition.js"
     },
+    "./creation-input": {
+      "source": "./template/creation-input.ts",
+      "types": "./template-dist/creation-input.d.ts",
+      "default": "./template-dist/creation-input.js"
+    },
     "./command-identity": {
       "source": "./src/cli-command-identity.ts",
       "types": "./dist/cli-command-identity.d.ts",
@@ -28,7 +33,7 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json --pretty false && tsc -p tsconfig.command-identity-types.json --pretty false",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json --pretty false",
     "build:template": "tsc -p tsconfig.template.json --pretty false",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",

@@ -1,12 +1,4 @@
-import {
-  cp,
-  mkdir,
-  readFile,
-  readdir,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,7 +7,6 @@ import {
   renderProject,
   resolveTemplateSource,
 } from "@ykdz/template-core/renderer";
-import { mapTypeScriptModuleSpecifiers } from "@ykdz/template-workspace-authoring/typescript-module-specifiers";
 
 const output = fileURLToPath(
   new URL("../dist/reference-packages/", import.meta.url),
@@ -56,47 +47,4 @@ for (const reference of referencePackages) {
     path.join(loaderDirectory, "entry.js"),
     `export * from ${JSON.stringify(`../${entry.slice(2)}`)};\n`,
   );
-}
-
-// 作者使用公开依赖入口，分发制品使用同一描述的编译副本。
-// 复用正式渲染器的模块映射，不携带完整参考包的运行依赖。
-const distributionRoot = fileURLToPath(new URL("../dist/", import.meta.url));
-const compiledSource = path.join(distributionRoot, "src");
-for (const file of await readdir(compiledSource, { recursive: true })) {
-  if (!file.endsWith(".js") && !file.endsWith(".d.ts")) continue;
-  const target = path.join(compiledSource, file);
-  const moduleSpecifiers = new Map(
-    referencePackages.map((reference) => {
-      const relative = path
-        .relative(
-          path.dirname(target),
-          path.join(output, reference.manifest.name, "template-dist/entry.js"),
-        )
-        .split(path.sep)
-        .join("/");
-      return [
-        reference.manifest.name + "/template",
-        relative.startsWith(".") ? relative : "./" + relative,
-      ];
-    }),
-  );
-  const original = await readFile(target, "utf8");
-  const text = mapTypeScriptModuleSpecifiers(
-    original,
-    moduleSpecifiers,
-    target,
-  );
-  if (text === original) continue;
-  await renderProject({
-    targetRoot: distributionRoot,
-    operations: [
-      {
-        kind: "writeText",
-        to: path.posix.join("src", file),
-        text,
-        mode: (await stat(target)).mode & 0o777,
-        overwrite: true,
-      },
-    ],
-  });
 }
