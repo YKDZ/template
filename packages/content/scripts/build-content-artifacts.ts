@@ -324,6 +324,8 @@ type ResolvedPackages = {
   readonly paths: ReadonlyMap<string, string>;
 };
 
+type OwnerResolvedDependencies = ReadonlyMap<string, PnpmDependencyNode>;
+
 function collectResolvedPackages(
   value: unknown,
   versions: Map<string, string>,
@@ -371,13 +373,13 @@ function collectResolvedPackages(
 }
 
 async function resolvedVersions(
-  packageNames: readonly string[],
+  projectsToResolve: readonly string[],
   workspaceRoot: string,
   commandLog: string[],
 ): Promise<ResolvedPackages> {
   const versions = new Map<string, string>();
   const paths = new Map<string, string>();
-  for (const name of packageNames) {
+  for (const name of projectsToResolve) {
     const stdout = await runPnpm(
       ["--filter", name, "list", "--depth", "Infinity", "--json"],
       workspaceRoot,
@@ -388,16 +390,59 @@ async function resolvedVersions(
   return { versions, paths };
 }
 
-function versionForDependency(
+async function resolvedOwnerDependencies(
+  ownerRoot: string,
+  commandLog: string[],
+): Promise<OwnerResolvedDependencies> {
+  const stdout = await runPnpm(
+    ["list", "--depth", "0", "--json"],
+    ownerRoot,
+    commandLog,
+  );
+  const projects = JSON.parse(stdout) as unknown;
+  const project = Array.isArray(projects) ? projects[0] : projects;
+  if (typeof project !== "object" || project === null) {
+    throw new Error(`原生包管理器未返回所属包的项目依赖：${ownerRoot}`);
+  }
+  const node = project as PnpmDependencyNode;
+  const dependencies = new Map<string, PnpmDependencyNode>();
+  for (const field of [
+    "dependencies",
+    "devDependencies",
+    "optionalDependencies",
+    "peerDependencies",
+  ] as const) {
+    for (const [name, dependency] of Object.entries(node[field] ?? {})) {
+      dependencies.set(name, dependency);
+    }
+  }
+  return dependencies;
+}
+
+function ownerVersionForDependency(
   name: string,
   specifier: string,
   workspace: ReadonlyMap<string, WorkspaceProject>,
-  resolved: ReadonlyMap<string, string>,
+  resolved: OwnerResolvedDependencies,
 ): string {
-  const project = workspace.get(name);
-  if (project?.version !== undefined) return project.version;
-  const version = resolved.get(name);
-  if (version !== undefined) return version;
+  const dependency = resolved.get(name);
+  const packageName = dependency?.from;
+  const version = dependency?.version;
+  if (version !== undefined && !version.startsWith("link:")) {
+    return packageName === undefined || packageName === name
+      ? version
+      : `npm:${packageName}@${version}`;
+  }
+  if (version?.startsWith("link:")) {
+    const project =
+      workspace.get(name) ??
+      (packageName === undefined ? undefined : workspace.get(packageName));
+    if (project?.version !== undefined) {
+      return packageName === undefined || packageName === name
+        ? project.version
+        : `npm:${packageName}@${project.version}`;
+    }
+  }
   if (!/^(?:workspace|catalog|link):/u.test(specifier)) return specifier;
   throw new Error(
     `原生包管理器未解析依赖坐标 ${name}@${specifier}；无法投影安装清单`,
@@ -410,7 +455,7 @@ function artifactInstallDependencies(
   members: readonly NativeMember[],
   artifacts: ReadonlyMap<string, PreparedNativeContentArtifact>,
   workspace: ReadonlyMap<string, WorkspaceProject>,
-  resolved: ReadonlyMap<string, string>,
+  resolved: OwnerResolvedDependencies,
 ): Readonly<Record<string, string>> {
   const dependencies: Record<string, string> = {};
   for (const dependency of artifact.dependencies) {
@@ -464,7 +509,7 @@ function artifactInstallDependencies(
       );
     }
     if (!dependency.purposes.includes("template-execution")) continue;
-    dependencies[dependency.name] = versionForDependency(
+    dependencies[dependency.name] = ownerVersionForDependency(
       dependency.name,
       dependency.specifier,
       workspace,
@@ -747,17 +792,22 @@ function generatedProviderAggregateSource(
       `import { templateContent as provider${index} } from ${JSON.stringify(name)};`,
   );
   return [
+    'import { deriveTemplateMembers } from "./template-members.js";',
+    'import type { LoadedTemplateContentMember, TemplateContentTypes } from "./template-content-types.js";',
     ...imports,
     "",
+    "export { deriveTemplateMembers };",
+    'export type { ContentKind } from "./template-content-types.js";',
     "export const templateContent = [",
     ...packageNames.map((_, index) => `  ...provider${index},`),
-    "] as const;",
-    "export const templatePresets = templateContent.filter(",
-    '  (member) => member.kind === "preset",',
-    ");",
-    "export const templateReferencePackages = templateContent.filter(",
-    '  (member) => member.kind === "reference",',
-    ");",
+    "] as readonly LoadedTemplateContentMember[];",
+    "type ContentTypes = TemplateContentTypes<typeof templateContent>;",
+    'export type TemplateContentMember = ContentTypes["member"];',
+    'export type TemplatePreset = ContentTypes["preset"];',
+    'export type TemplateReferencePackage = ContentTypes["reference"];',
+    "const templateMembers = deriveTemplateMembers(templateContent);",
+    "export const templatePresets = templateMembers.presets;",
+    "export const templateReferencePackages = templateMembers.referencePackages;",
     "",
   ].join("\n");
 }
@@ -775,6 +825,7 @@ async function createModulePackageRoot(options: {
   readonly packageName: string;
   readonly packageVersion: string;
   readonly source: string;
+  readonly additionalSources?: ReadonlyMap<string, string>;
   readonly dependencies: Readonly<Record<string, string>>;
   readonly packageRoots: ReadonlyMap<string, string>;
   readonly sdkPackageRoots: ReadonlyMap<string, string>;
@@ -831,6 +882,9 @@ async function createModulePackageRoot(options: {
     )}\n`,
   );
   await writeFile(path.join(sourceRoot, "index.ts"), options.source);
+  for (const [fileName, source] of options.additionalSources ?? []) {
+    await writeFile(path.join(sourceRoot, fileName), source);
+  }
 
   for (const [name, packageRoot] of options.sdkPackageRoots) {
     await linkPackage(nodeModulesRoot, name, packageRoot);
@@ -955,6 +1009,14 @@ async function createCollectionInstallRoot(options: {
     }
     dependencies[name] = version;
   }
+  const memberModuleSource = await readFile(
+    fileURLToPath(new URL("../src/template-members.ts", import.meta.url)),
+    "utf8",
+  );
+  const contentTypesModuleSource = await readFile(
+    fileURLToPath(new URL("../src/template-content-types.ts", import.meta.url)),
+    "utf8",
+  );
   return await createModulePackageRoot({
     root: options.root,
     packageName: options.packageName,
@@ -962,6 +1024,10 @@ async function createCollectionInstallRoot(options: {
     source: generatedProviderAggregateSource(
       options.providers.map(({ packageName }) => packageName),
     ),
+    additionalSources: new Map([
+      ["template-members.ts", memberModuleSource],
+      ["template-content-types.ts", contentTypesModuleSource],
+    ]),
     dependencies,
     packageRoots,
     sdkPackageRoots: options.sdkPackageRoots,
@@ -1021,6 +1087,15 @@ export async function prepareContentCollection(
       artifact,
     ]),
   );
+  const ownerDependenciesByRoot = new Map<string, OwnerResolvedDependencies>();
+  for (const { packageRoot: ownerRoot } of preparedOwners) {
+    if (!ownerDependenciesByRoot.has(ownerRoot)) {
+      ownerDependenciesByRoot.set(
+        ownerRoot,
+        await resolvedOwnerDependencies(ownerRoot, commandLog),
+      );
+    }
+  }
   const owners: {
     member: NativeMember;
     artifact: PreparedNativeContentArtifact;
@@ -1037,7 +1112,7 @@ export async function prepareContentCollection(
       members,
       artifactsByIdentity,
       workspace,
-      resolved.versions,
+      ownerDependenciesByRoot.get(ownerRoot) ?? new Map(),
     );
     const identitySuffix = createHash("sha256")
       .update(identityKey)

@@ -36,7 +36,11 @@ export type AuthoredContentFixtureOptions = {
   readonly featurePackageName?: string;
   readonly featureDependsOnTheme?: boolean;
   readonly featureNativeDevDependencies?: Readonly<Record<string, string>>;
+  /** 在原创 reference 入口中写入额外的运行时代码。 */
+  readonly featureTemplatePrelude?: readonly string[];
   readonly featureTemplateDependencies?: readonly ReferenceTemplateDependency[];
+  readonly addonDependsOnTheme?: boolean;
+  readonly addonTemplateDependencies?: readonly ReferenceTemplateDependency[];
   readonly includeTheme?: boolean;
   readonly includeAddon?: boolean;
   readonly sdkVersions?: ReadonlyMap<string, string>;
@@ -124,9 +128,12 @@ function referenceDefinition(options: {
   readonly instance: "shared" | "independent";
   readonly resourcePath: string;
   readonly templateDependencies?: readonly ReferenceTemplateDependency[];
+  readonly templatePrelude?: readonly string[];
 }): string {
   const resourceDirectory = path.posix.dirname(options.resourcePath);
   return [
+    ...(options.templatePrelude ?? []),
+    "",
     'import { defineReferencePackage, type ReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";',
     "",
     "export const referencePackage: ReferencePackage = defineReferencePackage({",
@@ -175,6 +182,7 @@ async function writeReferencePackage(options: {
   readonly dependencies?: Readonly<Record<string, string>>;
   readonly devDependencies?: Readonly<Record<string, string>>;
   readonly templateDependencies?: readonly ReferenceTemplateDependency[];
+  readonly templatePrelude?: readonly string[];
   readonly sdkVersions: ReadonlyMap<string, string>;
   readonly nativeWorkspace: boolean;
 }): Promise<void> {
@@ -203,6 +211,9 @@ async function writeReferencePackage(options: {
       defaultLeafName: options.defaultLeafName ?? options.alias,
       instance: options.instance,
       resourcePath: options.resourcePath,
+      ...(options.templatePrelude === undefined
+        ? {}
+        : { templatePrelude: options.templatePrelude }),
       ...(options.templateDependencies === undefined
         ? {}
         : { templateDependencies: options.templateDependencies }),
@@ -338,6 +349,9 @@ export async function createAuthoredContentFixture(
     ...(options.featureNativeDevDependencies === undefined
       ? {}
       : { devDependencies: options.featureNativeDevDependencies }),
+    ...(options.featureTemplatePrelude === undefined
+      ? {}
+      : { templatePrelude: options.featureTemplatePrelude }),
     ...(options.featureTemplateDependencies === undefined
       ? {}
       : { templateDependencies: options.featureTemplateDependencies }),
@@ -366,6 +380,19 @@ export async function createAuthoredContentFixture(
     alias: "addon",
     instance: "independent",
     resourcePath: "src/addon.ts",
+    dependencies:
+      options.addonDependsOnTheme === true
+        ? { "@fixture/typescript-config": "workspace:*" }
+        : {},
+    ...(options.addonTemplateDependencies === undefined
+      ? options.addonDependsOnTheme === true
+        ? {
+            templateDependencies: [
+              { name: "@fixture/typescript-config", purpose: "target" },
+            ],
+          }
+        : {}
+      : { templateDependencies: options.addonTemplateDependencies }),
   });
   await writePresetPackage({
     collectionRoot,

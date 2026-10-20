@@ -25,8 +25,10 @@ import {
   prepareContentCollection,
   writeContentCollectionEvidence,
   writeNativeArchiveOverrides,
+  type PackedArtifact,
   type PreparedContentCollection,
 } from "@ykdz/template-content/artifact-builder";
+import { contentIdentityKey } from "@ykdz/template-core/content-identity";
 import {
   resolveTemplateSource,
   type TemplateSourceHandle,
@@ -81,6 +83,39 @@ async function contentArtifactEvidenceRoot(): Promise<string> {
   return generatedEvidenceRoot;
 }
 
+async function buildNativeAuthoredContent(
+  fixture: Awaited<ReturnType<typeof createAuthoredContentFixture>>,
+  namespace: string,
+  sdkArchives: readonly PackedArtifact[],
+) {
+  await writeNativeArchiveOverrides(fixture.root, sdkArchives, [
+    `${namespace}/authors/*`,
+    `${namespace}/collection`,
+  ]);
+  await execa("pnpm", ["--dir", fixture.root, "install"], {
+    cwd: workspaceRoot,
+  });
+  await execa(
+    "pnpm",
+    [
+      "--dir",
+      fixture.root,
+      "-r",
+      "--filter",
+      "@fixture/preset...",
+      "--filter",
+      "@fixture/typescript-config",
+      "--filter",
+      "@fixture/addon",
+      "--if-present",
+      "run",
+      "build:template",
+    ],
+    { cwd: workspaceRoot },
+  );
+  return await fixture.load(namespace);
+}
+
 async function textFiles(root: string): Promise<readonly string[]> {
   const files: string[] = [];
   const visit = async (directory: string): Promise<void> => {
@@ -110,18 +145,27 @@ type InstalledPackage = {
 function installedPackages(value: unknown): readonly {
   readonly name: string;
   readonly path: string;
+  readonly parentPath?: string;
 }[] {
-  const packages: { name: string; path: string }[] = [];
-  const visit = (entry: unknown, fallbackName?: string): void => {
+  const packages: { name: string; path: string; parentPath?: string }[] = [];
+  const visit = (
+    entry: unknown,
+    fallbackName?: string,
+    parentPath?: string,
+  ): void => {
     if (Array.isArray(entry)) {
-      for (const item of entry) visit(item, fallbackName);
+      for (const item of entry) visit(item, fallbackName, parentPath);
       return;
     }
     if (typeof entry !== "object" || entry === null) return;
     const node = entry as InstalledPackage;
     const name = node.name ?? fallbackName;
     if (name !== undefined && node.path !== undefined) {
-      packages.push({ name, path: node.path });
+      packages.push({
+        name,
+        path: node.path,
+        ...(parentPath === undefined ? {} : { parentPath }),
+      });
     }
     for (const field of [
       "dependencies",
@@ -130,7 +174,7 @@ function installedPackages(value: unknown): readonly {
       "peerDependencies",
     ] as const) {
       for (const [childName, child] of Object.entries(node[field] ?? {})) {
-        visit(child, childName);
+        visit(child, childName, node.path ?? parentPath);
       }
     }
   };
@@ -241,7 +285,35 @@ async function auditInstalledClosure(
   const nodeModulesRealRoot = await realpath(nodeModulesRoot);
   const auditedPackagePaths = new Set<string>();
   for (const installedPackage of packages) {
-    const packagePath = await realpath(installedPackage.path);
+    let packagePath: string;
+    try {
+      packagePath = await realpath(installedPackage.path);
+    } catch (error) {
+      if (
+        typeof error !== "object" ||
+        error === null ||
+        !("code" in error) ||
+        error.code !== "ENOENT" ||
+        installedPackage.parentPath === undefined
+      ) {
+        throw error;
+      }
+      const parentManifest = JSON.parse(
+        await readFile(
+          path.join(installedPackage.parentPath, "package.json"),
+          "utf8",
+        ),
+      ) as { readonly optionalDependencies?: Readonly<Record<string, string>> };
+      if (
+        !Object.hasOwn(
+          parentManifest.optionalDependencies ?? {},
+          installedPackage.name,
+        )
+      ) {
+        throw error;
+      }
+      continue;
+    }
     assert.ok(
       isWithin(nodeModulesRealRoot, packagePath),
       `实际安装包越出消费者node_modules：${installedPackage.name} -> ${packagePath}`,
@@ -539,6 +611,743 @@ void describe("原生内容制品安装链", () => {
     );
   });
 
+  void it("其余五个预设分别从独立最小原生集合安装并初始化", async () => {
+    assert.ok(firstPartyPrepared);
+    const sdkArchives = firstPartyPrepared.sdkPackages;
+    const presets = templateContent.filter(
+      (member) => member.kind === "preset" && member.alias !== "ts-lib",
+    );
+    assert.equal(presets.length, 5);
+
+    for (const preset of presets) {
+      assert.equal(preset.kind, "preset");
+      const prepared = await prepareContentCollection({
+        content: templateContent,
+        roots: [preset],
+        strategy: createDefaultWorkspaceStrategy(),
+        workspaceRoot,
+        root: await temporaryRoot(`preset-${preset.alias}-`),
+        sdkArchives,
+      });
+      preparedCollections.push(prepared);
+      assert.deepEqual(
+        prepared.presets.map(({ alias }) => alias),
+        [preset.alias],
+      );
+      assert.ok(
+        prepared.members.every(
+          (member) =>
+            member.kind !== "preset" || member.identity === preset.identity,
+        ),
+        `${preset.alias} 的最小闭包包含了其他预设`,
+      );
+
+      const authorRoots = prepared.owners.map((owner) => owner.packageRoot);
+      const authorModes = await Promise.all(
+        authorRoots.map(
+          async (authorPath) => (await stat(authorPath)).mode & 0o777,
+        ),
+      );
+      const authorTimes = await Promise.all(
+        authorRoots.map(async (authorPath) => (await stat(authorPath)).mtimeMs),
+      );
+      const workspaceMetadata = await stat(workspaceRoot);
+      const workspaceMode = workspaceMetadata.mode & 0o777;
+      const workspaceTime = workspaceMetadata.mtimeMs;
+
+      const consumerRoot = await temporaryRoot(
+        `preset-${preset.alias}-consumer-`,
+      );
+      await installContentCollection(prepared, consumerRoot);
+      const projectRoot = path.join(consumerRoot, "project");
+      const targetRoot = path.join(projectRoot, "workspace");
+      const temporaryDirectory = path.join(consumerRoot, "tmp");
+      await mkdir(projectRoot, { recursive: true });
+      await mkdir(temporaryDirectory, { recursive: true });
+      await chmod(projectRoot, 0o777);
+      await chmod(temporaryDirectory, 0o777);
+      const installedCollection = path.join(
+        consumerRoot,
+        "node_modules",
+        "@ykdz",
+        "template-content",
+      );
+      const driverPath = path.join(installedCollection, "preset-driver.mjs");
+      const authorRootsPath = path.join(projectRoot, "author-roots.json");
+      const resultPath = path.join(projectRoot, "result.json");
+      await writeFile(
+        authorRootsPath,
+        JSON.stringify([...authorRoots, workspaceRoot]),
+      );
+      await writeFile(
+        driverPath,
+        [
+          'import assert from "node:assert/strict";',
+          'import { readdir, readFile, writeFile } from "node:fs/promises";',
+          'import { createGenerator } from "@ykdz/template-generator";',
+          'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
+          'import { templateContent } from "@ykdz/template-content";',
+          'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
+          'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
+          'const preset = templateContent.find((member) => member.kind === "preset" && member.alias === process.argv[4]);',
+          "assert.ok(preset);",
+          "const generator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+          "const initialized = await generator.init({ targetRoot: process.argv[2], selection: { roots: [{ preset: preset.identity }] }, strategyInput: { repositoryName: `installed-${preset.alias}`, defaultPackageScope: `installed-${preset.alias}`, todo: false } });",
+          'assert.equal(initialized.status, "success", JSON.stringify(initialized));',
+          'if (initialized.status !== "success") process.exit(2);',
+          "assert.deepEqual(initialized.generationRecord.presetSelections.map(({ packageName }) => packageName), [preset.identity.packageName]);",
+          "await writeFile(process.argv[5], JSON.stringify({ initialized, preset: preset.identity }));",
+        ].join("\n"),
+      );
+
+      await withUnreadableAuthorDirectories(
+        [
+          ...authorRoots.map((authorPath, index) => ({
+            path: authorPath,
+            mode: authorModes[index]!,
+          })),
+          { path: workspaceRoot, mode: workspaceMode },
+        ],
+        async () =>
+          await execa(
+            process.execPath,
+            [driverPath, targetRoot, authorRootsPath, preset.alias, resultPath],
+            {
+              cwd: installedCollection,
+              env: {
+                ...process.env,
+                HOME: consumerRoot,
+                TMPDIR: temporaryDirectory,
+                NODE_OPTIONS: "--no-global-search-paths",
+                NODE_PATH: "",
+              },
+              uid: 65534,
+              gid: 65534,
+            },
+          ),
+      );
+
+      const result = JSON.parse(await readFile(resultPath, "utf8")) as {
+        readonly initialized: {
+          readonly generationRecord: {
+            readonly presetSelections: readonly {
+              readonly packageName: string;
+            }[];
+          };
+          readonly blueprint: {
+            readonly packages: readonly { readonly path: string }[];
+          };
+        };
+      };
+      assert.deepEqual(
+        result.initialized.generationRecord.presetSelections.map(
+          ({ packageName }) => packageName,
+        ),
+        [preset.identity.packageName],
+      );
+      assert.ok(result.initialized.blueprint.packages.length > 0);
+      const closure = await auditInstalledClosure(consumerRoot, [
+        ...authorRoots,
+        workspaceRoot,
+      ]);
+      for (const archive of [
+        ...prepared.sdkPackages,
+        ...prepared.owners.map((owner) => owner.packed),
+        ...prepared.providers,
+        prepared.collection,
+      ]) {
+        assert.ok(
+          closure.packages.some(({ name }) => name === archive.name),
+          `${preset.alias} 安装闭包缺少制品：${archive.name}@${archive.version}`,
+        );
+      }
+      let missingResourceEvidence:
+        | {
+            readonly status: string;
+            readonly phase: string;
+            readonly errorMessage: string;
+          }
+        | undefined;
+      if (preset.alias === "rust-bin") {
+        const rustOwner = prepared.owners.find(
+          (owner) =>
+            owner.member.identity.packageName === "@ykdz/reference-rust-bin",
+        );
+        const installedRust = closure.packages.find(
+          ({ name }) => name === "@ykdz/reference-rust-bin",
+        );
+        assert.ok(rustOwner && installedRust);
+        assert.ok(
+          rustOwner.artifact.resources.some(
+            ({ path: resourcePath }) => resourcePath === "Cargo.toml",
+          ),
+          "Rust reference 的原生执行事实必须进入正式制品",
+        );
+        const installedCargoManifest = path.join(
+          installedRust.path,
+          "native",
+          "Cargo.toml",
+        );
+        const hiddenCargoManifest = `${installedCargoManifest}.temporarily-missing`;
+        const missingResourceResultPath = path.join(
+          projectRoot,
+          "missing-rust-resource.json",
+        );
+        const missingResourceDriverPath = path.join(
+          installedCollection,
+          "missing-rust-resource-driver.mjs",
+        );
+        await writeFile(
+          missingResourceDriverPath,
+          [
+            'import assert from "node:assert/strict";',
+            'import { readdir, readFile, writeFile } from "node:fs/promises";',
+            'import { createGenerator } from "@ykdz/template-generator";',
+            'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
+            'import { templateContent } from "@ykdz/template-content";',
+            'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
+            'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
+            "const generator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+            'const result = await generator.add({ repositoryRoot: process.argv[2], contentIdentity: { alias: "binary", namespace: "ykdz" }, creationInput: { leafName: "second-app" } });',
+            "await writeFile(process.argv[4], JSON.stringify({ status: result.status, phase: result.phase, errorMessage: result.error?.message }));",
+          ].join("\n"),
+        );
+        const existingTargetBeforeFailure = await snapshotTree(targetRoot);
+        await rename(installedCargoManifest, hiddenCargoManifest);
+        let missingResourceExecution;
+        try {
+          missingResourceExecution = await withUnreadableAuthorDirectories(
+            [
+              ...authorRoots.map((authorPath, index) => ({
+                path: authorPath,
+                mode: authorModes[index]!,
+              })),
+              { path: workspaceRoot, mode: workspaceMode },
+            ],
+            async () =>
+              await execa(
+                process.execPath,
+                [
+                  missingResourceDriverPath,
+                  targetRoot,
+                  authorRootsPath,
+                  missingResourceResultPath,
+                ],
+                {
+                  cwd: installedCollection,
+                  env: {
+                    ...process.env,
+                    HOME: consumerRoot,
+                    TMPDIR: temporaryDirectory,
+                    NODE_OPTIONS: "--no-global-search-paths",
+                    NODE_PATH: "",
+                  },
+                  uid: 65534,
+                  gid: 65534,
+                },
+              ),
+          );
+        } finally {
+          await rename(hiddenCargoManifest, installedCargoManifest);
+        }
+        assert.equal(missingResourceExecution.exitCode, 0);
+        missingResourceEvidence = JSON.parse(
+          await readFile(missingResourceResultPath, "utf8"),
+        ) as {
+          readonly status: string;
+          readonly phase: string;
+          readonly errorMessage: string;
+        };
+        assert.equal(missingResourceEvidence.status, "operation-failure");
+        assert.equal(missingResourceEvidence.phase, "planning");
+        assert.match(
+          missingResourceEvidence.errorMessage,
+          /@ykdz\/reference-rust-bin.*prepare 阶段失败.*模板执行数据未包含/u,
+        );
+        assert.deepEqual(
+          await snapshotTree(targetRoot),
+          existingTargetBeforeFailure,
+        );
+        await assert.rejects(
+          stat(path.join(targetRoot, "packages", "second-app")),
+          { code: "ENOENT" },
+        );
+      }
+      assert.deepEqual(
+        await Promise.all(
+          authorRoots.map(
+            async (authorPath) => (await stat(authorPath)).mtimeMs,
+          ),
+        ),
+        authorTimes,
+      );
+      assert.deepEqual(
+        await Promise.all(
+          authorRoots.map(
+            async (authorPath) => (await stat(authorPath)).mode & 0o777,
+          ),
+        ),
+        authorModes,
+      );
+      const restoredWorkspace = await stat(workspaceRoot);
+      assert.equal(restoredWorkspace.mode & 0o777, workspaceMode);
+      assert.equal(restoredWorkspace.mtimeMs, workspaceTime);
+
+      const evidenceRoot = await contentArtifactEvidenceRoot();
+      await writeContentCollectionEvidence(
+        prepared,
+        path.join(evidenceRoot, `${preset.alias}-build.md`),
+      );
+      await writeFile(
+        path.join(evidenceRoot, `${preset.alias}-consumer.json`),
+        `${JSON.stringify(
+          {
+            command: `pnpm --dir ${consumerRoot} add ${prepared.collection.tarball}`,
+            authorDirectories: [
+              ...authorRoots.map((authorPath) => ({
+                path: authorPath,
+                mode: 0,
+              })),
+              { path: workspaceRoot, mode: 0 },
+            ],
+            links: closure.links,
+            providers: closure.packages,
+            preset: preset.identity,
+            packages: result.initialized.blueprint.packages,
+            missingResource: missingResourceEvidence,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+    }
+  });
+
+  void it("全部十一个参考入口按声明绑定原生根并安装生成", async () => {
+    assert.ok(firstPartyPrepared);
+    const references = templateContent.filter(
+      (member) => member.kind === "reference",
+    );
+    assert.equal(references.length, 11);
+    const contentByIdentity = new Map(
+      references.map((member) => [contentIdentityKey(member.identity), member]),
+    );
+    const strategy = createDefaultWorkspaceStrategy();
+    const entries = references.map((member) => {
+      const dependencies = strategy.dependencies({
+        content: member,
+        contentByIdentity,
+      });
+      return {
+        member,
+        independentDependencies: dependencies
+          .map((identity) =>
+            contentByIdentity.get(contentIdentityKey(identity)),
+          )
+          .flatMap((dependency) =>
+            dependency?.definition.instance === "independent"
+              ? [dependency]
+              : [],
+          ),
+      };
+    });
+    const vueHonoWeb = references.find(
+      (member) =>
+        member.identity.packageName === "@ykdz/reference-vue-hono-web",
+    );
+    const honoApi = references.find(
+      (member) => member.identity.packageName === "@ykdz/reference-hono-api",
+    );
+    const vikeWeb = references.find(
+      (member) => member.identity.packageName === "@ykdz/reference-vike-web",
+    );
+    const vikeDatabase = references.find(
+      (member) => member.identity.packageName === "@ykdz/reference-vike-db",
+    );
+    const vikeMigrations = references.find(
+      (member) =>
+        member.identity.packageName === "@ykdz/reference-vike-migrations",
+    );
+    assert.ok(
+      vueHonoWeb && honoApi && vikeWeb && vikeDatabase && vikeMigrations,
+    );
+    assert.ok(
+      strategy
+        .dependencies({ content: vueHonoWeb, contentByIdentity })
+        .some(
+          (identity) =>
+            contentIdentityKey(identity) ===
+            contentIdentityKey(honoApi.identity),
+        ),
+      "Vue-Hono web 的真实依赖声明应指向 Hono API",
+    );
+    assert.ok(
+      strategy
+        .dependencies({ content: vikeWeb, contentByIdentity })
+        .some(
+          (identity) =>
+            contentIdentityKey(identity) ===
+            contentIdentityKey(vikeDatabase.identity),
+        ),
+      "Vike web 的真实依赖声明应指向 Vike DB",
+    );
+    assert.ok(
+      strategy
+        .dependencies({ content: vikeMigrations, contentByIdentity })
+        .some(
+          (identity) =>
+            contentIdentityKey(identity) ===
+            contentIdentityKey(vikeDatabase.identity),
+        ),
+      "Vike migrations 的真实依赖声明应指向 Vike DB",
+    );
+
+    const prepared = await prepareContentCollection({
+      content: templateContent,
+      roots: references,
+      strategy,
+      workspaceRoot,
+      root: await temporaryRoot("reference-content-"),
+      sdkArchives: firstPartyPrepared.sdkPackages,
+    });
+    preparedCollections.push(prepared);
+    assert.equal(prepared.presets.length, 0);
+    assert.equal(prepared.members.length, references.length);
+    assert.deepEqual(
+      prepared.members
+        .map((member) => contentIdentityKey(member.identity))
+        .sort(),
+      references.map((member) => contentIdentityKey(member.identity)).sort(),
+    );
+    assert.equal(prepared.owners.length, 11);
+    const vueSharedOwner = prepared.owners.find(
+      (owner) =>
+        owner.member.identity.packageName === "@ykdz/reference-vue-shared",
+    );
+    assert.ok(vueSharedOwner);
+    const vueSharedNativeList = await execa(
+      "pnpm",
+      ["--dir", vueSharedOwner.packageRoot, "list", "--depth", "0", "--json"],
+      { cwd: workspaceRoot },
+    );
+    const vueSharedNativeProject = (
+      JSON.parse(vueSharedNativeList.stdout) as readonly {
+        readonly devDependencies?: Readonly<
+          Record<string, { readonly from?: string; readonly version?: string }>
+        >;
+      }[]
+    )[0];
+    const nativeTypeScript =
+      vueSharedNativeProject?.devDependencies?.["typescript-7"];
+    assert.ok(nativeTypeScript?.from && nativeTypeScript.version);
+    const vueSharedArchiveManifest = JSON.parse(
+      await readFile(
+        path.join(vueSharedOwner.installRoot, "package.json"),
+        "utf8",
+      ),
+    ) as { readonly dependencies?: Readonly<Record<string, string>> };
+    assert.equal(
+      vueSharedArchiveManifest.dependencies?.["typescript-7"],
+      nativeTypeScript.from === "typescript-7"
+        ? nativeTypeScript.version
+        : `npm:${nativeTypeScript.from}@${nativeTypeScript.version}`,
+      "第一方归档应保留原生包别名实际指向的包身份与版本",
+    );
+
+    const authorRoots = prepared.owners.map((owner) => owner.packageRoot);
+    const authorModes = await Promise.all(
+      authorRoots.map(
+        async (authorPath) => (await stat(authorPath)).mode & 0o777,
+      ),
+    );
+    const authorTimes = await Promise.all(
+      authorRoots.map(async (authorPath) => (await stat(authorPath)).mtimeMs),
+    );
+    const workspaceMetadata = await stat(workspaceRoot);
+    const workspaceMode = workspaceMetadata.mode & 0o777;
+    const workspaceTime = workspaceMetadata.mtimeMs;
+    const consumerRoot = await temporaryRoot("reference-content-consumer-");
+    await installContentCollection(prepared, consumerRoot);
+    const projectRoot = path.join(consumerRoot, "project");
+    const temporaryDirectory = path.join(consumerRoot, "tmp");
+    await mkdir(projectRoot, { recursive: true });
+    await mkdir(temporaryDirectory, { recursive: true });
+    await chmod(projectRoot, 0o777);
+    await chmod(temporaryDirectory, 0o777);
+    const publicTypesPath = path.join(projectRoot, "public-types.mts");
+    await writeFile(
+      publicTypesPath,
+      [
+        'import { templateContent, templatePresets, templateReferencePackages, type ContentKind, type TemplateContentMember, type TemplatePreset, type TemplateReferencePackage } from "@ykdz/template-content";',
+        "const kind: ContentKind = templateContent[0]!.kind;",
+        "const members: readonly TemplateContentMember[] = templateContent;",
+        "const presets: readonly TemplatePreset[] = templatePresets;",
+        "const references: readonly TemplateReferencePackage[] = templateReferencePackages;",
+        'const preset = templateContent.find((member): member is TemplatePreset => member.kind === "preset");',
+        'const reference = templateContent.find((member): member is TemplateReferencePackage => member.kind === "reference");',
+        "void [kind, members, presets, references, preset, reference];",
+      ].join("\n"),
+    );
+    await execa(
+      path.join(workspaceRoot, "node_modules", ".bin", "tsc"),
+      [
+        "--noEmit",
+        "--target",
+        "ES2022",
+        "--module",
+        "NodeNext",
+        "--moduleResolution",
+        "NodeNext",
+        "--strict",
+        "--skipLibCheck",
+        publicTypesPath,
+      ],
+      { cwd: projectRoot },
+    );
+    const installedCollection = path.join(
+      consumerRoot,
+      "node_modules",
+      "@ykdz",
+      "template-content",
+    );
+    const driverPath = path.join(installedCollection, "references-driver.mjs");
+    const authorRootsPath = path.join(projectRoot, "author-roots.json");
+    const entriesPath = path.join(projectRoot, "entries.json");
+    const resultPath = path.join(projectRoot, "result.json");
+    const productAuthorRoot = workspaceRoot;
+    await writeFile(
+      authorRootsPath,
+      JSON.stringify([...authorRoots, productAuthorRoot]),
+    );
+    await writeFile(
+      entriesPath,
+      JSON.stringify(
+        entries.map(({ member, independentDependencies }) => ({
+          identity: member.identity,
+          independentDependencies: independentDependencies.map(
+            (dependency) => dependency.identity,
+          ),
+        })),
+      ),
+    );
+    await writeFile(
+      driverPath,
+      [
+        'import assert from "node:assert/strict";',
+        'import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";',
+        'import { contentIdentityKey } from "@ykdz/template-core/content-identity";',
+        'import { createGenerator } from "@ykdz/template-generator";',
+        'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
+        'import { deriveTemplateMembers, templateContent } from "@ykdz/template-content";',
+        "const targetBase = process.argv[2];",
+        'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
+        'const entries = JSON.parse(await readFile(process.argv[4], "utf8"));',
+        'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
+        'const contentByIdentity = new Map(templateContent.filter((member) => member.kind === "reference").map((member) => [contentIdentityKey(member.identity), member]));',
+        "const derivedMembers = deriveTemplateMembers(templateContent);",
+        "assert.equal(derivedMembers.presets.length, 0);",
+        "assert.equal(derivedMembers.referencePackages.length, 11);",
+        "const results = [];",
+        "for (const [index, entry] of entries.entries()) {",
+        '  const roots = [{ nodeIdentity: "entry", contentIdentity: entry.identity }, ...entry.independentDependencies.map((contentIdentity, providerIndex) => ({ nodeIdentity: `provider-${providerIndex}`, contentIdentity }))];',
+        "  const targetRoot = `${targetBase}/entry-${index}`;",
+        "  const generator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+        "  const initialized = await generator.init({ targetRoot, selection: { roots }, strategyInput: { repositoryName: `reference-${index}`, defaultPackageScope: `reference-${index}`, todo: false } });",
+        '  assert.equal(initialized.status, "success", `${entry.identity.packageName}: ${JSON.stringify(initialized)}`);',
+        '  if (initialized.status !== "success") process.exit(2);',
+        "  const entryRecord = initialized.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(entry.identity));",
+        "  assert.ok(entryRecord, `generation record missing ${entry.identity.packageName}`);",
+        "  for (const dependencyIdentity of createDefaultWorkspaceStrategy().dependencies({ content: contentByIdentity.get(contentIdentityKey(entry.identity)), contentByIdentity })) {",
+        "    const providerRecord = initialized.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(dependencyIdentity));",
+        "    assert.ok(providerRecord, `binding provider missing ${dependencyIdentity.packageName}`);",
+        "    assert.equal(entryRecord.bindings[contentIdentityKey(dependencyIdentity)], providerRecord.packageDefinitionId, `invalid binding ${entry.identity.packageName} -> ${dependencyIdentity.packageName}`);",
+        "  }",
+        "  await access(targetRoot);",
+        "  results.push({ identity: entry.identity, roots, generationRecord: initialized.generationRecord, packagePaths: initialized.blueprint.packages.map(({ path }) => path) });",
+        "}",
+        'const web = entries.find((entry) => entry.identity.packageName === "@ykdz/reference-vue-hono-web");',
+        "assert.ok(web);",
+        "const missingBindingTarget = `${targetBase}/missing-independent-provider`;",
+        'const missingBinding = await createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() }).init({ targetRoot: missingBindingTarget, selection: { roots: [{ nodeIdentity: "entry", contentIdentity: web.identity }] }, strategyInput: { repositoryName: "missing-binding", defaultPackageScope: "missing-binding", todo: false } });',
+        'assert.equal(missingBinding.status, "operation-failure");',
+        'assert.equal(missingBinding.phase, "planning");',
+        "assert.match(missingBinding.error.message, /缺少明确的独立依赖实例/u);",
+        'await assert.rejects(access(missingBindingTarget), { code: "ENOENT" });',
+        "const missingContentTarget = `${targetBase}/missing-content-provider`;",
+        'const missingContent = templateContent.filter((member) => member.identity.packageName !== "@ykdz/reference-hono-api");',
+        'const missingProvider = await createGenerator({ content: missingContent, strategy: createDefaultWorkspaceStrategy() }).init({ targetRoot: missingContentTarget, selection: { roots: [{ nodeIdentity: "entry", contentIdentity: web.identity }] }, strategyInput: { repositoryName: "missing-content", defaultPackageScope: "missing-content", todo: false } });',
+        'assert.equal(missingProvider.status, "operation-failure");',
+        'assert.equal(missingProvider.phase, "planning");',
+        'assert.ok(missingProvider.error.message.includes("必要模板依赖未登记") && missingProvider.error.message.includes("@ykdz/reference-hono-api"));',
+        'await assert.rejects(access(missingContentTarget), { code: "ENOENT" });',
+        "await writeFile(process.argv[5], JSON.stringify({ results, missingBinding: { status: missingBinding.status, phase: missingBinding.phase, error: missingBinding.error.message }, missingProvider: { status: missingProvider.status, phase: missingProvider.phase, error: missingProvider.error.message } }));",
+      ].join("\n"),
+    );
+    await withUnreadableAuthorDirectories(
+      [
+        ...authorRoots.map((authorPath, index) => ({
+          path: authorPath,
+          mode: authorModes[index]!,
+        })),
+        { path: workspaceRoot, mode: workspaceMode },
+      ],
+      async () =>
+        await execa(
+          process.execPath,
+          [driverPath, projectRoot, authorRootsPath, entriesPath, resultPath],
+          {
+            cwd: installedCollection,
+            env: {
+              ...process.env,
+              HOME: consumerRoot,
+              TMPDIR: temporaryDirectory,
+              NODE_OPTIONS: "--no-global-search-paths",
+              NODE_PATH: "",
+            },
+            uid: 65534,
+            gid: 65534,
+          },
+        ),
+    );
+
+    const result = JSON.parse(await readFile(resultPath, "utf8")) as {
+      readonly results: readonly {
+        readonly identity: {
+          readonly packageName: string;
+          readonly namespace: string;
+          readonly exportPath: string;
+        };
+        readonly roots: readonly {
+          readonly nodeIdentity: string;
+          readonly contentIdentity: { readonly packageName: string };
+        }[];
+        readonly generationRecord: {
+          readonly packages: readonly {
+            readonly contentIdentity: { readonly packageName: string };
+            readonly bindings: Readonly<Record<string, string>>;
+          }[];
+        };
+        readonly packagePaths: readonly string[];
+      }[];
+      readonly missingBinding: {
+        readonly status: string;
+        readonly phase: string;
+        readonly error: string;
+      };
+      readonly missingProvider: {
+        readonly status: string;
+        readonly phase: string;
+        readonly error: string;
+      };
+    };
+    assert.equal(result.results.length, 11);
+    for (const { member } of entries) {
+      assert.ok(
+        result.results.some(
+          ({ identity }) =>
+            contentIdentityKey(identity) ===
+            contentIdentityKey(member.identity),
+        ),
+        `未实际初始化 reference ${member.identity.packageName}`,
+      );
+    }
+    const vueHonoResult = result.results.find(
+      ({ identity }) => identity.packageName === "@ykdz/reference-vue-hono-web",
+    );
+    assert.ok(vueHonoResult);
+    assert.ok(
+      vueHonoResult.roots.some(
+        ({ contentIdentity }) =>
+          contentIdentity.packageName === "@ykdz/reference-hono-api",
+      ),
+      "Vue-Hono web init 必须把独立 Hono API 作为合法根实例绑定",
+    );
+    for (const packageName of [
+      "@ykdz/reference-vike-web",
+      "@ykdz/reference-vike-migrations",
+    ]) {
+      const vikeResult = result.results.find(
+        ({ identity }) => identity.packageName === packageName,
+      );
+      assert.ok(vikeResult);
+      assert.ok(
+        vikeResult.roots.some(
+          ({ contentIdentity }) =>
+            contentIdentity.packageName === "@ykdz/reference-vike-db",
+        ),
+        `${packageName} init 必须把独立 Vike DB 作为合法根实例绑定`,
+      );
+    }
+    assert.equal(result.missingBinding.status, "operation-failure");
+    assert.equal(result.missingBinding.phase, "planning");
+    assert.equal(result.missingProvider.status, "operation-failure");
+    assert.equal(result.missingProvider.phase, "planning");
+    const closure = await auditInstalledClosure(consumerRoot, [
+      ...authorRoots,
+      workspaceRoot,
+    ]);
+    const installedVueShared = closure.packages.find(
+      ({ name }) => name === "@ykdz/reference-vue-shared",
+    );
+    assert.ok(installedVueShared);
+    const installedTypeScript = createRequire(
+      path.join(installedVueShared.path, "package.json"),
+    )("typescript-7") as { readonly version: string };
+    assert.equal(installedTypeScript.version, nativeTypeScript.version);
+    for (const archive of [
+      ...prepared.sdkPackages,
+      ...prepared.owners.map((owner) => owner.packed),
+      ...prepared.providers,
+      prepared.collection,
+    ]) {
+      assert.ok(
+        closure.packages.some(({ name }) => name === archive.name),
+        `全部参考集合安装闭包缺少制品：${archive.name}@${archive.version}`,
+      );
+    }
+    assert.deepEqual(
+      await Promise.all(
+        authorRoots.map(async (authorPath) => (await stat(authorPath)).mtimeMs),
+      ),
+      authorTimes,
+    );
+    assert.deepEqual(
+      await Promise.all(
+        authorRoots.map(
+          async (authorPath) => (await stat(authorPath)).mode & 0o777,
+        ),
+      ),
+      authorModes,
+    );
+    const restoredWorkspace = await stat(workspaceRoot);
+    assert.equal(restoredWorkspace.mode & 0o777, workspaceMode);
+    assert.equal(restoredWorkspace.mtimeMs, workspaceTime);
+    const evidenceRoot = await contentArtifactEvidenceRoot();
+    await writeContentCollectionEvidence(
+      prepared,
+      path.join(evidenceRoot, "all-references-build.md"),
+    );
+    await writeFile(
+      path.join(evidenceRoot, "all-references-consumer.json"),
+      `${JSON.stringify(
+        {
+          command: `pnpm --dir ${consumerRoot} add ${prepared.collection.tarball}`,
+          authorDirectories: [
+            ...authorRoots.map((authorPath) => ({ path: authorPath, mode: 0 })),
+            { path: workspaceRoot, mode: 0 },
+          ],
+          providers: closure.packages,
+          links: closure.links,
+          references: result.results,
+          missingBinding: result.missingBinding,
+          missingProvider: result.missingProvider,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  });
+
   void it("同一原创TypeScript工厂经原生安装后init、fresh add并隔离作者目录", async () => {
     assert.ok(firstPartyPrepared);
     const sdkVersions = new Map(
@@ -558,6 +1367,7 @@ void describe("原生内容制品安装链", () => {
     const fixture = await createAuthoredContentFixture({
       namespace,
       marker: namespace,
+      addonDependsOnTheme: true,
       nativeWorkspace: true,
       deferLoad: true,
       collectionPackageName: "@fixture/authored-content",
@@ -566,34 +1376,58 @@ void describe("原生内容制品安装链", () => {
         typescript: typescriptVersion,
         nodeTypes: nodeTypesVersion,
       },
+      featureNativeDevDependencies: { typescript: "6.0.3" },
+      featureTemplatePrelude: [
+        'import ts from "typescript";',
+        "export const fixtureTypescriptVersion = ts.version;",
+        'if (ts.version !== "6.0.3") throw new Error(`所属包解析出 TypeScript ${ts.version}`);',
+      ],
+      featureTemplateDependencies: [
+        {
+          name: "@ykdz/template-workspace-authoring",
+          purpose: "template-execution",
+        },
+        { name: "typescript", purpose: "template-execution" },
+      ],
     });
     authoredFixtures.push(fixture);
-    await writeNativeArchiveOverrides(
+    const featureAuthorRoot = path.join(
       fixture.root,
-      firstPartyPrepared.sdkPackages,
-      [`${namespace}/authors/*`, `${namespace}/collection`],
+      namespace,
+      "authors",
+      "feature",
     );
-    await execa("pnpm", ["--dir", fixture.root, "install"], {
-      cwd: workspaceRoot,
+    const featureDefinitionPath = path.join(
+      featureAuthorRoot,
+      "template",
+      "definition.ts",
+    );
+    const originalFeatureDefinition = await readFile(
+      featureDefinitionPath,
+      "utf8",
+    );
+    assert.ok(originalFeatureDefinition.includes('resources: ["src"],'));
+    await mkdir(path.join(featureAuthorRoot, "lib"), { recursive: true });
+    await rename(
+      path.join(featureAuthorRoot, "src", "content.ts"),
+      path.join(featureAuthorRoot, "lib", "content.ts"),
+    );
+    await rm(path.join(featureAuthorRoot, "src"), {
+      recursive: true,
+      force: true,
     });
-    await execa(
-      "pnpm",
-      [
-        "--dir",
-        fixture.root,
-        "-r",
-        "--filter",
-        "@fixture/preset...",
-        "--filter",
-        "@fixture/addon",
-        "--if-present",
-        "run",
-        "build:template",
-      ],
-      { cwd: workspaceRoot },
+    await writeFile(
+      featureDefinitionPath,
+      originalFeatureDefinition.replace(
+        'resources: ["src"],',
+        'resources: ["lib"],',
+      ),
     );
-
-    const content = await fixture.load(namespace);
+    const content = await buildNativeAuthoredContent(
+      fixture,
+      namespace,
+      firstPartyPrepared.sdkPackages,
+    );
     const feature = content.find(
       (member) => member.identity.packageName === "@fixture/feature",
     );
@@ -608,7 +1442,7 @@ void describe("原生内容制品安装链", () => {
         }[];
       };
     };
-    const featureSource = featureDefinition.source("src/content.ts");
+    const featureSource = featureDefinition.source("lib/content.ts");
     const authoringSdkRoot = await realpath(
       path.join(
         fixture.root,
@@ -648,13 +1482,14 @@ void describe("原生内容制品安装链", () => {
     );
     const preparedFeature = featureDefinition.prepareArtifact();
     const preparedFeatureSource = preparedFeature.resources.find(
-      ({ path: resourcePath }) => resourcePath === "src/content.ts",
+      ({ path: resourcePath }) => resourcePath === "lib/content.ts",
     );
     assert.ok(preparedFeatureSource);
     assert.equal(
       Buffer.from(preparedFeatureSource.data).toString("utf8"),
       'export const fixtureOrigin = "native-authored:feature";\n',
     );
+    assert.equal(preparedFeatureSource.path, "lib/content.ts");
     const sdkBoundaryEvidence = {
       archiveCoreEntry,
       workspaceCoreEntry,
@@ -701,6 +1536,23 @@ void describe("原生内容制品安装链", () => {
         "@fixture/preset",
         "@fixture/typescript-config",
       ].sort(),
+    );
+    const featureOwner = prepared.owners.find(
+      (owner) => owner.member.identity.packageName === "@fixture/feature",
+    );
+    assert.ok(featureOwner);
+    const featureArchiveManifest = JSON.parse(
+      await readFile(
+        path.join(featureOwner.installRoot, "package.json"),
+        "utf8",
+      ),
+    ) as {
+      readonly dependencies?: Readonly<Record<string, string>>;
+    };
+    assert.equal(
+      featureArchiveManifest.dependencies?.typescript,
+      "6.0.3",
+      "原创 owner 的普通原生依赖应使用该 owner 自己解析出的 TypeScript 坐标",
     );
     const presetOwner = prepared.owners.find(
       (owner) => owner.member.identity.packageName === "@fixture/preset",
@@ -816,7 +1668,7 @@ void describe("原生内容制品安装链", () => {
         "const featureDefinition = initialized.blueprint.packages.find((definition) => definition.packageDefinitionId === featureRecord.packageDefinitionId);",
         "const themeDefinition = initialized.blueprint.packages.find((definition) => definition.packageDefinitionId === themeRecord.packageDefinitionId);",
         "assert.ok(featureDefinition && themeDefinition);",
-        'assert.equal(await readFile(`${targetRoot}/${featureDefinition.path}/src/content.ts`, "utf8"), \'export const fixtureOrigin = "native-authored:feature";\\n\');',
+        'assert.equal(await readFile(`${targetRoot}/${featureDefinition.path}/lib/content.ts`, "utf8"), \'export const fixtureOrigin = "native-authored:feature";\\n\');',
         'assert.equal(await readFile(`${targetRoot}/${themeDefinition.path}/src/theme.ts`, "utf8"), \'export const fixtureOrigin = "native-authored:theme";\\n\');',
         "const generationPath = `${targetRoot}/.template/generation.json`;",
         'await writeFile(`${targetRoot}/user-owned.txt`, "keep this file\\n", { mode: 0o640 });',
@@ -828,13 +1680,24 @@ void describe("原生内容制品安装链", () => {
         'assert.equal(await readFile(generationPath, "utf8"), beforeWrongKind);',
         "const afterWrongKindTree = await snapshotTree(targetRoot);",
         "assert.deepEqual(afterWrongKindTree, beforeWrongKindTree);",
-        'const addition = await generator.add({ repositoryRoot: targetRoot, contentIdentity: { alias: "addon", namespace: "native-authored" }, creationInput: { leafName: "fresh-addon" } });',
+        "const freshGenerator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+        'const addition = await freshGenerator.add({ repositoryRoot: targetRoot, contentIdentity: { alias: "addon", namespace: "native-authored" }, creationInput: { leafName: "fresh-addon" } });',
         'assert.equal(addition.status, "success", JSON.stringify(addition));',
         'if (addition.status !== "success") process.exit(3);',
         'const addonDefinition = addition.blueprint.packages.find((definition) => definition.path === "packages/fresh-addon");',
         "assert.ok(addonDefinition);",
         'const generatedAddon = await readFile(`${targetRoot}/${addonDefinition.path}/src/addon.ts`, "utf8");',
         "assert.equal(generatedAddon, 'export const fixtureOrigin = \"native-authored:addon\";\\n');",
+        "const afterFeatureRecord = addition.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(featureIdentity));",
+        "const afterThemeRecords = addition.generationRecord.packages.filter((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(themeIdentity));",
+        'const addonIdentity = { namespace: "native-authored", packageName: "@fixture/addon", exportPath: "./template" };',
+        "const addonRecord = addition.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(addonIdentity));",
+        "assert.ok(afterFeatureRecord && addonRecord);",
+        "assert.equal(afterFeatureRecord.packageDefinitionId, featureRecord.packageDefinitionId);",
+        "assert.equal(afterThemeRecords.length, 1);",
+        "assert.equal(afterThemeRecords[0].packageDefinitionId, themeRecord.packageDefinitionId);",
+        "assert.equal(addonRecord.bindings[contentIdentityKey(themeIdentity)], themeRecord.packageDefinitionId);",
+        "for (const [nodeIdentity, instanceId] of Object.entries(initialized.generationRecord.nodeInstances)) assert.equal(addition.generationRecord.nodeInstances[nodeIdentity], instanceId);",
         "await writeFile(resultPath, JSON.stringify({ templateContent, initialized, addition, generatedAddon, beforeWrongKindTree, afterWrongKindTree }));",
       ].join("\n"),
     );
@@ -934,6 +1797,21 @@ void describe("原生内容制品安装链", () => {
       ({ name }) => name === "@fixture/preset",
     );
     assert.ok(installedPreset);
+    const installedFeature = installed.find(
+      ({ name }) => name === "@fixture/feature",
+    );
+    assert.ok(installedFeature);
+    const installedFeatureDefinition = await import(
+      pathToFileURL(
+        path.join(
+          installedFeature.path,
+          "native",
+          "template-dist",
+          "definition.js",
+        ),
+      ).href
+    );
+    assert.equal(installedFeatureDefinition.fixtureTypescriptVersion, "6.0.3");
     const presetManifest = JSON.parse(
       await readFile(path.join(installedPreset.path, "package.json"), "utf8"),
     ) as { readonly dependencies?: Readonly<Record<string, string>> };
@@ -1070,7 +1948,7 @@ void describe("原生内容制品安装链", () => {
       ({ name }) => name === "@fixture/feature",
     )?.path;
     assert.ok(featurePackagePath);
-    const featureResourceRoot = path.join(featurePackagePath, "native", "src");
+    const featureResourceRoot = path.join(featurePackagePath, "native", "lib");
     const hiddenFeatureResourceRoot = path.join(
       featurePackagePath,
       "native",
@@ -1132,7 +2010,7 @@ void describe("原生内容制品安装链", () => {
       assert.equal(failure.phase, "planning");
       assert.match(
         failure.errorMessage,
-        /@fixture\/feature.*prepare 阶段失败.*参考资源不存在：src/u,
+        /@fixture\/feature.*prepare 阶段失败.*参考资源不存在：lib/u,
       );
     }
     assert.deepEqual(
@@ -1181,6 +2059,307 @@ void describe("原生内容制品安装链", () => {
           ownerSdkBoundary: sdkBoundaryEvidence,
           existingTargetAfterMissingResource: await snapshotTree(targetRoot),
           missingResourceTargetCreated: false,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  });
+
+  void it("原生安装按来源和真实版本消歧同名原创内容", async () => {
+    assert.ok(firstPartyPrepared);
+    const typescriptVersion =
+      firstPartyPrepared.resolvedVersions.get("typescript-7");
+    const nodeTypesVersion =
+      firstPartyPrepared.resolvedVersions.get("@types/node");
+    assert.ok(typescriptVersion && nodeTypesVersion);
+    const fixtures = [
+      {
+        namespace: "native-alpha",
+        version: "1.0.0",
+        marker: "native-alpha",
+      },
+      {
+        namespace: "native-beta",
+        version: "2.0.0",
+        marker: "native-beta",
+      },
+    ];
+    const authored = [];
+    for (const source of fixtures) {
+      const fixture = await createAuthoredContentFixture({
+        namespace: source.namespace,
+        marker: source.marker,
+        contentVersion: source.version,
+        featureDependsOnTheme: false,
+        nativeWorkspace: true,
+        deferLoad: true,
+        sdkVersions: new Map(
+          firstPartyPrepared.sdkPackages.map(({ name, version }) => [
+            name,
+            version,
+          ]),
+        ),
+        toolVersions: {
+          typescript: typescriptVersion,
+          nodeTypes: nodeTypesVersion,
+        },
+      });
+      authoredFixtures.push(fixture);
+      authored.push({
+        ...source,
+        fixture,
+        members: await buildNativeAuthoredContent(
+          fixture,
+          source.namespace,
+          firstPartyPrepared.sdkPackages,
+        ),
+      });
+    }
+    const members = authored.flatMap(({ members: sourceMembers }) => [
+      ...sourceMembers,
+    ]);
+    const features = authored.map(({ namespace, members: sourceMembers }) => {
+      const feature = sourceMembers.find(
+        (member) => member.identity.packageName === "@fixture/feature",
+      );
+      assert.ok(feature);
+      assert.equal(feature.kind, "reference");
+      assert.equal(feature.identity.namespace, namespace);
+      return feature;
+    });
+    const prepared = await prepareContentCollection({
+      content: members as unknown as typeof templateContent,
+      roots: features as unknown as typeof templateContent,
+      strategy: createDefaultWorkspaceStrategy(),
+      workspaceRoot,
+      packageName: "@fixture/multi-source-content",
+      collectionVersion: "1.0.0",
+      root: await temporaryRoot("multi-source-content-"),
+      sdkArchives: firstPartyPrepared.sdkPackages,
+    });
+    preparedCollections.push(prepared);
+    assert.equal(prepared.members.length, 2);
+    assert.deepEqual(
+      prepared.owners
+        .map(({ artifact }) => artifact.coordinate)
+        .sort((a, b) => a.version.localeCompare(b.version)),
+      [
+        { name: "@fixture/feature", version: "1.0.0" },
+        { name: "@fixture/feature", version: "2.0.0" },
+      ],
+    );
+    assert.equal(
+      [...prepared.archives.values()].filter(
+        ({ name }) => name === "@fixture/feature",
+      ).length,
+      2,
+    );
+
+    const consumerRoot = await temporaryRoot("multi-source-consumer-");
+    await installContentCollection(prepared, consumerRoot);
+    const projectRoot = path.join(consumerRoot, "project");
+    const targetBase = path.join(projectRoot, "generated");
+    const temporaryDirectory = path.join(consumerRoot, "tmp");
+    await mkdir(projectRoot, { recursive: true });
+    await mkdir(temporaryDirectory, { recursive: true });
+    await chmod(projectRoot, 0o777);
+    await chmod(temporaryDirectory, 0o777);
+    const installedCollection = path.join(
+      consumerRoot,
+      "node_modules",
+      "@fixture",
+      "multi-source-content",
+    );
+    const driverPath = path.join(
+      installedCollection,
+      "multi-source-driver.mjs",
+    );
+    const sourcePath = path.join(projectRoot, "sources.json");
+    const authorRootsPath = path.join(projectRoot, "author-roots.json");
+    const resultPath = path.join(projectRoot, "result.json");
+    const targetRoot = path.join(targetBase, "selected-sources");
+    const authorRoots = [
+      workspaceRoot,
+      ...authored.flatMap(({ fixture, namespace }) => [
+        fixture.root,
+        path.join(fixture.root, namespace, "authors"),
+        ...["feature", "typescript-config", "addon", "preset"].map((owner) =>
+          path.join(fixture.root, namespace, "authors", owner),
+        ),
+      ]),
+    ];
+    const authorDirectoryStates = await Promise.all(
+      authorRoots.map(async (directory) => ({
+        path: directory,
+        mode: (await stat(directory)).mode & 0o777,
+        mtimeMs: (await stat(directory)).mtimeMs,
+      })),
+    );
+    await writeFile(
+      sourcePath,
+      JSON.stringify({
+        targetRoot,
+        identities: features.map(({ identity }) => identity),
+        versions: fixtures.map(({ version }) => version),
+        markers: fixtures.map(({ marker }) => `${marker}:feature`),
+      }),
+    );
+    await writeFile(authorRootsPath, JSON.stringify(authorRoots));
+    await writeFile(
+      driverPath,
+      [
+        'import assert from "node:assert/strict";',
+        'import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";',
+        'import { contentIdentityKey } from "@ykdz/template-core/content-identity";',
+        'import { createGenerator } from "@ykdz/template-generator";',
+        'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
+        'import { templateContent } from "@fixture/multi-source-content";',
+        'const { targetRoot, identities, versions, markers } = JSON.parse(await readFile(process.argv[2], "utf8"));',
+        'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
+        'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
+        "const generator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+        "const ambiguousTarget = `${targetRoot}/ambiguous`;",
+        'const ambiguous = await generator.init({ targetRoot: ambiguousTarget, selection: { roots: [{ nodeIdentity: "ambiguous", contentIdentity: { alias: "feature" } }] }, strategyInput: { repositoryName: "ambiguous", defaultPackageScope: "ambiguous", todo: false } });',
+        'assert.equal(ambiguous.status, "operation-failure");',
+        'assert.equal(ambiguous.phase, "planning");',
+        "assert.match(ambiguous.error.message, /内容别名存在歧义：feature/u);",
+        'await assert.rejects(readdir(ambiguousTarget), { code: "ENOENT" });',
+        "await mkdir(targetRoot, { recursive: true });",
+        'const initialized = await generator.init({ targetRoot, selection: { roots: identities.map((contentIdentity, index) => ({ nodeIdentity: `source-${index}`, contentIdentity, creationInput: { leafName: `source-${index}` } })) }, strategyInput: { repositoryName: "multi-source", defaultPackageScope: "multi-source", todo: false } });',
+        'assert.equal(initialized.status, "success", JSON.stringify(initialized));',
+        'if (initialized.status !== "success") process.exit(2);',
+        "const results = identities.map((identity, index) => {",
+        "  const record = initialized.generationRecord.packages.find((item) => contentIdentityKey(item.contentIdentity) === contentIdentityKey(identity));",
+        "  assert.ok(record);",
+        "  const definition = initialized.blueprint.packages.find((item) => item.packageDefinitionId === record.packageDefinitionId);",
+        "  assert.ok(definition);",
+        "  return { identity, packageDefinitionId: record.packageDefinitionId, path: definition.path, body: markers[index], version: versions[index] };",
+        "});",
+        "assert.notEqual(results[0].packageDefinitionId, results[1].packageDefinitionId);",
+        "assert.notEqual(results[0].path, results[1].path);",
+        'for (const result of results) assert.equal(await readFile(`${targetRoot}/${result.path}/src/content.ts`, "utf8"), `export const fixtureOrigin = ${JSON.stringify(result.body)};\\n`);',
+        "await writeFile(process.argv[4], JSON.stringify({ ambiguous: { status: ambiguous.status, phase: ambiguous.phase, error: ambiguous.error.message }, results }));",
+      ].join("\n"),
+    );
+    await withUnreadableAuthorDirectories(
+      authorDirectoryStates,
+      async () =>
+        await execa(
+          process.execPath,
+          [driverPath, sourcePath, authorRootsPath, resultPath],
+          {
+            cwd: installedCollection,
+            env: {
+              ...process.env,
+              HOME: consumerRoot,
+              TMPDIR: temporaryDirectory,
+              NODE_OPTIONS: "--no-global-search-paths",
+              NODE_PATH: "",
+            },
+            uid: 65534,
+            gid: 65534,
+          },
+        ),
+    );
+    const result = JSON.parse(await readFile(resultPath, "utf8")) as {
+      readonly ambiguous: {
+        readonly status: string;
+        readonly phase: string;
+        readonly error: string;
+      };
+      readonly results: readonly {
+        readonly identity: { readonly namespace: string };
+        readonly packageDefinitionId: string;
+        readonly path: string;
+        readonly body: string;
+        readonly version: string;
+      }[];
+    };
+    assert.equal(result.ambiguous.status, "operation-failure");
+    assert.equal(result.results.length, 2);
+    assert.deepEqual(
+      result.results.map(({ identity, version }) => ({
+        namespace: identity.namespace,
+        version,
+      })),
+      fixtures.map(({ namespace, version }) => ({ namespace, version })),
+    );
+    const closure = await auditInstalledClosure(consumerRoot, [
+      workspaceRoot,
+      ...authored.flatMap(({ fixture }) => [fixture.root]),
+    ]);
+    const installedFeatures = closure.packages.filter(
+      ({ name }) => name === "@fixture/feature",
+    );
+    const distinctFeaturePaths = [
+      ...new Set(installedFeatures.map(({ path }) => path)),
+    ];
+    const installedVersions = await Promise.all(
+      distinctFeaturePaths.map(async (packagePath) => {
+        const manifest = JSON.parse(
+          await readFile(path.join(packagePath, "package.json"), "utf8"),
+        ) as { readonly version: string };
+        return manifest.version;
+      }),
+    );
+    assert.deepEqual(installedVersions.sort(), ["1.0.0", "2.0.0"]);
+    const installedProviders = [
+      ...new Map(
+        closure.packages
+          .filter(({ name }) =>
+            name.startsWith("@ykdz/template-content-provider-"),
+          )
+          .map((provider) => [provider.path, provider]),
+      ).values(),
+    ];
+    assert.equal(installedProviders.length, 2);
+    const providerVersions = await Promise.all(
+      installedProviders.map(async ({ path: providerPath }) => {
+        const manifest = JSON.parse(
+          await readFile(path.join(providerPath, "package.json"), "utf8"),
+        ) as {
+          readonly dependencies?: Readonly<Record<string, string>>;
+        };
+        return manifest.dependencies?.["@fixture/feature"];
+      }),
+    );
+    assert.deepEqual(
+      providerVersions.sort((left, right) =>
+        (left ?? "").localeCompare(right ?? ""),
+      ),
+      ["1.0.0", "2.0.0"],
+    );
+    assert.ok(closure.links.length > 0);
+    for (const directory of authorDirectoryStates) {
+      const restored = await stat(directory.path);
+      assert.equal(restored.mode & 0o777, directory.mode);
+      assert.equal(restored.mtimeMs, directory.mtimeMs);
+    }
+    const evidenceRoot = await contentArtifactEvidenceRoot();
+    await writeContentCollectionEvidence(
+      prepared,
+      path.join(evidenceRoot, "multi-source-build.md"),
+    );
+    await writeFile(
+      path.join(evidenceRoot, "multi-source-consumer.json"),
+      `${JSON.stringify(
+        {
+          command: `pnpm --dir ${consumerRoot} add ${prepared.collection.tarball}`,
+          owners: prepared.owners.map(({ member, artifact, packed }) => ({
+            identity: member.identity,
+            coordinate: artifact.coordinate,
+            sha256: packed.sha256,
+          })),
+          providerDependencies: providerVersions,
+          results: result.results,
+          ambiguous: result.ambiguous,
+          packages: closure.packages,
+          links: closure.links,
+          authorDirectories: authorDirectoryStates.map(({ path }) => ({
+            path,
+            mode: 0,
+          })),
         },
         null,
         2,
