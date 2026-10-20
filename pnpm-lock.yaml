@@ -683,9 +683,6 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 7.0.2004
-      tar:
-        specifier: 'catalog:'
-        version: 7.5.22
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
