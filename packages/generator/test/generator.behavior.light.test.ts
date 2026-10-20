@@ -681,11 +681,21 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
     const cloneRecord = () =>
       JSON.parse(JSON.stringify(validRecord)) as Record<string, unknown>;
     const cases = [
-      {
-        label: "schema2",
-        record: { ...cloneRecord(), schemaVersion: 2 },
-        message: /不支持的生成记录 schema 2/u,
-      },
+      ...([1, 2] as const).map((schemaVersion) => ({
+        label: `schema${schemaVersion}`,
+        record: {
+          schemaVersion,
+          strategyIdentity: validRecord.strategyIdentity,
+          strategyState: validRecord.strategyState,
+          packages: [
+            {
+              contentIdentity: guideIdentity,
+              definition: { packageDefinitionId: "legacy-package" },
+            },
+          ],
+        },
+        message: new RegExp(`不支持的生成记录 schema ${schemaVersion}`, "u"),
+      })),
       {
         label: "strategyState",
         record: (() => {
