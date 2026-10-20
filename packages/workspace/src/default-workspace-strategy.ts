@@ -357,9 +357,9 @@ function nativeDependencyNames(
   content: DefaultReferenceContent<PackageCreationInput>,
 ): readonly string[] {
   const reference = content.definition;
-  const templateExecution = new Set(
-    reference.templateDependencies
-      .filter((dependency) => dependency.purpose === "template-execution")
+  const targetDependencies = new Set(
+    reference.dependencyUses
+      .filter((dependency) => dependency.purposes.includes("target"))
       .map((dependency) => dependency.name),
   );
   return [
@@ -375,7 +375,7 @@ function nativeDependencyNames(
         return Object.entries(dependencies)
           .filter(
             ([name, specifier]) =>
-              !templateExecution.has(name) &&
+              targetDependencies.has(name) &&
               typeof specifier === "string" &&
               (specifier.startsWith("workspace:") ||
                 specifier.startsWith("link:")),
