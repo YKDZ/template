@@ -9,6 +9,8 @@ import {
 import type {
   PresetDefinition,
   PresetNode,
+  PresetOwnerSelection,
+  PresetProjectOptions,
   PresetReference,
 } from "@ykdz/template-core/preset-definition";
 import {
@@ -42,6 +44,7 @@ type GeneratorRecord<CreationInput extends PackageCreationInput> = {
   readonly strategyState: unknown;
   readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
   readonly nodeInstances: GeneratorNodeInstanceIds;
+  readonly presetSelections: readonly PresetOwnerSelection[];
 };
 
 type PackageNode<
@@ -92,6 +95,9 @@ export type Generator<
   CreationInput extends PackageCreationInput = PackageCreationInput,
   Reference extends PresetReference = PresetReference,
   NodeLayout = unknown,
+  Context = unknown,
+  Contribution extends PackageContribution = PackageContribution,
+  PresetProjectContribution = unknown,
 > = {
   init(options: {
     readonly targetRoot: string;
@@ -99,7 +105,10 @@ export type Generator<
       readonly roots: readonly GeneratorSelectionInput<
         Reference,
         CreationInput,
-        NodeLayout
+        NodeLayout,
+        Context,
+        Contribution,
+        PresetProjectContribution
       >[];
     };
     readonly strategyInput: Input;
@@ -116,7 +125,9 @@ export type Generator<
           readonly preset: PresetDefinition<
             Reference,
             NodeLayout,
-            CreationInput
+            CreationInput,
+            PresetProjectOptions<Context, Contribution>,
+            PresetProjectContribution
           >;
         }
     ),
@@ -127,10 +138,19 @@ type GeneratorSelectionInput<
   Reference extends PresetReference,
   CreationInput extends PackageCreationInput,
   NodeLayout,
+  Context,
+  Contribution,
+  PresetProjectContribution,
 > =
   | GeneratorSelectionRoot<CreationInput, NodeLayout>
   | {
-      readonly preset: PresetDefinition<Reference, NodeLayout, CreationInput>;
+      readonly preset: PresetDefinition<
+        Reference,
+        NodeLayout,
+        CreationInput,
+        PresetProjectOptions<Context, Contribution>,
+        PresetProjectContribution
+      >;
       readonly creationInput?: CreationInput;
     };
 
@@ -142,9 +162,17 @@ function isPresetDefinition<
   Reference extends PresetReference,
   NodeLayout,
   CreationInput,
+  ProjectOptions,
+  ProjectContribution,
 >(
   value: unknown,
-): value is PresetDefinition<Reference, NodeLayout, CreationInput> {
+): value is PresetDefinition<
+  Reference,
+  NodeLayout,
+  CreationInput,
+  ProjectOptions,
+  ProjectContribution
+> {
   return isRecord(value) && value.kind === "preset" && isRecord(value.nodes);
 }
 
@@ -171,6 +199,34 @@ function fail(
 function readJson(value: unknown, label: string): Record<string, unknown> {
   if (!isRecord(value)) throw new Error(label + " must be an object");
   return value;
+}
+
+function presetOwnerKey(owner: PresetOwnerSelection): string {
+  return JSON.stringify([owner.packageName, owner.exportPath]);
+}
+
+function parsePresetSelections(value: unknown): PresetOwnerSelection[] {
+  if (!Array.isArray(value)) throw new Error("生成记录的预设选择无效");
+  const seen = new Set<string>();
+  return value.map((item) => {
+    const owner = readJson(item, "生成记录预设选择");
+    if (
+      typeof owner.packageName !== "string" ||
+      owner.packageName.length === 0 ||
+      typeof owner.exportPath !== "string" ||
+      (owner.exportPath !== "." && !owner.exportPath.startsWith("./"))
+    ) {
+      throw new Error("生成记录的预设选择无效");
+    }
+    const selection = {
+      packageName: owner.packageName,
+      exportPath: owner.exportPath,
+    };
+    const key = presetOwnerKey(selection);
+    if (seen.has(key)) throw new Error("生成记录的预设选择重复");
+    seen.add(key);
+    return selection;
+  });
 }
 
 function parseGeneratorRecord<CreationInput extends PackageCreationInput>(
@@ -226,6 +282,7 @@ function parseGeneratorRecord<CreationInput extends PackageCreationInput>(
     strategyState: record.strategyState,
     packages,
     nodeInstances: nodeInstances as GeneratorNodeInstanceIds,
+    presetSelections: parsePresetSelections(record.presetSelections),
   };
 }
 
@@ -265,10 +322,17 @@ export function createGenerator<
   CreationInput extends PackageCreationInput,
   Content extends GeneratorContent<Context, Contribution, CreationInput>,
   NodeLayout,
+  PresetProjectContribution = unknown,
 >(options: {
   readonly content: readonly (
     | Content
-    | PresetDefinition<Content, NoInfer<NodeLayout>, NoInfer<CreationInput>>
+    | PresetDefinition<
+        Content,
+        NoInfer<NodeLayout>,
+        NoInfer<CreationInput>,
+        PresetProjectOptions<Context, Contribution>,
+        NoInfer<PresetProjectContribution>
+      >
   )[];
   readonly strategy: WorkspaceStrategy<
     Context,
@@ -277,15 +341,45 @@ export function createGenerator<
     Contribution,
     CreationInput,
     Content,
-    NodeLayout
+    NodeLayout,
+    PresetProjectContribution
   >;
-}): Generator<Input, CreationInput, Content, NodeLayout> {
+}): Generator<
+  Input,
+  CreationInput,
+  Content,
+  NodeLayout,
+  Context,
+  Contribution,
+  PresetProjectContribution
+> {
   const contentMembers = options.content.filter(
     (content): content is Content =>
-      !isPresetDefinition<Content, NodeLayout, CreationInput>(content),
+      !isPresetDefinition<
+        Content,
+        NodeLayout,
+        CreationInput,
+        PresetProjectOptions<Context, Contribution>,
+        PresetProjectContribution
+      >(content),
   );
   const presetMembers = options.content.filter(
-    isPresetDefinition<Content, NodeLayout, CreationInput>,
+    (
+      content,
+    ): content is PresetDefinition<
+      Content,
+      NodeLayout,
+      CreationInput,
+      PresetProjectOptions<Context, Contribution>,
+      PresetProjectContribution
+    > =>
+      isPresetDefinition<
+        Content,
+        NodeLayout,
+        CreationInput,
+        PresetProjectOptions<Context, Contribution>,
+        PresetProjectContribution
+      >(content),
   );
   const contentByIdentity = new Map(
     contentMembers.map((content) => [content.identity, content]),
@@ -297,7 +391,28 @@ export function createGenerator<
   if (presets.size !== presetMembers.length) {
     throw new Error("显式预设成员不能重复");
   }
+  const projectPresetsByOwner = new Map<
+    string,
+    PresetDefinition<
+      Content,
+      NodeLayout,
+      CreationInput,
+      PresetProjectOptions<Context, Contribution>,
+      PresetProjectContribution
+    >
+  >();
   for (const preset of presets) {
+    if (preset.project !== undefined) {
+      const owner = preset.owner;
+      if (owner === undefined) {
+        throw new Error("项目预设缺少所属包公开导出身份");
+      }
+      const ownerKey = JSON.stringify([owner.packageName, owner.exportPath]);
+      if (projectPresetsByOwner.has(ownerKey)) {
+        throw new Error("项目预设所属包导出身份重复");
+      }
+      projectPresetsByOwner.set(ownerKey, preset);
+    }
     for (const node of Object.values(preset.nodes)) {
       const reference = contentByIdentity.get(node.reference.identity);
       if (reference !== node.reference) {
@@ -317,7 +432,13 @@ export function createGenerator<
   }
 
   function expandPreset(options_: {
-    readonly preset: PresetDefinition<Content, NodeLayout, CreationInput>;
+    readonly preset: PresetDefinition<
+      Content,
+      NodeLayout,
+      CreationInput,
+      PresetProjectOptions<Context, Contribution>,
+      PresetProjectContribution
+    >;
     readonly operation: "init" | "add";
     readonly creationInput?: CreationInput;
   }): GeneratorSelectionRoot<CreationInput, NodeLayout>[] {
@@ -467,6 +588,7 @@ export function createGenerator<
     state: State,
     records: readonly GeneratorPackageRecord<CreationInput>[],
     nodeInstances: GeneratorNodeInstanceIds,
+    presetSelections: readonly PresetOwnerSelection[],
   ): GeneratorRecord<CreationInput> {
     return {
       schemaVersion: 1,
@@ -474,7 +596,52 @@ export function createGenerator<
       strategyState: state,
       packages: records,
       nodeInstances,
+      presetSelections,
     };
+  }
+
+  function projectOwner(
+    preset: PresetDefinition<
+      Content,
+      NodeLayout,
+      CreationInput,
+      PresetProjectOptions<Context, Contribution>,
+      PresetProjectContribution
+    >,
+  ): PresetOwnerSelection | undefined {
+    if (preset.project === undefined) return undefined;
+    if (preset.owner === undefined) {
+      throw new Error("项目预设缺少所属包公开导出身份");
+    }
+    return preset.owner;
+  }
+
+  function mergePresetSelections(
+    existing: readonly PresetOwnerSelection[],
+    added: readonly PresetOwnerSelection[],
+  ): PresetOwnerSelection[] {
+    const selections = new Map<string, PresetOwnerSelection>();
+    for (const selection of [...existing, ...added]) {
+      selections.set(presetOwnerKey(selection), selection);
+    }
+    return [...selections.values()];
+  }
+
+  function computePresetProjectContributions(
+    context: Context,
+    contributions: readonly Contribution[],
+    nodeInstances: GeneratorNodeInstances,
+    presetSelections: readonly PresetOwnerSelection[],
+  ): PresetProjectContribution[] {
+    return presetSelections.map((selection) => {
+      const preset = projectPresetsByOwner.get(presetOwnerKey(selection));
+      if (preset?.project === undefined) {
+        throw new Error(
+          `生成记录所选预设不可用：${selection.packageName}${selection.exportPath}`,
+        );
+      }
+      return preset.project({ context, contributions, nodeInstances });
+    });
   }
 
   function project(
@@ -484,8 +651,15 @@ export function createGenerator<
     records: readonly GeneratorPackageRecord<CreationInput>[],
     contributions: readonly Contribution[],
     nodeInstances: GeneratorNodeInstanceIds,
+    presetSelections: readonly PresetOwnerSelection[],
   ) {
     const resolvedNodeInstances = resolveNodeInstances(records, nodeInstances);
+    const presetProjectContributions = computePresetProjectContributions(
+      context,
+      contributions,
+      resolvedNodeInstances,
+      presetSelections,
+    );
     const projection = options.strategy.project({
       context,
       state,
@@ -493,6 +667,7 @@ export function createGenerator<
       packages: records,
       contributions,
       nodeInstances: resolvedNodeInstances,
+      presetProjectContributions,
     });
     const projectedBlueprint = assertProjectBlueprint(
       projection.blueprint ?? blueprint,
@@ -533,7 +708,7 @@ export function createGenerator<
         {
           kind: "writeJson" as const,
           to: ".template/generation.json",
-          value: storedRecord(state, records, nodeInstances),
+          value: storedRecord(state, records, nodeInstances, presetSelections),
         },
       ],
       reconciliation: projection.reconciliation,
@@ -703,13 +878,26 @@ export function createGenerator<
       readonly roots: readonly GeneratorSelectionInput<
         Content,
         CreationInput,
-        NodeLayout
+        NodeLayout,
+        Context,
+        Contribution,
+        PresetProjectContribution
       >[];
     };
     readonly strategyInput: Input;
     readonly dryRun?: boolean;
   }): Promise<GeneratorResult> {
     try {
+      const selectedProjectPresets: PresetOwnerSelection[] = [];
+      for (const root of initOptions.selection.roots) {
+        if (!("preset" in root)) continue;
+        const owner = projectOwner(root.preset);
+        if (owner !== undefined) selectedProjectPresets.push(owner);
+      }
+      const presetSelections = mergePresetSelections(
+        [],
+        selectedProjectPresets,
+      );
       const selectionRoots = initOptions.selection.roots.flatMap((root) =>
         "preset" in root
           ? expandPreset({
@@ -806,6 +994,7 @@ export function createGenerator<
         records,
         contributions,
         nodeInstances,
+        presetSelections,
       );
       await materializeProjectProjection({
         operations: projectPlan.operations,
@@ -836,7 +1025,13 @@ export function createGenerator<
     } & (
       | { readonly contentIdentity: string }
       | {
-          readonly preset: PresetDefinition<Content, NodeLayout, CreationInput>;
+          readonly preset: PresetDefinition<
+            Content,
+            NodeLayout,
+            CreationInput,
+            PresetProjectOptions<Context, Contribution>,
+            PresetProjectContribution
+          >;
         }
     ),
   ): Promise<GeneratorResult> {
@@ -888,6 +1083,8 @@ export function createGenerator<
       }
       const selected = requireContent(selectionRoot.contentIdentity);
       const creationInput = selectionRoot.creationInput;
+      const addedProjectPreset =
+        "preset" in addOptions ? projectOwner(addOptions.preset) : undefined;
       const existingNodes = addRecordNodes(record.packages, blueprint);
       const currentNodeInstances = resolveNodeInstances(
         record.packages,
@@ -906,13 +1103,31 @@ export function createGenerator<
       } catch (error) {
         return fail("metadata", error);
       }
-      for (const node of existingNodes) {
+      const existingContributions = existingNodes.map((node) =>
         createContribution(
           node,
           context,
           record.packages,
           currentNodeInstances,
-        );
+        ),
+      );
+      try {
+        const currentPresetProjectContributions =
+          computePresetProjectContributions(
+            context,
+            existingContributions,
+            currentNodeInstances,
+            record.presetSelections,
+          );
+        await options.strategy.validateAddition?.({
+          targetRoot: repositoryRoot,
+          packages: record.packages,
+          contributions: existingContributions,
+          nodeInstances: currentNodeInstances,
+          presetProjectContributions: currentPresetProjectContributions,
+        });
+      } catch (error) {
+        return fail("metadata", error);
       }
       const definition = options.strategy.createDefinition({
         context,
@@ -962,6 +1177,9 @@ export function createGenerator<
         content: selected,
         definition,
         createdBy: "addition",
+        ...(addedProjectPreset !== undefined
+          ? { nodeIdentity: selectionRoot.nodeIdentity }
+          : {}),
         ...(creationInput === undefined ? {} : { creationInput }),
         providers: new Map(),
       };
@@ -978,6 +1196,30 @@ export function createGenerator<
         node.record === undefined ? [] : [node.record],
       );
       const allRecords = [...record.packages, ...newRecords];
+      const afterNodeInstanceIds: Record<string, PackageDefinitionId> = {
+        ...record.nodeInstances,
+      };
+      if (addedProjectPreset !== undefined) {
+        if (Object.hasOwn(afterNodeInstanceIds, selectionRoot.nodeIdentity)) {
+          throw new Error(
+            "加包预设节点身份已存在：" + selectionRoot.nodeIdentity,
+          );
+        }
+        const addedRoot = additions.find(
+          (node) => node.nodeIdentity === selectionRoot.nodeIdentity,
+        );
+        if (addedRoot?.record === undefined) {
+          throw new Error(
+            "加包预设节点没有持久实例：" + selectionRoot.nodeIdentity,
+          );
+        }
+        afterNodeInstanceIds[selectionRoot.nodeIdentity] =
+          addedRoot.record.definition.packageDefinitionId;
+      }
+      const afterPresetSelections = mergePresetSelections(
+        record.presetSelections,
+        addedProjectPreset === undefined ? [] : [addedProjectPreset],
+      );
       const allDefinitions = [
         ...blueprint.packages,
         ...newRecords.map((item) => item.definition),
@@ -997,7 +1239,7 @@ export function createGenerator<
         afterNodes,
         context,
         allRecords,
-        resolveNodeInstances(allRecords, record.nodeInstances),
+        resolveNodeInstances(allRecords, afterNodeInstanceIds),
       );
       const before = project(
         context,
@@ -1006,6 +1248,7 @@ export function createGenerator<
         record.packages,
         beforeContributions,
         record.nodeInstances,
+        record.presetSelections,
       );
       const after = project(
         context,
@@ -1013,7 +1256,8 @@ export function createGenerator<
         afterBlueprint,
         allRecords,
         afterContributions,
-        record.nodeInstances,
+        afterNodeInstanceIds,
+        afterPresetSelections,
       );
       const projectedBlueprint = after.blueprint;
       const preconditions: ProjectProjectionPathPrecondition[] = additions.map(
