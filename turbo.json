@@ -115,6 +115,42 @@
           ]
         }
       },
+      "template-preset": {
+        "dependencies": {
+          "allow": [
+            "template-preset",
+            "template-content",
+            "app",
+            "native",
+            "library",
+            "template-core",
+            "template-generator",
+            "template-builtin-presets",
+            "template-checks",
+            "template-environment",
+            "template-workspace",
+            "template-workspace-authoring"
+          ]
+        }
+      },
+      "template-content": {
+        "dependencies": {
+          "allow": [
+            "template-content",
+            "template-preset",
+            "app",
+            "native",
+            "library",
+            "template-core",
+            "template-generator",
+            "template-builtin-presets",
+            "template-checks",
+            "template-environment",
+            "template-workspace",
+            "template-workspace-authoring"
+          ]
+        }
+      },
       "template-cli": {
         "dependencies": {
           "allow": [
@@ -125,6 +161,8 @@
             "template-core",
             "template-generator",
             "template-builtin-presets",
+            "template-preset",
+            "template-content",
             "template-checks",
             "template-environment",
             "template-workspace",
@@ -158,6 +196,8 @@
             "template-core",
             "template-generator",
             "template-builtin-presets",
+            "template-preset",
+            "template-content",
             "template-checks",
             "template-environment",
             "template-workspace",
