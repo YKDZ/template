@@ -1,9 +1,8 @@
-import {
-  assertProjectBlueprint,
-  type PackageRole,
-  type ProjectBlueprint,
-} from "@ykdz/template-core/project-blueprint";
+import { type ProjectBlueprint } from "@ykdz/template-core/project-blueprint";
+import { isDefaultPackageRole } from "@ykdz/template-workspace-authoring/default-package-role";
 import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
+
+import { assertDefaultProjectBlueprint } from "./default-package-identity.ts";
 
 type PackageManifest = Readonly<Record<string, unknown>>;
 
@@ -30,15 +29,22 @@ export function canConsumeNodePackageNameImport(
   manifest: PackageManifest = contribution.manifest,
 ): boolean {
   return (
+    isDefaultPackageRole(contribution.definition.role) &&
     contribution.definition.role !== "native-package" &&
     manifest.type === "module"
   );
 }
 
 export function canLinkNodePackageRoles(
-  consumerRole: PackageRole,
-  providerRole: PackageRole,
+  consumerRole: string,
+  providerRole: string,
 ): boolean {
+  if (
+    !isDefaultPackageRole(consumerRole) ||
+    !isDefaultPackageRole(providerRole)
+  ) {
+    return false;
+  }
   if (consumerRole === "native-package" || providerRole === "native-package") {
     return false;
   }
@@ -121,6 +127,7 @@ export function canProvideSourceConditionPackageNameImport(
   manifest: PackageManifest = contribution.manifest,
 ): boolean {
   return (
+    isDefaultPackageRole(contribution.definition.role) &&
     contribution.definition.role !== "native-package" &&
     exposesSourceCondition(manifest)
   );
@@ -154,7 +161,7 @@ export function planExplicitProjectLinks(options: {
   readonly contributions: readonly PackageContribution[];
   readonly manifestTruthByPackagePath?: ReadonlyMap<string, PackageManifest>;
 }): ExplicitProjectLinkPlan {
-  const blueprint = assertProjectBlueprint(options.blueprint);
+  const blueprint = assertDefaultProjectBlueprint(options.blueprint);
   const contributionsByPath = new Map(
     options.contributions.map((contribution) => [
       contribution.definition.path,

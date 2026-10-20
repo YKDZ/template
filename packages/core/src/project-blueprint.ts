@@ -1,4 +1,4 @@
-import { isBuiltin } from "node:module";
+import path from "node:path";
 
 import * as v from "valibot";
 
@@ -6,14 +6,8 @@ import * as v from "valibot";
  * The durable, preset-agnostic topology used by local template follow-up
  * operations. Preset provenance deliberately belongs in Generation Record.
  */
-const packageRoles = [
-  "cli-tool",
-  "runtime-service",
-  "shared-library",
-  "native-package",
-] as const;
-
-export type PackageRole = (typeof packageRoles)[number];
+/** 角色含义由所选工作区策略解释。 */
+export type PackageRole = string;
 
 export type PackageDefinition = {
   readonly name: string;
@@ -58,27 +52,12 @@ export type BlueprintValidationResult =
       readonly issues: readonly BlueprintValidationIssue[];
     };
 
-const packagePath = /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/;
-const reservedWorkspaceCollections = new Set([
-  ".git",
-  ".github",
-  ".devcontainer",
-  ".template",
-  "node_modules",
-  "dist",
-  "target",
-]);
-const reservedPackageNames = new Set(["node_modules", "favicon.ico"]);
-
 const unknownBlueprintField = "Unknown Blueprint v3 field";
 
 const packageDefinitionEntries = {
   name: v.string("Package name must be a string"),
   path: v.string("Package Path must be a string"),
-  role: v.picklist(
-    packageRoles,
-    "Package Role must be cli-tool, runtime-service, shared-library, or native-package",
-  ),
+  role: v.string("Package Role must be a string"),
 } as const;
 
 function packageDefinitionMessage(issue: v.BaseIssue<unknown>): string {
@@ -133,56 +112,20 @@ export const projectBlueprintSchema = v.strictObject(
       : "Local Template Metadata must be an object",
 );
 
-/** Canonical npm package-name predicate shared by Blueprint and input preparation. */
-export function isValidNewNpmPackageName(value: string): boolean {
-  if (
-    value.length === 0 ||
-    value.length > 214 ||
-    value !== value.trim() ||
-    value !== value.toLowerCase() ||
-    value === "." ||
-    value === ".." ||
-    reservedPackageNames.has(value) ||
-    isBuiltin(value)
-  ) {
-    return false;
-  }
-
-  const scopedMatch = /^@([^/]+)\/([^/]+)$/.exec(value);
-  if (value.startsWith("@") && scopedMatch === null) return false;
-
-  const scope = scopedMatch?.[1];
-  const leaf = scopedMatch?.[2] ?? value;
-  if (scope === undefined && /^[._-]/.test(leaf)) {
-    return false;
-  }
-  if (scope !== undefined && leaf.startsWith(".")) {
-    return false;
-  }
-  if (/[~'!()*]/.test(leaf)) return false;
-
+function isNormalizedSafeRelativePath(value: string): boolean {
+  const normalized = path.posix.normalize(value);
   return (
-    encodeURIComponent(leaf) === leaf &&
-    (scope === undefined || encodeURIComponent(scope) === scope)
+    value.length > 0 &&
+    !value.includes("\0") &&
+    !value.includes("\\") &&
+    !path.posix.isAbsolute(value) &&
+    path.win32.parse(value).root.length === 0 &&
+    !value.endsWith("/") &&
+    normalized !== "." &&
+    normalized !== ".." &&
+    !normalized.startsWith("../") &&
+    normalized === value
   );
-}
-
-export type NewPackagePathValidation = {
-  readonly hasValidShape: boolean;
-  readonly reservedWorkspaceCollection?: string;
-};
-
-/** Canonical Package Path facts shared by Blueprint and input preparation. */
-export function validateNewPackagePath(
-  value: string,
-): NewPackagePathValidation {
-  const workspaceCollection = value.split("/", 1)[0]!;
-  return {
-    hasValidShape: packagePath.test(value),
-    ...(reservedWorkspaceCollections.has(workspaceCollection)
-      ? { reservedWorkspaceCollection: workspaceCollection }
-      : {}),
-  };
 }
 
 function blueprintIssuePath(issue: v.BaseIssue<unknown>): string {
@@ -215,9 +158,7 @@ function blueprintStructureMessage(issue: v.BaseIssue<unknown>): string {
     return "Package Definition ID must use the package-<sha256> format";
   }
   if (path.endsWith(".path")) return "Package Path must be a string";
-  if (path.endsWith(".role")) {
-    return "Package Role must be cli-tool, runtime-service, shared-library, or native-package";
-  }
+  if (path.endsWith(".role")) return "Package Role must be a string";
   if (path === ".packageLinkIntents") {
     return "Package Link Intents must be an array";
   }
@@ -236,23 +177,22 @@ function validateBlueprintTopologySemantics(
   const issues: BlueprintValidationIssue[] = [];
   for (const [index, definition] of blueprint.packages.entries()) {
     const itemPath = `.packages[${index}]`;
-    const pathValidation = validateNewPackagePath(definition.path);
-    if (!isValidNewNpmPackageName(definition.name)) {
+    if (definition.name.length === 0) {
       issues.push({
         path: `${itemPath}.name`,
-        message:
-          "Package name must be a valid npm package name for new packages",
+        message: "Package name must not be empty",
       });
     }
-    if (pathValidation.reservedWorkspaceCollection !== undefined) {
+    if (definition.role.length === 0) {
       issues.push({
-        path: `${itemPath}.path`,
-        message: `Package Path ${definition.path} uses reserved workspace collection ${pathValidation.reservedWorkspaceCollection}`,
+        path: `${itemPath}.role`,
+        message: "Package Role must not be empty",
       });
-    } else if (!pathValidation.hasValidShape) {
+    }
+    if (!isNormalizedSafeRelativePath(definition.path)) {
       issues.push({
         path: `${itemPath}.path`,
-        message: "Package Path must be exactly two safe path segments",
+        message: "Package Path must be a normalized safe relative path",
       });
     }
   }

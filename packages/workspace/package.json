@@ -55,6 +55,11 @@
       "types": "./dist/default-workspace-strategy.d.ts",
       "default": "./dist/default-workspace-strategy.js"
     },
+    "./default-package-identity": {
+      "source": "./src/default-package-identity.ts",
+      "types": "./dist/default-package-identity.d.ts",
+      "default": "./dist/default-package-identity.js"
+    },
     "./package-addition-facts": {
       "source": "./src/package-addition-facts.ts",
       "types": "./dist/package-addition-facts.d.ts",
@@ -73,6 +78,7 @@
     "@ykdz/reference-ts-cli": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
+    "@ykdz/template-workspace-authoring": "workspace:*",
     "yaml": "catalog:"
   },
   "devDependencies": {
@@ -81,7 +87,6 @@
     "@types/semver": "catalog:",
     "@types/spdx-expression-parse": "catalog:",
     "@ykdz/reference-typescript-config": "workspace:*",
-    "@ykdz/template-workspace-authoring": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

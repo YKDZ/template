@@ -1,10 +1,10 @@
 import type {
   PackageDefinition,
-  PackageRole,
   ProjectBlueprintDraft,
 } from "@ykdz/template-core/project-blueprint";
 import type { TemplateSourceHandle } from "@ykdz/template-core/renderer";
 
+import type { DefaultPackageRole } from "./default-package-role.ts";
 import type { PackageContribution } from "./package-contribution.ts";
 
 /** 工具链事实解析后提供的稳定、与预设无关的输入。 */
@@ -87,7 +87,7 @@ export type ResolvedPrimaryPackageIdentity = {
 /** 仅由可配置初始包的 Preset 持有的可选行为。 */
 export type InitialPrimaryPackageCapability = {
   readonly defaultLeafName: string;
-  readonly role: PackageRole;
+  readonly role: DefaultPackageRole;
   defaultPackagePath(options: { readonly packageLeafName: string }): string;
   planInitialContribution(options: {
     readonly context: GenerationContext;

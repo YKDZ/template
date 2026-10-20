@@ -37,6 +37,10 @@ import type { PackageContribution } from "@ykdz/template-workspace-authoring/pac
 import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
 import type { ReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
+import {
+  assertDefaultPackageDefinition,
+  assertDefaultProjectBlueprint,
+} from "./default-package-identity.ts";
 import { browserTestDevelopmentContainerToolLayer } from "./development-container.ts";
 import {
   assertReusablePackageExposure,
@@ -251,7 +255,8 @@ function projectOperations(options: {
   readonly packages: readonly GeneratorPackageRecord[];
   readonly contributions: readonly PackageContribution[];
 }): WorkspaceProjection {
-  const { context, blueprint, contributions } = options;
+  const { context, contributions } = options;
+  const blueprint = assertDefaultProjectBlueprint(options.blueprint);
   const configuration = contributions.find(
     (contribution) =>
       contribution.definition.name ===
@@ -639,7 +644,7 @@ export function createDefaultWorkspaceStrategy(): WorkspaceStrategy<
       packagePath: explicitPath,
     }) {
       const selectedLeaf = leafName ?? content.defaultLeafName;
-      return {
+      return assertDefaultPackageDefinition({
         name: "@" + context.defaultPackageScope + "/" + selectedLeaf,
         path:
           explicitPath ??
@@ -647,7 +652,7 @@ export function createDefaultWorkspaceStrategy(): WorkspaceStrategy<
             ? content.defaultPath
             : siblingPackagePath(content.defaultPath, selectedLeaf)),
         role: content.role,
-      };
+      });
     },
     project(options) {
       return projectOperations(options);
