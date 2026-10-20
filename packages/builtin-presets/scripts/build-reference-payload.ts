@@ -30,6 +30,7 @@ await rm(output, { recursive: true, force: true });
 for (const reference of referencePackages) {
   const definition = reference.definition;
   const identity = contentIdentityKey(reference.identity);
+  definition.prepare();
   const targetRoot = path.join(
     output,
     Buffer.from(identity).toString("base64url"),

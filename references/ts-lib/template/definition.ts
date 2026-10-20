@@ -3,15 +3,22 @@ import { defineReferencePackage } from "@ykdz/template-workspace-authoring/refer
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-ts-lib",
   resolve: (specifier) => import.meta.resolve(specifier),
+  resourceRoot: new URL("../", import.meta.url),
   alias: "library",
   instance: "independent",
   defaultLeafName: "lib",
   role: "shared-library",
   resources: ["."],
-  authoring: {
-    dependencies: ["@ykdz/template-core", "@ykdz/template-workspace-authoring"],
+  template: {
+    dependencies: [
+      { name: "@ykdz/template-core", purpose: "template-execution" },
+      {
+        name: "@ykdz/template-workspace-authoring",
+        purpose: "template-execution",
+      },
+    ],
     scripts: ["build:template"],
-    resources: ["template", "template-dist", "tsconfig.template.json"],
+    resources: ["template", "tsconfig.template.json"],
   },
   environmentNeeds: [],
   foundation: {

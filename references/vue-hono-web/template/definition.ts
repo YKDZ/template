@@ -4,21 +4,25 @@ import { defineReferencePackage } from "@ykdz/template-workspace-authoring/refer
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vue-hono-web",
   resolve: (specifier) => import.meta.resolve(specifier),
+  resourceRoot: new URL("../", import.meta.url),
   alias: "vue-hono-web",
   instance: "independent",
   defaultLeafName: "web",
   defaultPath: "apps/web",
   role: "runtime-service",
   resources: ["."],
-  authoring: {
+  template: {
     dependencies: [
-      "@ykdz/template-core",
-      "@ykdz/template-environment",
-      "@ykdz/template-workspace-authoring",
-      "typescript-7",
+      { name: "@ykdz/template-core", purpose: "template-execution" },
+      { name: "@ykdz/template-environment", purpose: "template-execution" },
+      {
+        name: "@ykdz/template-workspace-authoring",
+        purpose: "template-execution",
+      },
+      { name: "typescript-7", purpose: "template-execution" },
     ],
     scripts: ["build:template"],
-    resources: ["template", "template-dist", "tsconfig.template.json"],
+    resources: ["template", "tsconfig.template.json"],
   },
   foundation: ({ definition, bindings }) => {
     const api = bindings?.get("@ykdz/reference-hono-api");

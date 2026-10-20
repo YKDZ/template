@@ -4,20 +4,24 @@ import { defineReferencePackage } from "@ykdz/template-workspace-authoring/refer
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vue-shared",
   resolve: (specifier) => import.meta.resolve(specifier),
+  resourceRoot: new URL("../", import.meta.url),
   alias: "vue-shared",
   instance: "shared",
   defaultLeafName: "vue-shared",
   role: "shared-library",
   resources: ["."],
-  authoring: {
+  template: {
     dependencies: [
-      "@ykdz/template-core",
-      "@ykdz/template-environment",
-      "@ykdz/template-workspace-authoring",
-      "typescript-7",
+      { name: "@ykdz/template-core", purpose: "template-execution" },
+      { name: "@ykdz/template-environment", purpose: "template-execution" },
+      {
+        name: "@ykdz/template-workspace-authoring",
+        purpose: "template-execution",
+      },
+      { name: "typescript-7", purpose: "template-execution" },
     ],
     scripts: ["build:template"],
-    resources: ["template", "template-dist", "tsconfig.template.json"],
+    resources: ["template", "tsconfig.template.json"],
   },
   foundation: ({ definition }) => ({
     toolchains: {},

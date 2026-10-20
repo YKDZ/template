@@ -239,6 +239,7 @@ async function runReadinessCaller(
         ),
     ),
     (() => {
+      referencePackage.prepare();
       const source = referencePackage.publicationIdentitySource;
       assert.ok(source);
       return cp(

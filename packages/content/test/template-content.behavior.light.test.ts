@@ -159,7 +159,11 @@ void describe("公开模板内容集合", () => {
           preset: vueAppPreset.identity,
           creationInput: { leafName: names[0] },
         });
-        assert.strictEqual(conflict.status, "conflict");
+        assert.strictEqual(
+          conflict.status,
+          "conflict",
+          JSON.stringify(conflict),
+        );
         assert.strictEqual(await snapshotTree(targetRoot), beforeConflict);
         await writeFile(workflowPath, customizedWorkflow.replace(userStep, ""));
       }
@@ -782,9 +786,12 @@ void describe("公开模板内容集合", () => {
       readonly creationInput: TsCliCreationInput;
     };
     assert.strictEqual(publicationConfig.packagePath, "packages/cli");
+    const expectedCreationInput =
+      tsCliPreset.definition.nodes.cli?.creationInput?.init;
+    assert.ok(expectedCreationInput);
     assert.deepStrictEqual(
       publicationConfig.creationInput,
-      cliNode.creationInput.init,
+      expectedCreationInput,
     );
     const blueprint = JSON.parse(
       await readFile(path.join(cliRoot, ".template/blueprint.json"), "utf8"),

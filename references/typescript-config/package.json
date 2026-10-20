@@ -9,7 +9,6 @@
     "./oxfmt": "./oxfmt.config.ts",
     "./reporter": "./scripts/node-test-count-reporter.ts",
     "./reference": "./package.json",
-    "./assets/*": "./*",
     "./template": {
       "source": "./template/definition.ts",
       "types": "./template-dist/definition.d.ts",

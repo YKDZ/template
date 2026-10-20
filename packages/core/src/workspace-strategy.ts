@@ -54,6 +54,8 @@ export type GeneratorContentDefinition<
   readonly defaultLeafName: string;
   readonly defaultPath: string;
   readonly role: PackageDefinition["role"];
+  /** 所属内容准备自身声明的资源事实；通用生成器只管理调用时机。 */
+  prepare?(): unknown;
   contribute(options: {
     readonly context: Context;
     readonly definition: PackageDefinition;
@@ -63,6 +65,8 @@ export type GeneratorContentDefinition<
     readonly creationInput?: CreationInput;
     /** 按稳定节点身份解析、供项目行为使用的实例。 */
     readonly nodeInstances: GeneratorNodeInstances;
+    /** 同一所属内容prepare返回的事实，由生成器原样传递。 */
+    readonly preparation?: unknown;
   }): Contribution;
 };
 

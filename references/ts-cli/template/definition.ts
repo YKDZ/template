@@ -44,14 +44,21 @@ function publicationNodeEngine(
 export const referencePackage = defineReferencePackage<TsCliCreationInput>({
   packageName: "@ykdz/reference-ts-cli",
   resolve: (specifier) => import.meta.resolve(specifier),
+  resourceRoot: new URL("../", import.meta.url),
   alias: "cli-package-addition",
   instance: "independent",
   defaultLeafName: "cli",
   role: "cli-tool",
   resources: ["."],
   publicationIdentitySource: "src/cli-command-identity.ts",
-  authoring: {
-    dependencies: ["@ykdz/template-core", "@ykdz/template-workspace-authoring"],
+  template: {
+    dependencies: [
+      { name: "@ykdz/template-core", purpose: "template-execution" },
+      {
+        name: "@ykdz/template-workspace-authoring",
+        purpose: "template-execution",
+      },
+    ],
     exports: ["./command-identity", "./creation-input"],
     scripts: ["build:template"],
     resources: ["template", "tsconfig.template.json"],
