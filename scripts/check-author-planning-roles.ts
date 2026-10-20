@@ -16,8 +16,7 @@ export type PlanningEffectViolation = {
     | "filesystem"
     | "process-global"
     | "require"
-    | "computed-dynamic-import"
-    | "data-as-code";
+    | "computed-dynamic-import";
   readonly file: string;
   readonly line: number;
   readonly column: number;
@@ -32,8 +31,6 @@ type ProcessBindings = {
   readonly namespaces: ReadonlySet<ts.Symbol>;
   readonly values: ReadonlySet<ts.Symbol>;
 };
-
-type DataResourceBindings = ReadonlySet<ts.Symbol>;
 
 const publicPlanningContracts = [
   {
@@ -66,7 +63,6 @@ function effectDescription(effect: PlanningEffectViolation["effect"]): string {
     "process-global": "规划阶段读取进程全局状态",
     require: "规划阶段使用 require 加载模块",
     "computed-dynamic-import": "规划阶段使用计算式动态导入",
-    "data-as-code": "规划阶段直接消费所属包数据资源",
   };
   return descriptions[effect];
 }
@@ -168,110 +164,6 @@ function processBindings(
     }
   }
   return { namespaces, values };
-}
-
-function dataResourceBindings(
-  sourceFile: ts.SourceFile,
-  checker: ts.TypeChecker,
-): DataResourceBindings {
-  const bindings = new Set<ts.Symbol>();
-  for (const statement of sourceFile.statements) {
-    if (
-      !ts.isImportDeclaration(statement) ||
-      !ts.isStringLiteral(statement.moduleSpecifier) ||
-      path.posix.extname(
-        statement.moduleSpecifier.text.split(/[?#]/, 1)[0] ?? "",
-      ) !== ".json" ||
-      statement.importClause?.isTypeOnly === true
-    ) {
-      continue;
-    }
-    const clause = statement.importClause;
-    if (clause?.name !== undefined) {
-      const symbol = bindingSymbol(checker, clause.name);
-      if (symbol !== undefined) bindings.add(symbol);
-    }
-    const namedBindings = clause?.namedBindings;
-    if (namedBindings === undefined) continue;
-    if (ts.isNamespaceImport(namedBindings)) {
-      const symbol = bindingSymbol(checker, namedBindings.name);
-      if (symbol !== undefined) bindings.add(symbol);
-      continue;
-    }
-    for (const element of namedBindings.elements) {
-      if (element.isTypeOnly) continue;
-      const symbol = bindingSymbol(checker, element.name);
-      if (symbol !== undefined) bindings.add(symbol);
-    }
-  }
-  return bindings;
-}
-
-function isDataResourceExpression(
-  expression: ts.Expression,
-  checker: ts.TypeChecker,
-  importedBindings: DataResourceBindings,
-  seen = new Set<ts.Symbol>(),
-): boolean {
-  if (
-    ts.isParenthesizedExpression(expression) ||
-    ts.isAsExpression(expression) ||
-    ts.isTypeAssertionExpression(expression) ||
-    ts.isNonNullExpression(expression) ||
-    ts.isSatisfiesExpression(expression)
-  ) {
-    return isDataResourceExpression(
-      expression.expression,
-      checker,
-      importedBindings,
-      seen,
-    );
-  }
-  if (ts.isPropertyAccessExpression(expression)) {
-    return isDataResourceExpression(
-      expression.expression,
-      checker,
-      importedBindings,
-      seen,
-    );
-  }
-  if (ts.isElementAccessExpression(expression)) {
-    return isDataResourceExpression(
-      expression.expression,
-      checker,
-      importedBindings,
-      seen,
-    );
-  }
-  if (!ts.isIdentifier(expression)) return false;
-  const symbol = checker.getSymbolAtLocation(expression);
-  if (symbol === undefined) return false;
-  if (importedBindings.has(symbol)) return true;
-  if (seen.has(symbol)) return false;
-  seen.add(symbol);
-  for (const declaration of symbol.declarations ?? []) {
-    if (
-      ts.isVariableDeclaration(declaration) &&
-      declaration.initializer !== undefined &&
-      isDataResourceExpression(
-        declaration.initializer,
-        checker,
-        importedBindings,
-        seen,
-      )
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function isTypeQueryReference(identifier: ts.Identifier): boolean {
-  let reference: ts.Node = identifier;
-  while (ts.isQualifiedName(reference.parent)) {
-    reference = reference.parent;
-  }
-  return ts.isTypeQueryNode(reference.parent);
 }
 
 function functionFromDeclaration(
@@ -699,7 +591,6 @@ function diagnosticsForRole(
   checker: ts.TypeChecker,
   importsByFile: ReadonlyMap<string, FilesystemBindings>,
   processesByFile: ReadonlyMap<string, ProcessBindings>,
-  dataBindingsByFile: ReadonlyMap<string, DataResourceBindings>,
 ): PlanningEffectViolation[] {
   const violations: PlanningEffectViolation[] = [];
   const visited = new Set<ts.FunctionLikeDeclaration>();
@@ -711,13 +602,11 @@ function diagnosticsForRole(
     const sourceFile = current.getSourceFile();
     const imports = importsByFile.get(absolute(sourceFile.fileName));
     const processes = processesByFile.get(absolute(sourceFile.fileName));
-    const dataBindings = dataBindingsByFile.get(absolute(sourceFile.fileName));
     const body = current.body;
     if (
       body === undefined ||
       imports === undefined ||
-      processes === undefined ||
-      dataBindings === undefined
+      processes === undefined
     ) {
       continue;
     }
@@ -743,13 +632,6 @@ function diagnosticsForRole(
         isProcessRead(node, checker, processes, absolute(root.packageRoot))
       ) {
         report(node, "process-global");
-      }
-      if (
-        ts.isIdentifier(node) &&
-        !isTypeQueryReference(node) &&
-        isDataResourceExpression(node, checker, dataBindings)
-      ) {
-        report(node, "data-as-code");
       }
       if (ts.isCallExpression(node)) {
         if (isFilesystemCall(node, checker, imports)) {
@@ -899,7 +781,6 @@ export function findPlanningEffectViolations(
   const checker = program.getTypeChecker();
   const importsByFile = new Map<string, FilesystemBindings>();
   const processesByFile = new Map<string, ProcessBindings>();
-  const dataBindingsByFile = new Map<string, DataResourceBindings>();
   for (const sourceFile of program.getSourceFiles()) {
     importsByFile.set(
       absolute(sourceFile.fileName),
@@ -908,10 +789,6 @@ export function findPlanningEffectViolations(
     processesByFile.set(
       absolute(sourceFile.fileName),
       processBindings(sourceFile, checker),
-    );
-    dataBindingsByFile.set(
-      absolute(sourceFile.fileName),
-      dataResourceBindings(sourceFile, checker),
     );
   }
 
@@ -932,7 +809,6 @@ export function findPlanningEffectViolations(
             checker,
             importsByFile,
             processesByFile,
-            dataBindingsByFile,
           ),
         );
       }

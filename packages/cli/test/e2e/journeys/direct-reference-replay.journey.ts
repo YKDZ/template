@@ -115,13 +115,22 @@ const journey: CliJourney = {
         executable: process.execPath,
         cwd: context.packageRoot,
         args: [
-          "--conditions=source",
+          ...(context.mode === "source" ? ["--conditions=source"] : []),
           "--experimental-strip-types",
           path.join(
             context.packageRoot,
             "test/e2e/journeys/direct-reference-init.ts",
           ),
           project,
+          context.mode,
+          ...(context.mode === "packed"
+            ? [
+                process.env.TEMPLATE_CLI_PACKED_BIN ??
+                  (() => {
+                    throw new Error("packed 直接参考初始化缺少 CLI 二进制入口");
+                  })(),
+              ]
+            : []),
         ],
       },
       {
@@ -212,6 +221,32 @@ const journey: CliJourney = {
     assert.equal(JSON.parse(results[2]?.stdout ?? "").variant, "added");
 
     const project = path.join(context.workDir, "direct-references");
+    const directInit = JSON.parse(results[0]?.stdout ?? "{}") as {
+      readonly mode: string;
+      readonly modules: Readonly<Record<string, string>>;
+    };
+    assert.equal(directInit.mode, context.mode);
+    assert.deepEqual(Object.keys(directInit.modules).toSorted(), [
+      "content",
+      "generator",
+      "strategy",
+    ]);
+    if (context.mode === "packed") {
+      for (const entry of Object.values(directInit.modules)) {
+        assert.ok(entry.includes("node_modules"));
+        assert.ok(entry.endsWith(".js"));
+        assert.ok(!entry.startsWith(context.packageRoot));
+      }
+    } else if (context.mode === "distribution") {
+      for (const entry of Object.values(directInit.modules)) {
+        assert.ok(entry.endsWith(".js"));
+      }
+    } else {
+      for (const entry of Object.values(directInit.modules)) {
+        assert.ok(entry.endsWith(".ts"));
+      }
+    }
+
     const initialRecord = JSON.parse(
       await readFile(
         path.join(context.workDir, "generation-before-add.json"),

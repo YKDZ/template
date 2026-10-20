@@ -182,7 +182,6 @@ void describe("Template Repository native task model", () => {
         "@ykdz/template#build",
         [
           "@ykdz/template-core#build",
-          "@ykdz/template-builtin-presets#build",
           "@ykdz/template-environment#build",
           "@ykdz/template-workspace#build",
         ],
@@ -259,9 +258,7 @@ void describe("Template Repository native task model", () => {
       "node scripts/run-packed-publication-test.ts",
     );
     assert.ok(
-      scripts.test?.includes(
-        "@ykdz/template-builtin-presets/node-test-count-reporter",
-      ),
+      scripts.test?.includes("@ykdz/reference-typescript-config/reporter"),
     );
     assert.match(scripts.test ?? "", /--test-concurrency=2/u);
 
@@ -481,7 +478,7 @@ void describe("Template Repository native task model", () => {
     ).tasks.map(({ taskId }) => taskId);
     assert.ok(tasks.includes("@ykdz/template#build"));
     assert.ok(tasks.includes("@ykdz/template-core#build"));
-    assert.ok(tasks.includes("@ykdz/template-builtin-presets#build"));
+    assert.ok(!tasks.includes("@ykdz/template-builtin-presets#build"));
   });
 
   void it("keeps source tests build-free and assigns full CLI journeys to the root", async () => {

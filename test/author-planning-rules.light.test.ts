@@ -26,9 +26,8 @@ void describe("author planning role check", () => {
 
       const planningRoot = path.join(fixtureRoot, "planning-owner");
       const preparationRoot = path.join(fixtureRoot, "preparation-owner");
+      await Promise.all([mkdir(planningRoot), mkdir(preparationRoot)]);
       await Promise.all([
-        mkdir(planningRoot),
-        mkdir(preparationRoot),
         writeFile(
           path.join(planningRoot, "package.json"),
           JSON.stringify({ name: "@fixture/planning-owner", type: "module" }),
@@ -447,78 +446,9 @@ export function loadComputedModule(): void {
     }
   });
 
-  void it("拒绝规划代码绕过 prepare 直接导入所属数据资源", async () => {
+  void it("允许规划消费静态 owner JSON 元数据并复制到贡献清单", async () => {
     const fixtureRoot = await mkdtemp(
-      path.join(os.tmpdir(), "author-planning-data-"),
-    );
-    try {
-      await symlink(
-        path.join(repositoryRoot, "node_modules"),
-        path.join(fixtureRoot, "node_modules"),
-        "dir",
-      );
-      const packageRoot = path.join(fixtureRoot, "owner");
-      await mkdir(packageRoot);
-      await Promise.all([
-        writeFile(
-          path.join(packageRoot, "package.json"),
-          JSON.stringify({
-            name: "@fixture/data-owner",
-            type: "module",
-            dependencies: { "@ykdz/template-core": "workspace:*" },
-          }),
-        ),
-        writeFile(
-          path.join(packageRoot, "owner.json"),
-          JSON.stringify({ value: "owner fact" }),
-        ),
-      ]);
-      const entryFile = path.join(packageRoot, "template.ts");
-      await writeFile(
-        entryFile,
-        `import ownerData from "./owner.json" with { type: "json" };
-import { definePreset } from "@ykdz/template-core/preset-definition";
-
-const ownerDataAlias = ownerData;
-
-export const preset = definePreset({
-  metadata: { alias: "fixture", title: "Fixture", description: "Fixture" },
-  operations: ["init"],
-  nodes: { service: { reference: { alias: "service", instance: "shared" } } },
-  owner: { packageName: "@fixture/data-owner", exportPath: "./template" },
-  project() {
-    return ownerDataAlias.value;
-  },
-});
-`,
-      );
-
-      const violations = findPlanningEffectViolations(
-        [
-          {
-            entryFile,
-            packageRoot,
-            identity: "@fixture/data-owner#./template",
-          },
-        ],
-        path.join(repositoryRoot, "tsconfig.json"),
-      );
-
-      assert.equal(violations.length, 1);
-      assert.equal(violations[0]?.effect, "data-as-code");
-      assert.equal(
-        violations[0]?.role,
-        "@fixture/data-owner#./template:preset.project",
-      );
-      assert.equal(violations[0]?.file, entryFile);
-    } finally {
-      await rm(fixtureRoot, { recursive: true, force: true });
-    }
-  });
-
-  void it("允许规划只把 owner JSON 用于可擦除的类型查询", async () => {
-    const fixtureRoot = await mkdtemp(
-      path.join(os.tmpdir(), "author-planning-json-type-query-"),
+      path.join(os.tmpdir(), "author-planning-static-metadata-"),
     );
     try {
       await symlink(
@@ -531,26 +461,51 @@ export const preset = definePreset({
       await writeFile(
         path.join(packageRoot, "package.json"),
         JSON.stringify({
-          name: "@fixture/json-type-owner",
+          name: "@fixture/static-metadata-owner",
+          description: "Static owner metadata",
           type: "module",
-          dependencies: { "@ykdz/template-core": "workspace:*" },
+          dependencies: {
+            "@ykdz/template-workspace-authoring": "workspace:*",
+          },
         }),
       );
       const entryFile = path.join(packageRoot, "template.ts");
       await writeFile(
         entryFile,
-        `import manifest from "./package.json" with { type: "json" };
-import { definePreset } from "@ykdz/template-core/preset-definition";
+        `import ownerManifest from "./package.json" with { type: "json" };
+import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
-export const preset = definePreset({
-  metadata: { alias: "fixture", title: "Fixture", description: "Fixture" },
-  operations: ["init"],
-  nodes: { service: { reference: { alias: "service", instance: "shared" } } },
-  owner: { packageName: manifest.name, exportPath: "./template" },
-  project() {
-    const result: Pick<typeof manifest, "name"> = { name: "generated" };
-    const qualifiedResult: typeof manifest.name = "generated";
-    return result.name + qualifiedResult;
+export const referencePackage = defineReferencePackage({
+  packageName: ownerManifest.name,
+  resolve: (specifier) => import.meta.resolve(specifier),
+  resourceRoot: new URL("./", import.meta.url),
+  alias: "owner",
+  instance: "independent",
+  defaultLeafName: "owner",
+  role: "shared-library",
+  resources: [],
+  template: {
+    dependencies: [
+      {
+        name: "@ykdz/template-workspace-authoring",
+        purpose: "template-execution",
+      },
+    ],
+    scripts: [],
+  },
+  foundation: {
+    toolchains: {},
+    editorCapabilities: [],
+    dependencyMaintenance: { ecosystems: [], interval: "weekly" },
+  },
+  environmentNeeds: [],
+  project(contribution) {
+    const description: typeof ownerManifest.description =
+      ownerManifest.description;
+    return {
+      ...contribution,
+      manifest: { ...contribution.manifest, description },
+    };
   },
 });
 `,
@@ -561,7 +516,7 @@ export const preset = definePreset({
           {
             entryFile,
             packageRoot,
-            identity: "@fixture/json-type-owner#./template",
+            identity: "@fixture/static-metadata-owner#./template",
           },
         ],
         path.join(repositoryRoot, "tsconfig.json"),
