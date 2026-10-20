@@ -602,7 +602,7 @@ function parsePackOutput(stdout: string): string {
       return output.filename;
     }
   } catch {
-    // pnpm versions that omit --json output the archive path as plain text.
+    // 未输出 JSON 的 pnpm 版本会以纯文本输出归档路径。
   }
   const lines = stdout.trim().split("\n");
   return lines.at(-1) ?? "";
