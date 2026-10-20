@@ -1,34 +1,10 @@
-import type {
-  ContentKind,
-  LoadedContentMember,
-} from "@ykdz/template-core/content-identity";
-import type {
-  PresetDefinition,
-  PresetProjectOptions,
-} from "@ykdz/template-core/preset-definition";
-import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
-import { loadContentSource } from "@ykdz/template-generator/content-source";
-import type { GenerationContext } from "@ykdz/template-workspace-authoring/generation-context";
-import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 import {
-  defineReferencePackage,
-  type ReferencePackage,
-} from "@ykdz/template-workspace-authoring/reference-package";
-
-type TemplatePresetDefinition = PresetDefinition<
-  ReferencePackage,
-  unknown,
-  PackageCreationInput,
-  PresetProjectOptions<GenerationContext, PackageContribution>,
-  unknown
->;
-
-type LoadedTemplateContentMember =
-  | LoadedContentMember<ReferencePackage, "reference">
-  | LoadedContentMember<TemplatePresetDefinition, "preset">;
+  loadTemplateContent,
+  type LoadedTemplateContentMember,
+} from "./collection.ts";
 
 /** 所有可选择内容只在这里登记一次，并从原生公开入口装载。 */
-export const templateContent = (await loadContentSource({
+export const templateContent = (await loadTemplateContent({
   namespace: "ykdz",
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
@@ -50,14 +26,9 @@ export const templateContent = (await loadContentSource({
     "@ykdz/reference-vike-migrations/template",
     "@ykdz/preset-vike-app/template",
   ],
-  prepareReferenceDefinition(definition) {
-    return defineReferencePackage(
-      definition as Parameters<typeof defineReferencePackage>[0],
-    );
-  },
 })) as readonly LoadedTemplateContentMember[];
 
-export type { ContentKind };
+export type { ContentKind } from "./collection.ts";
 export type TemplateContentMember = (typeof templateContent)[number];
 
 /** 从唯一内容集合派生的可选择预设成员。 */

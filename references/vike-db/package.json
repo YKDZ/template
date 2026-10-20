@@ -2,8 +2,7 @@
   "name": "@ykdz/reference-vike-db",
   "private": true,
   "files": [
-    "dist",
-    "template-dist"
+    "dist"
   ],
   "type": "module",
   "imports": {
@@ -63,7 +62,7 @@
     "lint:fix": "oxlint --format=unix . --fix",
     "test": "DATABASE_PROFILE=test node --conditions=source --test --test-reporter=spec --test-reporter=#tooling/reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.test.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
-    "build:template": "tsc -p tsconfig.template.json --pretty false",
+    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
     "typecheck:template": "tsc -p tsconfig.template.json --noEmit --pretty false"
   },
   "dependencies": {
