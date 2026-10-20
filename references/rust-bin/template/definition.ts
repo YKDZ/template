@@ -88,8 +88,6 @@ export const referencePackage: ReferencePackage<
     };
   },
   project(contribution, { definition, preparation }) {
-    const targetManifest = { ...contribution.manifest };
-    delete targetManifest.files;
     const { cargoManifest, cargoLock } = preparation.ownerFacts;
     const rustToolchain = contribution.foundation.toolchains.rust;
     if (rustToolchain === undefined) {
@@ -131,7 +129,7 @@ export const referencePackage: ReferencePackage<
     ]);
     return {
       ...contribution,
-      manifest: targetManifest,
+      manifest: contribution.manifest,
       foundation: {
         ...contribution.foundation,
         toolchains: {

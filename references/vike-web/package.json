@@ -2,8 +2,7 @@
   "name": "@ykdz/reference-vike-web",
   "private": true,
   "files": [
-    "dist",
-    "template-dist"
+    "dist"
   ],
   "type": "module",
   "imports": {

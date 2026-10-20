@@ -47,11 +47,23 @@ const authoredFixtures: Awaited<
   ReturnType<typeof createAuthoredContentFixture>
 >[] = [];
 let firstPartyPrepared: PreparedContentCollection | undefined;
+let generatedEvidenceRoot: Promise<string> | undefined;
 
 async function temporaryRoot(prefix: string): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), prefix));
   temporaryRoots.push(root);
   return root;
+}
+
+async function contentArtifactEvidenceRoot(): Promise<string> {
+  const configuredRoot = process.env.TEMPLATE_CONTENT_ARTIFACT_EVIDENCE_DIR;
+  if (configuredRoot !== undefined) {
+    const root = path.resolve(configuredRoot);
+    await mkdir(root, { recursive: true });
+    return root;
+  }
+  generatedEvidenceRoot ??= temporaryRoot("template-content-evidence-");
+  return generatedEvidenceRoot;
 }
 
 async function textFiles(root: string): Promise<readonly string[]> {
@@ -253,7 +265,7 @@ after(async () => {
 });
 
 void describe("原生内容制品安装链", () => {
-  void it("安装TS库最小集合后由普通Node init并读取原生配置绑定", async () => {
+  void it("安装TS库最小集合后由普通Node init并在新引擎中add和回放", async () => {
     const buildRoot = await temporaryRoot("preset-content-");
     const prepared = await prepareContentCollection({
       content: templateContent,
@@ -274,6 +286,9 @@ void describe("原生内容制品安装链", () => {
       ].sort(),
     );
 
+    const workspaceRootMetadata = await stat(workspaceRoot);
+    const workspaceRootMode = workspaceRootMetadata.mode & 0o777;
+    const workspaceRootTime = workspaceRootMetadata.mtimeMs;
     const authorRoots = prepared.owners.map((owner) => owner.packageRoot);
     for (const authorRoot of authorRoots) {
       protectedAuthorDirectories.push({
@@ -305,7 +320,10 @@ void describe("原生内容制品安装链", () => {
     );
     const resultPath = path.join(projectRoot, "result.json");
     const authorRootsPath = path.join(projectRoot, "author-roots.json");
-    await writeFile(authorRootsPath, JSON.stringify(authorRoots));
+    await writeFile(
+      authorRootsPath,
+      JSON.stringify([...authorRoots, workspaceRoot]),
+    );
     const driverPath = path.join(installedPackage, "integration-driver.mjs");
     await writeFile(
       driverPath,
@@ -345,7 +363,12 @@ void describe("原生内容制品安装链", () => {
         "const libraryDefinition = initialized.blueprint.packages.find((definition) => definition.packageDefinitionId === libraryRecord.packageDefinitionId);",
         "assert.ok(libraryDefinition);",
         'const generated = await readFile(`${targetRoot}/${libraryDefinition.path}/src/index.ts`, "utf8");',
-        'const addition = await generator.add({ repositoryRoot: targetRoot, contentIdentity: { alias: "library", namespace: "ykdz" }, creationInput: { leafName: "fresh-library" } });',
+        "const replayGenerator = createGenerator({",
+        "  content: templateContent,",
+        "  strategy: createDefaultWorkspaceStrategy(),",
+        "});",
+        "assert.notStrictEqual(replayGenerator, generator);",
+        'const addition = await replayGenerator.add({ repositoryRoot: targetRoot, contentIdentity: { alias: "library", namespace: "ykdz" }, creationInput: { leafName: "fresh-library" } });',
         'assert.equal(addition.status, "success", JSON.stringify(addition));',
         'if (addition.status !== "success") process.exit(3);',
         'const freshLibrary = addition.blueprint.packages.find((definition) => definition.path === "packages/fresh-library");',
@@ -355,22 +378,28 @@ void describe("原生内容制品安装链", () => {
       ].join("\n"),
     );
 
-    await execa(
-      process.execPath,
-      [driverPath, targetRoot, resultPath, authorRootsPath, workspaceRoot],
-      {
-        cwd: installedPackage,
-        env: {
-          ...process.env,
-          HOME: consumerRoot,
-          TMPDIR: path.join(consumerRoot, "tmp"),
-          NODE_OPTIONS: "--no-global-search-paths",
-          NODE_PATH: "",
+    await chmod(workspaceRoot, 0);
+    try {
+      assert.equal((await stat(workspaceRoot)).mode & 0o777, 0);
+      await execa(
+        process.execPath,
+        [driverPath, targetRoot, resultPath, authorRootsPath, workspaceRoot],
+        {
+          cwd: installedPackage,
+          env: {
+            ...process.env,
+            HOME: consumerRoot,
+            TMPDIR: path.join(consumerRoot, "tmp"),
+            NODE_OPTIONS: "--no-global-search-paths",
+            NODE_PATH: "",
+          },
+          uid: 65534,
+          gid: 65534,
         },
-        uid: 65534,
-        gid: 65534,
-      },
-    );
+      );
+    } finally {
+      await chmod(workspaceRoot, workspaceRootMode);
+    }
 
     const result = JSON.parse(await readFile(resultPath, "utf8")) as {
       readonly generationRecord: {
@@ -432,6 +461,9 @@ void describe("原生内容制品安装链", () => {
       ),
       authorTimes,
     );
+    const restoredWorkspaceRoot = await stat(workspaceRoot);
+    assert.equal(restoredWorkspaceRoot.mtimeMs, workspaceRootTime);
+    assert.equal(restoredWorkspaceRoot.mode & 0o777, workspaceRootMode);
     assert.ok(
       (
         await Promise.all(
@@ -455,8 +487,7 @@ void describe("原生内容制品安装链", () => {
         `TS库集合安装闭包缺少制品：${archive.name}@${archive.version}`,
       );
     }
-    const evidenceRoot = path.join(tmpdir(), "preset-migration-17-evidence");
-    await mkdir(evidenceRoot, { recursive: true });
+    const evidenceRoot = await contentArtifactEvidenceRoot();
     await writeContentCollectionEvidence(
       prepared,
       path.join(evidenceRoot, "typescript-library-build.md"),
@@ -466,11 +497,14 @@ void describe("原生内容制品安装链", () => {
       `${JSON.stringify(
         {
           command: `pnpm --dir ${consumerRoot} add ${prepared.collection.tarball}`,
-          authorDirectories: authorRoots.map((authorPath) => ({
-            path: authorPath,
-            mode: 0,
-            readableByConsumer: false,
-          })),
+          authorDirectories: [
+            ...authorRoots.map((authorPath) => ({
+              path: authorPath,
+              mode: 0,
+              readableByConsumer: false,
+            })),
+            { path: workspaceRoot, mode: 0, readableByConsumer: false },
+          ],
           providers: closure.packages,
           links: closure.links,
           initialized: {
@@ -672,6 +706,9 @@ void describe("原生内容制品安装链", () => {
       assert.ok(owner.packed.provider?.specifier.endsWith("/template"));
     }
 
+    const fixtureRootMetadata = await stat(fixture.root);
+    const fixtureRootMode = fixtureRootMetadata.mode & 0o777;
+    const fixtureRootTime = fixtureRootMetadata.mtimeMs;
     const authorRoots = ["feature", "typescript-config", "addon", "preset"].map(
       (name) => path.join(fixture.root, namespace, "authors", name),
     );
@@ -697,7 +734,10 @@ void describe("原生内容制品安装链", () => {
     );
     const resultPath = path.join(projectRoot, "result.json");
     const authorRootsPath = path.join(projectRoot, "author-roots.json");
-    await writeFile(authorRootsPath, JSON.stringify(authorRoots));
+    await writeFile(
+      authorRootsPath,
+      JSON.stringify([...authorRoots, fixture.root]),
+    );
     const driverPath = path.join(installedCollection, "integration-driver.mjs");
     await writeFile(
       driverPath,
@@ -771,22 +811,28 @@ void describe("原生内容制品安装链", () => {
         "await writeFile(resultPath, JSON.stringify({ templateContent, initialized, addition, generatedAddon, beforeWrongKindTree, afterWrongKindTree }));",
       ].join("\n"),
     );
-    await execa(
-      process.execPath,
-      [driverPath, targetRoot, resultPath, authorRootsPath, fixture.root],
-      {
-        cwd: installedCollection,
-        env: {
-          ...process.env,
-          HOME: consumerRoot,
-          TMPDIR: temporaryDirectory,
-          NODE_OPTIONS: "--no-global-search-paths",
-          NODE_PATH: "",
+    await chmod(fixture.root, 0);
+    try {
+      assert.equal((await stat(fixture.root)).mode & 0o777, 0);
+      await execa(
+        process.execPath,
+        [driverPath, targetRoot, resultPath, authorRootsPath, fixture.root],
+        {
+          cwd: installedCollection,
+          env: {
+            ...process.env,
+            HOME: consumerRoot,
+            TMPDIR: temporaryDirectory,
+            NODE_OPTIONS: "--no-global-search-paths",
+            NODE_PATH: "",
+          },
+          uid: 65534,
+          gid: 65534,
         },
-        uid: 65534,
-        gid: 65534,
-      },
-    );
+      );
+    } finally {
+      await chmod(fixture.root, fixtureRootMode);
+    }
 
     const result = JSON.parse(await readFile(resultPath, "utf8")) as {
       readonly templateContent: readonly {
@@ -840,6 +886,9 @@ void describe("原生内容制品安装链", () => {
       ),
       authorTimes,
     );
+    const restoredFixtureRoot = await stat(fixture.root);
+    assert.equal(restoredFixtureRoot.mtimeMs, fixtureRootTime);
+    assert.equal(restoredFixtureRoot.mode & 0o777, fixtureRootMode);
 
     const closure = await auditInstalledClosure(consumerRoot, [
       fixture.root,
@@ -1039,8 +1088,7 @@ void describe("原生内容制品安装链", () => {
     );
     await assert.rejects(stat(missingResourceTarget), { code: "ENOENT" });
 
-    const evidenceRoot = path.join(tmpdir(), "preset-migration-17-evidence");
-    await mkdir(evidenceRoot, { recursive: true });
+    const evidenceRoot = await contentArtifactEvidenceRoot();
     await writeContentCollectionEvidence(
       prepared,
       path.join(evidenceRoot, "authored-content-build.md"),
@@ -1050,11 +1098,14 @@ void describe("原生内容制品安装链", () => {
       `${JSON.stringify(
         {
           command: `pnpm --dir ${consumerRoot} add ${prepared.collection.tarball}`,
-          authorDirectories: authorRoots.map((authorPath) => ({
-            path: authorPath,
-            mode: 0,
-            readableByConsumer: false,
-          })),
+          authorDirectories: [
+            ...authorRoots.map((authorPath) => ({
+              path: authorPath,
+              mode: 0,
+              readableByConsumer: false,
+            })),
+            { path: fixture.root, mode: 0, readableByConsumer: false },
+          ],
           providers: closure.packages,
           links: closure.links,
           initialized: {

@@ -76,6 +76,7 @@
     "test:integration": {
       "dependsOn": ["build"],
       "tags": ["quality:heavy"],
+      "passThroughEnv": ["TEMPLATE_CONTENT_ARTIFACT_EVIDENCE_DIR"],
       "cache": false,
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],

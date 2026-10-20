@@ -5,9 +5,7 @@
     "reference-cli": "./dist/cli.js"
   },
   "files": [
-    "dist",
-    "template-dist",
-    "src/publication/cli-command-identity.ts"
+    "dist"
   ],
   "type": "module",
   "imports": {
