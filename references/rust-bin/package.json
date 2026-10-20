@@ -1,6 +1,16 @@
 {
   "name": "@ykdz/reference-rust-bin",
   "private": true,
+  "files": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "rustfmt.toml",
+    "src",
+    "template-dist",
+    "template/rust-toolchain.toml",
+    "tsconfig.json",
+    "turbo.json"
+  ],
   "type": "module",
   "exports": {
     "./reference": "./package.json",

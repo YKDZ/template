@@ -10,7 +10,7 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { templateReferencePackages } from "@ykdz/template-content";
+import { deriveTemplateMembers, templateContent } from "@ykdz/template-content";
 import {
   renderProject,
   resolveTemplateSource,
@@ -20,9 +20,10 @@ import { mapTypeScriptModuleSpecifiers } from "@ykdz/template-workspace-authorin
 const output = fileURLToPath(
   new URL("../dist/reference-packages/", import.meta.url),
 );
+const { referencePackages } = deriveTemplateMembers(templateContent);
 await rm(output, { recursive: true, force: true });
 
-for (const reference of templateReferencePackages) {
+for (const reference of referencePackages) {
   const targetRoot = path.join(output, reference.manifest.name);
   const templateExport = reference.manifest.exports?.["./template"];
   const entry =
@@ -65,7 +66,7 @@ for (const file of await readdir(compiledSource, { recursive: true })) {
   if (!file.endsWith(".js") && !file.endsWith(".d.ts")) continue;
   const target = path.join(compiledSource, file);
   const moduleSpecifiers = new Map(
-    templateReferencePackages.map((reference) => {
+    referencePackages.map((reference) => {
       const relative = path
         .relative(
           path.dirname(target),
