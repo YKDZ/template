@@ -1067,6 +1067,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../../references/typescript-config
