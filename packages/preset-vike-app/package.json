@@ -1,0 +1,46 @@
+{
+  "name": "@ykdz/preset-vike-app",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "template-dist"
+  ],
+  "type": "module",
+  "exports": {
+    "./template": {
+      "source": "./template/definition.ts",
+      "types": "./template-dist/definition.d.ts",
+      "default": "./template-dist/definition.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm run build:template",
+    "build:template": "tsc -p tsconfig.template.json --pretty false",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix --ignore-pattern template-dist .",
+    "lint:fix": "oxlint --format=unix --ignore-pattern template-dist . --fix",
+    "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 'test/**/*.light.test.ts'",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@ykdz/reference-vike-db": "workspace:*",
+    "@ykdz/reference-vike-migrations": "workspace:*",
+    "@ykdz/reference-vike-web": "workspace:*",
+    "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-environment": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@ykdz/reference-ts-lib": "workspace:*",
+    "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/reference-vue-shared": "workspace:*",
+    "@ykdz/template-generator": "workspace:*",
+    "@ykdz/template-workspace": "workspace:*",
+    "@ykdz/template-workspace-authoring": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  }
+}

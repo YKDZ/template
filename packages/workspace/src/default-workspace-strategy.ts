@@ -303,6 +303,7 @@ function oneRequirement<T extends ProjectRequirement["kind"]>(
 function projectRequirements(
   blueprint: ProjectBlueprint,
   contributions: readonly PackageContribution[],
+  presetProjectContributions: readonly (readonly ProjectRequirement[])[],
 ): {
   readonly blueprint: ProjectBlueprint;
   readonly requirements: WorkspaceProjectRequirements;
@@ -310,6 +311,7 @@ function projectRequirements(
   const declarations = contributions.flatMap(
     (contribution) => contribution.projectRequirements ?? [],
   );
+  declarations.push(...presetProjectContributions.flat());
   const joint = oneRequirement(declarations, "vue-hono-joint-e2e");
   const database = oneRequirement(declarations, "sqlite-database-preparation");
   const deployment = oneRequirement(
@@ -594,11 +596,13 @@ function projectOperations(options: {
   readonly blueprint: ProjectBlueprint;
   readonly packages: readonly GeneratorPackageRecord[];
   readonly contributions: readonly PackageContribution[];
+  readonly presetProjectContributions: readonly (readonly ProjectRequirement[])[];
 }): WorkspaceProjection {
   const { context } = options;
   const projectState = projectRequirements(
     assertDefaultProjectBlueprint(options.blueprint),
     options.contributions,
+    options.presetProjectContributions,
   );
   const { blueprint, requirements } = projectState;
   const linkPlan = planExplicitProjectLinks({
@@ -1027,7 +1031,8 @@ export function createDefaultWorkspaceStrategy<
   PackageContribution,
   CreationInput,
   ReferencePackage,
-  DefaultWorkspaceNodeLayout
+  DefaultWorkspaceNodeLayout,
+  readonly ProjectRequirement[]
 > {
   return {
     identity: "default",
