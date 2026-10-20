@@ -1,14 +1,34 @@
 import { readFileSync } from "node:fs";
 
-import { composeCiDiagnosticArtifacts } from "@ykdz/template-core/ci-diagnostic-artifact";
-import type { DeploymentEnvironmentNeed } from "@ykdz/template-core/module-graph";
-import type {
-  DependabotDirectory,
-  DependencyEcosystem,
-  DependencyMaintenancePolicy,
-  ProjectCheckWorkflowDiagnosticOptions,
-} from "@ykdz/template-core/project-github";
+import { composeCiDiagnosticArtifacts } from "@ykdz/template-environment/ci-diagnostic-artifact";
+import type { DeploymentEnvironmentNeed } from "@ykdz/template-environment/module-graph";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
+
+export type DependencyEcosystem =
+  | "npm"
+  | "cargo"
+  | "github-actions"
+  | "docker"
+  | "devcontainers"
+  | "rust-toolchain";
+
+export type DependabotDirectory = `/${string}`;
+
+export type DependencyMaintenancePolicy = {
+  readonly ecosystems: readonly DependencyEcosystem[];
+  readonly directories?: Partial<
+    Record<DependencyEcosystem, DependabotDirectory>
+  >;
+  readonly extraDirectories?: Partial<
+    Record<DependencyEcosystem, readonly DependabotDirectory[]>
+  >;
+  readonly interval: "weekly";
+};
+
+export type ProjectCheckWorkflowDiagnosticOptions = {
+  readonly packagePaths: readonly string[];
+  readonly diagnosticArtifacts?: readonly unknown[] | undefined;
+};
 
 /** 完整原生工作流拥有任务和工具设置；投影只选择已声明的能力。 */
 export function projectCheckWorkflow(

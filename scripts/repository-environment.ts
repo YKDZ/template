@@ -1,15 +1,15 @@
 import path from "node:path";
 
-import type { DevelopmentContainerToolLayerProbe } from "@ykdz/template-core/development-container-tool-layer";
 import { materializeProjectProjection } from "@ykdz/template-core/project-projection";
 import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
+import type { DevelopmentContainerToolLayerProbe } from "@ykdz/template-environment/development-container-tool-layer";
 import {
   builtInEditorCustomization,
-  browserTestDevelopmentContainerToolLayer,
   planBuiltInDevelopmentContainer,
   rustDevelopmentContainerToolLayer,
   shellCheckDevelopmentContainerToolLayer,
 } from "@ykdz/template-environment/development-environment";
+import { browserTestDevelopmentContainerToolLayer } from "@ykdz/template-workspace/development-container";
 import { format } from "oxfmt";
 
 import formatterConfig from "../oxfmt.config.ts";

@@ -92,6 +92,12 @@ import {
   projectToolchainMirrorManifest,
   type WorkspaceRootInsertion,
 } from "@ykdz/template-workspace/root-projection";
+import { vuePnpmDependencyOverrides } from "@ykdz/template-workspace/vue-policy";
+import {
+  copyWorkspaceResource,
+  copyWorkspaceDirectory,
+  readWorkspaceJson,
+} from "@ykdz/template-workspace/workspace-resources";
 import { parse as parseToml } from "smol-toml";
 import ts from "typescript";
 
@@ -120,17 +126,11 @@ import {
   typescriptConfigPackageDefinition,
   typescriptConfigReplayAdapter,
 } from "./shared/typescript.ts";
-import { vuePnpmDependencyOverrides } from "./shared/vue.ts";
 import { tsCliDefinition } from "./ts-cli/definition.ts";
 import { tsLibDefinition } from "./ts-lib/definition.ts";
 import { vikeAppDefinition } from "./vike-app/definition.ts";
 import { vueAppDefinition } from "./vue-app/definition.ts";
 import { vueHonoAppDefinition } from "./vue-hono-app/definition.ts";
-import {
-  copyWorkspaceResource,
-  copyWorkspaceDirectory,
-  readWorkspaceJson,
-} from "./workspace-resources.ts";
 
 export type {
   PackageDefinition,

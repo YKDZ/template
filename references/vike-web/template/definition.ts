@@ -5,7 +5,6 @@ import {
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import { defineReferencePackage } from "@ykdz/template-core/reference-package";
-import { browserTestDevelopmentContainerToolLayer } from "@ykdz/template-environment/development-environment";
 
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vike-web",
@@ -33,9 +32,6 @@ export const referencePackage = defineReferencePackage({
       interval: "weekly",
     },
     workspacePackageGlobs: [`${definition.path.split("/")[0]}/*`],
-    developmentContainerToolLayers: [
-      browserTestDevelopmentContainerToolLayer(),
-    ],
   }),
   environmentNeeds: ({ definition }) => [
     playwrightBrowserAssetsEnvironmentNeed({

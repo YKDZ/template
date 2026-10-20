@@ -1,22 +1,22 @@
 import { readFileSync } from "node:fs";
 
-import { loadTemplateDependencyCatalog } from "@ykdz/template-core/dependency-catalog";
 import {
+  resolveTemplateSource,
+  type WriteTextOperation,
+} from "@ykdz/template-core/renderer";
+
+import {
+  prepareDevelopmentContainerDockerfile,
   planDevelopmentContainerToolLayersSync,
   type DevelopmentContainerToolLayer,
   type DevelopmentContainerToolLayerPlan,
-} from "@ykdz/template-core/development-container-tool-layer";
+} from "./development-container-tool-layer.ts";
 import {
   editorCustomizationForCapabilities,
   loadEditorCustomizationDeclarations,
   type EditorCustomization,
   type EditorCustomizationCapability,
-} from "@ykdz/template-core/editor-customization";
-import {
-  resolveTemplateSource,
-  type WriteTextFromFragmentsOperation,
-} from "@ykdz/template-core/renderer";
-
+} from "./editor-customization.ts";
 import { environmentSources } from "./sources.ts";
 
 export function githubCliDevelopmentContainerToolLayer(): DevelopmentContainerToolLayer {
@@ -37,15 +37,9 @@ export function githubCliDevelopmentContainerToolLayer(): DevelopmentContainerTo
   };
 }
 
-export function browserTestDevelopmentContainerToolLayer(): DevelopmentContainerToolLayer {
-  const playwrightTestVersion =
-    loadTemplateDependencyCatalog()["@playwright/test"];
-  if (playwrightTestVersion === undefined) {
-    throw new Error(
-      "Template Dependency Catalog is missing dependency: @playwright/test",
-    );
-  }
-
+export function browserTestDevelopmentContainerToolLayer(
+  playwrightTestVersion: string,
+): DevelopmentContainerToolLayer {
   return {
     identity: "browser-test",
     dockerfile: {
@@ -81,7 +75,7 @@ export function planBuiltInDevelopmentContainer(options: {
   readonly layers?: readonly DevelopmentContainerToolLayer[];
 }): DevelopmentContainerToolLayerPlan & {
   readonly features: Readonly<Record<string, Record<string, unknown>>>;
-  readonly dockerfileOperation: WriteTextFromFragmentsOperation;
+  readonly dockerfileOperation: WriteTextOperation;
 } {
   const plan = planDevelopmentContainerToolLayersSync({
     baseLayer: {
@@ -159,12 +153,9 @@ export function planBuiltInDevelopmentContainer(options: {
         ),
       ) as { features: Record<string, Record<string, unknown>> }
     ).features,
-    dockerfileOperation: {
-      kind: "writeTextFromFragments",
-      to: ".devcontainer/Dockerfile",
-      validation: "development-container-dockerfile",
-      fragments: plan.layers.map((layer) => layer.dockerfile),
-    },
+    dockerfileOperation: prepareDevelopmentContainerDockerfile({
+      layers: plan.layers,
+    }),
     probes: [
       ...plan.probes,
       {
