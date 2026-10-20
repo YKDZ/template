@@ -40,6 +40,15 @@ import type {
 } from "@ykdz/template-workspace-authoring/project-requirements";
 import type { ReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
+import {
+  assertDatabasePreparationManifestTruth,
+  applicationCiDiagnosticArtifacts,
+  readDatabasePreparationManifestTruth,
+  projectDependencyMaintenancePolicy,
+  applicationRootTsconfigIncludes,
+  type DatabasePreparationManifestRequirement,
+  type WorkspaceProjectRequirements,
+} from "./application-requirements.ts";
 import { projectCliPublication } from "./cli-publication-projection.ts";
 import {
   assertDefaultPackageDefinition,
@@ -58,7 +67,11 @@ import {
   projectCheckWorkflow,
   projectDependabotConfig,
 } from "./project-github.ts";
-import { planExplicitProjectLinks } from "./project-linking.ts";
+import {
+  planExplicitProjectLinks,
+  promoteInjectedProviderRuntimeDependencies,
+  readProjectLinkManifestTruth,
+} from "./project-linking.ts";
 import { releaseToolchainSnapshot } from "./release-toolchain-snapshot.ts";
 import {
   createWorkspaceRootManifest,
@@ -73,6 +86,7 @@ import {
   projectRustTarget,
   rustVersionForAddition,
 } from "./rust-target-projection.ts";
+import { vuePnpmDependencyOverrides } from "./vue-policy.ts";
 import {
   copyWorkspaceDirectory,
   copyWorkspaceResource,
@@ -218,47 +232,6 @@ function siblingPackagePath(defaultPath: string, leafName: string): string {
   );
 }
 
-function maintenancePolicy(
-  contributions: readonly PackageContribution[],
-  hasDeployment: boolean,
-) {
-  const ecosystems = [
-    ...new Set([
-      "devcontainers" as const,
-      ...(hasDeployment ? (["docker"] as const) : []),
-      ...contributions.flatMap(
-        (contribution) =>
-          contribution.foundation.dependencyMaintenance.ecosystems,
-      ),
-    ]),
-  ];
-  const directories: Record<string, string> = {};
-  const extraDirectories: Record<string, string[]> = {};
-  for (const ecosystem of ecosystems) {
-    const candidates = [
-      ...new Set(
-        contributions.flatMap((contribution) => {
-          const policy = contribution.foundation.dependencyMaintenance;
-          const primary = policy.directories?.[ecosystem];
-          return [
-            ...(primary === undefined ? [] : [primary]),
-            ...(policy.extraDirectories?.[ecosystem] ?? []),
-          ];
-        }),
-      ),
-    ];
-    const [primary, ...extra] = candidates;
-    if (primary !== undefined) directories[ecosystem] = primary;
-    if (extra.length > 0) extraDirectories[ecosystem] = extra;
-  }
-  return {
-    ecosystems,
-    ...(Object.keys(directories).length === 0 ? {} : { directories }),
-    ...(Object.keys(extraDirectories).length === 0 ? {} : { extraDirectories }),
-    interval: "weekly" as const,
-  };
-}
-
 function boundaryTags(
   contributions: readonly PackageContribution[],
 ): readonly ("app" | "library")[] {
@@ -275,12 +248,6 @@ function boundaryTags(
   }
   return [...selected];
 }
-
-type WorkspaceProjectRequirements = {
-  readonly vueHonoJointE2e?: VueHonoJointE2eRequirement;
-  readonly databasePreparation?: DatabasePreparationRequirement;
-  readonly deploymentCheck?: DeploymentCheckRequirement;
-};
 
 function samePackageDefinition(
   left: PackageDefinition,
@@ -623,12 +590,25 @@ function projectOperations(options: {
   readonly packages: readonly GeneratorPackageRecord[];
   readonly contributions: readonly PackageContribution[];
 }): WorkspaceProjection {
-  const { context, contributions } = options;
+  const { context } = options;
   const projectState = projectRequirements(
     assertDefaultProjectBlueprint(options.blueprint),
-    contributions,
+    options.contributions,
   );
   const { blueprint, requirements } = projectState;
+  const linkPlan = planExplicitProjectLinks({
+    blueprint,
+    contributions: options.contributions,
+    manifestTruthByPackagePath: readProjectLinkManifestTruth({
+      repositoryRoot: context.targetDir,
+      blueprint,
+      contributions: options.contributions,
+    }),
+  });
+  const contributions = promoteInjectedProviderRuntimeDependencies({
+    contributions: options.contributions,
+    linkPlan,
+  });
   const cliPublication = projectCliPublication({
     packages: options.packages,
     contributions,
@@ -676,6 +656,14 @@ function projectOperations(options: {
       ? {}
       : { imports: cliPublication.imports }),
     scriptInsertions: [
+      ...(rust === undefined
+        ? []
+        : [
+            {
+              before: "boundaries",
+              values: { "toolchain:prepare": "cargo --version" },
+            },
+          ]),
       ...cliPublication.scriptInsertions,
       ...projectRootScriptInsertions(requirements),
     ],
@@ -711,6 +699,11 @@ function projectOperations(options: {
       rootManifest,
     ]),
   );
+  const dependencyOverrides =
+    Object.hasOwn(dependencyCatalog, "vue") ||
+    Object.hasOwn(dependencyCatalog, "pinia")
+      ? vuePnpmDependencyOverrides
+      : {};
   const packages = ["apps/*", "packages/*"];
   for (const definition of blueprint.packages) {
     const glob = definition.path.split("/")[0] + "/*";
@@ -719,9 +712,12 @@ function projectOperations(options: {
   const packagePaths = blueprint.packages.map((definition) => definition.path);
   const artifacts = composeCiDiagnosticArtifacts({
     packagePaths,
-    declarations: contributions.flatMap(
-      (contribution) => contribution.ciDiagnosticArtifacts ?? [],
-    ),
+    declarations: [
+      ...contributions.flatMap(
+        (contribution) => contribution.ciDiagnosticArtifacts ?? [],
+      ),
+      ...applicationCiDiagnosticArtifacts(requirements),
+    ],
   });
   const editor = builtInEditorCustomization(
     contributions.flatMap(
@@ -791,7 +787,7 @@ function projectOperations(options: {
     rootManifest,
     packageGlobs: packages,
     dependencyCatalog,
-    dependencyOverrides: {},
+    dependencyOverrides,
     turboTemplate: readWorkspaceJson("turbo.json"),
     referenceNames,
     turboBoundaryTags: boundaryTags(contributions),
@@ -805,6 +801,7 @@ function projectOperations(options: {
       "*.config.ts",
       "scripts/**/*.ts",
       ...cliPublication.tsconfigInclude,
+      ...applicationRootTsconfigIncludes(requirements),
     ],
     tsconfigConfigTemplate: readWorkspaceJson("tsconfig.config.json"),
   });
@@ -956,7 +953,7 @@ function projectOperations(options: {
       kind: "writeText",
       to: ".github/dependabot.yml",
       text: projectDependabotConfig(
-        maintenancePolicy(contributions, hasDeployment),
+        projectDependencyMaintenancePolicy({ contributions, hasDeployment }),
       ),
     },
     {
@@ -965,10 +962,6 @@ function projectOperations(options: {
       value: environmentNeeds,
     },
   ];
-  const linkPlan = planExplicitProjectLinks({
-    blueprint,
-    contributions,
-  });
   const packageOperations = contributions.flatMap((contribution) =>
     contribution.operations.map((operation) =>
       operation.kind === "writeJson" &&
@@ -1077,19 +1070,19 @@ export function createDefaultWorkspaceStrategy<
           item.definition,
         ]),
       );
-      for (const identity of nativeDependencyIdentities(
-        content,
-        contentByIdentity,
-      )) {
-        const provider = contentByIdentity.get(identity);
-        const existing = packages.filter(
-          (item) => item.contentIdentity === identity,
+      const existingContributions = packages.map((packageRecord) => {
+        const existingContent = contentByIdentity.get(
+          packageRecord.contentIdentity,
         );
-        if (provider === undefined || existing.length !== 1) continue;
-        const providerRecord = existing[0]!;
+        if (existingContent === undefined) {
+          throw new Error(
+            "生成记录引用了显式内容之外的身份：" +
+              packageRecord.contentIdentity,
+          );
+        }
         const providerDefinitions = new Map<string, PackageDefinition>();
         for (const [providerIdentity, packageDefinitionId] of Object.entries(
-          providerRecord.bindings,
+          packageRecord.bindings,
         )) {
           const definition = definitionsById.get(packageDefinitionId);
           if (definition === undefined) {
@@ -1101,15 +1094,82 @@ export function createDefaultWorkspaceStrategy<
         }
         const contributionOptions = {
           context,
-          definition: providerRecord.definition,
+          definition: packageRecord.definition,
           bindings: nativeBindings(contentByIdentity, providerDefinitions),
-          createdBy: providerRecord.createdBy,
+          createdBy: packageRecord.createdBy,
           nodeInstances,
-          ...(providerRecord.creationInput === undefined
+          ...(packageRecord.creationInput === undefined
             ? {}
-            : { creationInput: providerRecord.creationInput }),
+            : { creationInput: packageRecord.creationInput }),
         };
-        const baseline = provider.contribute(contributionOptions);
+        return existingContent.contribute(contributionOptions);
+      });
+      const existingContributionsByPackageId = new Map(
+        packages.map((packageRecord, index) => [
+          packageRecord.definition.packageDefinitionId,
+          existingContributions[index]!,
+        ]),
+      );
+      const packageByName = new Map(
+        existingContributions.map((contribution) => [
+          contribution.definition.name,
+          contribution,
+        ]),
+      );
+      const databasePreparations = existingContributions.flatMap(
+        (contribution) =>
+          (contribution.projectRequirements ?? []).filter(
+            (requirement): requirement is DatabasePreparationRequirement =>
+              requirement.kind === "sqlite-database-preparation",
+          ),
+      );
+      if (databasePreparations.length > 1) {
+        throw new Error(
+          "工作区项目能力只能声明一次：sqlite-database-preparation",
+        );
+      }
+      const databasePreparation = databasePreparations[0];
+      const manifestRequirement:
+        | DatabasePreparationManifestRequirement
+        | undefined =
+        databasePreparation === undefined
+          ? undefined
+          : {
+              databasePackageName: databasePreparation.database.name,
+              migrationPackageName: databasePreparation.migrations.name,
+              consumers: {
+                "application-dev": databasePreparation.web.name,
+                "application-e2e": databasePreparation.web.name,
+              },
+            };
+      const manifestTruthByPackagePath = readDatabasePreparationManifestTruth({
+        repositoryRoot: targetRoot,
+        preparation: manifestRequirement,
+        packageByName,
+      });
+      assertDatabasePreparationManifestTruth({
+        preparation: manifestRequirement,
+        packageByName,
+        manifestTruthByPackagePath,
+      });
+      for (const identity of nativeDependencyIdentities(
+        content,
+        contentByIdentity,
+      )) {
+        const provider = contentByIdentity.get(identity);
+        const existing = packages.filter(
+          (item) => item.contentIdentity === identity,
+        );
+        if (provider === undefined || existing.length !== 1) continue;
+        const providerRecord = existing[0]!;
+        const baseline = existingContributionsByPackageId.get(
+          providerRecord.definition.packageDefinitionId,
+        );
+        if (baseline === undefined) {
+          throw new Error(
+            "生成记录缺少已选依赖的现行贡献：" + providerRecord.definition.path,
+          );
+        }
         assertReusablePackageExposure({
           repositoryRoot: targetRoot,
           packagePath: providerRecord.definition.path,

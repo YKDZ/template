@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, stat } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -18,6 +25,33 @@ import { defineReferencePackage } from "@ykdz/template-workspace-authoring/refer
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
 const configuration = defineReferencePackage(configurationDefinition);
+
+async function snapshotTree(root: string): Promise<string> {
+  const entries: {
+    readonly path: string;
+    readonly mode: number;
+    readonly bytes: string;
+  }[] = [];
+  async function visit(directory: string, relative = ""): Promise<void> {
+    for (const entry of (
+      await readdir(directory, { withFileTypes: true })
+    ).sort((left, right) => left.name.localeCompare(right.name))) {
+      const filePath = path.join(directory, entry.name);
+      const file = path.posix.join(relative, entry.name);
+      if (entry.isDirectory()) {
+        await visit(filePath, file);
+      } else {
+        entries.push({
+          path: file,
+          mode: (await stat(filePath)).mode & 0o777,
+          bytes: (await readFile(filePath)).toString("base64"),
+        });
+      }
+    }
+  }
+  await visit(root);
+  return JSON.stringify(entries);
+}
 
 void describe("显式生成器 TypeScript CLI 行为", () => {
   void it("只把显式初始化候选发布，并在真实加包回放后保留候选身份", async () => {
@@ -313,6 +347,78 @@ void describe("显式生成器 TypeScript CLI 行为", () => {
         default: "./dist/index.js",
       },
     );
+  });
+
+  void it("普通加包沿用已连接 provider 的当前 exports 并在失效时零写入", async () => {
+    const targetRoot = path.join(
+      await mkdtemp(path.join(tmpdir(), "template-generator-cli-link-truth-")),
+      "demo",
+    );
+    const generator = createGenerator({
+      content: [cli, library, configuration],
+      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+    });
+
+    const initialized = await generator.init({
+      targetRoot,
+      selection: {
+        roots: [{ nodeIdentity: "library", contentIdentity: library.identity }],
+      },
+      strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+    const linked = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: cli.identity,
+      creationInput: {
+        variant: "private",
+        linkToNodeIdentity: "library",
+      },
+    });
+    assert.strictEqual(linked.status, "success", JSON.stringify(linked));
+
+    const validAdd = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: library.identity,
+      creationInput: { leafName: "next", packagePath: "packages/next" },
+    });
+    assert.strictEqual(validAdd.status, "success", JSON.stringify(validAdd));
+
+    const providerManifestPath = path.join(
+      targetRoot,
+      "packages/lib/package.json",
+    );
+    const providerManifest = JSON.parse(
+      await readFile(providerManifestPath, "utf8"),
+    ) as {
+      exports: Record<string, unknown>;
+    };
+    const rootExport = providerManifest.exports["."] as Record<string, unknown>;
+    delete rootExport.default;
+    await writeFile(
+      providerManifestPath,
+      JSON.stringify(providerManifest, null, 2) + "\n",
+    );
+
+    const beforeFailure = await snapshotTree(targetRoot);
+    const rejected = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: library.identity,
+      creationInput: {
+        leafName: "after-broken-link",
+        packagePath: "packages/after-broken-link",
+      },
+    });
+    assert.strictEqual(rejected.status, "operation-failure");
+    assert.match(
+      rejected.status === "operation-failure" ? rejected.error.message : "",
+      /Package Link provider packages\/lib does not expose an importable package root/u,
+    );
+    assert.strictEqual(await snapshotTree(targetRoot), beforeFailure);
   });
 
   void it("拒绝连接不支持的 Rust 包且初始化目标保持空白", async () => {

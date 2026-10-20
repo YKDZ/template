@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { type ProjectBlueprint } from "@ykdz/template-core/project-blueprint";
 import { isDefaultPackageRole } from "@ykdz/template-workspace-authoring/default-package-role";
 import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
@@ -23,6 +26,10 @@ export type ExplicitProjectLinkPlan = {
    */
   readonly hasBuildOrdering: boolean;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 export function canConsumeNodePackageNameImport(
   contribution: PackageContribution,
@@ -131,6 +138,50 @@ export function canProvideSourceConditionPackageNameImport(
     contribution.definition.role !== "native-package" &&
     exposesSourceCondition(manifest)
   );
+}
+
+/** 读取显式连接端点已有的当前 package manifest，供正式连接计划复核。 */
+export function readProjectLinkManifestTruth(options: {
+  readonly repositoryRoot: string;
+  readonly blueprint: ProjectBlueprint;
+  readonly contributions: readonly PackageContribution[];
+}): ReadonlyMap<string, PackageManifest> {
+  const definitionByPath = new Map(
+    options.contributions.map((contribution) => [
+      contribution.definition.path,
+      contribution.definition,
+    ]),
+  );
+  const endpointPaths = new Set(
+    (options.blueprint.packageLinkIntents ?? []).flatMap((intent) => [
+      intent.consumerPackagePath,
+      intent.providerPackagePath,
+    ]),
+  );
+  const truth = new Map<string, PackageManifest>();
+  for (const packagePath of endpointPaths) {
+    if (!definitionByPath.has(packagePath)) continue;
+    let manifestText: string;
+    try {
+      manifestText = readFileSync(
+        path.join(options.repositoryRoot, packagePath, "package.json"),
+        "utf8",
+      );
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        continue;
+      }
+      throw error;
+    }
+    const parsed: unknown = JSON.parse(manifestText);
+    truth.set(packagePath, isRecord(parsed) ? parsed : {});
+  }
+  return truth;
 }
 
 function exposesImportablePackageRoot(manifest: PackageManifest): boolean {
@@ -260,4 +311,55 @@ export function planExplicitProjectLinks(options: {
     manifestPatchesByPackagePath: manifestPatches,
     hasBuildOrdering: manifestPatches.size > 0,
   };
+}
+
+type RuntimePromotedContribution<Contribution extends PackageContribution> =
+  Omit<Contribution, "manifest"> & {
+    readonly manifest: PackageContribution["manifest"];
+  };
+
+/** 被注入的参考包将其绑定的 TypeScript 配置作为运行时依赖携带。 */
+export function promoteInjectedProviderRuntimeDependencies<
+  Contribution extends PackageContribution,
+>(options: {
+  readonly contributions: readonly Contribution[];
+  readonly linkPlan: ExplicitProjectLinkPlan;
+}): readonly RuntimePromotedContribution<Contribution>[] {
+  const injectedProviderNames = new Set(
+    [...options.linkPlan.manifestPatchesByPackagePath.values()].flatMap(
+      (patch) =>
+        Object.entries(patch.dependenciesMeta ?? {})
+          .filter(([, metadata]) => metadata.injected)
+          .map(([name]) => name),
+    ),
+  );
+  return options.contributions.map((contribution) => {
+    if (
+      contribution.referenceSource === undefined ||
+      !injectedProviderNames.has(contribution.definition.name)
+    ) {
+      return contribution;
+    }
+    const devDependencies = {
+      ...(isRecord(contribution.manifest.devDependencies)
+        ? contribution.manifest.devDependencies
+        : {}),
+    };
+    const dependencies = {
+      ...(isRecord(contribution.manifest.dependencies)
+        ? contribution.manifest.dependencies
+        : {}),
+    };
+    for (const definition of Object.values(
+      contribution.referenceBindings ?? {},
+    )) {
+      if (devDependencies[definition.name] === undefined) continue;
+      dependencies[definition.name] = "workspace:*";
+      delete devDependencies[definition.name];
+    }
+    return {
+      ...contribution,
+      manifest: { ...contribution.manifest, dependencies, devDependencies },
+    };
+  });
 }

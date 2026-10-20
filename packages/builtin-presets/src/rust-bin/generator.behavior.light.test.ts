@@ -60,6 +60,20 @@ void describe("显式生成器 Rust 行为", () => {
     });
 
     assert.strictEqual(result.status, "success", JSON.stringify(result));
+    const rootManifest = JSON.parse(
+      await readFile(path.join(targetRoot, "package.json"), "utf8"),
+    ) as { readonly scripts: Record<string, string> };
+    assert.strictEqual(
+      rootManifest.scripts["toolchain:prepare"],
+      "cargo --version",
+    );
+    const turbo = JSON.parse(
+      await readFile(path.join(targetRoot, "turbo.json"), "utf8"),
+    ) as { readonly tasks: Record<string, unknown> };
+    assert.deepStrictEqual(turbo.tasks["//#toolchain:prepare"], {
+      cache: false,
+      tags: ["work:preparation"],
+    });
     assert.strictEqual(
       await readFile(path.join(targetRoot, "rust-toolchain.toml"), "utf8"),
       '[toolchain]\nchannel = "1.99.0"\ncomponents = ["rustfmt", "clippy"]\n',
