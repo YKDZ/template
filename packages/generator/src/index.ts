@@ -6,6 +6,11 @@ import {
   assertPackageContribution,
   type PackageContribution,
 } from "@ykdz/template-core/package-contribution";
+import type {
+  PresetDefinition,
+  PresetNode,
+  PresetReference,
+} from "@ykdz/template-core/preset-definition";
 import {
   assertProjectBlueprint,
   type PackageDefinition,
@@ -85,25 +90,71 @@ export type GeneratorResult =
 export type Generator<
   Input,
   CreationInput extends PackageCreationInput = PackageCreationInput,
+  Reference extends PresetReference = PresetReference,
+  NodeLayout = unknown,
 > = {
   init(options: {
     readonly targetRoot: string;
     readonly selection: {
-      readonly roots: readonly GeneratorSelectionRoot<CreationInput>[];
+      readonly roots: readonly GeneratorSelectionInput<
+        Reference,
+        CreationInput,
+        NodeLayout
+      >[];
     };
     readonly strategyInput: Input;
     readonly dryRun?: boolean;
   }): Promise<GeneratorResult>;
-  add(options: {
-    readonly repositoryRoot: string;
-    readonly contentIdentity: string;
-    readonly creationInput?: CreationInput;
-    readonly dryRun?: boolean;
-  }): Promise<GeneratorResult>;
+  add(
+    options: {
+      readonly repositoryRoot: string;
+      readonly creationInput?: CreationInput;
+      readonly dryRun?: boolean;
+    } & (
+      | { readonly contentIdentity: string }
+      | {
+          readonly preset: PresetDefinition<
+            Reference,
+            NodeLayout,
+            CreationInput
+          >;
+        }
+    ),
+  ): Promise<GeneratorResult>;
 };
+
+type GeneratorSelectionInput<
+  Reference extends PresetReference,
+  CreationInput extends PackageCreationInput,
+  NodeLayout,
+> =
+  | GeneratorSelectionRoot<CreationInput, NodeLayout>
+  | {
+      readonly preset: PresetDefinition<Reference, NodeLayout, CreationInput>;
+      readonly creationInput?: CreationInput;
+    };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPresetDefinition<
+  Reference extends PresetReference,
+  NodeLayout,
+  CreationInput,
+>(
+  value: unknown,
+): value is PresetDefinition<Reference, NodeLayout, CreationInput> {
+  return isRecord(value) && value.kind === "preset" && isRecord(value.nodes);
+}
+
+function mergeCreationInput<CreationInput extends PackageCreationInput>(
+  defaults: CreationInput | undefined,
+  supplied: CreationInput | undefined,
+): CreationInput | undefined {
+  if (defaults === undefined) return supplied;
+  if (supplied === undefined) return defaults;
+  return { ...defaults, ...supplied } as CreationInput;
 }
 
 function fail(
@@ -213,22 +264,48 @@ export function createGenerator<
   Contribution extends PackageContribution,
   CreationInput extends PackageCreationInput,
   Content extends GeneratorContent<Context, Contribution, CreationInput>,
+  NodeLayout,
 >(options: {
-  readonly content: readonly Content[];
+  readonly content: readonly (
+    | Content
+    | PresetDefinition<Content, NoInfer<NodeLayout>, NoInfer<CreationInput>>
+  )[];
   readonly strategy: WorkspaceStrategy<
     Context,
     Input,
     State,
     Contribution,
     CreationInput,
-    Content
+    Content,
+    NodeLayout
   >;
-}): Generator<Input, CreationInput> {
-  const contentByIdentity = new Map(
-    options.content.map((content) => [content.identity, content]),
+}): Generator<Input, CreationInput, Content, NodeLayout> {
+  const contentMembers = options.content.filter(
+    (content): content is Content =>
+      !isPresetDefinition<Content, NodeLayout, CreationInput>(content),
   );
-  if (contentByIdentity.size !== options.content.length) {
+  const presetMembers = options.content.filter(
+    isPresetDefinition<Content, NodeLayout, CreationInput>,
+  );
+  const contentByIdentity = new Map(
+    contentMembers.map((content) => [content.identity, content]),
+  );
+  if (contentByIdentity.size !== contentMembers.length) {
     throw new Error("显式内容身份必须唯一");
+  }
+  const presets = new Set(presetMembers);
+  if (presets.size !== presetMembers.length) {
+    throw new Error("显式预设成员不能重复");
+  }
+  for (const preset of presets) {
+    for (const node of Object.values(preset.nodes)) {
+      const reference = contentByIdentity.get(node.reference.identity);
+      if (reference !== node.reference) {
+        throw new Error(
+          `显式内容集合缺少预设参考成员：${node.reference.identity}`,
+        );
+      }
+    }
   }
 
   function requireContent(identity: string): Content {
@@ -237,6 +314,38 @@ export function createGenerator<
       throw new Error("显式内容中不存在：" + identity);
     }
     return content;
+  }
+
+  function expandPreset(options_: {
+    readonly preset: PresetDefinition<Content, NodeLayout, CreationInput>;
+    readonly operation: "init" | "add";
+    readonly creationInput?: CreationInput;
+  }): GeneratorSelectionRoot<CreationInput, NodeLayout>[] {
+    if (!presets.has(options_.preset)) {
+      throw new Error("所选预设未由显式内容集合提供");
+    }
+    if (!options_.preset.operations.includes(options_.operation)) {
+      throw new Error(`预设不支持${options_.operation}操作`);
+    }
+    const nodes = Object.entries(options_.preset.nodes) as [
+      string,
+      PresetNode<Content, NodeLayout, CreationInput>,
+    ][];
+    if (options_.creationInput !== undefined && nodes.length !== 1) {
+      throw new Error("多节点预设不能接收单一包创建输入");
+    }
+    return nodes.map(([nodeIdentity, node]) => {
+      const creationInput = mergeCreationInput(
+        node.creationInput?.[options_.operation],
+        options_.creationInput,
+      );
+      return {
+        nodeIdentity,
+        contentIdentity: node.reference.identity,
+        ...(node.layout === undefined ? {} : { layout: node.layout }),
+        ...(creationInput === undefined ? {} : { creationInput }),
+      };
+    });
   }
 
   function findByPackageId(
@@ -591,17 +700,32 @@ export function createGenerator<
   async function init(initOptions: {
     readonly targetRoot: string;
     readonly selection: {
-      readonly roots: readonly GeneratorSelectionRoot<CreationInput>[];
+      readonly roots: readonly GeneratorSelectionInput<
+        Content,
+        CreationInput,
+        NodeLayout
+      >[];
     };
     readonly strategyInput: Input;
     readonly dryRun?: boolean;
   }): Promise<GeneratorResult> {
     try {
-      if (initOptions.selection.roots.length === 0) {
+      const selectionRoots = initOptions.selection.roots.flatMap((root) =>
+        "preset" in root
+          ? expandPreset({
+              preset: root.preset,
+              operation: "init",
+              ...(root.creationInput === undefined
+                ? {}
+                : { creationInput: root.creationInput }),
+            })
+          : [root],
+      );
+      if (selectionRoots.length === 0) {
         throw new Error("初始化至少需要一个显式内容根");
       }
       const rootsByIdentity = new Set<string>();
-      for (const root of initOptions.selection.roots) {
+      for (const root of selectionRoots) {
         if (root.nodeIdentity.length === 0) {
           throw new Error("显式初始化节点身份不能为空");
         }
@@ -614,18 +738,19 @@ export function createGenerator<
       const prepared = options.strategy.initialize({
         targetRoot: initOptions.targetRoot,
         input: initOptions.strategyInput,
-        selection: initOptions.selection.roots,
+        selection: selectionRoots,
       });
       const roots: PackageNode<
         Context,
         Contribution,
         CreationInput,
         Content
-      >[] = initOptions.selection.roots.map((root) => {
+      >[] = selectionRoots.map((root) => {
         const content = requireContent(root.contentIdentity);
         const definition = options.strategy.createDefinition({
           context: prepared.context,
           content,
+          ...(root.layout === undefined ? {} : { layout: root.layout }),
           ...(root.creationInput === undefined
             ? {}
             : { creationInput: root.creationInput }),
@@ -703,12 +828,18 @@ export function createGenerator<
     }
   }
 
-  async function add(addOptions: {
-    readonly repositoryRoot: string;
-    readonly contentIdentity: string;
-    readonly creationInput?: CreationInput;
-    readonly dryRun?: boolean;
-  }): Promise<GeneratorResult> {
+  async function add(
+    addOptions: {
+      readonly repositoryRoot: string;
+      readonly creationInput?: CreationInput;
+      readonly dryRun?: boolean;
+    } & (
+      | { readonly contentIdentity: string }
+      | {
+          readonly preset: PresetDefinition<Content, NodeLayout, CreationInput>;
+        }
+    ),
+  ): Promise<GeneratorResult> {
     try {
       const repositoryRoot = path.resolve(addOptions.repositoryRoot);
       const blueprintValue = JSON.parse(
@@ -730,7 +861,33 @@ export function createGenerator<
         throw new Error("目标仓库使用了不兼容的工作区策略");
       }
       const state = options.strategy.parseState(record.strategyState);
-      const selected = requireContent(addOptions.contentIdentity);
+      const additionRoots =
+        "preset" in addOptions
+          ? expandPreset({
+              preset: addOptions.preset,
+              operation: "add",
+              ...(addOptions.creationInput === undefined
+                ? {}
+                : { creationInput: addOptions.creationInput }),
+            })
+          : [
+              {
+                nodeIdentity: "addition",
+                contentIdentity: addOptions.contentIdentity,
+                ...(addOptions.creationInput === undefined
+                  ? {}
+                  : { creationInput: addOptions.creationInput }),
+              },
+            ];
+      if (additionRoots.length !== 1) {
+        throw new Error("加包预设必须恰好包含一个节点");
+      }
+      const selectionRoot = additionRoots[0];
+      if (selectionRoot === undefined) {
+        throw new Error("加包预设必须恰好包含一个节点");
+      }
+      const selected = requireContent(selectionRoot.contentIdentity);
+      const creationInput = selectionRoot.creationInput;
       const existingNodes = addRecordNodes(record.packages, blueprint);
       const currentNodeInstances = resolveNodeInstances(
         record.packages,
@@ -760,9 +917,10 @@ export function createGenerator<
       const definition = options.strategy.createDefinition({
         context,
         content: selected,
-        ...(addOptions.creationInput === undefined
+        ...(selectionRoot.layout === undefined
           ? {}
-          : { creationInput: addOptions.creationInput }),
+          : { layout: selectionRoot.layout }),
+        ...(creationInput === undefined ? {} : { creationInput }),
       });
       const conflicting = blueprint.packages.find(
         (candidate) =>
@@ -804,9 +962,7 @@ export function createGenerator<
         content: selected,
         definition,
         createdBy: "addition",
-        ...(addOptions.creationInput === undefined
-          ? {}
-          : { creationInput: addOptions.creationInput }),
+        ...(creationInput === undefined ? {} : { creationInput }),
         providers: new Map(),
       };
       const newNodes = hydrateNewNodes({
