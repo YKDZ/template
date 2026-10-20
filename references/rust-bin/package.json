@@ -22,7 +22,7 @@
   },
   "scripts": {
     "build": "cargo build --workspace",
-    "build:template": "tsc -p tsconfig.template.json --pretty false",
+    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
     "format:check": "cargo fmt --all -- --check && oxfmt --list-different .",
     "format:write": "cargo fmt --all && oxfmt --write .",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings && oxlint --quiet --format=unix --ignore-pattern node_modules --ignore-pattern target .",

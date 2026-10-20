@@ -37,6 +37,11 @@
       "types": "./dist/reference-package.d.ts",
       "default": "./dist/reference-package.js"
     },
+    "./content-artifact": {
+      "source": "./src/content-artifact.ts",
+      "types": "./dist/content-artifact.d.ts",
+      "default": "./dist/content-artifact.js"
+    },
     "./project-requirements": {
       "source": "./src/project-requirements.ts",
       "types": "./dist/project-requirements.d.ts",

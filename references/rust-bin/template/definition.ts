@@ -21,6 +21,7 @@ export const referencePackage: ReferencePackage<
   RustReferenceFacts
 > = defineReferencePackage({
   packageName: "@ykdz/reference-rust-bin",
+  artifactVersion: "0.0.0",
   resolve: (specifier) => import.meta.resolve(specifier),
   resourceRoot: new URL("../", import.meta.url),
   alias: "binary",
