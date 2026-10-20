@@ -5,8 +5,8 @@ import {
   type PresetProjectOptions,
 } from "@ykdz/template-core/preset-definition";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+import type { GenerationContext } from "@ykdz/template-workspace-authoring/generation-context";
 import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
-import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
 import type { ProjectRequirement } from "@ykdz/template-workspace-authoring/project-requirements";
 
 import presetPackage from "../package.json" with { type: "json" };

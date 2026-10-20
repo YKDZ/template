@@ -108,17 +108,22 @@ void describe("TypeScript CLI 公开组合预设", () => {
       "success",
       JSON.stringify(initialized),
     );
-    assert.deepStrictEqual(
-      JSON.parse(
-        await readFile(
-          path.join(
-            targetRoot,
-            "scripts/npm-publication/publication.config.json",
-          ),
-          "utf8",
+    const publicationConfiguration = JSON.parse(
+      await readFile(
+        path.join(
+          targetRoot,
+          "scripts/npm-publication/publication.config.json",
         ),
+        "utf8",
       ),
-      { packagePath: "packages/cli" },
+    ) as Record<string, unknown>;
+    assert.partialDeepStrictEqual(publicationConfiguration, {
+      packagePath: "packages/cli",
+      creationInput: { variant: "public-candidate" },
+    });
+    assert.match(
+      publicationConfiguration.packageDefinitionId as string,
+      /^package-[a-f\d]{64}$/u,
     );
     const publicationMode =
       (

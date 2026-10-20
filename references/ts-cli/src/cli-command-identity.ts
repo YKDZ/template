@@ -3,6 +3,29 @@ export type CliCommandIdentity = {
   readonly version: string;
 };
 
+export type TsCliCreationVariant = "private" | "public-candidate";
+
+export type TsCliPublicCandidateCreationInput = {
+  readonly variant: "public-candidate";
+};
+
+export const tsCliPublicCandidateCreationInput = {
+  variant: "public-candidate",
+} as const satisfies TsCliPublicCandidateCreationInput;
+
+/** The CLI reference owns the persisted input that marks an init candidate. */
+export function isTsCliPublicCandidateCreationInput(
+  value: unknown,
+): value is TsCliPublicCandidateCreationInput {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as Readonly<Record<string, unknown>>).variant ===
+      tsCliPublicCandidateCreationInput.variant
+  );
+}
+
 export function validateCliCommandName(
   commandName: string,
   occupiedCommandNames: readonly string[] = [],

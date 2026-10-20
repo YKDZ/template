@@ -9,8 +9,8 @@ import type {
   GeneratorPackageRecord,
   GeneratorSelectionRoot,
 } from "@ykdz/template-core/workspace-strategy";
+import type { GenerationContext } from "@ykdz/template-workspace-authoring/generation-context";
 import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
-import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
 
 import { releaseToolchainSnapshot } from "./release-toolchain-snapshot.ts";
 import {
