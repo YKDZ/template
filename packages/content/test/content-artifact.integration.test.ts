@@ -1020,6 +1020,39 @@ void describe("原生内容制品安装链", () => {
       references.map((member) => contentIdentityKey(member.identity)).sort(),
     );
     assert.equal(prepared.owners.length, 11);
+    const vueSharedOwner = prepared.owners.find(
+      (owner) =>
+        owner.member.identity.packageName === "@ykdz/reference-vue-shared",
+    );
+    assert.ok(vueSharedOwner);
+    const vueSharedNativeList = await execa(
+      "pnpm",
+      ["--dir", vueSharedOwner.packageRoot, "list", "--depth", "0", "--json"],
+      { cwd: workspaceRoot },
+    );
+    const vueSharedNativeProject = (
+      JSON.parse(vueSharedNativeList.stdout) as readonly {
+        readonly devDependencies?: Readonly<
+          Record<string, { readonly from?: string; readonly version?: string }>
+        >;
+      }[]
+    )[0];
+    const nativeTypeScript =
+      vueSharedNativeProject?.devDependencies?.["typescript-7"];
+    assert.ok(nativeTypeScript?.from && nativeTypeScript.version);
+    const vueSharedArchiveManifest = JSON.parse(
+      await readFile(
+        path.join(vueSharedOwner.installRoot, "package.json"),
+        "utf8",
+      ),
+    ) as { readonly dependencies?: Readonly<Record<string, string>> };
+    assert.equal(
+      vueSharedArchiveManifest.dependencies?.["typescript-7"],
+      nativeTypeScript.from === "typescript-7"
+        ? nativeTypeScript.version
+        : `npm:${nativeTypeScript.from}@${nativeTypeScript.version}`,
+      "第一方归档应保留原生包别名实际指向的包身份与版本",
+    );
 
     const authorRoots = prepared.owners.map((owner) => owner.packageRoot);
     const authorModes = await Promise.all(
@@ -1253,6 +1286,14 @@ void describe("原生内容制品安装链", () => {
       ...authorRoots,
       workspaceRoot,
     ]);
+    const installedVueShared = closure.packages.find(
+      ({ name }) => name === "@ykdz/reference-vue-shared",
+    );
+    assert.ok(installedVueShared);
+    const installedTypeScript = createRequire(
+      path.join(installedVueShared.path, "package.json"),
+    )("typescript-7") as { readonly version: string };
+    assert.equal(installedTypeScript.version, nativeTypeScript.version);
     for (const archive of [
       ...prepared.sdkPackages,
       ...prepared.owners.map((owner) => owner.packed),
@@ -1335,6 +1376,19 @@ void describe("原生内容制品安装链", () => {
         typescript: typescriptVersion,
         nodeTypes: nodeTypesVersion,
       },
+      featureNativeDevDependencies: { typescript: "6.0.3" },
+      featureTemplatePrelude: [
+        'import ts from "typescript";',
+        "export const fixtureTypescriptVersion = ts.version;",
+        'if (ts.version !== "6.0.3") throw new Error(`所属包解析出 TypeScript ${ts.version}`);',
+      ],
+      featureTemplateDependencies: [
+        {
+          name: "@ykdz/template-workspace-authoring",
+          purpose: "template-execution",
+        },
+        { name: "typescript", purpose: "template-execution" },
+      ],
     });
     authoredFixtures.push(fixture);
     const featureAuthorRoot = path.join(
@@ -1482,6 +1536,23 @@ void describe("原生内容制品安装链", () => {
         "@fixture/preset",
         "@fixture/typescript-config",
       ].sort(),
+    );
+    const featureOwner = prepared.owners.find(
+      (owner) => owner.member.identity.packageName === "@fixture/feature",
+    );
+    assert.ok(featureOwner);
+    const featureArchiveManifest = JSON.parse(
+      await readFile(
+        path.join(featureOwner.installRoot, "package.json"),
+        "utf8",
+      ),
+    ) as {
+      readonly dependencies?: Readonly<Record<string, string>>;
+    };
+    assert.equal(
+      featureArchiveManifest.dependencies?.typescript,
+      "6.0.3",
+      "原创 owner 的普通原生依赖应使用该 owner 自己解析出的 TypeScript 坐标",
     );
     const presetOwner = prepared.owners.find(
       (owner) => owner.member.identity.packageName === "@fixture/preset",
@@ -1726,6 +1797,21 @@ void describe("原生内容制品安装链", () => {
       ({ name }) => name === "@fixture/preset",
     );
     assert.ok(installedPreset);
+    const installedFeature = installed.find(
+      ({ name }) => name === "@fixture/feature",
+    );
+    assert.ok(installedFeature);
+    const installedFeatureDefinition = await import(
+      pathToFileURL(
+        path.join(
+          installedFeature.path,
+          "native",
+          "template-dist",
+          "definition.js",
+        ),
+      ).href
+    );
+    assert.equal(installedFeatureDefinition.fixtureTypescriptVersion, "6.0.3");
     const presetManifest = JSON.parse(
       await readFile(path.join(installedPreset.path, "package.json"), "utf8"),
     ) as { readonly dependencies?: Readonly<Record<string, string>> };
