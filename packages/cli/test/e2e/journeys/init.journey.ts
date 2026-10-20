@@ -13,6 +13,9 @@ const snapshotNodeMajor = releaseToolchainSnapshot.nodeVersion.slice(
 );
 
 const presets = templatePresets.map((member) => member.definition);
+const initializationPresets = templatePresets.filter((member) =>
+  member.definition.operations.includes("init"),
+);
 
 function requireAddablePreset() {
   const preset = presets.find(
@@ -107,6 +110,17 @@ const journey: CliJourney = {
         name: "existing target conflict",
         args: ["init", "project", "--preset", addablePresetName],
       },
+      ...initializationPresets.map(({ definition }) => ({
+        name: `通过 CLI 进程初始化 ${definition.metadata.alias} 预设`,
+        args: [
+          "init",
+          `matrix-${definition.metadata.alias}`,
+          "--preset",
+          definition.metadata.alias,
+          "--scope",
+          "acme",
+        ],
+      })),
     ];
   },
   async assertions({ context, results }) {
@@ -213,6 +227,49 @@ const journey: CliJourney = {
       JSON.parse(results[5]?.stderr ?? "").variant,
       "operationFailed",
     );
+
+    const matrixResults = results.slice(6);
+    assert.equal(matrixResults.length, initializationPresets.length);
+    for (const [index, member] of initializationPresets.entries()) {
+      const result = matrixResults[index]!;
+      assert.equal(result.exitCode, 0, result.stderr);
+      const envelope = JSON.parse(result.stdout);
+      assert.equal(envelope.variant, "initialized");
+      const data = envelope.data;
+      const projectName = `matrix-${member.definition.metadata.alias}`;
+      const project = path.join(context.workDir, projectName);
+      const generationRecord = JSON.parse(
+        await readFile(path.join(project, ".template/generation.json"), "utf8"),
+      );
+      assert.deepEqual(data.generationRecord, generationRecord);
+      assert.equal(generationRecord.schemaVersion, 3);
+      assert.equal(generationRecord.strategyIdentity, "default");
+      assert.equal(generationRecord.strategyState.repositoryName, projectName);
+      assert.equal(generationRecord.strategyState.defaultPackageScope, "acme");
+      assert.ok(
+        generationRecord.presetSelections.some(
+          (selection: { readonly packageName: string }) =>
+            selection.packageName === member.identity.packageName,
+        ),
+      );
+
+      const blueprint = JSON.parse(
+        await readFile(path.join(project, ".template/blueprint.json"), "utf8"),
+      );
+      assert.deepEqual(data.blueprint, blueprint);
+      for (const packageEntry of data.resolved.packages as readonly {
+        readonly name: string;
+        readonly path: string;
+      }[]) {
+        const manifest = JSON.parse(
+          await readFile(
+            path.join(project, packageEntry.path, "package.json"),
+            "utf8",
+          ),
+        ) as { readonly name: string };
+        assert.equal(manifest.name, packageEntry.name);
+      }
+    }
   },
 };
 
