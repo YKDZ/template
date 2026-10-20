@@ -80,7 +80,7 @@ export function validateInitializationInput(
 ): InitializationInputValidation {
   const issues: InitializationInputIssue[] = [];
   const preset = presetByAlias(input.preset);
-  if (preset === undefined || !preset.operations.includes("init")) {
+  if (preset === undefined || !preset.definition.operations.includes("init")) {
     return {
       status: "input-invalid",
       issues: [{ code: "PRESET_UNKNOWN" }],
@@ -93,7 +93,8 @@ export function validateInitializationInput(
   const normalizedScope = scopeInput?.startsWith("@")
     ? scopeInput.slice(1)
     : scopeInput;
-  const configurable = Object.keys(preset.nodes).length === 1;
+  const definition = preset.definition;
+  const configurable = Object.keys(definition.nodes).length === 1;
   if (
     !configurable &&
     (override?.name !== undefined || override?.path !== undefined)
@@ -135,7 +136,7 @@ export function validateInitializationInput(
     : validRepositoryScope
       ? repositoryName
       : "repository";
-  const nodeLeafNames = Object.values(preset.nodes).map(
+  const nodeLeafNames = Object.values(definition.nodes).map(
     ({ reference }) => reference.defaultLeafName,
   );
   if (
@@ -198,7 +199,7 @@ export function validatePackageAdditionInput(input: {
   const issues: PackageAdditionInputIssue[] = [];
   const preset = presetByAlias(input.preset);
   if (preset === undefined) issues.push({ code: "PRESET_UNKNOWN" });
-  else if (!preset.operations.includes("add")) {
+  else if (!preset.definition.operations.includes("add")) {
     issues.push({ code: "PRESET_NOT_ADDABLE" });
   }
   if (!isValidDefaultNpmPackageName(`@x/${input.packageLeafName}`)) {

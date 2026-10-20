@@ -18,7 +18,6 @@ import {
 } from "@ykdz/template-core/package-contribution";
 import type {
   PresetDefinition,
-  PresetNode,
   PresetOwnerSelection,
   PresetProjectOptions,
   PresetReference,
@@ -243,7 +242,7 @@ function mergeCreationInput<CreationInput extends PackageCreationInput>(
 ): CreationInput | undefined {
   if (defaults === undefined) return supplied;
   if (supplied === undefined) return defaults;
-  return { ...defaults, ...supplied } as CreationInput;
+  return { ...defaults, ...supplied };
 }
 
 function fail(
@@ -320,7 +319,7 @@ export function parseGenerationRecord<
     strategyIdentity: record.strategyIdentity,
     strategyState: record.strategyState,
     packages: record.packages,
-    nodeInstances: nodeInstances as GeneratorNodeInstanceIds,
+    nodeInstances: nodeInstances,
     presetSelections: parsePresetSelections(record.presetSelections),
   };
 }
@@ -421,10 +420,13 @@ export function createGenerator<
     }
     for (const node of Object.values(preset.nodes)) {
       try {
-        contentIndex.fromDefinition(node.reference, "reference");
+        contentIndex.fromDefinition(node.reference, "reference", {
+          namespace: presetMember.identity.namespace,
+        });
       } catch (error) {
         throw new Error(
           `预设${contentIdentityLabel(presetMember.identity)}引用未装载的来源定义：${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
         );
       }
     }
@@ -450,10 +452,7 @@ export function createGenerator<
     if (!preset.operations.includes(options_.operation)) {
       throw new Error(`预设不支持${options_.operation}操作`);
     }
-    const nodes = Object.entries(preset.nodes) as [
-      string,
-      PresetNode<Content["definition"], NodeLayout, CreationInput>,
-    ][];
+    const nodes = Object.entries(preset.nodes);
     if (options_.creationInput !== undefined && nodes.length !== 1) {
       throw new Error("多节点预设不能接收单一包创建输入");
     }
@@ -465,6 +464,7 @@ export function createGenerator<
       const reference = contentIndex.fromDefinition(
         node.reference,
         "reference",
+        { namespace: options_.preset.identity.namespace },
       ) as Content;
       return {
         nodeIdentity,

@@ -13,9 +13,15 @@ import { describe, it } from "node:test";
 
 import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
 import { referenceDefinition as configurationDefinition } from "@ykdz/reference-typescript-config/template";
+import { referencePackage as vueShared } from "@ykdz/reference-vue-shared/template";
 import { createGenerator } from "@ykdz/template-generator";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+
+import {
+  loadTestReferences,
+  testContentIdentity,
+} from "../../test-support/content-member.ts";
 
 const configuration = defineReferencePackage(configurationDefinition);
 
@@ -49,7 +55,7 @@ void describe("显式生成器默认库行为", () => {
       "demo",
     );
     const generator = createGenerator({
-      content: [library, configuration],
+      content: loadTestReferences([library, configuration]),
       strategy: createDefaultWorkspaceStrategy(),
     });
 
@@ -113,23 +119,17 @@ void describe("显式生成器默认库行为", () => {
       await mkdtemp(path.join(tmpdir(), "template-generator-closure-")),
       "demo",
     );
-    const bridge = {
-      ...configuration,
-      identity: "typescript-config-bridge",
-      defaultLeafName: "typescript-config-bridge",
-      defaultPath: "packages/typescript-config-bridge",
-    };
     const baseStrategy = createDefaultWorkspaceStrategy();
     const generator = createGenerator({
-      content: [library, bridge, configuration],
+      content: loadTestReferences([library, vueShared, configuration]),
       strategy: {
         ...baseStrategy,
         dependencies({ content }) {
-          if (content.identity === library.identity) {
-            return [bridge.identity];
+          if (content.identity === testContentIdentity(library)) {
+            return [testContentIdentity(vueShared)];
           }
-          if (content.identity === bridge.identity) {
-            return [configuration.identity];
+          if (content.identity === testContentIdentity(vueShared)) {
+            return [testContentIdentity(configuration)];
           }
           return [];
         },
@@ -139,7 +139,12 @@ void describe("显式生成器默认库行为", () => {
     const result = await generator.init({
       targetRoot,
       selection: {
-        roots: [{ nodeIdentity: "library", contentIdentity: library.identity }],
+        roots: [
+          {
+            nodeIdentity: "library",
+            contentIdentity: testContentIdentity(library),
+          },
+        ],
       },
       strategyInput: { defaultPackageScope: "demo" },
     });
@@ -148,11 +153,7 @@ void describe("显式生成器默认库行为", () => {
     if (result.status === "success") {
       assert.deepStrictEqual(
         result.blueprint.packages.map((definition) => definition.path),
-        [
-          "packages/lib",
-          "packages/typescript-config-bridge",
-          "packages/typescript-config",
-        ],
+        ["packages/lib", "packages/vue-shared", "packages/typescript-config"],
       );
     }
   });
@@ -163,7 +164,7 @@ void describe("显式生成器默认库行为", () => {
       "demo",
     );
     const generator = createGenerator({
-      content: [library, configuration],
+      content: loadTestReferences([library, configuration]),
       strategy: createDefaultWorkspaceStrategy(),
     });
     const initialized = await generator.init({
@@ -283,7 +284,7 @@ void describe("显式生成器默认库行为", () => {
         "demo",
       );
       const generator = createGenerator({
-        content: [library, configuration],
+        content: loadTestReferences([library, configuration]),
         strategy: createDefaultWorkspaceStrategy(),
       });
       const initialized = await generator.init({
@@ -357,7 +358,7 @@ void describe("显式生成器默认库行为", () => {
       "demo",
     );
     const generator = createGenerator({
-      content: [library, configuration],
+      content: loadTestReferences([library, configuration]),
       strategy: createDefaultWorkspaceStrategy(),
     });
     const initialized = await generator.init({
@@ -402,7 +403,7 @@ void describe("显式生成器默认库行为", () => {
       "demo",
     );
     const generator = createGenerator({
-      content: [library, configuration],
+      content: loadTestReferences([library, configuration]),
       strategy: createDefaultWorkspaceStrategy(),
     });
     const initialized = await generator.init({

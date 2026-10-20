@@ -650,7 +650,7 @@ function preflightLocalTemplateMetadata(options: {
         )
       ) {
         throw new ReferenceCompositionFailure(
-          `参考包 ${reference.identity} 的依赖记录与当前来源不兼容，请先显式迁移。`,
+          `参考包 ${reference.alias} 的依赖记录与当前来源不兼容，请先显式迁移。`,
         );
       }
       for (const dependencyName of dependencyNames) {
@@ -663,7 +663,7 @@ function preflightLocalTemplateMetadata(options: {
           provider.record.referenceSource !== dependencyName
         ) {
           throw new ReferenceCompositionFailure(
-            `参考包 ${reference.identity} 缺少已记录的依赖实例 ${dependencyName}。`,
+            `参考包 ${reference.alias} 缺少已记录的依赖实例 ${dependencyName}。`,
           );
         }
         bindings.set(dependencyName, provider.definition);

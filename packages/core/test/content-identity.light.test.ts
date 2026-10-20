@@ -101,4 +101,52 @@ void describe("规范内容身份索引", () => {
       /来源修订/u,
     );
   });
+
+  void it("已知来源命名空间优先关联同一实际定义", () => {
+    const alpha = member({
+      namespace: "alpha",
+      packageName: "@example/shared",
+      exportPath: "./template",
+      alias: "shared",
+      kind: "reference",
+      value: "physical-source",
+    });
+    const beta = {
+      ...alpha,
+      identity: { ...alpha.identity, namespace: "beta" },
+    };
+    const index = createContentIndex([alpha, beta]);
+
+    assert.strictEqual(
+      index.fromDefinition(alpha.definition, "reference", {
+        namespace: "beta",
+      }),
+      beta,
+    );
+    assert.throws(
+      () => index.fromDefinition(alpha.definition, "reference"),
+      /属于多个命名空间/u,
+    );
+    assert.strictEqual(
+      createContentIndex([alpha]).fromDefinition(
+        alpha.definition,
+        "reference",
+        { namespace: "beta" },
+      ),
+      alpha,
+    );
+    const betaEntry = {
+      ...beta,
+      identity: { ...beta.identity, exportPath: "./another-entry" },
+    };
+    assert.throws(
+      () =>
+        createContentIndex([alpha, beta, betaEntry]).fromDefinition(
+          alpha.definition,
+          "reference",
+          { namespace: "beta" },
+        ),
+      /多个规范入口/u,
+    );
+  });
 });

@@ -24,6 +24,11 @@ import { createGenerator } from "@ykdz/template-generator";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
+import {
+  loadTestReferences,
+  testContentIdentity,
+} from "../../test-support/content-member.ts";
+
 const configuration = defineReferencePackage(configurationDefinition);
 
 async function snapshotTree(root: string): Promise<string> {
@@ -60,7 +65,7 @@ void describe("显式生成器 TypeScript CLI 行为", () => {
       "demo",
     );
     const generator = createGenerator({
-      content: [cli, configuration],
+      content: loadTestReferences([cli, configuration]),
       strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
     });
 
@@ -70,7 +75,7 @@ void describe("显式生成器 TypeScript CLI 行为", () => {
         roots: [
           {
             nodeIdentity: "cli",
-            contentIdentity: cli.identity,
+            contentIdentity: testContentIdentity(cli),
             creationInput: tsCliPublicCandidateCreationInput,
           },
         ],
@@ -164,7 +169,7 @@ void describe("显式生成器 TypeScript CLI 行为", () => {
 
     const added = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: cli.identity,
+      contentIdentity: testContentIdentity(cli),
       creationInput: {
         leafName: "private-cli",
         packagePath: "packages/private-cli",
@@ -246,14 +251,16 @@ void describe("显式生成器 TypeScript CLI 行为", () => {
       "demo",
     );
     const generator = createGenerator({
-      content: [cli, configuration],
+      content: loadTestReferences([cli, configuration]),
       strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
     });
 
     const initialized = await generator.init({
       targetRoot,
       selection: {
-        roots: [{ nodeIdentity: "cli", contentIdentity: cli.identity }],
+        roots: [
+          { nodeIdentity: "cli", contentIdentity: testContentIdentity(cli) },
+        ],
       },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
@@ -289,14 +296,19 @@ void describe("显式生成器 TypeScript CLI 行为", () => {
       "demo",
     );
     const generator = createGenerator({
-      content: [cli, library, configuration],
+      content: loadTestReferences([cli, library, configuration]),
       strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
     });
 
     const initialized = await generator.init({
       targetRoot,
       selection: {
-        roots: [{ nodeIdentity: "library", contentIdentity: library.identity }],
+        roots: [
+          {
+            nodeIdentity: "library",
+            contentIdentity: testContentIdentity(library),
+          },
+        ],
       },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
@@ -308,7 +320,7 @@ void describe("显式生成器 TypeScript CLI 行为", () => {
 
     const result = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: cli.identity,
+      contentIdentity: testContentIdentity(cli),
       creationInput: {
         variant: "private",
         linkToNodeIdentity: "library",
@@ -355,14 +367,19 @@ void describe("显式生成器 TypeScript CLI 行为", () => {
       "demo",
     );
     const generator = createGenerator({
-      content: [cli, library, configuration],
+      content: loadTestReferences([cli, library, configuration]),
       strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
     });
 
     const initialized = await generator.init({
       targetRoot,
       selection: {
-        roots: [{ nodeIdentity: "library", contentIdentity: library.identity }],
+        roots: [
+          {
+            nodeIdentity: "library",
+            contentIdentity: testContentIdentity(library),
+          },
+        ],
       },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
@@ -373,7 +390,7 @@ void describe("显式生成器 TypeScript CLI 行为", () => {
     );
     const linked = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: cli.identity,
+      contentIdentity: testContentIdentity(cli),
       creationInput: {
         variant: "private",
         linkToNodeIdentity: "library",
@@ -383,7 +400,7 @@ void describe("显式生成器 TypeScript CLI 行为", () => {
 
     const validAdd = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
+      contentIdentity: testContentIdentity(library),
       creationInput: { leafName: "next", packagePath: "packages/next" },
     });
     assert.strictEqual(validAdd.status, "success", JSON.stringify(validAdd));
@@ -407,7 +424,7 @@ void describe("显式生成器 TypeScript CLI 行为", () => {
     const beforeFailure = await snapshotTree(targetRoot);
     const rejected = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
+      contentIdentity: testContentIdentity(library),
       creationInput: {
         leafName: "after-broken-link",
         packagePath: "packages/after-broken-link",
@@ -430,7 +447,7 @@ void describe("显式生成器 TypeScript CLI 行为", () => {
     );
     await mkdir(targetRoot, { recursive: true });
     const generator = createGenerator({
-      content: [cli, configuration, rust],
+      content: loadTestReferences([cli, configuration, rust]),
       strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
     });
 
@@ -440,13 +457,13 @@ void describe("显式生成器 TypeScript CLI 行为", () => {
         roots: [
           {
             nodeIdentity: "cli",
-            contentIdentity: cli.identity,
+            contentIdentity: testContentIdentity(cli),
             creationInput: {
               variant: "private",
               linkToNodeIdentity: "rust",
             },
           },
-          { nodeIdentity: "rust", contentIdentity: rust.identity },
+          { nodeIdentity: "rust", contentIdentity: testContentIdentity(rust) },
         ],
       },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },

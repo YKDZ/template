@@ -23,7 +23,7 @@ import { sourceGeneratedScenarioRuntime } from "../src/source-generated-runtime.
 async function generatedScenario(alias: string, workspace: string) {
   const scenario = deriveInitializationScenarios(
     sourceGeneratedScenarioRuntime,
-  ).find((candidate) => candidate.base.metadata.alias === alias);
+  ).find((candidate) => candidate.base.definition.metadata.alias === alias);
   if (scenario === undefined) throw new Error(`Missing ${alias} initializer`);
   const receipt = await materializeGeneratedScenario({
     runtime: sourceGeneratedScenarioRuntime,

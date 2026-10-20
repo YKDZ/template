@@ -18,7 +18,7 @@ void it("拒绝发布工作流语义变更并定位 YAML 字段", async () => {
   try {
     const scenario = deriveInitializationScenarios(
       sourceGeneratedScenarioRuntime,
-    ).find((item) => item.base.metadata.alias === "ts-cli");
+    ).find((item) => item.base.definition.metadata.alias === "ts-cli");
     assert.ok(scenario);
     const receipt = await materializeGeneratedScenario({
       runtime: sourceGeneratedScenarioRuntime,

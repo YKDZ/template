@@ -19,7 +19,9 @@ void describe("真实 Generator receipt 检查", () => {
     try {
       const scenario = deriveInitializationScenarios(
         sourceGeneratedScenarioRuntime,
-      ).find((candidate) => candidate.base.metadata.alias === "ts-lib");
+      ).find(
+        (candidate) => candidate.base.definition.metadata.alias === "ts-lib",
+      );
       assert.ok(scenario);
       const receipt = await materializeGeneratedScenario({
         runtime: sourceGeneratedScenarioRuntime,

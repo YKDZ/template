@@ -37,7 +37,7 @@ type PresetDefinition = Readonly<{
   }>;
 }>;
 
-export type LoadedSourceMember = LoadedContentMember<unknown>;
+export type LoadedSourceMember = LoadedContentMember;
 
 /** 经来源自己的Node解析器，从公开代码与数据入口装载本次内容集合。 */
 export async function loadContentSource(
@@ -239,6 +239,7 @@ function resolveLocalURL(
   } catch (error) {
     throw new Error(
       `${label}解析失败：${specifier}：${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   let url: URL;

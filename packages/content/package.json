@@ -40,11 +40,12 @@
     "@ykdz/reference-vue-app": "workspace:*",
     "@ykdz/reference-vue-hono-web": "workspace:*",
     "@ykdz/reference-vue-shared": "workspace:*",
+    "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

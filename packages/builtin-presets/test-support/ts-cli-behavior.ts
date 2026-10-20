@@ -383,6 +383,7 @@ export async function driveGeneratedTerminal(
         if (!(await waitForOwnedProcessGroups(1_000)))
           throw new Error(
             `Owned terminal process groups did not exit: ${[...processGroups].join(", ")}`,
+            { cause: cause },
           );
       }
       await exited;

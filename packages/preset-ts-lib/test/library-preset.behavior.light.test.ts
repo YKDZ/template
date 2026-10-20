@@ -11,16 +11,51 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { preset } from "@ykdz/preset-ts-lib/template";
-import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
-import { referenceDefinition as configurationDefinition } from "@ykdz/reference-typescript-config/template";
+import { preset as presetDefinition } from "@ykdz/preset-ts-lib/template";
+import { referencePackage as libraryDefinition } from "@ykdz/reference-ts-lib/template";
+import {
+  contentIdentityKey,
+  createContentIndex,
+  type ContentIdentity,
+  type LoadedContentMember,
+} from "@ykdz/template-core/content-identity";
 import { definePreset } from "@ykdz/template-core/preset-definition";
 import { createGenerator } from "@ykdz/template-generator";
+import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
-const configuration = defineReferencePackage(configurationDefinition);
-const content = [library, configuration, preset];
+const content = await loadContentSource({
+  namespace: "ykdz",
+  resolve: (specifier) => import.meta.resolve(specifier),
+  members: [
+    "@ykdz/reference-ts-lib/template",
+    "@ykdz/reference-typescript-config/template",
+    "@ykdz/preset-ts-lib/template",
+  ],
+  prepareReferenceDefinition(definition) {
+    return defineReferencePackage(
+      definition as Parameters<typeof defineReferencePackage>[0],
+    );
+  },
+});
+const contentIndex = createContentIndex(content);
+const library = contentIndex.fromDefinition(
+  libraryDefinition,
+  "reference",
+) as LoadedContentMember<
+  ReturnType<typeof defineReferencePackage>,
+  "reference"
+>;
+const configuration = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/reference-typescript-config",
+    exportPath: "./template",
+  },
+  "reference",
+);
+const preset = contentIndex.fromDefinition(presetDefinition, "preset");
 
 async function snapshotTree(root: string): Promise<string> {
   const files: { path: string; mode: number; content: string }[] = [];
@@ -57,7 +92,7 @@ void describe("TypeScript 库公开预设", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
 
@@ -74,7 +109,7 @@ void describe("TypeScript 库公开预设", () => {
     ) as {
       nodeInstances: Record<string, string>;
       packages: {
-        contentIdentity: string;
+        contentIdentity: ContentIdentity;
         definition: { packageDefinitionId: string };
       }[];
     };
@@ -115,7 +150,7 @@ void describe("TypeScript 库公开预设", () => {
     const beforePreview = await readFile(generationPath, "utf8");
     const preview = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: { leafName: "shared" },
       dryRun: true,
     });
@@ -125,13 +160,13 @@ void describe("TypeScript 库公开预设", () => {
 
     const first = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: { leafName: "shared" },
     });
     assert.strictEqual(first.status, "success", JSON.stringify(first));
     const repeated = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: { leafName: "shared" },
     });
     assert.strictEqual(repeated.status, "success", JSON.stringify(repeated));
@@ -140,7 +175,7 @@ void describe("TypeScript 库公开预设", () => {
 
     const second = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: { leafName: "another" },
     });
     assert.strictEqual(second.status, "success", JSON.stringify(second));
@@ -152,7 +187,7 @@ void describe("TypeScript 库公开预设", () => {
     ) as {
       nodeInstances: Record<string, string>;
       packages: {
-        contentIdentity: string;
+        contentIdentity: ContentIdentity;
         definition: { packageDefinitionId: string };
       }[];
     };
@@ -162,10 +197,16 @@ void describe("TypeScript 库公开预设", () => {
     );
     for (const identity of [library.identity, configuration.identity]) {
       assert.strictEqual(
-        updatedRecord.packages.find((item) => item.contentIdentity === identity)
-          ?.definition.packageDefinitionId,
-        initialRecord.packages.find((item) => item.contentIdentity === identity)
-          ?.definition.packageDefinitionId,
+        updatedRecord.packages.find(
+          (item) =>
+            contentIdentityKey(item.contentIdentity) ===
+            contentIdentityKey(identity),
+        )?.definition.packageDefinitionId,
+        initialRecord.packages.find(
+          (item) =>
+            contentIdentityKey(item.contentIdentity) ===
+            contentIdentityKey(identity),
+        )?.definition.packageDefinitionId,
       );
     }
     assert.strictEqual(
@@ -209,7 +250,7 @@ void describe("TypeScript 库公开预设", () => {
     });
     const presetResult = await presetGenerator.init({
       targetRoot: path.join(roots[0]!, "demo"),
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     const referenceResult = await referenceGenerator.init({
@@ -230,11 +271,11 @@ void describe("TypeScript 库公开预设", () => {
 
   void it("节点布局和操作输入贯穿初始化、连续加包和真实回放", async () => {
     const layoutPreset = definePreset({
-      metadata: preset.metadata,
-      operations: preset.operations,
+      metadata: presetDefinition.metadata,
+      operations: presetDefinition.operations,
       nodes: {
         library: {
-          reference: library,
+          reference: library.definition,
           layout: { packageDirectory: "modules" },
           creationInput: {
             init: { leafName: "archive" },
@@ -243,17 +284,22 @@ void describe("TypeScript 库公开预设", () => {
         },
       },
     });
+    const layoutPresetMember = Object.freeze({
+      ...preset,
+      alias: layoutPreset.metadata.alias,
+      definition: layoutPreset,
+    });
     const targetRoot = path.join(
       await mkdtemp(path.join(tmpdir(), "template-ts-lib-layout-")),
       "demo",
     );
     const generator = createGenerator({
-      content: [library, configuration, layoutPreset],
+      content: [library, configuration, layoutPresetMember],
       strategy: createDefaultWorkspaceStrategy(),
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: layoutPreset }] },
+      selection: { roots: [{ preset: layoutPresetMember.identity }] },
       strategyInput: { defaultPackageScope: "demo" },
     });
     assert.strictEqual(
@@ -272,7 +318,7 @@ void describe("TypeScript 库公开预设", () => {
     );
     const fallback = await generator.add({
       repositoryRoot: targetRoot,
-      preset: layoutPreset,
+      preset: layoutPresetMember.identity,
     });
     assert.strictEqual(fallback.status, "success", JSON.stringify(fallback));
     assert.strictEqual(
@@ -288,7 +334,7 @@ void describe("TypeScript 库公开预设", () => {
     for (const [index, leafName] of ["second", "second", "third"].entries()) {
       const result = await generator.add({
         repositoryRoot: targetRoot,
-        preset: layoutPreset,
+        preset: layoutPresetMember.identity,
         creationInput: { leafName },
       });
       assert.strictEqual(result.status, "success", JSON.stringify(result));
@@ -332,7 +378,7 @@ void describe("TypeScript 库公开预设", () => {
     });
     const missing = await missingGenerator.init({
       targetRoot: missingTarget,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: { defaultPackageScope: "demo" },
     });
     assert.strictEqual(missing.status, "operation-failure");
@@ -348,7 +394,7 @@ void describe("TypeScript 库公开预设", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: { defaultPackageScope: "demo" },
     });
     assert.strictEqual(initialized.status, "success");
@@ -363,7 +409,7 @@ void describe("TypeScript 库公开预设", () => {
 
     const conflict = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: { leafName: "occupied" },
     });
 
@@ -389,7 +435,7 @@ void describe("TypeScript 库公开预设", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput: { defaultPackageScope: "demo" },
     });
     assert.strictEqual(initialized.status, "success");
@@ -397,21 +443,24 @@ void describe("TypeScript 库公开预设", () => {
     const generationPath = path.join(targetRoot, ".template/generation.json");
     const record = JSON.parse(await readFile(generationPath, "utf8")) as {
       packages: {
-        contentIdentity: string;
+        contentIdentity: ContentIdentity;
         bindings: Record<string, string>;
       }[];
     };
     const libraryRecord = record.packages.find(
-      (item) => item.contentIdentity === library.identity,
+      (item) =>
+        contentIdentityKey(item.contentIdentity) ===
+        contentIdentityKey(library.identity),
     );
     assert.ok(libraryRecord);
-    libraryRecord.bindings[configuration.identity] = "missing-package-instance";
+    libraryRecord.bindings[contentIdentityKey(configuration.identity)] =
+      "missing-package-instance";
     const corruptedRecord = JSON.stringify(record, null, 2) + "\n";
     await writeFile(generationPath, corruptedRecord);
 
     const result = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: { leafName: "rejected" },
     });
 

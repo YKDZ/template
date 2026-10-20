@@ -1,5 +1,7 @@
 import { describe, it, mock } from "node:test";
 
+import { contentIdentityKey } from "@ykdz/template-core/content-identity";
+
 import {
   deriveDeploymentQualityContractIdentity,
   deriveDeploymentQualityPlanInput,
@@ -93,7 +95,7 @@ void describe("Fixture Verification Evidence", () => {
       const evidenceScenario = {
         id: "deployment-contract-invalidation",
         label: "deployment contract invalidation",
-        presetIdentities: [selectedScenario.base.metadata.alias],
+        presetIdentities: [contentIdentityKey(selectedScenario.base.identity)],
       };
       const generatedContentIdentity = "a".repeat(40);
       const rootEvidence = await runFixtureEvidenceGate({

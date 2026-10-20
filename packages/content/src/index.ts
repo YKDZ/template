@@ -1,44 +1,63 @@
-import { preset as rustBinPreset } from "@ykdz/preset-rust-bin/template";
-import { preset as tsCliPreset } from "@ykdz/preset-ts-cli/template";
-import { preset as tsLibPreset } from "@ykdz/preset-ts-lib/template";
-import { preset as vikeAppPreset } from "@ykdz/preset-vike-app/template";
-import { preset as vueAppPreset } from "@ykdz/preset-vue-app/template";
-import { preset as vueHonoPreset } from "@ykdz/preset-vue-hono-app/template";
-import { referencePackage as honoApi } from "@ykdz/reference-hono-api/template";
-import { referencePackage as rustBin } from "@ykdz/reference-rust-bin/template";
-import { referencePackage as tsCli } from "@ykdz/reference-ts-cli/template";
-import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
-import { referenceDefinition as configurationDefinition } from "@ykdz/reference-typescript-config/template";
-import { referencePackage as vikeDatabase } from "@ykdz/reference-vike-db/template";
-import { referencePackage as vikeMigrations } from "@ykdz/reference-vike-migrations/template";
-import { referencePackage as vikeWeb } from "@ykdz/reference-vike-web/template";
-import { referencePackage as vueApp } from "@ykdz/reference-vue-app/template";
-import { referencePackage as vueHonoWeb } from "@ykdz/reference-vue-hono-web/template";
-import { referencePackage as vueShared } from "@ykdz/reference-vue-shared/template";
-import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
+import type {
+  ContentKind,
+  LoadedContentMember,
+} from "@ykdz/template-core/content-identity";
+import type {
+  PresetDefinition,
+  PresetProjectOptions,
+} from "@ykdz/template-core/preset-definition";
+import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
+import { loadContentSource } from "@ykdz/template-generator/content-source";
+import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
+import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
+import {
+  defineReferencePackage,
+  type ReferencePackage,
+} from "@ykdz/template-workspace-authoring/reference-package";
 
-const configuration = defineReferencePackage(configurationDefinition);
+type TemplatePresetDefinition = PresetDefinition<
+  ReferencePackage,
+  unknown,
+  PackageCreationInput,
+  PresetProjectOptions<GenerationContext, PackageContribution>,
+  unknown
+>;
 
-export const templateContent = [
-  library,
-  configuration,
-  tsLibPreset,
-  tsCli,
-  tsCliPreset,
-  rustBin,
-  rustBinPreset,
-  vueApp,
-  vueShared,
-  vueAppPreset,
-  honoApi,
-  vueHonoWeb,
-  vueHonoPreset,
-  vikeWeb,
-  vikeDatabase,
-  vikeMigrations,
-  vikeAppPreset,
-] as const;
+type LoadedTemplateContentMember =
+  | LoadedContentMember<ReferencePackage, "reference">
+  | LoadedContentMember<TemplatePresetDefinition, "preset">;
 
+/** 所有可选择内容只在这里登记一次，并从原生公开入口装载。 */
+export const templateContent = (await loadContentSource({
+  namespace: "ykdz",
+  resolve: (specifier) => import.meta.resolve(specifier),
+  members: [
+    "@ykdz/reference-ts-lib/template",
+    "@ykdz/reference-typescript-config/template",
+    "@ykdz/preset-ts-lib/template",
+    "@ykdz/reference-ts-cli/template",
+    "@ykdz/preset-ts-cli/template",
+    "@ykdz/reference-rust-bin/template",
+    "@ykdz/preset-rust-bin/template",
+    "@ykdz/reference-vue-app/template",
+    "@ykdz/reference-vue-shared/template",
+    "@ykdz/preset-vue-app/template",
+    "@ykdz/reference-hono-api/template",
+    "@ykdz/reference-vue-hono-web/template",
+    "@ykdz/preset-vue-hono-app/template",
+    "@ykdz/reference-vike-web/template",
+    "@ykdz/reference-vike-db/template",
+    "@ykdz/reference-vike-migrations/template",
+    "@ykdz/preset-vike-app/template",
+  ],
+  prepareReferenceDefinition(definition) {
+    return defineReferencePackage(
+      definition as Parameters<typeof defineReferencePackage>[0],
+    );
+  },
+})) as readonly LoadedTemplateContentMember[];
+
+export type { ContentKind };
 export type TemplateContentMember = (typeof templateContent)[number];
 
 /** 从唯一内容集合派生的可选择预设成员。 */
@@ -50,10 +69,10 @@ export type TemplatePreset = Extract<
 /** 从唯一内容集合派生的原生参考包闭包。 */
 export type TemplateReferencePackage = Extract<
   TemplateContentMember,
-  { readonly manifest: unknown }
+  { readonly kind: "reference" }
 >;
 
-/** 从唯一内容序列派生可选预设和打包所需参考包输入。 */
+/** 从唯一内容序列派生预设成员和打包所需参考包成员。 */
 export function deriveTemplateMembers<Content extends readonly unknown[]>(
   content: Content,
 ): {
@@ -63,13 +82,13 @@ export function deriveTemplateMembers<Content extends readonly unknown[]>(
   >[];
   readonly referencePackages: readonly Extract<
     Content[number],
-    { readonly manifest: unknown }
+    { readonly kind: "reference" }
   >[];
 } {
   const presets: Extract<Content[number], { readonly kind: "preset" }>[] = [];
   const referencePackages: Extract<
     Content[number],
-    { readonly manifest: unknown }
+    { readonly kind: "reference" }
   >[] = [];
   for (const member of content) {
     if (typeof member !== "object" || member === null) continue;
@@ -78,9 +97,9 @@ export function deriveTemplateMembers<Content extends readonly unknown[]>(
         member as Extract<Content[number], { readonly kind: "preset" }>,
       );
     }
-    if ("manifest" in member) {
+    if ("kind" in member && member.kind === "reference") {
       referencePackages.push(
-        member as Extract<Content[number], { readonly manifest: unknown }>,
+        member as Extract<Content[number], { readonly kind: "reference" }>,
       );
     }
   }

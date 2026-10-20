@@ -23,6 +23,11 @@ import { defineReferencePackage } from "@ykdz/template-workspace-authoring/refer
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 import { parse } from "yaml";
 
+import {
+  loadTestReferences,
+  testContentIdentity,
+} from "../../test-support/content-member.ts";
+
 const configuration = defineReferencePackage(configurationDefinition);
 const projectContent = createVikeProjectContents({
   web,
@@ -65,23 +70,29 @@ void it("Vike 项目要求用真实 web、数据库和迁移实例生成拓扑�
   const targetRoot = path.join(temporaryRoot, "demo");
   try {
     const generator = createGenerator({
-      content: [
+      content: loadTestReferences([
         projectContent.web,
         projectContent.database,
         migrations,
         vueShared,
         configuration,
         library,
-      ],
+      ]),
       strategy: createDefaultWorkspaceStrategy(),
     });
     const initialized = await generator.init({
       targetRoot,
       selection: {
         roots: [
-          { nodeIdentity: "web", contentIdentity: web.identity },
-          { nodeIdentity: "database", contentIdentity: database.identity },
-          { nodeIdentity: "migrations", contentIdentity: migrations.identity },
+          { nodeIdentity: "web", contentIdentity: testContentIdentity(web) },
+          {
+            nodeIdentity: "database",
+            contentIdentity: testContentIdentity(database),
+          },
+          {
+            nodeIdentity: "migrations",
+            contentIdentity: testContentIdentity(migrations),
+          },
         ],
       },
       strategyInput: {
@@ -168,7 +179,7 @@ void it("Vike 项目要求用真实 web、数据库和迁移实例生成拓扑�
 
     const added = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
+      contentIdentity: testContentIdentity(library),
       creationInput: { leafName: "domain" },
     });
     assert.strictEqual(added.status, "success", JSON.stringify(added));
@@ -208,7 +219,7 @@ void it("Vike 项目要求用真实 web、数据库和迁移实例生成拓扑�
     const beforeInvalidAddition = await repositorySnapshot(targetRoot);
     const invalidAddition = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
+      contentIdentity: testContentIdentity(library),
       creationInput: { leafName: "next" },
     });
     assert.strictEqual(invalidAddition.status, "operation-failure");

@@ -399,9 +399,15 @@ function nativeDependencyIdentities(
         `内容${contentIdentityLabel(content.identity)}无法解析必要模板依赖${nativeName}：${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    const providers = [...contentByIdentity.values()].filter(
+    const matchingSources = [...contentByIdentity.values()].filter(
       (candidate) => candidate.source.moduleURL === resolved,
     );
+    const sameNamespace = matchingSources.filter(
+      (candidate) =>
+        candidate.identity.namespace === content.identity.namespace,
+    );
+    const providers =
+      sameNamespace.length > 0 ? sameNamespace : matchingSources;
     if (providers.length === 0) {
       throw new Error(
         `内容${contentIdentityLabel(content.identity)}的必要模板依赖未登记：${nativeName}`,

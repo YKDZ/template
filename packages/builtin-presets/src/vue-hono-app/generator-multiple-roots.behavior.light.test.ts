@@ -9,6 +9,7 @@ import { referenceDefinition as configurationDefinition } from "@ykdz/reference-
 import { referencePackage as web } from "@ykdz/reference-vue-hono-web/template";
 import { referencePackage as vueShared } from "@ykdz/reference-vue-shared/template";
 import { createVueHonoProjectContent } from "@ykdz/template-builtin-presets";
+import { contentIdentityKey } from "@ykdz/template-core/content-identity";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import type {
   GeneratorPackageCreatedBy,
@@ -18,6 +19,11 @@ import { createGenerator } from "@ykdz/template-generator";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import type { ReferenceContributionOptions } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+
+import {
+  loadTestReferences,
+  testContentIdentity,
+} from "../../test-support/content-member.ts";
 
 const configuration = defineReferencePackage(configurationDefinition);
 type CreationInput = PackageCreationInput<"site" | "admin">;
@@ -68,7 +74,12 @@ void it("Vue-Hono 初始化先分配所有显式独立根再解析原生依赖",
   const targetRoot = path.join(temporaryRoot, "demo");
   try {
     const generator = createGenerator({
-      content: [trackedWeb, api, trackedShared, configuration],
+      content: loadTestReferences([
+        trackedWeb,
+        api,
+        trackedShared,
+        configuration,
+      ]),
       strategy: createDefaultWorkspaceStrategy<CreationInput>(),
     });
     const initialized = await generator.init({
@@ -77,10 +88,10 @@ void it("Vue-Hono 初始化先分配所有显式独立根再解析原生依赖",
         roots: [
           {
             nodeIdentity: "web",
-            contentIdentity: web.identity,
+            contentIdentity: testContentIdentity(web),
             creationInput: { variant: "site" },
           },
-          { nodeIdentity: "api", contentIdentity: api.identity },
+          { nodeIdentity: "api", contentIdentity: testContentIdentity(api) },
         ],
       },
       strategyInput: {
@@ -203,15 +214,19 @@ void it("Vue-Hono 初始化先分配所有显式独立根再解析原生依赖",
     ) as {
       nodeInstances: Record<string, string>;
       packages: {
-        contentIdentity: string;
+        contentIdentity: ReturnType<typeof testContentIdentity>;
         definition: { packageDefinitionId: string };
       }[];
     };
     const webRecord = generation.packages.find(
-      (record) => record.contentIdentity === web.identity,
+      (record) =>
+        contentIdentityKey(record.contentIdentity) ===
+        contentIdentityKey(testContentIdentity(web)),
     );
     const apiRecord = generation.packages.find(
-      (record) => record.contentIdentity === api.identity,
+      (record) =>
+        contentIdentityKey(record.contentIdentity) ===
+        contentIdentityKey(testContentIdentity(api)),
     );
     assert.strictEqual(
       generation.nodeInstances.web,
@@ -224,7 +239,7 @@ void it("Vue-Hono 初始化先分配所有显式独立根再解析原生依赖",
 
     const added = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: web.identity,
+      contentIdentity: testContentIdentity(web),
       creationInput: { leafName: "admin", variant: "admin" },
     });
     assert.strictEqual(added.status, "success", JSON.stringify(added));
@@ -244,7 +259,7 @@ void it("Vue-Hono 初始化先分配所有显式独立根再解析原生依赖",
       ),
     ) as {
       packages: {
-        contentIdentity: string;
+        contentIdentity: ReturnType<typeof testContentIdentity>;
         createdBy: string;
         creationInput?: CreationInput;
       }[];
@@ -252,7 +267,8 @@ void it("Vue-Hono 初始化先分配所有显式独立根再解析原生依赖",
     assert.ok(
       afterAdd.packages.some(
         (record) =>
-          record.contentIdentity === web.identity &&
+          contentIdentityKey(record.contentIdentity) ===
+            contentIdentityKey(testContentIdentity(web)) &&
           record.createdBy === "addition" &&
           record.creationInput?.leafName === "admin" &&
           record.creationInput.variant === "admin",
@@ -271,7 +287,8 @@ void it("Vue-Hono 初始化先分配所有显式独立根再解析原生依赖",
     assert.ok(
       afterAdd.packages.some(
         (record) =>
-          record.contentIdentity === vueShared.identity &&
+          contentIdentityKey(record.contentIdentity) ===
+            contentIdentityKey(testContentIdentity(vueShared)) &&
           record.createdBy === "shared-dependency",
       ),
     );
@@ -309,7 +326,7 @@ void it("公开生成器拒绝包贡献写入未拥有的根路径且不留下�
     },
   };
   const generator = createGenerator({
-    content: [guardedWeb, api, vueShared, configuration],
+    content: loadTestReferences([guardedWeb, api, vueShared, configuration]),
     strategy: createDefaultWorkspaceStrategy<CreationInput>(),
   });
   try {
@@ -318,8 +335,8 @@ void it("公开生成器拒绝包贡献写入未拥有的根路径且不留下�
       targetRoot,
       selection: {
         roots: [
-          { nodeIdentity: "web", contentIdentity: web.identity },
-          { nodeIdentity: "api", contentIdentity: api.identity },
+          { nodeIdentity: "web", contentIdentity: testContentIdentity(web) },
+          { nodeIdentity: "api", contentIdentity: testContentIdentity(api) },
         ],
       },
       strategyInput: {
@@ -335,8 +352,8 @@ void it("公开生成器拒绝包贡献写入未拥有的根路径且不留下�
       targetRoot,
       selection: {
         roots: [
-          { nodeIdentity: "web", contentIdentity: web.identity },
-          { nodeIdentity: "api", contentIdentity: api.identity },
+          { nodeIdentity: "web", contentIdentity: testContentIdentity(web) },
+          { nodeIdentity: "api", contentIdentity: testContentIdentity(api) },
         ],
       },
       strategyInput: {
@@ -352,8 +369,8 @@ void it("公开生成器拒绝包贡献写入未拥有的根路径且不留下�
       targetRoot,
       selection: {
         roots: [
-          { nodeIdentity: "web", contentIdentity: web.identity },
-          { nodeIdentity: "api", contentIdentity: api.identity },
+          { nodeIdentity: "web", contentIdentity: testContentIdentity(web) },
+          { nodeIdentity: "api", contentIdentity: testContentIdentity(api) },
         ],
       },
       strategyInput: {
@@ -381,7 +398,7 @@ void it("公开生成器拒绝包贡献写入未拥有的根路径且不留下�
     writeOutsidePackage = "traversal";
     const invalidAddition = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: web.identity,
+      contentIdentity: testContentIdentity(web),
       creationInput: { leafName: "admin", variant: "admin" },
     });
     assert.strictEqual(invalidAddition.status, "operation-failure");

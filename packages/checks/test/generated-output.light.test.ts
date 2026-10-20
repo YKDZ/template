@@ -16,7 +16,7 @@ await test("在真实生成目标上检查格式与依赖目录事实", async ()
   try {
     const scenario = deriveInitializationScenarios(
       sourceGeneratedScenarioRuntime,
-    ).find((item) => item.base.metadata.alias === "ts-lib");
+    ).find((item) => item.base.definition.metadata.alias === "ts-lib");
     assert.ok(scenario);
     const receipt = await materializeGeneratedScenario({
       runtime: sourceGeneratedScenarioRuntime,
