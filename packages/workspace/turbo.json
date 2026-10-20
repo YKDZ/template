@@ -5,7 +5,8 @@
     "build": {
       "dependsOn": [
         "@ykdz/template-core#build",
-        "@ykdz/template-environment#build"
+        "@ykdz/template-environment#build",
+        "@ykdz/template-workspace-authoring#build"
       ],
       "tags": ["quality:light"],
       "cache": true,
@@ -38,6 +39,14 @@
       "persistent": false
     },
     "lint:fix": {
+      "dependsOn": [],
+      "tags": ["work:repair"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "sync:policy-snapshot": {
       "dependsOn": [],
       "tags": ["work:repair"],
       "cache": false,

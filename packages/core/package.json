@@ -19,6 +19,7 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix --ignore-pattern dist .",
     "lint:fix": "oxlint --format=unix --ignore-pattern dist . --fix",
+    "sync:renderer-policy-snapshot": "node scripts/sync-renderer-policy-snapshot.ts",
     "test": "node --conditions=source --test --test-reporter=spec --test-reporter=@ykdz/reference-typescript-config/reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.light.test.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },

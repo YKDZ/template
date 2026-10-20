@@ -2,17 +2,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  collectGeneratedManifestCatalogReferences,
-  selectTemplateDependencyCatalogEntries,
-} from "@ykdz/template-core/dependency-catalog";
 import type {
   PackageLinkIntent,
   PackageDefinition,
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
 import type { ProjectProjectionReconciliation } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
   createTemplateSourceHandle,
   type RenderOperation,
@@ -49,6 +44,10 @@ import {
   assertDefaultPackageDefinition,
   assertDefaultProjectBlueprint,
 } from "./default-package-identity.ts";
+import {
+  collectGeneratedManifestCatalogReferences,
+  selectTemplateDependencyCatalogEntries,
+} from "./dependency-catalog.ts";
 import { browserTestDevelopmentContainerToolLayer } from "./development-container.ts";
 import {
   assertReusablePackageExposure,
@@ -59,6 +58,7 @@ import {
   projectDependabotConfig,
 } from "./project-github.ts";
 import { planExplicitProjectLinks } from "./project-linking.ts";
+import { releaseToolchainSnapshot } from "./release-toolchain-snapshot.ts";
 import {
   createWorkspaceRootManifest,
   packageConditionKeyOrder,

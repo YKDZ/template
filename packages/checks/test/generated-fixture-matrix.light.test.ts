@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
 
 import { runGeneratedScenarioSet } from "../src/check-generated-registry.ts";

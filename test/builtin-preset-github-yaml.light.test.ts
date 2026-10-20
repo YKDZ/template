@@ -15,8 +15,8 @@ import {
   assertWorkflowContract,
   assertPublicationWorkflowContract,
 } from "@ykdz/template-checks/workflow-contract";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { parse } from "yaml";
 
 function rootOnlyPlan(): GeneratedRepositoryPlan {

@@ -385,7 +385,38 @@ export function createGenerator<
       contributions,
       nodeInstances: resolvedNodeInstances,
     });
-    const projectedBlueprint = projection.blueprint ?? blueprint;
+    const projectedBlueprint = assertProjectBlueprint(
+      projection.blueprint ?? blueprint,
+    );
+    const allocatedDefinitions = new Map(
+      records.map((record) => [
+        record.definition.packageDefinitionId,
+        record.definition,
+      ]),
+    );
+    if (projectedBlueprint.packages.length !== allocatedDefinitions.size) {
+      throw new Error("策略蓝图必须引用完整且唯一的已分配包实例");
+    }
+    for (const projectedDefinition of projectedBlueprint.packages) {
+      const allocated = allocatedDefinitions.get(
+        projectedDefinition.packageDefinitionId,
+      );
+      if (
+        allocated === undefined ||
+        allocated.name !== projectedDefinition.name ||
+        allocated.path !== projectedDefinition.path ||
+        allocated.role !== projectedDefinition.role
+      ) {
+        throw new Error(
+          "策略蓝图中的包定义必须与生成器分配的包实例一致：" +
+            projectedDefinition.path,
+        );
+      }
+      allocatedDefinitions.delete(projectedDefinition.packageDefinitionId);
+    }
+    if (allocatedDefinitions.size > 0) {
+      throw new Error("策略蓝图遗漏了已分配的包实例");
+    }
     return {
       blueprint: projectedBlueprint,
       operations: [

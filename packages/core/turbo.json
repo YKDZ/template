@@ -50,6 +50,14 @@
       "outputs": [],
       "persistent": false
     },
+    "sync:renderer-policy-snapshot": {
+      "dependsOn": [],
+      "tags": ["work:repair"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "tags": ["quality:light"],

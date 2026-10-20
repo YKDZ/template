@@ -21,9 +21,9 @@ import {
   type ProjectProjectionAction,
   type ProjectProjectionConflict,
 } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { projectNextStepsDocument } from "@ykdz/template-workspace/project-github";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 export type ApplicationRuntime = {
   readonly cwd: string;

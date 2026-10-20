@@ -60,9 +60,6 @@ export const dependencyCatalogSnapshot: Readonly<Record<string, string>> = {
   "validate-npm-package-name": "^8.0.0",
 };
 
-export const resourceIgnoreSnapshot =
-  "node_modules/\n.pnpm-store/\ndist/\ntemplate-dist/\ntarget/\n.turbo/\ncoverage/\n.env\n.template/\n.vitest/\ndata/\nplaywright-report/\ntest-results/\n\n.fixture-evidence/\n.fixture-evidence-activity/\n.fixture-native-cache/\n.fixture-workspace/\n.verified-packed-publication/\n.cli-journey-diagnostics/\n.preset-behavior-diagnostics/\n";
-
 export const workspaceInstallPolicySnapshot = {
   nodeLinker: "isolated",
   preferSymlinkedExecutables: true,
@@ -82,5 +79,3 @@ export const workspaceInstallPolicySnapshot = {
     "vue>typescript": "-",
   },
 };
-
-export const generatedJsonPrintWidth = 80;

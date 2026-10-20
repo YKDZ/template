@@ -24,8 +24,8 @@ import {
 } from "@ykdz/template-builtin-presets";
 import { type PackageRole } from "@ykdz/template-core/project-blueprint";
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
 
 import { rootInstalledIntegrationSignal } from "../test-support/root-installed-integration-signal.ts";

@@ -43,10 +43,10 @@ export type GeneratorContent<
     readonly context: Context;
     readonly definition: PackageDefinition;
     readonly bindings?: ReadonlyMap<string, PackageDefinition>;
-    /** The persisted operation that originally created this package instance. */
+    /** 创建该包实例时持久化的原始操作。 */
     readonly createdBy: GeneratorPackageCreatedBy;
     readonly creationInput?: CreationInput;
-    /** Resolved instances selected by stable node identity for project behavior. */
+    /** 按稳定节点身份解析、供项目行为使用的实例。 */
     readonly nodeInstances: GeneratorNodeInstances;
   }): Contribution;
 };
@@ -70,7 +70,7 @@ export type GeneratorNodeInstanceIds = Readonly<
 export type GeneratorNodeInstances = ReadonlyMap<string, PackageDefinition>;
 
 export type WorkspaceProjection = {
-  /** Strategy-owned closed project relationships added to the current blueprint. */
+  /** 策略拥有并封闭管理、并入当前蓝图的项目关系。 */
   readonly blueprint?: ProjectBlueprint;
   readonly operations: readonly RenderOperation[];
   readonly reconciliation: readonly ProjectProjectionReconciliation[];

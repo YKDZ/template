@@ -3,7 +3,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
-import { mapPackageNamesInJson } from "@ykdz/template-core/package-name-projection";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import {
   createTemplateSourceHandle,
@@ -11,13 +10,14 @@ import {
   type RenderOperation,
   type TemplateSourceHandle,
 } from "@ykdz/template-core/renderer";
-import { resourceIgnoreSnapshot } from "@ykdz/template-core/workspace-policy-snapshot";
 import ignore, { type Ignore } from "ignore";
 import { parse, type ParseError } from "jsonc-parser";
 
 import type { DefaultPackageRole } from "./default-package-role.ts";
 import type { PackageContribution } from "./package-contribution.ts";
+import { mapPackageNamesInJson } from "./package-name-projection.ts";
 import type { GenerationContext } from "./preset-definition.ts";
+import { resourceIgnoreSnapshot } from "./resource-ignore-snapshot.ts";
 
 export type ReferencePackageManifest = Readonly<Record<string, unknown>> & {
   readonly name: string;

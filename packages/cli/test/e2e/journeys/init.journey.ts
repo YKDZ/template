@@ -3,7 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { builtInPresetRegistry } from "@ykdz/template-builtin-presets";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 import type { CliJourney } from "../journey.ts";
 

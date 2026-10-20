@@ -14,7 +14,7 @@ import {
 async function repositoryFixture(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "repository-config-"));
   await mkdir(path.join(root, "packages/cli"), { recursive: true });
-  await mkdir(path.join(root, "packages/core/src"), { recursive: true });
+  await mkdir(path.join(root, "packages/workspace/src"), { recursive: true });
   await mkdir(path.join(root, "references/ts-cli"), { recursive: true });
   await mkdir(path.join(root, "references/rust-bin/template"), {
     recursive: true,
@@ -45,7 +45,7 @@ async function repositoryFixture(): Promise<string> {
     '[toolchain]\nchannel = "1.99.0" # 保留模板注释\ncomponents = ["rustfmt", "clippy"]\n',
   );
   await writeFile(
-    path.join(root, "packages/core/src/release-toolchain-snapshot.ts"),
+    path.join(root, "packages/workspace/src/release-toolchain-snapshot.ts"),
     'export const releaseToolchainSnapshot = Object.freeze({nodeVersion:"24.0.0",packageManagerPin:"pnpm@12.0.0",rustVersion:"1.99.0"} as const);\n// 保留注释\n',
   );
   return root;
@@ -96,7 +96,7 @@ void it("只读检查发现所有受管输出的漂移，同步恢复后再次�
     const cliFile = "packages/cli/package.json";
     const referenceCliFile = "references/ts-cli/package.json";
     const rustFile = "references/rust-bin/template/rust-toolchain.toml";
-    const snapshotFile = "packages/core/src/release-toolchain-snapshot.ts";
+    const snapshotFile = "packages/workspace/src/release-toolchain-snapshot.ts";
     const files = [
       ...managedFiles,
       cliFile,
@@ -201,7 +201,7 @@ void it("写入失败报告已更新文件，直接 Node 入口可离线补齐�
       '{"engines":{"node":"^26.1.2"},"custom":true}\n',
     );
     const snapshot = await readFile(
-      path.join(root, "packages/core/src/release-toolchain-snapshot.ts"),
+      path.join(root, "packages/workspace/src/release-toolchain-snapshot.ts"),
       "utf8",
     );
     assert.match(snapshot, /nodeVersion:"26\.1\.2"/u);
@@ -233,7 +233,9 @@ for (const failure of [
     const root = await mkdtemp(path.join(tmpdir(), "sync-preflight-"));
     try {
       await mkdir(path.join(root, "packages/cli"), { recursive: true });
-      await mkdir(path.join(root, "packages/core/src"), { recursive: true });
+      await mkdir(path.join(root, "packages/workspace/src"), {
+        recursive: true,
+      });
       await mkdir(path.join(root, ".devcontainer"), { recursive: true });
       await mkdir(path.join(root, "references/ts-cli"), { recursive: true });
       await mkdir(path.join(root, "references/rust-bin/template"), {
@@ -265,7 +267,10 @@ for (const failure of [
       await writeFile(path.join(root, ".devcontainer/Dockerfile"), docker);
       if (failure !== "missing")
         await writeFile(
-          path.join(root, "packages/core/src/release-toolchain-snapshot.ts"),
+          path.join(
+            root,
+            "packages/workspace/src/release-toolchain-snapshot.ts",
+          ),
           failure === "shape"
             ? "export const releaseToolchainSnapshot = compute();\n"
             : `export const releaseToolchainSnapshot = Object.freeze({nodeVersion:"24.0.0",packageManagerPin:"pnpm@12.0.0",rustVersion:"1.99.0"} as const${failure === "syntax" ? "" : ")"};\n`,

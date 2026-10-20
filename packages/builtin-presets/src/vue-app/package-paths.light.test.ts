@@ -12,8 +12,8 @@ import {
   planGeneratedRepositoryPackageAddition,
 } from "@ykdz/template-builtin-presets";
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 import { vueAppDefinition } from "./definition.ts";
 

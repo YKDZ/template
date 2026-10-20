@@ -2,7 +2,7 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
 } from "@ykdz/template-builtin-presets";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 /** 从公开来源与新增能力找到本次旅程要消费的预设。 */
 export function requireReferencePresetName(
