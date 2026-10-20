@@ -11,26 +11,24 @@ import type {
   PackageCreationInput,
 } from "./workspace-strategy.ts";
 
-/** schema1 的结构声明；策略状态和内容创建输入由各自 owner 解释。 */
-export const generationRecordSchema = v.looseObject({
-  schemaVersion: v.literal(1),
-  strategyIdentity: v.string(),
+/** schema3 只保存后续操作所需的事实；蓝图仍是包定义的唯一来源。 */
+export const generationRecordSchema = v.strictObject({
+  schemaVersion: v.literal(3),
+  strategyIdentity: v.pipe(v.string(), v.minLength(1)),
   strategyState: v.unknown(),
   packages: v.array(
-    v.looseObject({
+    v.strictObject({
       contentIdentity: contentIdentitySchema,
       createdBy: v.picklist([
         "initialization",
         "addition",
         "shared-dependency",
       ]),
-      definition: v.looseObject({
-        packageDefinitionId: v.string(),
-        name: v.string(),
-        path: v.string(),
-        role: v.string(),
-      }),
-      creationInput: v.optional(v.unknown()),
+      packageDefinitionId: v.pipe(
+        v.string(),
+        v.regex(/^package-[a-f0-9]{64}$/u),
+      ),
+      creationInput: v.nullable(v.unknown()),
       bindings: v.record(v.string(), v.string()),
     }),
   ),
@@ -38,13 +36,22 @@ export const generationRecordSchema = v.looseObject({
   presetSelections: v.array(contentIdentitySchema),
 });
 
-/** 按公开 schema1 结构解析；策略语义由 generator/workspace owner 继续校验。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** 按公开 schema3 结构解析；策略状态由 workspace owner 继续校验。 */
 export function parseGenerationRecordStructure<
   CreationInput extends PackageCreationInput = PackageCreationInput,
 >(value: unknown): GenerationRecord<CreationInput> {
+  if (isRecord(value) && value.schemaVersion !== 3) {
+    throw new Error(
+      `不支持的生成记录 schema ${String(value.schemaVersion)}；当前只支持 schema3`,
+    );
+  }
   const parsed = v.safeParse(generationRecordSchema, value);
   if (!parsed.success) {
-    throw new Error("生成记录不符合 schema1 结构");
+    throw new Error("生成记录不符合 schema3 结构");
   }
   return parsed.output as GenerationRecord<CreationInput>;
 }

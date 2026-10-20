@@ -13,7 +13,7 @@ import type { RenderOperation } from "@ykdz/template-core/renderer";
 import { resolveTemplateSource } from "@ykdz/template-core/renderer";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
 import type {
-  GeneratorPackageRecord,
+  GeneratorPackageState,
   GeneratorSelectionRoot,
 } from "@ykdz/template-core/workspace-strategy";
 import type { GenerationContext } from "@ykdz/template-workspace-authoring/generation-context";
@@ -56,7 +56,7 @@ export function initialRustVersion(
 /** 默认策略加 Rust 包时沿用现行根事实或发布快照。 */
 export function rustVersionForAddition(options: {
   readonly targetRoot: string;
-  readonly packages: readonly GeneratorPackageRecord[];
+  readonly packages: readonly GeneratorPackageState[];
   readonly contentIdentity: ContentIdentity;
   readonly contentByIdentity: ReadonlyMap<string, RustContent>;
 }): string | undefined {
@@ -106,7 +106,7 @@ function rustToolchain(
 /** 默认策略投影 Rust 根声明，并在已有 Rust 仓库加包时保留原始字节。 */
 export function projectRustTarget(options: {
   readonly context: GenerationContext;
-  readonly packages: readonly GeneratorPackageRecord[];
+  readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
 }): {
   readonly toolchain: RustToolchain | undefined;

@@ -180,9 +180,13 @@ async function focusedConsumerPath(options: {
   readonly canConsumePackageNameImport: GeneratedScenarioRuntime["canConsumeNodePackageNameImportForRole"];
 }): Promise<string | undefined> {
   const initializedPaths = new Set(
-    options.generationRecord.packages
-      .filter((record) => record.createdBy === "initialization")
-      .map((record) => record.definition.path),
+    options.blueprint.packages.flatMap((definition) => {
+      const record = options.generationRecord.packages.find(
+        (candidate) =>
+          candidate.packageDefinitionId === definition.packageDefinitionId,
+      );
+      return record?.createdBy === "initialization" ? [definition.path] : [];
+    }),
   );
   for (const consumer of options.blueprint.packages) {
     if (!initializedPaths.has(consumer.path)) continue;

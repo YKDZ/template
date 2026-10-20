@@ -752,8 +752,9 @@ void describe("公开模板内容集合", () => {
     });
 
     assert.strictEqual(cliResult.status, "success", JSON.stringify(cliResult));
-    const cliNode = tsCliPreset.definition.nodes.cli;
-    assert.ok(cliNode?.creationInput);
+    const expectedCreationInput =
+      tsCliPreset.definition.nodes.cli?.creationInput?.init;
+    assert.ok(expectedCreationInput);
     const cliManifest = JSON.parse(
       await readFile(path.join(cliRoot, "packages/cli/package.json"), "utf8"),
     ) as {
@@ -784,7 +785,7 @@ void describe("公开模板内容集合", () => {
     assert.strictEqual(publicationConfig.packagePath, "packages/cli");
     assert.deepStrictEqual(
       publicationConfig.creationInput,
-      cliNode.creationInput.init,
+      expectedCreationInput,
     );
     const blueprint = JSON.parse(
       await readFile(path.join(cliRoot, ".template/blueprint.json"), "utf8"),
@@ -809,13 +810,15 @@ void describe("公开模板内容集合", () => {
       ),
     );
     const matchingRecords = generationRecord.packages.filter(
-      ({ definition }) =>
-        definition.packageDefinitionId ===
-        publicationConfig.packageDefinitionId,
+      ({ packageDefinitionId }) =>
+        packageDefinitionId === publicationConfig.packageDefinitionId,
     );
     assert.strictEqual(matchingRecords.length, 1);
     assert.strictEqual(matchingRecords[0]?.createdBy, "initialization");
-    assert.strictEqual(matchingRecords[0]?.definition.path, "packages/cli");
+    assert.strictEqual(
+      matchingRecords[0]?.packageDefinitionId,
+      publicationConfig.packageDefinitionId,
+    );
     assert.deepStrictEqual(
       matchingRecords[0]?.creationInput,
       publicationConfig.creationInput,

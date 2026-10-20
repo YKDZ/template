@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { readFile, rm, mkdtemp } from "node:fs/promises";
+import {
+  chmod,
+  readFile,
+  rm,
+  mkdtemp,
+  rename,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
@@ -77,6 +85,11 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       });
       assert.equal(initialized.status, "success");
       if (initialized.status !== "success") return;
+      const presetIdentity = identityFor(fixture, "@fixture/preset");
+      assert.equal(initialized.generationRecord.schemaVersion, 3);
+      assert.deepEqual(initialized.generationRecord.presetSelections, [
+        presetIdentity,
+      ]);
 
       const featureIdentity = identityFor(fixture, "@fixture/feature");
       const themeIdentity = identityFor(fixture, "@fixture/typescript-config");
@@ -92,24 +105,50 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       );
       assert.ok(featureRecord);
       assert.ok(themeRecord);
+      assert.equal(Object.hasOwn(featureRecord, "definition"), false);
+      assert.equal(featureRecord.creationInput, null);
       assert.equal(
-        featureRecord.bindings[contentIdentityKey(themeIdentity)],
-        themeRecord.definition.packageDefinitionId,
+        initialized.blueprint.packages.find(
+          (definition) =>
+            definition.packageDefinitionId ===
+            featureRecord.packageDefinitionId,
+        )?.path,
+        "packages/feature",
       );
       assert.equal(
+        featureRecord.bindings[contentIdentityKey(themeIdentity)],
+        themeRecord.packageDefinitionId,
+      );
+      const featureDefinition = initialized.blueprint.packages.find(
+        (definition) =>
+          definition.packageDefinitionId === featureRecord.packageDefinitionId,
+      );
+      assert.ok(featureDefinition);
+      const firstPackageNote = path.join(
+        targetRoot,
+        featureDefinition.path,
+        "owner-note.txt",
+      );
+      await writeFile(firstPackageNote, "首包原始事实\n");
+      await chmod(firstPackageNote, 0o600);
+      assert.equal(
         await readFile(
-          path.join(
-            targetRoot,
-            featureRecord.definition.path,
-            "src/content.ts",
-          ),
+          path.join(targetRoot, featureDefinition.path, "src/content.ts"),
           "utf8",
         ),
         `export const fixtureOrigin = ${JSON.stringify(`${namespace}:feature`)};\n`,
       );
       assert.equal(
         await readFile(
-          path.join(targetRoot, themeRecord.definition.path, "src/theme.ts"),
+          path.join(
+            targetRoot,
+            initialized.blueprint.packages.find(
+              (definition) =>
+                definition.packageDefinitionId ===
+                themeRecord.packageDefinitionId,
+            )!.path,
+            "src/theme.ts",
+          ),
           "utf8",
         ),
         `export const fixtureOrigin = ${JSON.stringify(`${namespace}:theme`)};\n`,
@@ -119,7 +158,6 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
         path.join(targetRoot, ".template/generation.json"),
         "utf8",
       );
-      const presetIdentity = identityFor(fixture, "@fixture/preset");
       const wrongKind = await generator.add({
         repositoryRoot: targetRoot,
         contentIdentity: presetIdentity,
@@ -136,8 +174,22 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
         beforeWrongKind,
       );
 
-      const addition = await generator.add({
-        repositoryRoot: targetRoot,
+      const replayGenerator = createGenerator({
+        content: fixture.members,
+        strategy: createDefaultWorkspaceStrategy(),
+      });
+
+      const movedRoot = path.join(workspace, "moved-project");
+      await rename(targetRoot, movedRoot);
+      const movedPackageNote = path.join(
+        movedRoot,
+        featureDefinition.path,
+        "owner-note.txt",
+      );
+      await writeFile(movedPackageNote, "首包更新事实\n");
+
+      const addition = await replayGenerator.add({
+        repositoryRoot: movedRoot,
         contentIdentity: { alias: "addon", namespace },
         creationInput: { leafName: "addon-extra" },
       });
@@ -151,10 +203,25 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       );
       assert.ok(addonRecord);
       assert.equal(addonRecord.createdBy, "addition");
-      assert.equal(addonRecord.definition.path, "packages/addon-extra");
+      assert.equal(addonRecord.creationInput?.leafName, "addon-extra");
+      const addonDefinition = addition.blueprint.packages.find(
+        (definition) =>
+          definition.packageDefinitionId === addonRecord.packageDefinitionId,
+      );
+      assert.ok(addonDefinition);
+      assert.equal(addonDefinition.path, "packages/addon-extra");
+      assert.equal(addonDefinition.name, `@${namespace}/addon-extra`);
+      const strategyState = addition.generationRecord.strategyState as {
+        repositoryName: string;
+        defaultPackageScope: string;
+      };
+      assert.equal(strategyState.repositoryName, `${namespace}-fixture`);
+      assert.equal(strategyState.defaultPackageScope, namespace);
+      assert.equal(await readFile(movedPackageNote, "utf8"), "首包更新事实\n");
+      assert.equal((await stat(movedPackageNote)).mode & 0o777, 0o600);
       assert.equal(
         await readFile(
-          path.join(targetRoot, addonRecord.definition.path, "src/addon.ts"),
+          path.join(movedRoot, addonDefinition.path, "src/addon.ts"),
           "utf8",
         ),
         `export const fixtureOrigin = ${JSON.stringify(`${namespace}:addon`)};\n`,
@@ -162,12 +229,37 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       assert.deepEqual(
         JSON.parse(
           await readFile(
-            path.join(targetRoot, ".template/generation.json"),
+            path.join(movedRoot, ".template/generation.json"),
             "utf8",
           ),
         ),
         addition.generationRecord,
       );
+
+      const followupGenerator = createGenerator({
+        content: fixture.members,
+        strategy: createDefaultWorkspaceStrategy(),
+      });
+      const followup = await followupGenerator.add({
+        repositoryRoot: movedRoot,
+        contentIdentity: { alias: "addon", namespace },
+        creationInput: { leafName: "addon-next" },
+      });
+      assert.equal(followup.status, "success", JSON.stringify(followup));
+      if (followup.status !== "success") return;
+      const followupRecord = followup.generationRecord.packages.find(
+        (record) =>
+          contentIdentityKey(record.contentIdentity) ===
+            contentIdentityKey(addonIdentity) &&
+          record.creationInput?.leafName === "addon-next",
+      );
+      assert.ok(followupRecord);
+      const followupDefinition = followup.blueprint.packages.find(
+        (definition) =>
+          definition.packageDefinitionId === followupRecord.packageDefinitionId,
+      );
+      assert.ok(followupDefinition);
+      assert.equal(followupDefinition.path, "packages/addon-next");
     }
   });
 
@@ -290,7 +382,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     assert.ok(directTheme);
     assert.equal(
       directFeature.bindings[contentIdentityKey(betaTheme.identity)],
-      directTheme.definition.packageDefinitionId,
+      directTheme.packageDefinitionId,
     );
     assert.equal(
       direct.generationRecord.packages.some(
@@ -326,19 +418,20 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     assert.ok(presetTheme);
     assert.equal(
       initialized.generationRecord.nodeInstances.feature,
-      presetFeature.definition.packageDefinitionId,
+      presetFeature.packageDefinitionId,
     );
     assert.equal(
       presetFeature.bindings[contentIdentityKey(betaTheme.identity)],
-      presetTheme.definition.packageDefinitionId,
+      presetTheme.packageDefinitionId,
     );
+    const presetFeatureDefinition = initialized.blueprint.packages.find(
+      (definition) =>
+        definition.packageDefinitionId === presetFeature.packageDefinitionId,
+    );
+    assert.ok(presetFeatureDefinition);
     assert.equal(
       await readFile(
-        path.join(
-          presetTarget,
-          presetFeature.definition.path,
-          "src/content.ts",
-        ),
+        path.join(presetTarget, presetFeatureDefinition.path, "src/content.ts"),
         "utf8",
       ),
       'export const fixtureOrigin = "shared-source:feature";\n',

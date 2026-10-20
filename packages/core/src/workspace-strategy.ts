@@ -4,7 +4,6 @@ import type {
   LoadedContentMember,
 } from "./content-identity.ts";
 import type { PackageContribution } from "./package-contribution.ts";
-import type { PresetOwnerSelection } from "./preset-definition.ts";
 import type {
   PackageDefinition,
   PackageDefinitionId,
@@ -80,21 +79,32 @@ export type GeneratorContent<
 export type GeneratorPackageRecord<CreationInput = PackageCreationInput> = {
   readonly contentIdentity: ContentIdentity;
   readonly createdBy: GeneratorPackageCreatedBy;
-  readonly definition: PersistedPackageDefinition;
-  /** 原始创建语义由内容消费；包定义仍只保存在蓝图中。 */
-  readonly creationInput?: CreationInput;
+  /** 与蓝图中的完整 Package Definition 通过此 ID 关联。 */
+  readonly packageDefinitionId: PackageDefinitionId;
+  /** 内容拥有者解释原始输入；null 明确表示本次没有显式输入。 */
+  readonly creationInput: CreationInput | null;
   /** 以内容身份为键，记录已选包实例的持久化标识。 */
   readonly bindings: Readonly<Record<string, string>>;
 };
 
-/** 当前记录合同的实际公开形状；其持久化格式仍为 generator schema 1。 */
+/**
+ * 生成操作内将记录按 packageDefinitionId 与蓝图 join 后的视图。
+ * 仅供策略和贡献消费，不作为持久记录或公开结果返回。
+ */
+export type GeneratorPackageState<CreationInput = PackageCreationInput> =
+  GeneratorPackageRecord<CreationInput> & {
+    readonly definition: PersistedPackageDefinition;
+  };
+
+/** 当前记录合同的实际公开形状；持久化格式为 schema3。 */
 export type GenerationRecord<CreationInput = PackageCreationInput> = {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 3;
   readonly strategyIdentity: string;
   readonly strategyState: unknown;
   readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
   readonly nodeInstances: GeneratorNodeInstanceIds;
-  readonly presetSelections: readonly PresetOwnerSelection[];
+  /** 本仓库中实际选用过的规范预设身份。 */
+  readonly presetSelections: readonly ContentIdentity[];
 };
 
 /** 持久化节点表仅引用蓝图已有的包实例身份。 */
@@ -169,7 +179,7 @@ export type WorkspaceStrategy<
     readonly state: StrategyState;
     readonly content: Content;
     readonly contentByIdentity: ReadonlyMap<string, Content>;
-    readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
+    readonly packages: readonly GeneratorPackageState<CreationInput>[];
     readonly nodeInstances: GeneratorNodeInstances;
     /** 本次加包原始输入由策略解释，生成器只透传。 */
     readonly creationInput?: CreationInput;
@@ -184,7 +194,7 @@ export type WorkspaceStrategy<
     readonly content: Content;
     readonly definition: PackageDefinition;
     readonly creationInput?: CreationInput;
-    readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
+    readonly packages: readonly GeneratorPackageState<CreationInput>[];
     readonly contributions: readonly Contribution[];
     /** 按需构造同次加包贡献，正式投影复用该结果。 */
     readonly getAdditionContributions: () => readonly Contribution[];
@@ -219,7 +229,7 @@ export type WorkspaceStrategy<
     readonly context: Context;
     readonly state: StrategyState;
     readonly blueprint: ProjectBlueprint;
-    readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
+    readonly packages: readonly GeneratorPackageState<CreationInput>[];
     readonly contributions: readonly Contribution[];
     readonly nodeInstances: GeneratorNodeInstances;
     /** 各已选预设计算的封闭项目贡献由策略解释。 */
