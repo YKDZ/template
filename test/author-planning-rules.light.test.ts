@@ -549,7 +549,8 @@ export const preset = definePreset({
   owner: { packageName: manifest.name, exportPath: "./template" },
   project() {
     const result: Pick<typeof manifest, "name"> = { name: "generated" };
-    return result;
+    const qualifiedResult: typeof manifest.name = "generated";
+    return result.name + qualifiedResult;
   },
 });
 `,

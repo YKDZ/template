@@ -267,7 +267,11 @@ function isDataResourceExpression(
 }
 
 function isTypeQueryReference(identifier: ts.Identifier): boolean {
-  return ts.isTypeQueryNode(identifier.parent);
+  let reference: ts.Node = identifier;
+  while (ts.isQualifiedName(reference.parent)) {
+    reference = reference.parent;
+  }
+  return ts.isTypeQueryNode(reference.parent);
 }
 
 function functionFromDeclaration(
