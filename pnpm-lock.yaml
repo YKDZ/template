@@ -510,6 +510,9 @@ importers:
       '@ykdz/reference-vue-shared':
         specifier: workspace:*
         version: link:../../references/vue-shared
+      '@ykdz/template-content':
+        specifier: workspace:*
+        version: link:../content
       execa:
         specifier: 'catalog:'
         version: 10.1.1

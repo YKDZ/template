@@ -69,6 +69,7 @@
     "@ykdz/reference-vue-app": "workspace:*",
     "@ykdz/reference-vue-hono-web": "workspace:*",
     "@ykdz/reference-vue-shared": "workspace:*",
+    "@ykdz/template-content": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
