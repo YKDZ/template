@@ -73,7 +73,8 @@
         "@ykdz/reference-vike-db#build",
         "@ykdz/reference-vue-shared#build",
         "@ykdz/template-core#build",
-        "@ykdz/template-environment#build"
+        "@ykdz/template-environment#build",
+        "@ykdz/template-workspace-authoring#build"
       ],
       "outputs": ["template-dist/**"],
       "tags": ["quality:light"]

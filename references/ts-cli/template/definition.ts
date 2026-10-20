@@ -1,8 +1,8 @@
 import path from "node:path";
 
-import { validateCliCommandName } from "@ykdz/template-core/package-contribution";
-import type { GenerationContext } from "@ykdz/template-core/preset-definition";
-import { defineReferencePackage } from "@ykdz/template-core/reference-package";
+import { validateCliCommandName } from "@ykdz/template-workspace-authoring/package-contribution";
+import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
+import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
 function publicationNodeEngine(
   toolchain: GenerationContext["toolchain"],
@@ -36,8 +36,10 @@ export const referencePackage = defineReferencePackage({
   defaultLeafName: "cli",
   role: "cli-tool",
   resources: ["."],
+  publicationIdentitySource: "src/cli-command-identity.ts",
   authoring: {
-    dependencies: ["@ykdz/template-core"],
+    dependencies: ["@ykdz/template-core", "@ykdz/template-workspace-authoring"],
+    exports: ["./command-identity"],
     scripts: ["build:template"],
     resources: ["template", "tsconfig.template.json"],
   },

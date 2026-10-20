@@ -11,16 +11,16 @@ import { referencePackage as vike } from "@ykdz/reference-vike-web/template";
 import { referencePackage as vue } from "@ykdz/reference-vue-app/template";
 import { referencePackage as web } from "@ykdz/reference-vue-hono-web/template";
 import { referencePackage as vueShared } from "@ykdz/reference-vue-shared/template";
-import type {
-  GenerationContext,
-  PlannedPackageContribution,
-} from "@ykdz/template-core/preset-definition";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
-import { defineReferencePackage } from "@ykdz/template-core/reference-package";
 import {
   resolveTemplateSource,
   type RenderOperation,
 } from "@ykdz/template-core/renderer";
+import type {
+  GenerationContext,
+  PlannedPackageContribution,
+} from "@ykdz/template-workspace-authoring/preset-definition";
+import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
 export class ReferenceCompositionFailure extends Error {
   readonly suggestion =

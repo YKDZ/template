@@ -64,7 +64,8 @@
       "dependsOn": [
         "@ykdz/reference-hono-api#build",
         "@ykdz/reference-vue-shared#build",
-        "@ykdz/template-core#build"
+        "@ykdz/template-core#build",
+        "@ykdz/template-workspace-authoring#build"
       ],
       "outputs": ["template-dist/**"],
       "tags": ["work:preparation"]

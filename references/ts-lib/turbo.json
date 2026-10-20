@@ -45,7 +45,10 @@
       "tags": ["quality:light"]
     },
     "build:template": {
-      "dependsOn": ["@ykdz/template-core#build"],
+      "dependsOn": [
+        "@ykdz/template-core#build",
+        "@ykdz/template-workspace-authoring#build"
+      ],
       "outputs": ["template-dist/**"],
       "tags": ["work:preparation"]
     }

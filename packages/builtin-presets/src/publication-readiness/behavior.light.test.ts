@@ -12,7 +12,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 
+import { referencePackage } from "@ykdz/reference-ts-cli/template";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { resolveTemplateSource } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 
 const workspaces: string[] = [];
@@ -213,13 +215,14 @@ async function runReadinessCaller(
           path.join(moduleRoot, `${name}.ts`),
         ),
     ),
-    cp(
-      new URL(
-        import.meta
-          .resolve("@ykdz/reference-ts-cli/assets/src/cli-command-identity.ts"),
-      ),
-      path.join(moduleRoot, "cli-command-identity.ts"),
-    ),
+    (() => {
+      const source = referencePackage.publicationIdentitySource;
+      assert.ok(source);
+      return cp(
+        resolveTemplateSource(source, "."),
+        path.join(moduleRoot, "cli-command-identity.ts"),
+      );
+    })(),
     cp(
       new URL(
         import.meta

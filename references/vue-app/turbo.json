@@ -65,7 +65,8 @@
     "build:template": {
       "dependsOn": [
         "@ykdz/reference-vue-shared#build",
-        "@ykdz/template-core#build"
+        "@ykdz/template-core#build",
+        "@ykdz/template-workspace-authoring#build"
       ],
       "outputs": ["template-dist/**"],
       "tags": ["work:preparation"]

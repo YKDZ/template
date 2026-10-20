@@ -44,6 +44,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/template-workspace-authoring": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

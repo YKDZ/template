@@ -1,11 +1,11 @@
 import { fileURLToPath } from "node:url";
 
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import {
   definePackageContributionReplayAdapter,
   type BuiltInPresetDefinition,
   type GenerationContext,
-} from "@ykdz/template-core/preset-definition";
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+} from "@ykdz/template-workspace-authoring/preset-definition";
 
 import { requireReferencePackage } from "../reference-composition.ts";
 

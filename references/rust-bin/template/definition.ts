@@ -2,13 +2,13 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { rustToolchainEnvironmentNeed } from "@ykdz/template-core/module-graph";
-import {
-  defineReferencePackage,
-  type ReferencePackage,
-} from "@ykdz/template-core/reference-package";
 import type { RenderOperation } from "@ykdz/template-core/renderer";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
 import { rustDevelopmentContainerToolLayer } from "@ykdz/template-environment/development-environment";
+import {
+  defineReferencePackage,
+  type ReferencePackage,
+} from "@ykdz/template-workspace-authoring/reference-package";
 import { parse, type TomlTable } from "smol-toml";
 
 function readCargoFile(file: string): { source: string; data: TomlTable } {
@@ -33,6 +33,7 @@ export const referencePackage: ReferencePackage = defineReferencePackage({
     dependencies: [
       "@ykdz/template-core",
       "@ykdz/template-environment",
+      "@ykdz/template-workspace-authoring",
       "smol-toml",
     ],
     scripts: ["build:template"],

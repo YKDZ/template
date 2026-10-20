@@ -41,6 +41,7 @@
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
+    "@ykdz/template-workspace-authoring": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

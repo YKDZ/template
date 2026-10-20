@@ -1,4 +1,5 @@
 export {
   cliCommandIdentity,
   validateCliCommandName,
-} from "@ykdz/reference-ts-cli/assets/src/cli-command-identity.ts";
+} from "@ykdz/reference-ts-cli/command-identity";
+export type { CliCommandIdentity } from "@ykdz/reference-ts-cli/command-identity";

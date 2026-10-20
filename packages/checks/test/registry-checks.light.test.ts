@@ -13,7 +13,6 @@ import {
   planGeneratedRepositoryPackageAddition,
   type GeneratedRepositoryPlan,
 } from "@ykdz/template-builtin-presets";
-import { assertPackageContribution } from "@ykdz/template-core/package-contribution";
 import {
   reconcileAndApplyProjectProjections,
   reconcileProjectProjections,
@@ -24,6 +23,7 @@ import {
   createTemplateSourceHandle,
   renderNewProject,
 } from "@ykdz/template-core/renderer";
+import { assertPackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 
 import {
   deriveFixtureMatrix,
