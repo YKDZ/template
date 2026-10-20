@@ -19,12 +19,12 @@ import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
 } from "@ykdz/template-builtin-presets";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
   canConsumeNodePackageNameImport,
   canLinkNodePackageRoles,
   canProvideSourceConditionPackageNameImport,
-} from "@ykdz/template-core/project-linking-v2";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+} from "@ykdz/template-workspace/project-linking";
 import { execa } from "execa";
 
 import { runCli, type CliRuntime } from "../../src/main.ts";

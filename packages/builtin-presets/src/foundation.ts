@@ -55,12 +55,6 @@ import {
   type ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
 import type { DependencyMaintenancePolicy } from "@ykdz/template-core/project-github";
-import {
-  canConsumeNodePackageNameImport,
-  canLinkNodePackageRoles,
-  canProvideSourceConditionPackageNameImport,
-  planExplicitProjectLinks,
-} from "@ykdz/template-core/project-linking-v2";
 import type {
   MaterializeProjectProjectionOptions,
   ProjectProjectionMirrorSlot,
@@ -81,6 +75,12 @@ import {
   projectCheckWorkflow,
   projectDependabotConfig,
 } from "@ykdz/template-workspace/project-github";
+import {
+  canConsumeNodePackageNameImport,
+  canLinkNodePackageRoles,
+  canProvideSourceConditionPackageNameImport,
+  planExplicitProjectLinks,
+} from "@ykdz/template-workspace/project-linking";
 import { parse as parseToml } from "smol-toml";
 import ts from "typescript";
 import { stringify as stringifyYaml } from "yaml";

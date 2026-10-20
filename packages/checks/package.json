@@ -42,6 +42,7 @@
   "dependencies": {
     "@ykdz/template-builtin-presets": "workspace:*",
     "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-workspace": "workspace:*",
     "execa": "catalog:",
     "yaml": "catalog:"
   },
@@ -49,7 +50,6 @@
     "@devcontainers/cli": "catalog:",
     "@types/node": "catalog:",
     "@ykdz/reference-typescript-config": "workspace:*",
-    "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

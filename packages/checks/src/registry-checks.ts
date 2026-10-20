@@ -18,12 +18,6 @@ import {
   selectTemplateDependencyCatalogEntries,
 } from "@ykdz/template-core/dependency-catalog";
 import {
-  planExplicitProjectLinks,
-  canConsumeNodePackageNameImport,
-  canLinkNodePackageRoles,
-  canProvideSourceConditionPackageNameImport,
-} from "@ykdz/template-core/project-linking-v2";
-import {
   materializeProjectProjection,
   readProjectedMirrorSlotScalar,
   type ProjectProjectionMirrorSlot,
@@ -34,6 +28,12 @@ import {
   renderNewProject,
   type RenderOperation,
 } from "@ykdz/template-core/renderer";
+import {
+  planExplicitProjectLinks,
+  canConsumeNodePackageNameImport,
+  canLinkNodePackageRoles,
+  canProvideSourceConditionPackageNameImport,
+} from "@ykdz/template-workspace/project-linking";
 import { parse as parseYaml } from "yaml";
 
 /** A real registry Definition and optional Package Addition planner scenario. */
