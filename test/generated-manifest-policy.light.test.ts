@@ -22,8 +22,7 @@ void describe("生成项目包清单策略", () => {
     const nativeConfigurationManifest = JSON.parse(
       await readFile(
         new URL(
-          import.meta
-            .resolve("@ykdz/reference-typescript-config/assets/package.json"),
+          import.meta.resolve("@ykdz/reference-typescript-config/reference"),
         ),
         "utf8",
       ),
@@ -95,14 +94,12 @@ void describe("生成项目包清单策略", () => {
           assert.strictEqual(manifest.name, definition.name);
           const record = initialized.generationRecord.packages.find(
             (item) =>
-              item.definition.packageDefinitionId ===
-              definition.packageDefinitionId,
+              item.packageDefinitionId === definition.packageDefinitionId,
           );
           assert.ok(record, `缺少生成记录：${definition.path}`);
           const isPublicCandidate = candidateRecords.some(
             (candidate) =>
-              candidate.definition.packageDefinitionId ===
-              definition.packageDefinitionId,
+              candidate.packageDefinitionId === definition.packageDefinitionId,
           );
 
           if (isPublicCandidate) {

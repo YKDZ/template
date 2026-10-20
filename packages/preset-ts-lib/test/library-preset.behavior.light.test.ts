@@ -111,7 +111,7 @@ void describe("TypeScript 库公开预设", () => {
       nodeInstances: Record<string, string>;
       packages: {
         contentIdentity: ContentIdentity;
-        definition: { packageDefinitionId: string };
+        packageDefinitionId: string;
       }[];
     };
     assert.partialDeepStrictEqual(
@@ -189,7 +189,7 @@ void describe("TypeScript 库公开预设", () => {
       nodeInstances: Record<string, string>;
       packages: {
         contentIdentity: ContentIdentity;
-        definition: { packageDefinitionId: string };
+        packageDefinitionId: string;
       }[];
     };
     assert.strictEqual(
@@ -202,12 +202,12 @@ void describe("TypeScript 库公开预设", () => {
           (item) =>
             contentIdentityKey(item.contentIdentity) ===
             contentIdentityKey(identity),
-        )?.definition.packageDefinitionId,
+        )?.packageDefinitionId,
         initialRecord.packages.find(
           (item) =>
             contentIdentityKey(item.contentIdentity) ===
             contentIdentityKey(identity),
-        )?.definition.packageDefinitionId,
+        )?.packageDefinitionId,
       );
     }
     assert.strictEqual(
@@ -264,9 +264,35 @@ void describe("TypeScript 库公开预设", () => {
 
     assert.strictEqual(presetResult.status, "success");
     assert.strictEqual(referenceResult.status, "success");
-    assert.strictEqual(
+    if (
+      presetResult.status !== "success" ||
+      referenceResult.status !== "success"
+    ) {
+      throw new Error("初始化成功后应返回正式生成结果");
+    }
+    assert.deepStrictEqual(presetResult.blueprint, referenceResult.blueprint);
+    assert.deepStrictEqual(
+      presetResult.generationRecord.packages,
+      referenceResult.generationRecord.packages,
+    );
+    assert.deepStrictEqual(presetResult.generationRecord.presetSelections, [
+      preset.identity,
+    ]);
+    assert.deepStrictEqual(
+      referenceResult.generationRecord.presetSelections,
+      [],
+    );
+    const presetFiles = JSON.parse(
       await snapshotTree(path.join(roots[0]!, "demo")),
+    ) as { path: string; mode: number; content: string }[];
+    const referenceFiles = JSON.parse(
       await snapshotTree(path.join(roots[1]!, "demo")),
+    ) as { path: string; mode: number; content: string }[];
+    assert.deepStrictEqual(
+      presetFiles.filter((entry) => entry.path !== ".template/generation.json"),
+      referenceFiles.filter(
+        (entry) => entry.path !== ".template/generation.json",
+      ),
     );
   });
 

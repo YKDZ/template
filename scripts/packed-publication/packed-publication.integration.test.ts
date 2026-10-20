@@ -2630,7 +2630,12 @@ void describe("packed public CLI consumer", () => {
             const addedPackage = result.generationRecord.packages.find(
               (record) => record.createdBy === "addition",
             );
-            if (addedPackage?.definition.role === "native-package") {
+            const addedDefinition = result.blueprint.packages.find(
+              (definition) =>
+                definition.packageDefinitionId ===
+                addedPackage?.packageDefinitionId,
+            );
+            if (addedDefinition?.role === "native-package") {
               additionDefinition = preset;
               break;
             }

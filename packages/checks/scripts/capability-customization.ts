@@ -52,9 +52,14 @@ export async function customizeSharedVue(
       contentIdentityKey(item.contentIdentity) === identityKey,
   );
   assert.ok(shared);
+  const sharedDefinition = result.blueprint.packages.find(
+    (definition) =>
+      definition.packageDefinitionId === shared.packageDefinitionId,
+  );
+  assert.ok(sharedDefinition);
   const file = path.join(
     projectDir,
-    shared.definition.path,
+    sharedDefinition.path,
     "src/components/CounterButton.vue",
   );
   const original = await readFile(file, "utf8");
@@ -96,22 +101,27 @@ export async function verifySharedVueCombination(options: {
   );
   assert.equal(shared.length, 1);
   const provider = shared[0]!;
+  const providerDefinition = options.result.blueprint.packages.find(
+    (definition) =>
+      definition.packageDefinitionId === provider.packageDefinitionId,
+  );
+  assert.ok(providerDefinition);
   if (initial.length > 0) {
-    assert.equal(
-      provider.definition.packageDefinitionId,
-      initial[0]!.definition.packageDefinitionId,
-    );
-    assert.equal(provider.definition.path, initial[0]!.definition.path);
+    const initialProviderDefinition =
+      options.initialization.blueprint.packages.find(
+        (definition) =>
+          definition.packageDefinitionId === initial[0]!.packageDefinitionId,
+      );
+    assert.ok(initialProviderDefinition);
+    assert.equal(provider.packageDefinitionId, initial[0]!.packageDefinitionId);
+    assert.equal(providerDefinition.path, initialProviderDefinition.path);
   }
   const consumers = options.result.generationRecord.packages.filter(
     (item) => item.bindings[identityKey] !== undefined,
   );
   assert.equal(consumers.length, initial.length === 0 ? 1 : 2);
   for (const consumer of consumers) {
-    assert.equal(
-      consumer.bindings[identityKey],
-      provider.definition.packageDefinitionId,
-    );
+    assert.equal(consumer.bindings[identityKey], provider.packageDefinitionId);
   }
   if (options.customization === undefined) return;
   assert.equal(
@@ -132,8 +142,7 @@ test("新旧应用复用已有共同组件并保留定制", async ({ page }) => 
   assert.equal(observer.errors.length, 0);
   for (const consumer of consumers) {
     const definition = options.result.blueprint.packages.find(
-      (item) =>
-        item.packageDefinitionId === consumer.definition.packageDefinitionId,
+      (item) => item.packageDefinitionId === consumer.packageDefinitionId,
     );
     assert.ok(definition);
     const directory = path.join(

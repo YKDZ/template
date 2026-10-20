@@ -125,11 +125,13 @@ void describe("init toolchain snapshot consumption", () => {
         ),
       ) as {
         readonly schemaVersion: number;
+        readonly packages: readonly Record<string, unknown>[];
         readonly strategyState: {
           readonly toolchain: Record<string, unknown>;
         };
       };
-      assert.equal(generationRecord.schemaVersion, 1);
+      assert.equal(generationRecord.schemaVersion, 3);
+      assert.deepEqual(generationRecord, output.generationRecord);
       assert.deepEqual(generationRecord.strategyState.toolchain, {
         nodeLtsMajor: snapshotNodeMajor,
         nodeVersion: releaseToolchainSnapshot.nodeVersion,

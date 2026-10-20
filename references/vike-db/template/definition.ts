@@ -5,15 +5,22 @@ import { defineReferencePackage } from "@ykdz/template-workspace-authoring/refer
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vike-db",
   resolve: (specifier) => import.meta.resolve(specifier),
+  resourceRoot: new URL("../", import.meta.url),
   alias: "vike-database",
   instance: "independent",
   defaultLeafName: "db",
   defaultPath: "packages/db",
   role: "shared-library",
   resources: ["."],
-  authoring: {
-    resources: ["template", "template-dist", "tsconfig.template.json"],
-    dependencies: ["@ykdz/template-core", "@ykdz/template-workspace-authoring"],
+  template: {
+    resources: ["template", "tsconfig.template.json"],
+    dependencies: [
+      { name: "@ykdz/template-core", purpose: "template-execution" },
+      {
+        name: "@ykdz/template-workspace-authoring",
+        purpose: "template-execution",
+      },
+    ],
     scripts: ["build:template", "typecheck:template"],
   },
   foundation: ({ definition }) => ({

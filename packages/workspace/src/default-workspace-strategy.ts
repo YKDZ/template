@@ -20,7 +20,7 @@ import {
 } from "@ykdz/template-core/renderer";
 import type {
   GeneratorContent,
-  GeneratorPackageRecord,
+  GeneratorPackageState,
   PackageCreationInput,
   WorkspaceProjection,
   WorkspaceStrategy,
@@ -238,7 +238,7 @@ function requestedLinkFrom(value: unknown): readonly string[] {
 
 function includeRequestedLinkFromIntents(
   blueprint: ProjectBlueprint,
-  packages: readonly GeneratorPackageRecord[],
+  packages: readonly GeneratorPackageState[],
 ): ProjectBlueprint {
   const requested = packages.flatMap((packageRecord) =>
     packageRecord.createdBy === "addition"
@@ -357,7 +357,11 @@ function nativeDependencyNames(
   content: DefaultReferenceContent<PackageCreationInput>,
 ): readonly string[] {
   const reference = content.definition;
-  const authoring = new Set(reference.authoringDependencies);
+  const templateExecution = new Set(
+    reference.templateDependencies
+      .filter((dependency) => dependency.purpose === "template-execution")
+      .map((dependency) => dependency.name),
+  );
   return [
     ...new Set(
       [
@@ -371,7 +375,7 @@ function nativeDependencyNames(
         return Object.entries(dependencies)
           .filter(
             ([name, specifier]) =>
-              !authoring.has(name) &&
+              !templateExecution.has(name) &&
               typeof specifier === "string" &&
               (specifier.startsWith("workspace:") ||
                 specifier.startsWith("link:")),
@@ -806,7 +810,7 @@ function projectOperations(options: {
   readonly context: GenerationContext;
   readonly state: DefaultWorkspaceState;
   readonly blueprint: ProjectBlueprint;
-  readonly packages: readonly GeneratorPackageRecord[];
+  readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
   readonly presetProjectContributions: readonly (readonly ProjectRequirement[])[];
 }): WorkspaceProjection<DefaultWorkspaceOwnerFacts> {
@@ -1370,7 +1374,7 @@ export function createDefaultWorkspaceStrategy<
           bindings: nativeBindings(contentByIdentity, providerDefinitions),
           createdBy: packageRecord.createdBy,
           nodeInstances,
-          ...(packageRecord.creationInput === undefined
+          ...(packageRecord.creationInput === null
             ? {}
             : { creationInput: packageRecord.creationInput }),
         };
