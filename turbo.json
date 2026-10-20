@@ -302,6 +302,11 @@
       "outputs": [],
       "tags": ["quality:light"]
     },
+    "//#check:author-planning-roles": {
+      "inputs": ["$TURBO_DEFAULT$", "packages/**", "references/**"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
     "//#build": {
       "tags": ["work:preparation"]
     },
