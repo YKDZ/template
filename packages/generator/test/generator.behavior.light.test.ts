@@ -11,7 +11,10 @@ import type {
   PackageCreationInput,
   WorkspaceStrategy,
 } from "@ykdz/template-core/workspace-strategy";
-import { createGenerator } from "@ykdz/template-generator";
+import {
+  createGenerator,
+  parseGenerationRecord,
+} from "@ykdz/template-generator";
 
 type DocumentationContext = {
   readonly targetRoot: string;
@@ -172,6 +175,10 @@ function createDocumentationEngine(options: {
         edition: context.edition,
       };
       return {
+        ownerFacts: {
+          edition: state.edition,
+          packageCount: blueprint.packages.length,
+        },
         ...(options.invalidProjection === "duplicate"
           ? {
               blueprint: {
@@ -321,17 +328,174 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
       "success",
       JSON.stringify(secondInitialized),
     );
+    if (firstInitialized.status !== "success") {
+      throw new Error("初始化应成功");
+    }
+    assert.strictEqual(firstInitialized.generationRecord.schemaVersion, 1);
+    assert.strictEqual(
+      firstInitialized.generationRecord.strategyIdentity,
+      "test-policy:first",
+    );
+    assert.strictEqual(firstInitialized.generationRecord.packages.length, 2);
+    assert.ok(firstInitialized.projection !== null);
+    assert.deepStrictEqual(firstInitialized.projection.ownerFacts, {
+      edition: "draft",
+      packageCount: 2,
+    });
+    const firstRecordOperation = firstInitialized.projection.operations.find(
+      (operation) =>
+        operation.kind === "writeJson" &&
+        operation.to === ".template/generation.json",
+    );
+    assert.ok(firstRecordOperation?.kind === "writeJson");
+    assert.strictEqual(
+      firstRecordOperation.value,
+      firstInitialized.generationRecord,
+    );
+    assert.deepStrictEqual(
+      parseGenerationRecord(firstInitialized.generationRecord),
+      firstInitialized.generationRecord,
+    );
+
+    const dryRunRoot = path.join(firstRoot, "dry-run");
+    const dryRunInit = await first.init({
+      targetRoot: dryRunRoot,
+      selection: {
+        roots: [{ nodeIdentity: "guide", contentIdentity: guideIdentity }],
+      },
+      strategyInput: { collection: "north", edition: "draft" },
+      dryRun: true,
+    });
+    assert.strictEqual(
+      dryRunInit.status,
+      "success",
+      JSON.stringify(dryRunInit),
+    );
+    if (dryRunInit.status !== "success")
+      throw new Error("dry-run 初始化应成功");
+    assert.strictEqual(dryRunInit.dryRun, true);
+    assert.ok(dryRunInit.projection !== null);
+    const dryRunRecordOperation = dryRunInit.projection.operations.find(
+      (operation) =>
+        operation.kind === "writeJson" &&
+        operation.to === ".template/generation.json",
+    );
+    assert.ok(dryRunRecordOperation?.kind === "writeJson");
+    assert.strictEqual(
+      dryRunRecordOperation.value,
+      dryRunInit.generationRecord,
+    );
+    await assert.rejects(stat(dryRunRoot), { code: "ENOENT" });
 
     const firstOverview = path.join(firstRoot, "docs/overview/README.md");
     const firstOverviewBefore = await readFile(firstOverview, "utf8");
-    for (const leafName of ["appendix", "faq"]) {
-      const result = await first.add({
-        repositoryRoot: firstRoot,
-        contentIdentity: guideIdentity,
-        creationInput: { leafName },
-      });
-      assert.strictEqual(result.status, "success", JSON.stringify(result));
+    const appendixResult = await first.add({
+      repositoryRoot: firstRoot,
+      contentIdentity: guideIdentity,
+      creationInput: { leafName: "appendix" },
+    });
+    assert.strictEqual(
+      appendixResult.status,
+      "success",
+      JSON.stringify(appendixResult),
+    );
+    if (appendixResult.status !== "success") throw new Error("加包应成功");
+    assert.ok(appendixResult.projection !== null);
+    assert.deepStrictEqual(appendixResult.projection.ownerFacts, {
+      edition: "draft",
+      packageCount: 3,
+    });
+    const appendixIndex = appendixResult.projection.operations.find(
+      (operation) =>
+        operation.kind === "writeText" && operation.to === "INDEX.md",
+    );
+    assert.ok(appendixIndex?.kind === "writeText");
+    assert.match(appendixIndex.text, /docs\/appendix/u);
+    const appendixRecordOperation = appendixResult.projection.operations.find(
+      (operation) =>
+        operation.kind === "writeJson" &&
+        operation.to === ".template/generation.json",
+    );
+    assert.ok(appendixRecordOperation?.kind === "writeJson");
+    assert.strictEqual(
+      appendixRecordOperation.value,
+      appendixResult.generationRecord,
+    );
+    assert.deepStrictEqual(
+      appendixResult.generationRecord,
+      JSON.parse(
+        await readFile(
+          path.join(firstRoot, ".template/generation.json"),
+          "utf8",
+        ),
+      ),
+    );
+    const faqAddition = await first.add({
+      repositoryRoot: firstRoot,
+      contentIdentity: guideIdentity,
+      creationInput: { leafName: "faq" },
+    });
+    assert.strictEqual(
+      faqAddition.status,
+      "success",
+      JSON.stringify(faqAddition),
+    );
+    const unchanged = await first.add({
+      repositoryRoot: firstRoot,
+      contentIdentity: guideIdentity,
+      creationInput: { leafName: "faq" },
+    });
+    assert.strictEqual(unchanged.status, "success", JSON.stringify(unchanged));
+    if (unchanged.status === "success") {
+      assert.deepStrictEqual(unchanged.actions, []);
+      assert.strictEqual(unchanged.projection, null);
+      assert.deepStrictEqual(
+        unchanged.generationRecord,
+        JSON.parse(
+          await readFile(
+            path.join(firstRoot, ".template/generation.json"),
+            "utf8",
+          ),
+        ),
+      );
     }
+    const secondRecordPath = path.join(secondRoot, ".template/generation.json");
+    const secondRecordBefore = await readFile(secondRecordPath, "utf8");
+    const secondDryRun = await second.add({
+      repositoryRoot: secondRoot,
+      contentIdentity: guideIdentity,
+      creationInput: { leafName: "appendix" },
+      dryRun: true,
+    });
+    assert.strictEqual(
+      secondDryRun.status,
+      "success",
+      JSON.stringify(secondDryRun),
+    );
+    if (secondDryRun.status !== "success") {
+      throw new Error("dry-run 加包应成功");
+    }
+    assert.strictEqual(secondDryRun.dryRun, true);
+    assert.ok(secondDryRun.projection !== null);
+    const secondDryRunRecordOperation = secondDryRun.projection.operations.find(
+      (operation) =>
+        operation.kind === "writeJson" &&
+        operation.to === ".template/generation.json",
+    );
+    assert.ok(secondDryRunRecordOperation?.kind === "writeJson");
+    assert.strictEqual(
+      secondDryRunRecordOperation.value,
+      secondDryRun.generationRecord,
+    );
+    await assert.rejects(
+      stat(path.join(secondRoot, "docs/appendix/README.md")),
+      { code: "ENOENT" },
+    );
+    assert.strictEqual(
+      await readFile(secondRecordPath, "utf8"),
+      secondRecordBefore,
+    );
+
     const secondAdd = await second.add({
       repositoryRoot: secondRoot,
       contentIdentity: guideIdentity,
