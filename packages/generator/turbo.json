@@ -57,6 +57,12 @@
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false
+    },
+    "test:integration": {
+      "dependsOn": ["build"],
+      "tags": ["quality:heavy"],
+      "cache": false,
+      "outputs": []
     }
   }
 }

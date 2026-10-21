@@ -16,18 +16,14 @@ import {
   contentIdentityLabel,
   contentIdentityKey,
   type ContentIdentity,
+  type LoadedContentMember,
 } from "@ykdz/template-core/content-identity";
 import type { PreparedNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
 import { execa } from "execa";
 
-import type { LoadedTemplateContentMember } from "../src/collection.ts";
-
-type NativeMember = LoadedTemplateContentMember & {
-  readonly source: {
-    readonly manifestURL: string;
-    readonly moduleURL: string;
-  };
-};
+type NativeMember =
+  | LoadedContentMember<unknown, "reference">
+  | LoadedContentMember<unknown, "preset">;
 
 type PresetMember = Extract<NativeMember, { readonly kind: "preset" }>;
 type ReferenceMember = Extract<NativeMember, { readonly kind: "reference" }>;
@@ -81,10 +77,15 @@ export type PreparedContentCollection = {
 };
 
 export type PrepareContentCollectionOptions = {
-  readonly content: readonly LoadedTemplateContentMember[];
+  readonly content: readonly NativeMember[];
   /** 从同一已加载集合中选择任意预设或参考入口作为闭包根。 */
-  readonly roots: readonly LoadedTemplateContentMember[];
+  readonly roots: readonly NativeMember[];
   readonly strategy: ContentCollectionDependencyStrategy;
+  /** raw参考声明的拥有者公开准备入口；已准备内容无需提供。 */
+  readonly referencePreparation?: {
+    readonly specifier: string;
+    readonly exportName: string;
+  };
   readonly workspaceRoot?: string;
   readonly packageName?: string;
   /** 外部作者工作区集合的原生清单版本。 */
@@ -189,10 +190,8 @@ function selectedMembers(
 
   const includePresetReferences = (selectedPreset: PresetMember): void => {
     const nodes = Object.values(
-      selectedPreset.definition.nodes as Record<
-        string,
-        { readonly reference: unknown }
-      >,
+      (selectedPreset.definition as { readonly nodes: unknown })
+        .nodes as Record<string, { readonly reference: unknown }>,
     );
     for (const node of nodes) {
       const candidates = referencesByDefinition.get(
@@ -322,6 +321,7 @@ type PnpmDependencyNode = {
 type ResolvedPackages = {
   readonly versions: ReadonlyMap<string, string>;
   readonly paths: ReadonlyMap<string, string>;
+  readonly nodes: ReadonlyMap<string, PnpmDependencyNode>;
 };
 
 type OwnerResolvedDependencies = ReadonlyMap<string, PnpmDependencyNode>;
@@ -331,16 +331,24 @@ function collectResolvedPackages(
   versions: Map<string, string>,
   paths: Map<string, string>,
   fallbackName?: string,
+  nodes?: Map<string, PnpmDependencyNode>,
 ): void {
   if (Array.isArray(value)) {
     for (const item of value) {
-      collectResolvedPackages(item, versions, paths, fallbackName);
+      collectResolvedPackages(item, versions, paths, fallbackName, nodes);
     }
     return;
   }
   if (typeof value !== "object" || value === null) return;
   const node = value as PnpmDependencyNode;
   const name = node.name ?? fallbackName ?? node.from;
+  if (
+    name !== undefined &&
+    nodes !== undefined &&
+    (nodes.get(name)?.dependencies === undefined ||
+      node.dependencies !== undefined)
+  )
+    nodes.set(name, node);
   if (
     name !== undefined &&
     typeof node.version === "string" &&
@@ -364,10 +372,10 @@ function collectResolvedPackages(
       !Array.isArray(children)
     ) {
       for (const [childName, child] of Object.entries(children)) {
-        collectResolvedPackages(child, versions, paths, childName);
+        collectResolvedPackages(child, versions, paths, childName, nodes);
       }
     } else {
-      collectResolvedPackages(children, versions, paths);
+      collectResolvedPackages(children, versions, paths, undefined, nodes);
     }
   }
 }
@@ -379,15 +387,22 @@ async function resolvedVersions(
 ): Promise<ResolvedPackages> {
   const versions = new Map<string, string>();
   const paths = new Map<string, string>();
+  const nodes = new Map<string, PnpmDependencyNode>();
   for (const name of projectsToResolve) {
     const stdout = await runPnpm(
       ["--filter", name, "list", "--depth", "Infinity", "--json"],
       workspaceRoot,
       commandLog,
     );
-    collectResolvedPackages(JSON.parse(stdout), versions, paths);
+    collectResolvedPackages(
+      JSON.parse(stdout),
+      versions,
+      paths,
+      undefined,
+      nodes,
+    );
   }
-  return { versions, paths };
+  return { versions, paths, nodes };
 }
 
 async function resolvedOwnerDependencies(
@@ -494,11 +509,7 @@ function artifactInstallDependencies(
         ? undefined
         : artifacts.get(contentIdentityKey(selectedContent.identity));
     if (contentArtifact !== undefined) {
-      // 已选内容目标依赖还是定义解析边；普通目标依赖不进入执行闭包。
-      if (
-        dependency.purposes.includes("template-execution") ||
-        contentCandidates.length === 1
-      ) {
+      if (dependency.purposes.includes("template-execution")) {
         dependencies[dependency.name] = contentArtifact.coordinate.version;
       }
       continue;
@@ -688,7 +699,12 @@ async function workspaceDependencyClosure(
   workspaceRoot: string,
   projects: ReadonlyMap<string, WorkspaceProject>,
   commandLog: string[],
-): Promise<readonly WorkspaceProject[]> {
+  resolvedNodes: ReadonlyMap<string, PnpmDependencyNode>,
+): Promise<{
+  readonly projects: readonly WorkspaceProject[];
+  readonly names: ReadonlySet<string>;
+}> {
+  const names = new Set<string>();
   const selected = new Map<string, WorkspaceProject>();
   const projectsByPath = new Map(
     [...projects.values()].map((project) => [
@@ -697,24 +713,33 @@ async function workspaceDependencyClosure(
     ]),
   );
   const pending = [...roots];
+  const visited = new Set<string>();
   while (pending.length > 0) {
     const name = pending.shift()!;
-    if (selected.has(name)) continue;
+    if (visited.has(name)) continue;
+    visited.add(name);
+    names.add(name);
     const project = projects.get(name);
-    if (project === undefined) continue;
-    selected.set(name, project);
-    const stdout = await runPnpm(
-      ["--filter", name, "list", "--prod", "--depth", "Infinity", "--json"],
-      workspaceRoot,
-      commandLog,
-    );
-    const parsed = JSON.parse(stdout) as PnpmDependencyNode[];
+    let parsed: readonly PnpmDependencyNode[];
+    if (project === undefined) {
+      const installed = resolvedNodes.get(name);
+      parsed = installed === undefined ? [] : [installed];
+    } else {
+      selected.set(name, project);
+      const stdout = await runPnpm(
+        ["--filter", name, "list", "--prod", "--depth", "Infinity", "--json"],
+        workspaceRoot,
+        commandLog,
+      );
+      parsed = JSON.parse(stdout) as PnpmDependencyNode[];
+    }
     const walk = (node: PnpmDependencyNode): void => {
-      const dependencies = [
-        ...Object.values(node.dependencies ?? {}),
-        ...Object.values(node.optionalDependencies ?? {}),
-      ];
-      for (const dependency of dependencies) {
+      const dependencies = {
+        ...node.dependencies,
+        ...node.optionalDependencies,
+      };
+      for (const [dependencyName, dependency] of Object.entries(dependencies)) {
+        names.add(dependencyName);
         const dependencyProject =
           (dependency.name === undefined
             ? undefined
@@ -733,9 +758,12 @@ async function workspaceDependencyClosure(
     };
     for (const packageNode of parsed) walk(packageNode);
   }
-  return [...selected.values()].sort((left, right) =>
-    left.name.localeCompare(right.name),
-  );
+  return {
+    projects: [...selected.values()].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    ),
+    names,
+  };
 }
 
 async function linkPackage(
@@ -751,13 +779,32 @@ async function linkPackage(
   await symlink(packageRoot, linkPath, "dir");
 }
 
+function specifierPackageName(specifier: string): string {
+  if (
+    specifier.startsWith(".") ||
+    specifier.startsWith("/") ||
+    specifier.includes(":")
+  ) {
+    throw new Error(`准备入口必须使用公开包specifier：${specifier}`);
+  }
+  return specifier
+    .split("/")
+    .slice(0, specifier.startsWith("@") ? 2 : 1)
+    .join("/");
+}
+
 function generatedCollectionSource(
   namespace: string,
   members: readonly NativeMember[],
+  preparation: PrepareContentCollectionOptions["referencePreparation"],
 ): string {
   return [
     'import { loadContentSource } from "@ykdz/template-generator/content-source";',
-    'import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";',
+    ...(preparation === undefined
+      ? []
+      : [
+          `import { ${preparation.exportName} as prepareReferenceDefinition } from ${JSON.stringify(preparation.specifier)};`,
+        ]),
     "",
     "export const templateContent = await loadContentSource({",
     `  namespace: ${JSON.stringify(namespace)},`,
@@ -767,11 +814,15 @@ function generatedCollectionSource(
       (member) => `    ${JSON.stringify(member.source.specifier)},`,
     ),
     "  ],",
-    "  prepareReferenceDefinition(definition) {",
-    "    return defineReferencePackage(",
-    "      definition as Parameters<typeof defineReferencePackage>[0],",
-    "    );",
-    "  },",
+    ...(preparation === undefined
+      ? []
+      : [
+          "  prepareReferenceDefinition(definition) {",
+          "    return prepareReferenceDefinition(",
+          "      definition as Parameters<typeof prepareReferenceDefinition>[0],",
+          "    );",
+          "  },",
+        ]),
     "});",
     "",
     "export const templatePresets = templateContent.filter(",
@@ -793,18 +844,17 @@ function generatedProviderAggregateSource(
   );
   return [
     'import { deriveTemplateMembers } from "./template-members.js";',
-    'import type { LoadedTemplateContentMember, TemplateContentTypes } from "./template-content-types.js";',
+    'import type { LoadedContentMember } from "@ykdz/template-core/content-identity";',
     ...imports,
     "",
     "export { deriveTemplateMembers };",
-    'export type { ContentKind } from "./template-content-types.js";',
+    'export type { ContentKind } from "@ykdz/template-core/content-identity";',
     "export const templateContent = [",
     ...packageNames.map((_, index) => `  ...provider${index},`),
-    "] as readonly LoadedTemplateContentMember[];",
-    "type ContentTypes = TemplateContentTypes<typeof templateContent>;",
-    'export type TemplateContentMember = ContentTypes["member"];',
-    'export type TemplatePreset = ContentTypes["preset"];',
-    'export type TemplateReferencePackage = ContentTypes["reference"];',
+    "] as readonly LoadedContentMember[];",
+    "export type TemplateContentMember = (typeof templateContent)[number];",
+    'export type TemplatePreset = TemplateContentMember & { readonly kind: "preset" };',
+    'export type TemplateReferencePackage = TemplateContentMember & { readonly kind: "reference" };',
     "const templateMembers = deriveTemplateMembers(templateContent);",
     "export const templatePresets = templateMembers.presets;",
     "export const templateReferencePackages = templateMembers.referencePackages;",
@@ -929,6 +979,7 @@ async function createContentProviderRoot(options: {
   readonly root: string;
   readonly namespace: string;
   readonly members: readonly NativeMember[];
+  readonly referencePreparation?: PrepareContentCollectionOptions["referencePreparation"];
   readonly owners: ReadonlyMap<
     string,
     {
@@ -959,14 +1010,26 @@ async function createContentProviderRoot(options: {
     dependencies[owner.artifact.coordinate.name] =
       owner.artifact.coordinate.version;
   }
-  for (const [name, version] of options.sdkVersions) {
+  for (const name of [
+    "@ykdz/template-generator",
+    ...(options.referencePreparation === undefined
+      ? []
+      : [specifierPackageName(options.referencePreparation.specifier)]),
+  ]) {
+    const version = options.sdkVersions.get(name);
+    if (version === undefined)
+      throw new Error(`公开准备入口未由原生依赖解析：${name}`);
     dependencies[name] = version;
   }
   const installRoot = await createModulePackageRoot({
     root: options.root,
     packageName,
     packageVersion: "1.0.0",
-    source: generatedCollectionSource(options.namespace, options.members),
+    source: generatedCollectionSource(
+      options.namespace,
+      options.members,
+      options.referencePreparation,
+    ),
     dependencies,
     packageRoots,
     sdkPackageRoots: options.sdkPackageRoots,
@@ -996,12 +1059,7 @@ async function createCollectionInstallRoot(options: {
     dependencies[provider.packageName] = provider.packageVersion;
     packageRoots.set(provider.packageName, provider.installRoot);
   }
-  for (const name of [
-    "@ykdz/template-generator",
-    "@ykdz/template-workspace",
-    "@ykdz/template-core",
-    "@ykdz/template-workspace-authoring",
-  ]) {
+  for (const name of ["@ykdz/template-core"]) {
     const packageRoot = options.sdkPackageRoots.get(name);
     const version = options.sdkVersions.get(name);
     if (packageRoot === undefined || version === undefined) {
@@ -1013,10 +1071,6 @@ async function createCollectionInstallRoot(options: {
     fileURLToPath(new URL("../src/template-members.ts", import.meta.url)),
     "utf8",
   );
-  const contentTypesModuleSource = await readFile(
-    fileURLToPath(new URL("../src/template-content-types.ts", import.meta.url)),
-    "utf8",
-  );
   return await createModulePackageRoot({
     root: options.root,
     packageName: options.packageName,
@@ -1024,10 +1078,7 @@ async function createCollectionInstallRoot(options: {
     source: generatedProviderAggregateSource(
       options.providers.map(({ packageName }) => packageName),
     ),
-    additionalSources: new Map([
-      ["template-members.ts", memberModuleSource],
-      ["template-content-types.ts", contentTypesModuleSource],
-    ]),
+    additionalSources: new Map([["template-members.ts", memberModuleSource]]),
     dependencies,
     packageRoots,
     sdkPackageRoots: options.sdkPackageRoots,
@@ -1036,7 +1087,7 @@ async function createCollectionInstallRoot(options: {
   });
 }
 
-/** 按显式内容入口根及默认策略依赖派生制品集合，再由pnpm原生pack。 */
+/** 按显式装配和所属资源执行用途派生制品集合，再由pnpm原生pack。 */
 export async function prepareContentCollection(
   options: PrepareContentCollectionOptions,
 ): Promise<PreparedContentCollection> {
@@ -1050,16 +1101,6 @@ export async function prepareContentCollection(
   const buildOrder = orderedMembers(presets, members, options.strategy);
   const collectionName = options.packageName ?? "@ykdz/template-content";
   const workspace = await workspaceProjects(workspaceRoot, commandLog);
-  const resolutionRoots = new Set([
-    ...buildOrder.map((member) => member.identity.packageName),
-    collectionName,
-    "@ykdz/template-content",
-  ]);
-  const resolved = await resolvedVersions(
-    [...resolutionRoots].filter((name) => workspace.has(name)),
-    workspaceRoot,
-    commandLog,
-  );
 
   const root =
     options.root ?? (await mkdtemp(path.join("/tmp", "preset-content-")));
@@ -1138,19 +1179,45 @@ export async function prepareContentCollection(
   }
 
   const sdkRoots = [
-    "@ykdz/template-generator",
-    "@ykdz/template-workspace",
-    "@ykdz/template-core",
-    "@ykdz/template-workspace-authoring",
-  ];
-  const sdkProjects = await workspaceDependencyClosure(
+    ...new Set([
+      "@ykdz/template-generator",
+      ...(options.referencePreparation === undefined
+        ? []
+        : [specifierPackageName(options.referencePreparation.specifier)]),
+      ...owners.flatMap(({ artifact }) =>
+        artifact.dependencies
+          .filter((dependency) =>
+            dependency.purposes.includes("template-execution"),
+          )
+          .map((dependency) => dependency.name),
+      ),
+    ]),
+  ].filter(
+    (name) => !owners.some(({ artifact }) => artifact.coordinate.name === name),
+  );
+  const resolved = await resolvedVersions(
+    [
+      ...new Set([
+        ...sdkRoots,
+        ...buildOrder.map((member) => member.identity.packageName),
+        collectionName,
+      ]),
+    ].filter((name) => workspace.has(name)),
+    workspaceRoot,
+    commandLog,
+  );
+  const sdkClosure = await workspaceDependencyClosure(
     sdkRoots,
     workspaceRoot,
     workspace,
     commandLog,
+    resolved.nodes,
   );
+  const sdkProjects = sdkClosure.projects;
   const sdkPackagesByName = new Map(
-    (options.sdkArchives ?? []).map((artifact) => [artifact.name, artifact]),
+    (options.sdkArchives ?? [])
+      .filter((artifact) => sdkClosure.names.has(artifact.name))
+      .map((artifact) => [artifact.name, artifact]),
   );
   const ownerNames = new Set(
     owners.map(({ artifact }) => artifact.coordinate.name),
@@ -1170,14 +1237,17 @@ export async function prepareContentCollection(
   const sdkPackages = [...sdkPackagesByName.values()];
 
   const sdkPackageRoots = new Map<string, string>();
-  for (const name of sdkRoots) {
+  for (const name of new Set([
+    ...sdkRoots,
+    ...sdkPackages.map(({ name }) => name),
+  ])) {
     const project = workspace.get(name);
     const resolvedPath = resolved.paths.get(name);
     const packageRoot = project?.path ?? resolvedPath;
     if (packageRoot !== undefined) sdkPackageRoots.set(name, packageRoot);
   }
   const sdkVersions = new Map(
-    sdkRoots.flatMap((name) => {
+    [...sdkPackageRoots.keys()].flatMap((name) => {
       const version =
         workspace.get(name)?.version ?? resolved.versions.get(name);
       return version === undefined ? [] : [[name, version] as const];
@@ -1211,6 +1281,9 @@ export async function prepareContentCollection(
       root,
       namespace,
       members: namespaceMembers,
+      ...(options.referencePreparation === undefined
+        ? {}
+        : { referencePreparation: options.referencePreparation }),
       owners: ownerByIdentity,
       sdkPackageRoots,
       sdkVersions,

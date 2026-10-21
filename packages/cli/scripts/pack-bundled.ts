@@ -152,6 +152,10 @@ function packedFilename(stdout: string): string {
 
 try {
   prepared = await prepareContentCollection({
+    referencePreparation: {
+      specifier: "@ykdz/template-workspace/reference-package",
+      exportName: "defineReferencePackage",
+    },
     content: templateContent,
     roots: templateContent,
     strategy: createDefaultWorkspaceStrategy(),
