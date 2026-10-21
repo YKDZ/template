@@ -538,6 +538,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../../references/typescript-config
@@ -1077,10 +1080,23 @@ importers:
         version: typescript@7.0.2
 
   references/npm-publication:
+    dependencies:
+      semver:
+        specifier: 'catalog:'
+        version: 7.8.5
+      tar:
+        specifier: 'catalog:'
+        version: 7.5.22
+      validate-npm-package-name:
+        specifier: 'catalog:'
+        version: 8.0.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@types/semver':
+        specifier: 'catalog:'
+        version: 7.8.0
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config

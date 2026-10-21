@@ -4,7 +4,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "tags": ["quality:light"],
+      "tags": ["work:preparation"],
       "cache": true,
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": ["dist/**"],
@@ -50,11 +50,11 @@
       "outputs": [],
       "persistent": false
     },
-    "pack:bundled": {
-      "dependsOn": [],
-      "tags": ["work:release"],
+    "publication:prepare": {
+      "dependsOn": ["build"],
+      "tags": ["work:preparation"],
       "cache": false,
-      "inputs": [],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false
     },

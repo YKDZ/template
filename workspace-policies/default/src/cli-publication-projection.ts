@@ -222,6 +222,7 @@ export function projectCliPublication(options: {
       "spdx-expression-parse": "catalog:",
       npm: "catalog:",
       tar: "catalog:",
+      "validate-npm-package-name": "catalog:",
     },
     tsconfigCompilerOptions: { allowJs: true, checkJs: true },
     tsconfigInclude: [".pnpmfile.mjs"],

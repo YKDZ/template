@@ -16,7 +16,7 @@ async function makePackage(root: string): Promise<void> {
     `${JSON.stringify(
       {
         name: "@example/lifecycle-package",
-        version: "1.0.0",
+        version: "1.2.3-beta.1+build.2",
         type: "module",
         exports: "./index.mjs",
         files: ["index.mjs", "lifecycle.mjs", "consume.mjs"],
@@ -71,12 +71,30 @@ void describe("shared npm artifact preparation", () => {
     const env = { ...process.env, NPM_PUBLICATION_EVENT_LOG: eventLog };
 
     try {
+      const originalManifest = await readFile(
+        path.join(packageRoot, "package.json"),
+        "utf8",
+      );
       const prepared = await prepareArtifact({
         packageRoot,
         outputDirectory,
         env,
       });
       assert.equal(prepared.kind, "prepared");
+
+      await writeFile(
+        path.join(packageRoot, "package.json"),
+        originalManifest.replace("1.2.3-beta.1+build.2", "2.0.0"),
+      );
+      await assert.rejects(
+        acceptArtifact({
+          packageRoot,
+          artifactPath: prepared.artifactPath,
+          env,
+        }),
+        /制品 @example\/lifecycle-package/u,
+      );
+      await writeFile(path.join(packageRoot, "package.json"), originalManifest);
 
       const accepted = await acceptArtifact({
         packageRoot,
@@ -115,6 +133,22 @@ void describe("shared npm artifact preparation", () => {
           item.field === "package.json#/scripts/publication:consume" &&
           item.target === packageRoot &&
           item.nextAction.includes("publication:consume"),
+      ),
+    );
+
+    await writeFile(
+      path.join(packageRoot, "package.json"),
+      '{"name":"@example/invalid-version","version":"banana","scripts":{"publication:consume":"node consume.mjs"}}\n',
+    );
+    const invalidVersion = await inspectTarget({ packageRoot });
+    assert.equal(invalidVersion.kind, "blocked");
+    assert.ok(
+      invalidVersion.blockers.some(
+        (item) =>
+          item.field === "package.json#/version" &&
+          item.code === "publication-package-version-invalid" &&
+          item.target === packageRoot &&
+          item.nextAction.includes("SemVer"),
       ),
     );
 

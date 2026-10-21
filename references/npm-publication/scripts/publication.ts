@@ -9,10 +9,24 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { parse as parseSemver } from "semver";
+import * as tar from "tar";
+
+type NpmNameValidation = {
+  readonly validForNewPackages: boolean;
+  readonly errors?: readonly string[];
+  readonly warnings?: readonly string[];
+};
+
+const require = createRequire(import.meta.url);
+const validateNpmPackageName = require("validate-npm-package-name") as (
+  name: string,
+) => NpmNameValidation;
 const execFileAsync = promisify(execFile);
 const packageManifestName = "package.json";
 const consumerScriptName = "publication:consume";
@@ -148,15 +162,6 @@ async function packageManifest(
   }
 }
 
-function validPackageName(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    value === value.trim() &&
-    !/[\s\\]/u.test(value)
-  );
-}
-
 async function digestFile(filePath: string): Promise<string> {
   const bytes = await readFile(filePath);
   return createHash("sha512").update(bytes).digest("hex");
@@ -219,6 +224,54 @@ async function regularFile(filePath: string): Promise<boolean> {
   }
 }
 
+async function packedManifest(
+  artifactPath: string,
+): Promise<PublicationManifest> {
+  const extractionRoot = await import("node:fs/promises").then(({ mkdtemp }) =>
+    mkdtemp(path.join(tmpdir(), "npm-publication-manifest-")),
+  );
+  const manifestPath = path.join(
+    extractionRoot,
+    "package",
+    packageManifestName,
+  );
+  try {
+    await tar.extract({
+      file: artifactPath,
+      cwd: extractionRoot,
+      filter: (entryPath) => entryPath === `package/${packageManifestName}`,
+    });
+    const raw = await readFile(manifestPath, "utf8");
+    const manifest = objectValue(JSON.parse(raw));
+    if (manifest === undefined) throw new Error("package.json 根值不是对象");
+    return manifest;
+  } catch (error) {
+    throw new Error(
+      `无法从 npm tgz 读取 package/package.json：${artifactPath}；${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  } finally {
+    await rm(extractionRoot, { recursive: true, force: true });
+  }
+}
+
+async function verifyArtifactIdentity(options: {
+  readonly artifactPath: string;
+  readonly packageName: string;
+  readonly packageVersion: string;
+}): Promise<void> {
+  const manifest = await packedManifest(options.artifactPath);
+  const packedVersion = parseSemver(options.packageVersion)?.version;
+  if (
+    manifest.name !== options.packageName ||
+    manifest.version !== packedVersion
+  ) {
+    throw new Error(
+      `npm tgz 身份与目标不一致：目标 ${options.packageName}@${options.packageVersion}；制品 ${String(manifest.name)}@${String(manifest.version)}。npm pack 会移除版本 build metadata；其余 name、prerelease 和版本坐标必须匹配。修正目标 package.json 或打包 adapter。`,
+    );
+  }
+}
+
 /** 检查 npm 目标本身需要的身份、版本与包自有消费验收命令。 */
 export async function inspectTarget(options: {
   readonly packageRoot: string;
@@ -231,25 +284,36 @@ export async function inspectTarget(options: {
 
   const blockers: PublicationBlocker[] = [];
   const name = parsed.name;
-  if (!validPackageName(name)) {
+  const nameValidation =
+    typeof name === "string"
+      ? validateNpmPackageName(name)
+      : { validForNewPackages: false };
+  if (!nameValidation.validForNewPackages) {
     blockers.push({
-      code: "publication-package-name-missing",
+      code: "publication-package-name-invalid",
       target: packageRoot,
       field: `${packageManifestName}#/name`,
-      observed: String(name),
-      expected: "非空 npm 包名称",
-      nextAction: `在 ${path.join(packageRoot, packageManifestName)} 的 name 字段填写有效 npm 包名。`,
+      observed: `${String(name)}${nameValidation.errors?.length ? `（${nameValidation.errors.join("；")}）` : ""}`,
+      expected: "npm 接受的新包名称",
+      nextAction: `按 npm 包名规则修正 ${path.join(packageRoot, packageManifestName)} 的 name 字段。`,
     });
   }
   const version = parsed.version;
-  if (typeof version !== "string" || version.trim().length === 0) {
+  if (
+    typeof version !== "string" ||
+    version.trim().length === 0 ||
+    parseSemver(version)?.raw !== version
+  ) {
+    const missing = typeof version !== "string" || version.trim().length === 0;
     blockers.push({
-      code: "publication-package-version-missing",
+      code: missing
+        ? "publication-package-version-missing"
+        : "publication-package-version-invalid",
       target: packageRoot,
       field: `${packageManifestName}#/version`,
       observed: String(version),
-      expected: "非空 npm 包版本",
-      nextAction: `在 ${path.join(packageRoot, packageManifestName)} 的 version 字段选择该包自己的版本。`,
+      expected: "有效的 SemVer 发布版本（可包含预发布标识和 build metadata）",
+      nextAction: `在 ${path.join(packageRoot, packageManifestName)} 的 version 字段填写有效的 SemVer 版本，例如 1.2.3、1.2.3-rc.1 或 1.2.3+build.4。`,
     });
   }
   if (parsed.private === true) {
@@ -344,6 +408,11 @@ export async function prepareArtifact(options: {
       `打包命令没有生成普通 tgz 文件：${artifactPath}。检查目标包的 pack/prepack 生命周期及其输出位置。`,
     );
   }
+  await verifyArtifactIdentity({
+    artifactPath,
+    packageName: inspection.packageName,
+    packageVersion: inspection.packageVersion,
+  });
   if (path.dirname(artifactPath) !== outputDirectory) {
     throw new Error(
       `打包 adapter 必须把原始 tgz 写入声明的输出目录：目标 ${artifactPath}；目录 ${outputDirectory}。`,
@@ -400,6 +469,11 @@ export async function acceptArtifact(options: {
   if (!(await regularFile(artifactPath))) {
     throw new Error(`待验收原始 tgz 不存在或不是普通文件：${artifactPath}`);
   }
+  await verifyArtifactIdentity({
+    artifactPath,
+    packageName: inspection.packageName,
+    packageVersion: inspection.packageVersion,
+  });
   const sha512 = await digestFile(artifactPath);
   const { mkdtemp } = await import("node:fs/promises");
   const consumerRoot = await mkdtemp(
