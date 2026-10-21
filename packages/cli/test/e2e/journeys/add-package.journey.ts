@@ -742,7 +742,10 @@ const journey: CliJourney = {
           undefined,
           `${packageTasks.name} 应发现 ${name}`,
         );
-        assert.deepStrictEqual(task!.tags, ["quality:light"]);
+        assert.deepStrictEqual(
+          task!.tags,
+          name === "build" ? ["work:preparation"] : ["quality:light"],
+        );
         assert.notStrictEqual(task!.script, null);
       }
     }
@@ -750,7 +753,7 @@ const journey: CliJourney = {
       (candidate) => candidate.name === "build",
     );
     assert.notStrictEqual(utilityBuild, undefined);
-    assert.deepStrictEqual(utilityBuild!.tags, ["quality:light"]);
+    assert.deepStrictEqual(utilityBuild!.tags, ["work:preparation"]);
     assert.strictEqual(utilityBuild!.script, null);
     const utilityTypecheck = utility.tasks.items.find(
       (candidate) => candidate.name === "typecheck",
