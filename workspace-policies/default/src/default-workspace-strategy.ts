@@ -1227,7 +1227,7 @@ export function createDefaultWorkspaceStrategy<
   CreationInput extends PackageCreationInput = DefaultWorkspaceCreationInput,
 >(
   options: {
-    /** 默认 CLI 内容集合显式装配的共享发布参考包。 */
+    /** 默认内容集合显式装配的共享发布参考包。 */
     readonly cliPublicationReference?: ReferencePackage;
     readonly project?: (options: {
       readonly context: DefaultWorkspaceContext;

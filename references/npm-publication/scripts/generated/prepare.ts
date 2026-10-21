@@ -5,6 +5,9 @@ const { packageRoot, outputDirectory } = await publicationTarget();
 const result = await prepareArtifact({
   packageRoot,
   outputDirectory,
+  ...(process.env.PUBLICATION_SOURCE_SHA === undefined
+    ? {}
+    : { sourceSha: process.env.PUBLICATION_SOURCE_SHA }),
 });
 
 if (result.kind === "blocked") {

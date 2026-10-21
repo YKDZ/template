@@ -7,6 +7,7 @@ import {
   type PackAdapter,
   type PublicationExecution,
 } from "@ykdz/reference-npm-publication";
+import { assertRemotePreparation } from "@ykdz/reference-npm-publication/remote-context";
 import { execa } from "execa";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -36,6 +37,20 @@ if (outputDirectoryOverride !== undefined && batchTargetCount > 1) {
   );
 }
 const temporaryOutput = outputDirectoryOverride === undefined;
+const sourceSha = process.env.PUBLICATION_SOURCE_SHA;
+
+if (sourceSha !== undefined) {
+  const defaultBranch = process.env.GITHUB_DEFAULT_BRANCH;
+  if (defaultBranch === undefined) {
+    throw new Error("远端 CLI 制品准备需要 GITHUB_DEFAULT_BRANCH。");
+  }
+  await assertRemotePreparation({
+    repositoryRoot: path.resolve(packageRoot, "../.."),
+    sourceSha,
+    defaultBranch,
+    environment: process.env,
+  });
+}
 
 if (temporaryOutput) {
   await rm(outputDirectory, { recursive: true, force: true });
@@ -84,6 +99,7 @@ const pack: PackAdapter = async ({ outputDirectory: destination, env }) => {
 const result = await prepareArtifact({
   packageRoot,
   outputDirectory,
+  ...(sourceSha === undefined ? {} : { sourceSha }),
   pack,
 });
 

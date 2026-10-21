@@ -1094,6 +1094,9 @@ importers:
       semver:
         specifier: 'catalog:'
         version: 7.8.5
+      spdx-expression-parse:
+        specifier: 'catalog:'
+        version: 5.0.0
       tar:
         specifier: 'catalog:'
         version: 7.5.22
@@ -1107,6 +1110,9 @@ importers:
       '@types/semver':
         specifier: 'catalog:'
         version: 7.8.0
+      '@types/spdx-expression-parse':
+        specifier: 'catalog:'
+        version: 4.0.0
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
@@ -1638,15 +1644,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
-      '@types/semver':
-        specifier: 'catalog:'
-        version: 7.8.0
-      '@types/spdx-expression-parse':
-        specifier: 'catalog:'
-        version: 4.0.0
-      '@ykdz/reference-npm-publication':
-        specifier: workspace:*
-        version: link:../../references/npm-publication
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config
@@ -1662,15 +1659,6 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 7.0.2004
-      semver:
-        specifier: 'catalog:'
-        version: 7.8.5
-      spdx-expression-parse:
-        specifier: 'catalog:'
-        version: 5.0.0
-      tar:
-        specifier: 'catalog:'
-        version: 7.5.22
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2

@@ -1,31 +1,37 @@
-name: Publish verified npm artifact
+name: Publish accepted npm artifact
 
 on:
   workflow_dispatch:
+    inputs:
+      dist_tag:
+        description: 预发布版本必填的 npm 非 latest 渠道；稳定版默认为 latest
+        required: false
+        type: string
 
 permissions: {}
 
 concurrency:
-  group: npm-publication
+  group: npm-publication-${{ github.repository }}
   cancel-in-progress: false
   queue: max
 
 jobs:
   verify:
-    name: Verify publication artifact
+    name: Verify and accept original artifact
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     permissions:
       contents: read
+    env:
+      GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      PUBLICATION_SOURCE_SHA: ${{ github.sha }}
     steps:
-      - name: Require the default branch dispatch
+      - name: Require a default-branch manual dispatch
         run: |
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$GITHUB_REF" = "refs/heads/$GITHUB_DEFAULT_BRANCH"
-          test -n "$GITHUB_SHA"
-        env:
-          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-      - name: Checkout source
+          test -n "$PUBLICATION_SOURCE_SHA"
+      - name: Check out the original source commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -41,36 +47,41 @@ jobs:
           cache: true
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Create publication staging directory
+      - name: Run full source checks once
         run: |
-          mkdir -p "$RUNNER_TEMP/npm-publication-artifact"
-          test -z "$(find "$RUNNER_TEMP/npm-publication-artifact" -mindepth 1 -print -quit)"
-      - name: Run Full Check once
-        run: node --conditions=source scripts/task-gates.ts check:full
-      - name: Verify publication artifact
-        run: pnpm run publication:artifact
+          node --conditions=source scripts/task-gates.ts check
+          node --conditions=source scripts/task-gates.ts check:heavy
+      - name: Prepare and accept one original tgz
+        run: pnpm run publication:remote:artifact
         env:
-          PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: ${{ runner.temp }}/npm-publication-artifact
-          PUBLICATION_ARTIFACT_REQUIRED: "true"
-      - name: Upload verified npm artifact
+          PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: ${{ runner.temp }}/accepted-publication
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PUBLICATION_SOURCE_SHA: ${{ github.sha }}
+      - name: Upload accepted original tgz and receipt
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: npm-publication-${{ github.run_id }}
+          name: verified-packed-publication-${{ github.run_id }}
           path: |
-            ${{ runner.temp }}/npm-publication-artifact/*.tgz
-            ${{ runner.temp }}/npm-publication-artifact/publication-preparation.json
+            ${{ runner.temp }}/accepted-publication/*.tgz
+            ${{ runner.temp }}/accepted-publication/publication-preparation.json
+          include-hidden-files: true
           if-no-files-found: error
+          retention-days: 7
 
   publish:
-    name: Publish verified npm artifact
+    name: Publish accepted tgz to public npm
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: npm
     permissions:
       contents: read
       id-token: write
+    env:
+      GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      PUBLICATION_DIST_TAG: ${{ inputs.dist_tag }}
     steps:
-      - name: Checkout source
+      - name: Check out the original source commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -86,15 +97,15 @@ jobs:
           cache: true
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Download verified npm artifact
+      - name: Download accepted original tgz and receipt
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: npm-publication-${{ github.run_id }}
-          path: ${{ runner.temp }}/npm-publication-download
-      - name: Publish the verified tgz with OIDC
-        run: node --conditions=source scripts/npm-publication/publish.ts
+          name: verified-packed-publication-${{ github.run_id }}
+          path: ${{ runner.temp }}/accepted-publication
+      - name: Publish the accepted original tgz with pnpm OIDC
+        run: node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/publish.ts
         env:
-          PUBLICATION_ARTIFACT_DIRECTORY: ${{ runner.temp }}/npm-publication-download
+          PUBLICATION_ARTIFACT_DIRECTORY: ${{ runner.temp }}/accepted-publication
 
   release:
     name: Create immutable GitHub Release
@@ -103,8 +114,11 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+    env:
+      GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Checkout source
+      - name: Check out the original source commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -120,14 +134,12 @@ jobs:
           cache: true
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Download verified npm artifact
+      - name: Download the same accepted original tgz and receipt
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: npm-publication-${{ github.run_id }}
-          path: ${{ runner.temp }}/npm-publication-release
-      - name: Create immutable GitHub Release
-        run: node --conditions=source scripts/npm-publication/release.ts
+          name: verified-packed-publication-${{ github.run_id }}
+          path: ${{ runner.temp }}/accepted-publication
+      - name: Create and verify immutable GitHub Release
+        run: node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/release.ts
         env:
-          PUBLICATION_ARTIFACT_DIRECTORY: ${{ runner.temp }}/npm-publication-release
-          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GH_TOKEN: ${{ github.token }}
+          PUBLICATION_ARTIFACT_DIRECTORY: ${{ runner.temp }}/accepted-publication

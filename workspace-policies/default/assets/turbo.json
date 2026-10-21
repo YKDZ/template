@@ -59,6 +59,10 @@
       "cache": false,
       "tags": ["work:on-demand"]
     },
+    "//#publication:remote:artifact": {
+      "cache": false,
+      "tags": ["work:preparation"]
+    },
     "//#publication:prepare": {
       "cache": false,
       "dependsOn": [],

@@ -270,6 +270,7 @@ void describe("共享 npm 制品准备", () => {
       const prepared = await prepareArtifact({
         packageRoot,
         outputDirectory,
+        sourceSha: "0123456789abcdef0123456789abcdef01234567",
         env,
       });
       assert.equal(prepared.kind, "prepared");
@@ -321,7 +322,11 @@ void describe("共享 npm 制品准备", () => {
           path.join(outputDirectory, "publication-preparation.json"),
           "utf8",
         ),
-      ) as { readonly acceptance?: unknown };
+      ) as { readonly acceptance?: unknown; readonly sourceSha?: string };
+      assert.equal(
+        receipt.sourceSha,
+        "0123456789abcdef0123456789abcdef01234567",
+      );
       assert.deepEqual(receipt.acceptance, {
         packageName: prepared.packageName,
         artifactVersion: prepared.artifactVersion,
@@ -329,6 +334,32 @@ void describe("共享 npm 制品准备", () => {
         installation: "passed",
         consumption: "passed",
       });
+      await writeFile(
+        path.join(packageRoot, "package.json"),
+        originalManifest.replace("1.2.3-beta.1+build.2", "2.0.0"),
+      );
+      await assert.rejects(
+        readAcceptedArtifact({
+          packageRoot,
+          artifactDirectory: outputDirectory,
+        }),
+        /当前包配置不一致/u,
+      );
+      const originalTarget = await readAcceptedArtifact({
+        packageRoot,
+        artifactDirectory: outputDirectory,
+        preserveReceiptTarget: true,
+      });
+      assert.equal(originalTarget.kind, "prepared");
+      if (originalTarget.kind !== "prepared") {
+        throw new Error("原提交目标的共享制品回执读取被阻断");
+      }
+      assert.equal(originalTarget.packageVersion, "1.2.3-beta.1+build.2");
+      assert.equal(
+        originalTarget.receipt.sourceSha,
+        "0123456789abcdef0123456789abcdef01234567",
+      );
+      await writeFile(path.join(packageRoot, "package.json"), originalManifest);
       const reread = await readPreparedArtifact({
         packageRoot,
         artifactDirectory: outputDirectory,
@@ -759,6 +790,7 @@ void describe("共享 npm 制品准备", () => {
           name: "@example/formal-workspace",
           private: true,
           packageManager: "pnpm@12.9.1",
+          devDependencies: { turbo: "2.11.10" },
           scripts: {
             "publication:artifact": `node --conditions=source --experimental-strip-types ${JSON.stringify(generatedArtifact)}`,
           },
@@ -1048,6 +1080,7 @@ void describe("共享 npm 制品准备", () => {
           name: "@example/missing-dependency-workspace",
           private: true,
           packageManager: "pnpm@12.9.1",
+          devDependencies: { turbo: "2.11.10" },
           scripts: {
             "publication:artifact": `node --conditions=source --experimental-strip-types ${JSON.stringify(generatedArtifact)}`,
           },
