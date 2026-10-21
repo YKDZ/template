@@ -1,4 +1,3 @@
-import type { ProjectProjectionReconciliation } from "@ykdz/template-core/project-projection";
 import type { RenderOperation } from "@ykdz/template-core/renderer";
 import { mapPackageNamesInJson } from "@ykdz/template-workspace-authoring/package-name-projection";
 import { stringify as stringifyYaml } from "yaml";
@@ -27,24 +26,6 @@ export const packageManifestKeyOrder = [
 ] as const;
 
 export const packageConditionKeyOrder = ["source", "types", "default"] as const;
-
-export function projectToolchainMirrorManifest(
-  reconciliation: readonly ProjectProjectionReconciliation[],
-): RenderOperation {
-  return {
-    kind: "writeJson",
-    to: "scripts/toolchain-mirrors.json",
-    value: reconciliation.flatMap((policy) =>
-      policy.driver === "canonical"
-        ? []
-        : (policy.mirrorSlots ?? []).map((slot) => ({
-            id: slot.id,
-            path: policy.path,
-            location: slot.location,
-          })),
-    ),
-  };
-}
 
 export type WorkspaceRootInsertion = {
   readonly before: string;
@@ -81,8 +62,7 @@ export function createWorkspaceRootManifest(options: {
     check: "node --conditions=source scripts/task-gates.ts check",
     "check:heavy": "node --conditions=source scripts/task-gates.ts check:heavy",
     "check:full": "node --conditions=source scripts/task-gates.ts check:full",
-    boundaries:
-      "node --conditions=source scripts/run-turbo-boundaries.ts && node --conditions=source scripts/check-toolchain-versions.ts",
+    boundaries: "node --conditions=source scripts/run-turbo-boundaries.ts",
     fix: "node --conditions=source scripts/task-gates.ts fix",
     "format:check":
       "oxfmt --list-different --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer scripts",

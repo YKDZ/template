@@ -17,7 +17,6 @@
     "sync:workspace-policy": "node scripts/sync-workspace-policy.ts",
     "check:workspace-policy": "node scripts/sync-workspace-policy.ts --check",
     "build": "turbo run build --filter=!// --output-logs=errors-only --log-order=grouped",
-    "check:toolchain:versions": "node --conditions=source scripts/check-template-toolchain-versions.ts",
     "sync:repository": "node --conditions=source scripts/sync-repository-config.ts",
     "check:repository:config": "node --conditions=source scripts/sync-repository-config.ts --check",
     "check:development-container": "node --conditions=source scripts/check-repository-development-container.ts",
