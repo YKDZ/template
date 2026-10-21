@@ -1,6 +1,7 @@
 packages:
   - references/*
   - packages/*
+  - presets/*
 nodeLinker: isolated
 preferSymlinkedExecutables: true
 shellEmulator: true
