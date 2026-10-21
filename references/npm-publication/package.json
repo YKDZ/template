@@ -10,6 +10,11 @@
       "types": "./scripts/publication.ts",
       "default": "./scripts/publication.ts"
     },
+    "./prepare": {
+      "source": "./scripts/generated/prepare.ts",
+      "types": "./scripts/generated/prepare.ts",
+      "default": "./scripts/generated/prepare.ts"
+    },
     "./template": {
       "source": "./template/definition.ts",
       "types": "./template-dist/definition.d.ts",

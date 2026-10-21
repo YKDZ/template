@@ -161,6 +161,11 @@ export type AdditionalArtifactTarget = {
   readonly artifactPath: string;
 };
 
+export type PreparedArtifactBatchTarget = {
+  readonly packageRoot: string;
+  readonly artifactDirectory: string;
+};
+
 export type AcceptArtifactResult =
   | AcceptedArtifact
   | {
@@ -271,6 +276,87 @@ async function execute(
       { cause: error },
     );
   }
+}
+
+type NativeNpmInstallFailure = {
+  readonly code: string | undefined;
+  readonly message: string;
+};
+
+function nativeNpmInstallFailure(error: unknown): NativeNpmInstallFailure {
+  const cause =
+    error instanceof Error ? objectValue(error.cause) : objectValue(error);
+  const stdout = typeof cause?.stdout === "string" ? cause.stdout : "";
+  const stderr = typeof cause?.stderr === "string" ? cause.stderr : "";
+  let parsed: Record<string, unknown> | undefined;
+  try {
+    parsed = objectValue(JSON.parse(stdout));
+  } catch {
+    parsed = undefined;
+  }
+  const nativeError = objectValue(parsed?.error);
+  const code =
+    typeof nativeError?.code === "string" ? nativeError.code : undefined;
+  const summary =
+    typeof nativeError?.summary === "string" ? nativeError.summary : "";
+  const detail =
+    typeof nativeError?.detail === "string" ? nativeError.detail : "";
+  return {
+    code,
+    message: [summary, detail, stderr, stdout]
+      .filter((part) => part.length > 0)
+      .join("\n"),
+  };
+}
+
+function missingPackedDependencies(
+  failure: NativeNpmInstallFailure,
+  targets: readonly {
+    readonly inspection: Extract<PublicationInspection, { kind: "ready" }>;
+    readonly packedManifest: PublicationManifest;
+  }[],
+): readonly string[] {
+  if (!new Set(["ENOTCACHED", "E404", "ETARGET"]).has(failure.code ?? "")) {
+    return [];
+  }
+  const diagnostic = failure.message.toLowerCase();
+  const matches: string[] = [];
+  for (const target of targets) {
+    const dependencies = objectValue(target.packedManifest.dependencies);
+    if (dependencies === undefined) continue;
+    for (const [name, range] of Object.entries(dependencies)) {
+      if (typeof range !== "string") continue;
+      const packageName = name.toLowerCase();
+      const encodedName = name.replaceAll("/", "%2f").toLowerCase();
+      if (
+        diagnostic.includes(packageName) ||
+        diagnostic.includes(encodedName) ||
+        diagnostic.includes(encodeURIComponent(name).toLowerCase())
+      ) {
+        matches.push(
+          `目标 ${target.inspection.packageName} 声明了依赖 ${name}@${range}`,
+        );
+      }
+    }
+  }
+  return matches;
+}
+
+function batchInstallFailureMessage(
+  error: unknown,
+  targets: readonly {
+    readonly inspection: Extract<PublicationInspection, { kind: "ready" }>;
+    readonly packedManifest: PublicationManifest;
+  }[],
+): string {
+  const failure = nativeNpmInstallFailure(error);
+  const missing = missingPackedDependencies(failure, targets);
+  const nativeMessage = error instanceof Error ? error.message : String(error);
+  if (missing.length === 0) return nativeMessage;
+  return [
+    `批次 npm 安装无法从 registry 或本地缓存取得所需依赖（${failure.code}）：${missing.join("；")}。请把对应依赖目标显式加入本次 --filter 选择，并确保版本满足已声明范围，然后重试。`,
+    nativeMessage,
+  ].join("\n");
 }
 
 function archiveFromPackOutput(stdout: string): string | undefined {
@@ -771,10 +857,16 @@ export async function acceptArtifact(options: {
         packageName: inspection.packageName,
         packageVersion: inspection.packageVersion,
       });
+      const packedManifest = await verifiedPackedManifest({
+        artifactPath,
+        packageName: inspection.packageName,
+        packageVersion: inspection.packageVersion,
+      });
       return {
         inspection,
         artifactPath,
         artifactVersion,
+        packedManifest,
         sha512: await digestFile(artifactPath),
       };
     }),
@@ -798,6 +890,7 @@ export async function acceptArtifact(options: {
           "install",
           "--no-audit",
           "--no-fund",
+          "--json",
           "--foreground-scripts",
           ...verifiedTargets.map((target) => target.artifactPath),
         ],
@@ -808,10 +901,9 @@ export async function acceptArtifact(options: {
         },
       );
     } catch (error) {
-      throw new Error(
-        `批内原始 tgz 正常安装失败。若错误依赖尚未发布且未纳入本批，请显式补选该目标后重试。\n${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      );
+      throw new Error(batchInstallFailureMessage(error, verifiedTargets), {
+        cause: error,
+      });
     }
 
     const consumptions: PublicationExecution[] = [];
@@ -871,4 +963,50 @@ export async function acceptArtifact(options: {
   } finally {
     await rm(consumerRoot, { recursive: true, force: true });
   }
+}
+
+/** 从 pnpm 已选目标的原始准备回执接入同一条整批安装验收链。 */
+export async function acceptPreparedArtifacts(options: {
+  readonly targets: readonly PreparedArtifactBatchTarget[];
+  readonly env?: NodeJS.ProcessEnv;
+}): Promise<AcceptArtifactResult> {
+  if (options.targets.length === 0) {
+    throw new Error("npm 制品整批验收至少需要一个 pnpm 选中目标。");
+  }
+  const preparedTargets = await Promise.all(
+    options.targets.map(async (target) => ({
+      target,
+      prepared: await readPreparedArtifact(target),
+    })),
+  );
+  const blocked = preparedTargets.flatMap(({ prepared }) =>
+    prepared.kind === "blocked" ? [prepared.inspection] : [],
+  );
+  const firstBlocked = blocked[0];
+  if (firstBlocked !== undefined) {
+    return {
+      kind: "blocked",
+      inspection: firstBlocked,
+      inspections: blocked,
+    };
+  }
+  const ready = preparedTargets.map(({ target, prepared }) => {
+    if (prepared.kind !== "prepared") {
+      throw new Error("整批原件检查状态在验收期间发生变化。");
+    }
+    return {
+      packageRoot: target.packageRoot,
+      artifactPath: prepared.artifactPath,
+    };
+  });
+  const first = ready[0];
+  if (first === undefined) {
+    throw new Error("npm 制品整批验收至少需要一个目标。");
+  }
+  return await acceptArtifact({
+    packageRoot: first.packageRoot,
+    artifactPath: first.artifactPath,
+    additionalArtifacts: ready.slice(1),
+    ...(options.env === undefined ? {} : { env: options.env }),
+  });
 }

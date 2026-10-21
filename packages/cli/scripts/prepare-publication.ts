@@ -1,4 +1,4 @@
-import { readdir, rm } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,10 +13,28 @@ const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const outputDirectoryOverride =
   process.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY ??
   process.env.TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR;
-const outputDirectory = path.resolve(
+let outputDirectory = path.resolve(
   outputDirectoryOverride ??
     path.join(packageRoot, "node_modules/.cache/npm-publication"),
 );
+const batchTargetCount = Number(
+  process.env.PUBLICATION_BATCH_TARGET_COUNT ?? "1",
+);
+if (!Number.isSafeInteger(batchTargetCount) || batchTargetCount < 1) {
+  throw new Error("PUBLICATION_BATCH_TARGET_COUNT 必须是正整数。");
+}
+if (outputDirectoryOverride !== undefined && batchTargetCount > 1) {
+  const manifest = JSON.parse(
+    await readFile(path.join(packageRoot, "package.json"), "utf8"),
+  ) as { readonly name?: unknown };
+  if (typeof manifest.name !== "string" || manifest.name.length === 0) {
+    throw new Error(`批次发布目标缺少包名：${packageRoot}/package.json`);
+  }
+  outputDirectory = path.join(
+    outputDirectory,
+    encodeURIComponent(manifest.name),
+  );
+}
 const temporaryOutput = outputDirectoryOverride === undefined;
 
 if (temporaryOutput) {

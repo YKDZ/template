@@ -193,7 +193,8 @@ export function projectCliPublication(options: {
       "publication:readiness": `pnpm --filter=${filter} run publication:readiness`,
       "publication:prepare":
         "pnpm --workspace-root exec node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/generated/prepare.ts",
-      "publication:artifact": `pnpm exec turbo run publication:prepare && pnpm --filter=${filter} run publication:accept`,
+      "publication:artifact":
+        "node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/generated/artifact.ts",
     },
     devDependencies: {
       "@types/semver": "catalog:",
