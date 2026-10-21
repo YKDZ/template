@@ -5,11 +5,14 @@ set -u
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repository_root=$(CDPATH='' cd -- "$script_dir/../.." && pwd)
+bridge_script="$repository_root/scripts/npm-publication/scripts/setup/bridge.ts"
 mode="run"
 status_requested=false
 json_requested=false
 non_interactive=false
 debug=false
+resume_artifact=""
+dist_tag=""
 package_name=""
 command_name=""
 description=""
@@ -20,6 +23,7 @@ repository=""
 usage() {
   cat <<'USAGE'
 Usage: ./scripts/npm-publication-setup/setup.sh [public-fact options] [--non-interactive] [--debug]
+       ./scripts/npm-publication-setup/setup.sh --resume-artifact DIR [--dist-tag CHANNEL]
        ./scripts/npm-publication-setup/setup.sh --status --json
        ./scripts/npm-publication-setup/setup.sh --help
 USAGE
@@ -82,6 +86,12 @@ while [ "$#" -gt 0 ]; do
     --json) json_requested=true ;;
     --non-interactive) non_interactive=true ;;
     --debug) debug=true ;;
+    --resume-artifact|--dist-tag)
+      flag=$1; shift; [ "$#" -gt 0 ] || usage_fail ERROR publication-setup-usage "missing value" "a value for $flag" "Run --help and provide the accepted artifact or npm channel." 2
+      case "$flag" in
+        --resume-artifact) resume_artifact=$1 ;;
+        --dist-tag) dist_tag=$1 ;;
+      esac ;;
     --package-name|--bin|--description|--license|--copyright-holder|--repository)
       flag=$1; shift; [ "$#" -gt 0 ] || usage_fail ERROR publication-setup-usage "missing value" "a value for $flag" "Run --help and provide public facts." 2
       case "$flag" in
@@ -103,29 +113,38 @@ if [ "$json_requested" = true ] && [ "$mode" != "status" ]; then
 fi
 
 if [ "$mode" = "status" ]; then
-  if [ "$non_interactive" != false ] || [ "$debug" != false ] || [ -n "$package_name$command_name$description$license$copyright_holder$repository" ]; then
+  if [ "$non_interactive" != false ] || [ "$debug" != false ] || [ -n "$resume_artifact$dist_tag$package_name$command_name$description$license$copyright_holder$repository" ]; then
     printf '%s\n' '{"schemaVersion":1,"currentStage":{"id":"check-prerequisites","number":1,"name":"Check prerequisites"},"observations":{"packagePath":null,"packageName":null,"commandName":null,"version":null,"repository":null,"readiness":"unavailable","git":{"workingTree":null,"currentBranch":null,"defaultBranch":null,"headMatchesRemoteDefault":null}},"blockers":[{"code":"publication-setup-usage","observed":"invalid status arguments","expected":"--status --json only","nextAction":"Run ./scripts/npm-publication-setup/setup.sh --status --json."}],"nextAction":{"kind":"run","command":"./scripts/npm-publication-setup/setup.sh"}}'
     exit 2
   fi
-  REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.ts" status
+  REPOSITORY_ROOT="$repository_root" node --conditions=source "$bridge_script" status
   exit $?
+fi
+
+if [ -n "$resume_artifact" ]; then
+  if [ -n "$package_name$command_name$description$license$copyright_holder$repository" ] || [ "$non_interactive" != false ]; then
+    usage_fail ERROR publication-setup-usage "resume cannot configure package facts or run non-interactively" "--resume-artifact DIR [--dist-tag CHANNEL]" "Review the existing receipt and run the resume command from a terminal." 2
+  fi
 fi
 
 cd "$repository_root" || fail ERROR repository-root "unreadable repository root" "the generated repository root" "Run setup from its generated directory." 5
 printf 'STAGE 1/9 Check prerequisites\nCHECK local-toolchain\n'
 for command in bash node pnpm git gh; do command -v "$command" >/dev/null 2>&1 || fail ERROR prerequisite-command "$command is unavailable" "required local command $command" "Install the generated repository toolchain and retry." 5; done
-REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.ts" preflight
+REPOSITORY_ROOT="$repository_root" node --conditions=source "$bridge_script" preflight
 preflight_status=$?
 [ "$preflight_status" -eq 0 ] || exit "$preflight_status"
 printf 'OK prerequisites\n'
 
+if [ -n "$resume_artifact" ]; then
+  printf 'STAGE 5/9 Resume the accepted artifact\n'
+  REPOSITORY_ROOT="$repository_root" ARTIFACT_ROOT="$resume_artifact" PUBLICATION_DIST_TAG="$dist_tag" DEBUG="$debug" \
+    exec node --conditions=source "$bridge_script" external
+  exec_status=$?
+  fail ERROR external-bridge-unavailable "could not resume the accepted artifact" "a runnable private setup bridge" "Correct the generated setup files and retry." "$exec_status"
+fi
+
 existing_public=false
-if node --input-type=module - "$repository_root" <<'NODE' >/dev/null 2>&1
-import { readFileSync } from "node:fs";
-import { publicationPackagePath } from "#npm-publication/configuration";
-const manifest = JSON.parse(readFileSync(`${process.argv[2]}/${publicationPackagePath}/package.json`, "utf8"));
-process.exit(manifest.private || manifest.version !== "1.0.0" ? 1 : 0);
-NODE
+if REPOSITORY_ROOT="$repository_root" node --conditions=source "$bridge_script" configured >/dev/null 2>&1
 then
   existing_public=true
 fi
@@ -139,7 +158,7 @@ if [ "$non_interactive" = false ] && [ "$existing_public" = false ]; then
 fi
 
 printf 'STAGE 2/9 Configure the public package\n'
-PACKAGE_NAME="$package_name" COMMAND_NAME="$command_name" DESCRIPTION="$description" LICENSE_NAME="$license" COPYRIGHT_HOLDER="$copyright_holder" REPOSITORY_URL="$repository" REPOSITORY_ROOT="$repository_root" SETUP_DIR="$script_dir" node --conditions=source "$script_dir/bridge.ts" configure
+PACKAGE_NAME="$package_name" COMMAND_NAME="$command_name" DESCRIPTION="$description" LICENSE_NAME="$license" COPYRIGHT_HOLDER="$copyright_holder" REPOSITORY_URL="$repository" REPOSITORY_ROOT="$repository_root" node --conditions=source "$bridge_script" configure
 configuration_status=$?
 [ "$configuration_status" -eq 0 ] || exit "$configuration_status"
 printf 'OK public-package-configured\nSTAGE 3/9 Commit the publication configuration\n'
@@ -175,7 +194,7 @@ fi
 if [ "$branch" != "$remote_default" ] || [ -z "$remote_head" ] || [ "$local_head" != "$remote_head" ]; then
   fail "ACTION REQUIRED" git-handoff-required "branch or remote is not synchronized" "clean public default branch at its remote HEAD" "Complete the normal Git handoff and rerun setup." 3
 fi
-if ! REMOTE_URL="$remote" REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.ts" remote-matches-owner; then
+if ! REMOTE_URL="$remote" REPOSITORY_ROOT="$repository_root" node --conditions=source "$bridge_script" remote-matches-owner; then
   fail ERROR repository-remote-conflict "$(printf '%s' "$remote" | redact)" "the public package owner GitHub repository" "Correct the normal Git remote and retry." 4
 fi
 printf 'OK git-handoff-complete\nSTAGE 4/9 Verify the first release artifact\n'
@@ -202,8 +221,8 @@ cleanup_artifact_best_effort() {
   cleanup_artifact_root >/dev/null 2>&1 || :
 }
 trap cleanup_artifact_best_effort EXIT HUP INT TERM
-if [ "$debug" = true ]; then printf 'COMMAND node --conditions=source %s artifact\n' "$script_dir/bridge.ts"; fi
-artifact_result=$(REPOSITORY_ROOT="$repository_root" ARTIFACT_OUTPUT_DIRECTORY="$artifact_root" node --conditions=source "$script_dir/bridge.ts" artifact)
+if [ "$debug" = true ]; then printf 'COMMAND node --conditions=source %s artifact\n' "$bridge_script"; fi
+artifact_result=$(REPOSITORY_ROOT="$repository_root" ARTIFACT_OUTPUT_DIRECTORY="$artifact_root" node --conditions=source "$bridge_script" artifact)
 artifact_status=$?
 if [ "$artifact_status" -ne 0 ]; then
   printf '%s\n' "$artifact_result" >&2
@@ -217,7 +236,7 @@ printf '%s\n' "$acceptance"; printf 'Acceptance: '; read -r entered || fail "ACT
 # A successful exec is the ownership boundary: before it, this shell owns the
 # accepted artifact; after it, the private bridge owns the artifact, session,
 # signal handling, logout, and cleanup as one linear lifecycle.
-REPOSITORY_ROOT="$repository_root" ARTIFACT_ROOT="$artifact_root" DEBUG="$debug" \
-  exec node --conditions=source "$script_dir/bridge.ts" external
+REPOSITORY_ROOT="$repository_root" ARTIFACT_ROOT="$artifact_root" PUBLICATION_DIST_TAG="$dist_tag" DEBUG="$debug" \
+  exec node --conditions=source "$bridge_script" external
 exec_status=$?
 fail ERROR external-bridge-unavailable "could not transfer the accepted artifact to the private setup bridge" "a runnable private setup bridge" "Correct the generated setup files and retry." "$exec_status"

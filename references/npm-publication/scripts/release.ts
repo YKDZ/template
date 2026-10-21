@@ -8,9 +8,9 @@ import path from "node:path";
 import { publicationPackagePath as packagePath } from "./configuration.ts";
 import { PublicationFailure } from "./failure.ts";
 import {
-  readPackageReleaseNotes,
   readAcceptedRemoteArtifact,
   type AcceptedRemoteArtifact,
+  type RemoteCommandRunner,
 } from "./remote-context.ts";
 
 type AcceptedReleaseArtifact = AcceptedRemoteArtifact & {
@@ -29,7 +29,6 @@ type ProcessResult = {
 type ReleaseContext = {
   readonly repository: string;
   readonly sha: string;
-  readonly runAttempt: number;
   readonly childEnvironment: NodeJS.ProcessEnv;
   readonly gitEnvironment: NodeJS.ProcessEnv;
 };
@@ -45,6 +44,7 @@ type RemoteRelease = {
   readonly title: string;
   readonly body: string;
   readonly draft: boolean;
+  readonly prerelease: boolean;
   readonly immutable: boolean;
   readonly publishedAt: string | null;
   readonly assets: readonly RemoteAsset[];
@@ -54,11 +54,7 @@ export type ImmutableGithubReleaseOptions = {
   readonly repositoryRoot: string;
   readonly artifactDirectory: string;
   readonly environment: Readonly<Record<string, string | undefined>>;
-  readonly run?: (
-    command: string,
-    arguments_: readonly string[],
-    options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
-  ) => Promise<ProcessResult>;
+  readonly run?: RemoteCommandRunner;
 };
 
 function fail(code: string): never {
@@ -73,61 +69,40 @@ function stringField(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function noControl(value: string): boolean {
-  for (let index = 0; index < value.length;) {
-    const codePoint = value.codePointAt(index);
-    if (
-      codePoint === undefined ||
-      codePoint < 0x20 ||
-      codePoint === 0x7f ||
-      (codePoint >= 0x80 && codePoint <= 0x9f)
-    ) {
-      return false;
-    }
-    index += codePoint > 0xffff ? 2 : 1;
-  }
-  return true;
-}
-
-function exactEnvironmentValue(
-  environment: Readonly<Record<string, string | undefined>>,
-  name: string,
-): string {
-  const value = environment[name];
-  if (typeof value !== "string" || value.length === 0 || !noControl(value))
-    fail("release-context-invalid");
-  return value;
-}
-
 function releaseContext(
   environment: Readonly<Record<string, string | undefined>>,
+  artifact: AcceptedRemoteArtifact,
 ): ReleaseContext {
-  const repository = exactEnvironmentValue(environment, "GITHUB_REPOSITORY");
-  const sha = exactEnvironmentValue(environment, "GITHUB_SHA");
-  const branch = exactEnvironmentValue(environment, "GITHUB_DEFAULT_BRANCH");
-  const ref = exactEnvironmentValue(environment, "GITHUB_REF");
-  const eventName = exactEnvironmentValue(environment, "GITHUB_EVENT_NAME");
-  const runId = exactEnvironmentValue(environment, "GITHUB_RUN_ID");
-  const attempt = exactEnvironmentValue(environment, "GITHUB_RUN_ATTEMPT");
-  const token = exactEnvironmentValue(environment, "GH_TOKEN");
+  const repository = environment.GITHUB_REPOSITORY ?? artifact.repository;
+  const sha = artifact.sourceSha;
+  const branch = environment.GITHUB_DEFAULT_BRANCH;
   if (
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository) ||
-    !/^[0-9a-f]{40}$/u.test(sha) ||
-    !/^[A-Za-z0-9._/-]+$/u.test(branch) ||
-    eventName !== "workflow_dispatch" ||
-    ref !== `refs/heads/${branch}` ||
-    !/^\d+$/u.test(runId) ||
-    !/^[1-9]\d*$/u.test(attempt)
+    !/^[0-9a-f]{40}$/u.test(sha)
   ) {
     fail("release-context-invalid");
   }
-  const runAttempt = Number(attempt);
-  if (!Number.isSafeInteger(runAttempt)) fail("release-context-invalid");
-  const childEnvironment: NodeJS.ProcessEnv = { GH_TOKEN: token };
-  if (environment.PATH !== undefined) childEnvironment.PATH = environment.PATH;
+  if (
+    environment.GITHUB_ACTIONS === "true" &&
+    (branch === undefined ||
+      !/^[A-Za-z0-9._/-]+$/u.test(branch) ||
+      environment.GITHUB_EVENT_NAME !== "workflow_dispatch" ||
+      environment.GITHUB_REF !== `refs/heads/${branch}` ||
+      environment.GITHUB_SHA !== artifact.sourceSha ||
+      environment.GH_TOKEN === undefined ||
+      environment.GH_TOKEN.length === 0)
+  ) {
+    fail("release-context-invalid");
+  }
+  const childEnvironment: NodeJS.ProcessEnv = {};
+  if (environment.GH_TOKEN !== undefined)
+    childEnvironment.GH_TOKEN = environment.GH_TOKEN;
+  for (const key of ["PATH", "HOME", "XDG_CONFIG_HOME", "GH_CONFIG_DIR"])
+    if (environment[key] !== undefined)
+      childEnvironment[key] = environment[key];
   const gitEnvironment: NodeJS.ProcessEnv = {};
   if (environment.PATH !== undefined) gitEnvironment.PATH = environment.PATH;
-  return { repository, sha, runAttempt, childEnvironment, gitEnvironment };
+  return { repository, sha, childEnvironment, gitEnvironment };
 }
 
 async function defaultRun(
@@ -168,25 +143,6 @@ async function gh(options: {
   }
 }
 
-async function assertCheckoutHead(options: {
-  readonly run: NonNullable<ImmutableGithubReleaseOptions["run"]>;
-  readonly repositoryRoot: string;
-  readonly context: ReleaseContext;
-}): Promise<void> {
-  let result: ProcessResult;
-  try {
-    result = await options.run("git", ["rev-parse", "--verify", "HEAD"], {
-      cwd: options.repositoryRoot,
-      env: options.context.gitEnvironment,
-    });
-  } catch {
-    fail("release-context-invalid");
-  }
-  if (result.exitCode !== 0 || result.stdout !== `${options.context.sha}\n`) {
-    fail("release-context-invalid");
-  }
-}
-
 function parseJson(value: string, code: string): unknown {
   try {
     return JSON.parse(value);
@@ -220,7 +176,7 @@ async function tagReference(options: {
       "--include",
       "--method",
       "GET",
-      `repos/${options.context.repository}/git/ref/tags/${options.tag}`,
+      `repos/${options.context.repository}/git/ref/tags/${encodeURIComponent(options.tag)}`,
     ],
   });
   if (result.exitCode !== 0) {
@@ -239,6 +195,22 @@ async function tagReference(options: {
     fail("release-tag-conflict");
   }
   return stringField(value.object.sha)!;
+}
+
+async function assertPublicRepository(options: {
+  readonly run: NonNullable<ImmutableGithubReleaseOptions["run"]>;
+  readonly repositoryRoot: string;
+  readonly context: ReleaseContext;
+}): Promise<void> {
+  const result = await gh({
+    ...options,
+    arguments_: ["api", `repos/${options.context.repository}`],
+  });
+  if (result.exitCode !== 0) fail("release-remote-unavailable");
+  const value = parseJson(result.stdout, "release-remote-unavailable");
+  if (!isRecord(value) || value.private !== false) {
+    fail("release-repository-private");
+  }
 }
 
 async function assertAnnotatedTag(options: {
@@ -304,6 +276,7 @@ function remoteRelease(value: unknown): RemoteRelease | undefined {
     title === undefined ||
     body === undefined ||
     typeof value.draft !== "boolean" ||
+    typeof value.prerelease !== "boolean" ||
     typeof value.immutable !== "boolean" ||
     publishedAt === undefined ||
     !Array.isArray(value.assets)
@@ -318,6 +291,7 @@ function remoteRelease(value: unknown): RemoteRelease | undefined {
     title,
     body,
     draft: value.draft,
+    prerelease: value.prerelease,
     immutable: value.immutable,
     publishedAt,
     assets,
@@ -381,7 +355,9 @@ async function assertReleaseIdentity(options: {
     options.release.tag !== options.tag ||
     options.release.title !== options.tag ||
     options.release.body !== options.artifact.releaseNotes ||
-    options.release.draft !== options.draft
+    options.release.draft !== options.draft ||
+    options.release.prerelease !==
+      options.artifact.artifactVersion.split("+", 1)[0]!.includes("-")
   ) {
     fail(options.identityFailure);
   }
@@ -519,6 +495,9 @@ async function createDraft(options: {
       options.artifact.checksumPath,
       "--draft",
       "--verify-tag",
+      ...(options.artifact.artifactVersion.split("+", 1)[0]!.includes("-")
+        ? ["--prerelease"]
+        : []),
       "--title",
       options.tag,
       `--notes-file=${options.notesPath}`,
@@ -543,22 +522,21 @@ async function publishDraft(options: {
 async function acceptedArtifact(options: {
   readonly repositoryRoot: string;
   readonly artifactDirectory: string;
-  readonly repository: string;
+  readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly run: RemoteCommandRunner;
 }): Promise<AcceptedReleaseArtifact> {
   try {
     const packageRoot = path.join(options.repositoryRoot, packagePath);
-    const accepted = await readAcceptedRemoteArtifact({
+    return await readAcceptedRemoteArtifact({
+      repositoryRoot: options.repositoryRoot,
       packageRoot,
       artifactDirectory: options.artifactDirectory,
-      githubRepository: options.repository,
+      ...(options.environment.GITHUB_REPOSITORY === undefined
+        ? {}
+        : { githubRepository: options.environment.GITHUB_REPOSITORY }),
+      environment: options.environment,
+      run: options.run,
     });
-    return {
-      ...accepted,
-      releaseNotes: await readPackageReleaseNotes({
-        packageRoot,
-        packageVersion: accepted.packageVersion,
-      }),
-    };
   } catch {
     fail("release-artifact-invalid");
   }
@@ -601,20 +579,16 @@ function installSignalCleanup(temporaryDirectory: string): () => void {
 export async function runImmutableGithubRelease(
   options: ImmutableGithubReleaseOptions,
 ): Promise<void> {
-  const context = releaseContext(options.environment);
+  const run = options.run ?? defaultRun;
   const artifact = await acceptedArtifact({
     repositoryRoot: options.repositoryRoot,
     artifactDirectory: options.artifactDirectory,
-    repository: context.repository,
-  });
-  const tag = `v${artifact.artifactVersion}`;
-  const annotation = `npm artifact SHA-512: ${artifact.sha512}`;
-  const run = options.run ?? defaultRun;
-  await assertCheckoutHead({
+    environment: options.environment,
     run,
-    repositoryRoot: options.repositoryRoot,
-    context,
   });
+  const context = releaseContext(options.environment, artifact);
+  const tag = `${artifact.packageName}@${artifact.artifactVersion}`;
+  const annotation = `npm artifact SHA-512: ${artifact.sha512}`;
   const temporaryDirectory = await mkdtemp(
     path.join(tmpdir(), "npm-github-release-"),
   ).catch(() => fail("release-remote-unavailable"));
@@ -633,6 +607,11 @@ export async function runImmutableGithubRelease(
     await writeFile(notesPath, artifact.releaseNotes).catch(() =>
       fail("release-write-failed"),
     );
+    await assertPublicRepository({
+      run,
+      repositoryRoot: options.repositoryRoot,
+      context,
+    });
     let alreadyImmutable = false;
     const remoteTag = await tagReference({
       run,
@@ -647,9 +626,10 @@ export async function runImmutableGithubRelease(
       tag,
     });
 
-    if (context.runAttempt === 1) {
-      if (remoteTag !== undefined || remoteRelease !== undefined)
-        fail("fresh-release-conflict");
+    if (remoteRelease !== undefined && remoteTag === undefined) {
+      fail("release-tag-conflict");
+    }
+    if (remoteTag === undefined) {
       await createTag({
         run,
         repositoryRoot: options.repositoryRoot,
@@ -657,13 +637,15 @@ export async function runImmutableGithubRelease(
         tag,
         annotation,
       });
-      await assertAnnotatedTag({
-        run,
-        repositoryRoot: options.repositoryRoot,
-        context,
-        tag,
-        annotation,
-      });
+    }
+    await assertAnnotatedTag({
+      run,
+      repositoryRoot: options.repositoryRoot,
+      context,
+      tag,
+      annotation,
+    });
+    if (remoteRelease === undefined) {
       await createDraft({
         run,
         repositoryRoot: options.repositoryRoot,
@@ -672,29 +654,18 @@ export async function runImmutableGithubRelease(
         tag,
         notesPath,
       });
-    } else {
-      if (remoteTag === undefined || remoteRelease === undefined)
-        fail("release-incomplete-conflict");
-      await assertAnnotatedTag({
-        run,
-        repositoryRoot: options.repositoryRoot,
-        context,
+    } else if (!remoteRelease.draft) {
+      if (!remoteRelease.immutable || remoteRelease.publishedAt === null)
+        fail("release-immutability-unproven");
+      await assertReleaseIdentity({
+        release: remoteRelease,
+        artifact: releaseArtifact,
         tag,
-        annotation,
+        draft: false,
+        identityFailure: "release-asset-conflict",
+        assetCountFailure: "release-incomplete-conflict",
       });
-      if (!remoteRelease.draft) {
-        if (!remoteRelease.immutable || remoteRelease.publishedAt === null)
-          fail("release-immutability-unproven");
-        await assertReleaseIdentity({
-          release: remoteRelease,
-          artifact: releaseArtifact,
-          tag,
-          draft: false,
-          identityFailure: "release-asset-conflict",
-          assetCountFailure: "release-incomplete-conflict",
-        });
-        alreadyImmutable = true;
-      }
+      alreadyImmutable = true;
     }
 
     if (!alreadyImmutable) {
@@ -709,14 +680,8 @@ export async function runImmutableGithubRelease(
         artifact: releaseArtifact,
         tag,
         draft: true,
-        identityFailure:
-          context.runAttempt === 1
-            ? "release-write-failed"
-            : "release-draft-conflict",
-        assetCountFailure:
-          context.runAttempt === 1
-            ? "release-write-failed"
-            : "release-incomplete-conflict",
+        identityFailure: "release-draft-conflict",
+        assetCountFailure: "release-incomplete-conflict",
       });
       await verifyAssetBytes({
         run,

@@ -9,11 +9,29 @@ export const referencePackage = defineReferencePackage({
   defaultLeafName: "npm-publication",
   defaultPath: "tools/npm-publication",
   role: "shared-library",
-  resources: ["scripts", "tsconfig.json", "turbo.json"],
+  resources: [
+    "resources/release.yml",
+    "resources/setup",
+    "scripts",
+    "tsconfig.json",
+    "turbo.json",
+  ],
   template: {
     dependencies: [
       {
         name: "@ykdz/template-workspace",
+        purpose: "template-execution",
+      },
+      { name: "@types/semver", purpose: "template-execution" },
+      {
+        name: "@types/spdx-expression-parse",
+        purpose: "template-execution",
+      },
+      { name: "semver", purpose: "template-execution" },
+      { name: "spdx-expression-parse", purpose: "template-execution" },
+      { name: "tar", purpose: "template-execution" },
+      {
+        name: "validate-npm-package-name",
         purpose: "template-execution",
       },
     ],

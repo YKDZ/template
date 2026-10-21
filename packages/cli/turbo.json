@@ -59,7 +59,9 @@
       "persistent": false,
       "passThroughEnv": [
         "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
-        "TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR"
+        "TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR",
+        "PUBLICATION_SOURCE_SHA",
+        "GITHUB_DEFAULT_BRANCH"
       ]
     },
     "publication:verify": {

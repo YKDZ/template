@@ -1,20 +1,23 @@
-name: Release
+name: Publish accepted npm artifact
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
+    inputs:
+      dist_tag:
+        description: 预发布版本必填的 npm 非 latest 渠道；稳定版默认为 latest
+        required: false
+        type: string
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: npm-publication-${{ github.repository }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
-  check:
-    name: Check package
+  verify:
+    name: Verify and accept original artifact
     uses: ./.github/workflows/check.yml
     with:
       publish_verified_candidate: true
@@ -23,36 +26,79 @@ jobs:
       TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
 
   publish:
-    name: Publish to npm
-    needs: check
+    name: Publish accepted tgz to public npm
+    needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: npm
     permissions:
       contents: read
       id-token: write
+    env:
+      GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      PUBLICATION_DIST_TAG: ${{ inputs.dist_tag }}
+      PUBLICATION_PACKAGE_PATH: packages/cli
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
+      - name: Check out the original source commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: package.json
-          registry-url: https://registry.npmjs.org
-      - name: Enable Corepack
-        run: corepack enable
+      - name: Set up pnpm
+        uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
+        with:
+          cache: true
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: 下载已验证的 packed 候选
-        uses: actions/download-artifact@v8
+      - name: Download accepted original tgz and receipt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: verified-packed-publication-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/verified-packed-publication
+          name: verified-packed-publication-${{ github.run_id }}
+          path: ${{ runner.temp }}/accepted-publication
+      - name: Publish the accepted original tgz with pnpm OIDC
+        run: node --conditions=source --experimental-strip-types references/npm-publication/scripts/publish.ts
+        env:
+          PUBLICATION_ARTIFACT_DIRECTORY: ${{ runner.temp }}/accepted-publication
 
-      - name: 校验并发布已验证的归档
-        run: |
-          set -euo pipefail
-          artifact_directory="$RUNNER_TEMP/verified-packed-publication"
-          archive_path="$(PUBLICATION_ARTIFACT_DIRECTORY="$artifact_directory" pnpm --filter @ykdz/template --silent run publication:verify)"
-          npm publish "$archive_path" --access public --provenance
+  release:
+    name: Create immutable GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      GH_TOKEN: ${{ github.token }}
+      PUBLICATION_PACKAGE_PATH: packages/cli
+    steps:
+      - name: Check out the original source commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+      - name: Set up pnpm
+        uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
+        with:
+          cache: true
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Download the same accepted original tgz and receipt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: verified-packed-publication-${{ github.run_id }}
+          path: ${{ runner.temp }}/accepted-publication
+      - name: Create and verify immutable GitHub Release
+        run: node --conditions=source --experimental-strip-types references/npm-publication/scripts/release.ts
+        env:
+          PUBLICATION_ARTIFACT_DIRECTORY: ${{ runner.temp }}/accepted-publication

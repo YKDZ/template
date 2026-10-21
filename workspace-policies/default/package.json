@@ -10,16 +10,12 @@
     "resources"
   ],
   "type": "module",
-  "imports": {
-    "#npm-publication/*": "./scripts/npm-publication/*.ts"
-  },
   "exports": {
     "./dependency-catalog": {
       "source": "./src/dependency-catalog.ts",
       "types": "./dist/dependency-catalog.d.ts",
       "default": "./dist/dependency-catalog.js"
     },
-    "./npm-publication/*": "./scripts/npm-publication/*.ts",
     "./task-gates": "./scripts/task-gates.ts",
     "./project-github": {
       "source": "./src/project-github.ts",
@@ -131,17 +127,11 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@types/semver": "catalog:",
-    "@types/spdx-expression-parse": "catalog:",
-    "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/reference-ts-cli": "link:../../references/ts-cli",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "semver": "catalog:",
-    "spdx-expression-parse": "catalog:",
-    "tar": "catalog:",
     "typescript-7": "catalog:"
   }
 }

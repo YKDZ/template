@@ -18,26 +18,14 @@ const cliPublicationOwner =
   "工作区公开 CLI 发布能力 @ykdz/template-workspace#./cli-publication";
 
 const cliPublicationFiles = [
-  "scripts/npm-publication/changelog.ts",
-  "scripts/npm-publication/configuration.ts",
-  "scripts/npm-publication/failure.ts",
-  "scripts/npm-publication/publish.ts",
-  "scripts/npm-publication/release.ts",
-  "scripts/npm-publication/remote-context.ts",
   "resources/cli-publication/gitignore",
-  "resources/cli-publication/release.yml",
   "publication-setup/README.md",
-  "publication-setup/RELEASING.md",
-  "publication-setup/assets/CHANGELOG.md.template",
-  "publication-setup/assets/LICENSE-APACHE-2.0.txt",
-  "publication-setup/assets/LICENSE-MIT.txt",
-  "publication-setup/assets/README.md.template",
-  "scripts/npm-publication-setup/bridge.ts",
   "publication-setup/setup.sh",
 ] as const;
 
 // 根脚本目录由工作区根配置治理；包级配置和所属集成测试留在参考包验收中。
 const referencePackageOnlyResources = new Set([
+  "resources/release.yml",
   "scripts/publication.integration.test.ts",
   "tsconfig.json",
   "turbo.json",
@@ -115,12 +103,6 @@ function publicationOperations(
   return [
     ...scriptOperations,
     ...cliPublicationFiles
-      .filter((file) => file.startsWith("scripts/npm-publication/"))
-      .map((file) => copy(file, file)),
-    ...cliPublicationFiles
-      .filter((file) => file.startsWith("scripts/npm-publication-setup/"))
-      .map((file) => copy(file, file)),
-    ...cliPublicationFiles
       .filter((file) => file.startsWith("publication-setup/"))
       .map((file) =>
         copy(
@@ -143,10 +125,12 @@ function publicationOperations(
       path: "scripts/npm-publication-setup/setup.sh",
       executable: true,
     },
-    copy(
-      "resources/cli-publication/release.yml",
-      ".github/workflows/release.yml",
-    ),
+    {
+      kind: "copyFile",
+      source: referencePackage.source("resources/release.yml"),
+      from: ".",
+      to: ".github/workflows/release.yml",
+    },
   ];
 }
 
@@ -185,24 +169,15 @@ export function projectCliPublication(options: {
         cliPublicationOwner,
       ),
     ],
-    imports: {
-      "#npm-publication/*": "./scripts/npm-publication/*.ts",
-      "#shared-publication": "./scripts/npm-publication/scripts/publication.ts",
-    },
+    imports: undefined,
     scripts: {
       "publication:readiness": `pnpm --filter=${filter} run publication:readiness`,
       "publication:prepare":
         "pnpm --workspace-root exec node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/generated/prepare.ts",
       "publication:artifact": `pnpm exec turbo run publication:prepare && pnpm --filter=${filter} run publication:accept`,
+      "publication:remote:artifact": `node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/generated/assert-source.ts && pnpm exec turbo run publication:prepare && pnpm --filter=${filter} run publication:accept`,
     },
-    devDependencies: {
-      "@types/semver": "catalog:",
-      "@types/spdx-expression-parse": "catalog:",
-      semver: "catalog:",
-      "spdx-expression-parse": "catalog:",
-      tar: "catalog:",
-      "validate-npm-package-name": "catalog:",
-    },
+    devDependencies: {},
     tsconfigCompilerOptions: {},
     tsconfigInclude: [],
   };
