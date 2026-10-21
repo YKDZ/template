@@ -61,7 +61,8 @@ export function projectPublicationTarget(options: {
       throw new Error(
         `${contribution.definition.name} 的发布配置缺少共享工具实例绑定。`,
       );
-    scripts["publication:prepare"] = `node --import ${tool.name}/prepare`;
+    scripts["publication:prepare"] =
+      `node --import ${tool.name}/prepare --eval ''`;
   } else {
     delete scripts["publication:prepare"];
     delete scripts["publication:consume"];

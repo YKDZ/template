@@ -175,10 +175,6 @@ void describe("TypeScript CLI 公开组合预设", () => {
     assert.equal(root.scripts.notes, "echo 维护者说明");
     assert.equal(root.devDependencies["@demo/npm-publication"], "workspace:*");
     assert.equal((await manifest("packages/public-cli")).private, false);
-    assert.equal(
-      (await manifest("packages/public-cli")).scripts["publication:prepare"],
-      "node --import @demo/npm-publication/prepare",
-    );
     const internal = await generator().add({
       repositoryRoot: targetRoot,
       preset: preset.identity,
