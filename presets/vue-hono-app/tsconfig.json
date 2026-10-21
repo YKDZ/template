@@ -3,5 +3,5 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["template/**/*.ts", "test/**/*.ts"]
+  "include": ["template/**/*.ts", "resources/**/*.ts", "test/**/*.ts"]
 }

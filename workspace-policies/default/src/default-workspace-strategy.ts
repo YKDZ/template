@@ -27,10 +27,8 @@ import type {
 
 import {
   assertDatabasePreparationManifestTruth,
-  applicationCiDiagnosticArtifacts,
   readDatabasePreparationManifestTruth,
   projectDependencyMaintenancePolicy,
-  applicationRootTsconfigIncludes,
   type DatabasePreparationManifestRequirement,
   type WorkspaceProjectRequirements,
 } from "./application-requirements.ts";
@@ -60,7 +58,6 @@ import {
 import {
   normalizeEnvironmentNeeds,
   type CheckEnvironmentNeed,
-  playwrightBrowserAssetsEnvironmentNeed,
   shellCheckEnvironmentNeed,
 } from "./environment-needs.ts";
 import type { GenerationContext } from "./generation-context.ts";
@@ -90,7 +87,6 @@ import type {
   DependencyMaintenancePolicy,
   DeploymentCheckRequirement,
   ProjectRequirement,
-  VueHonoJointE2eRequirement,
 } from "./project-requirements.ts";
 import type { ReferencePackage } from "./reference-package.ts";
 import {
@@ -354,7 +350,6 @@ function includeRequestedLinkFromIntents(
 
 const supportedProjectRequirementKinds = new Set([
   "package-link",
-  "vue-hono-joint-e2e",
   "sqlite-database-preparation",
   "application-container-with-database-migrations",
 ]);
@@ -654,7 +649,6 @@ function projectRequirements(
       ),
   );
   assertSupportedProjectRequirementKinds(declarations);
-  const joint = oneRequirement(declarations, "vue-hono-joint-e2e");
   const database = oneRequirement(declarations, "sqlite-database-preparation");
   const deployment = oneRequirement(
     declarations,
@@ -676,26 +670,6 @@ function projectRequirements(
     links.push({
       consumerPackagePath: consumer.path,
       providerPackagePath: provider.path,
-    });
-  }
-  const actualJoint =
-    joint === undefined
-      ? undefined
-      : ({
-          kind: joint.kind,
-          web: requireProjectPackage(blueprint, joint.web, joint.kind),
-          api: requireProjectPackage(blueprint, joint.api, joint.kind),
-        } satisfies VueHonoJointE2eRequirement);
-  if (actualJoint !== undefined) {
-    if (
-      actualJoint.web.role !== "runtime-service" ||
-      actualJoint.api.role !== "runtime-service"
-    ) {
-      throw new Error("Vue-Hono 联合验收需要 web 与 API 服务实例");
-    }
-    links.push({
-      consumerPackagePath: actualJoint.web.path,
-      providerPackagePath: actualJoint.api.path,
     });
   }
   const actualDatabase =
@@ -799,7 +773,6 @@ function projectRequirements(
         : { ...blueprint, packageLinkIntents },
     ),
     requirements: {
-      ...(actualJoint === undefined ? {} : { vueHonoJointE2e: actualJoint }),
       ...(actualDatabase === undefined
         ? {}
         : { databasePreparation: actualDatabase }),
@@ -853,9 +826,6 @@ function projectRootScripts(
           deployment:
             "node --conditions=source scripts/check-standalone-deployment.ts",
         }),
-    ...(requirements.vueHonoJointE2e === undefined
-      ? {}
-      : { "test:e2e": "playwright test" }),
   };
 }
 
@@ -901,7 +871,6 @@ function projectOperations(options: {
   });
   const rust = rustProjection.toolchain;
   const hasDeployment = requirements.deploymentCheck !== undefined;
-  const hasJointE2e = requirements.vueHonoJointE2e !== undefined;
   const configurations = contributions.filter(
     (contribution) =>
       contribution.foundation.workspaceConfiguration?.kind ===
@@ -927,7 +896,7 @@ function projectOperations(options: {
     ".github",
     ".devcontainer",
     "scripts",
-    ...(hasJointE2e ? ["test"] : []),
+    "test",
   ].join(" ");
   const baseManifest = createWorkspaceRootManifest({
     name: context.repositoryName,
@@ -940,15 +909,13 @@ function projectOperations(options: {
   });
   // 基础检查命令由默认政策按实际根检查范围构造，再参与来源合成。
   const baseScripts = baseManifest.scripts as Record<string, string>;
-  if (hasDeployment || hasJointE2e) {
-    baseScripts["format:check"] =
-      `oxfmt --list-different --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
-    baseScripts["format:write"] =
-      `oxfmt --write --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
-    baseScripts.lint = `${hasDeployment ? "shellcheck scripts/container-entrypoint.sh && " : ""}oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts scripts${hasJointE2e ? " test" : ""}`;
-    baseScripts["lint:fix"] =
-      `oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts scripts${hasJointE2e ? " test" : ""} --fix`;
-  }
+  baseScripts["format:check"] =
+    `oxfmt --list-different --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
+  baseScripts["format:write"] =
+    `oxfmt --write --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
+  baseScripts.lint = `${hasDeployment ? "shellcheck scripts/container-entrypoint.sh && " : ""}oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test`;
+  baseScripts["lint:fix"] =
+    "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test --fix";
   const shared = composeSharedRootFiles({
     source: "@ykdz/template-workspace/default-workspace-strategy",
     manifest: baseManifest,
@@ -1011,11 +978,7 @@ function projectOperations(options: {
         source: "@ykdz/template-workspace/workspace-project-resources",
         manifest: {
           scripts: projectRootScripts(requirements),
-          devDependencies: hasJointE2e
-            ? { "@playwright/test": "catalog:" }
-            : {},
         },
-        typescript: { include: applicationRootTsconfigIncludes(requirements) },
         resources: projectWorkspaceProjectResources({
           requirements,
           resources: prepared.workspaceProject,
@@ -1054,7 +1017,13 @@ function projectOperations(options: {
       ...contributions.flatMap(
         (contribution) => contribution.ciDiagnosticArtifacts ?? [],
       ),
-      ...applicationCiDiagnosticArtifacts(requirements),
+      ...options.presetProjectContributions
+        .flat()
+        .flatMap((declaration) =>
+          declaration.kind === "shared-root-files"
+            ? (declaration.ciDiagnosticArtifacts ?? [])
+            : [],
+        ),
     ],
   });
   const editor = projectBuiltInEditorCustomization(
@@ -1067,14 +1036,7 @@ function projectOperations(options: {
     requirements.deploymentCheck?.environmentNeeds ?? [];
   const checkEnvironmentNeeds = [
     ...contributions.flatMap((contribution) => contribution.environmentNeeds),
-    ...(hasJointE2e
-      ? [
-          playwrightBrowserAssetsEnvironmentNeed({
-            browser: "chromium",
-            owner: { kind: "workspace-orchestration", path: "." },
-          }),
-        ]
-      : []),
+    ...shared.environmentNeeds.check,
     ...(hasDeployment
       ? [
           shellCheckEnvironmentNeed({
@@ -1144,7 +1106,10 @@ function projectOperations(options: {
   };
   const environmentNeeds = normalizeEnvironmentNeeds({
     check: checkEnvironmentNeeds as CheckEnvironmentNeed[],
-    deployment: deploymentEnvironmentNeeds,
+    deployment: [
+      ...deploymentEnvironmentNeeds,
+      ...shared.environmentNeeds.deployment,
+    ],
   });
   const dependencyMaintenance = projectDependencyMaintenancePolicy({
     contributions,

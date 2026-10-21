@@ -339,15 +339,6 @@
       "tags": ["work:preparation"],
       "dependsOn": ["@ykdz/reference-vike-db#build"]
     },
-    "//#test:e2e:vue-hono": {
-      "cache": false,
-      "tags": ["quality:heavy"],
-      "dependsOn": [
-        "@ykdz/reference-hono-api#build",
-        "@ykdz/reference-vue-hono-web#build",
-        "@ykdz/reference-vue-hono-web#browser:prepare"
-      ]
-    },
     "//#toolchain:prepare": {
       "cache": false,
       "tags": ["work:preparation"]

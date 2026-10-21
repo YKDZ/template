@@ -88,15 +88,6 @@
       "passThroughEnv": ["PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY"],
       "tags": ["work:preparation"]
     },
-    "//#test:e2e": {
-      "cache": false,
-      "dependsOn": [
-        "@ykdz/reference-hono-api#build",
-        "@ykdz/reference-vue-hono-web#build",
-        "@ykdz/reference-vue-hono-web#browser:prepare"
-      ],
-      "tags": ["quality:heavy"]
-    },
     "//#toolchain:prepare": {
       "cache": false,
       "tags": ["work:preparation"]

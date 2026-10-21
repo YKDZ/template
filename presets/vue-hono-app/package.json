@@ -3,7 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "files": [
-    "template-dist"
+    "template-dist",
+    "resources"
   ],
   "type": "module",
   "exports": {
@@ -23,6 +24,7 @@
     "lint": "oxlint --quiet --format=unix --ignore-pattern template-dist .",
     "lint:fix": "oxlint --format=unix --ignore-pattern template-dist . --fix",
     "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 'test/**/*.light.test.ts'",
+    "test:e2e": "PLAYWRIGHT_API_PACKAGE_NAME=@ykdz/reference-hono-api PLAYWRIGHT_WEB_PACKAGE_NAME=@ykdz/reference-vue-hono-web playwright test --config resources/joint-e2e/playwright.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
@@ -32,6 +34,7 @@
     "@ykdz/template-workspace-authoring": "workspace:*"
   },
   "devDependencies": {
+    "@playwright/test": "catalog:",
     "@types/node": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/reference-ts-cli": "workspace:*",
@@ -42,6 +45,7 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
+    "typescript": "catalog:",
     "typescript-7": "catalog:"
   }
 }

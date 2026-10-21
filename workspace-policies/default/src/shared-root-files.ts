@@ -8,6 +8,12 @@ import type {
 } from "@ykdz/template-core/renderer";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
 
+import type { CiDiagnosticArtifactDeclaration } from "./ci-diagnostic-artifact.ts";
+import type {
+  CheckEnvironmentNeed,
+  DeploymentEnvironmentNeed,
+} from "./environment-needs.ts";
+
 export type RootResourceOperation = Extract<
   RenderOperation,
   {
@@ -43,12 +49,19 @@ export type SharedRootContribution = {
       readonly id: string;
     })[];
   }[];
+  /** 外层拥有者声明共享检查与部署环境需求。 */
+  readonly environmentNeeds?: {
+    readonly check?: readonly CheckEnvironmentNeed[];
+    readonly deployment?: readonly DeploymentEnvironmentNeed[];
+  };
   /** 外层拥有者的完整独占资源；禁止对共享文件或真实包范围打补丁。 */
   readonly resources?: readonly {
     readonly operation: RootResourceOperation;
     readonly reconciliation?: ProjectProjectionReconciliation;
     readonly executable?: boolean;
   }[];
+  /** 由拥有者声明、随后投影到工作区 CI 的诊断制品。 */
+  readonly ciDiagnosticArtifacts?: readonly CiDiagnosticArtifactDeclaration[];
 };
 
 function pointer(value: string): string {
@@ -176,6 +189,14 @@ export function composeSharedRootFiles(options: {
         source: declaration.source,
       })),
     ),
+    environmentNeeds: {
+      check: declarations.flatMap(
+        (declaration) => declaration.environmentNeeds?.check ?? [],
+      ),
+      deployment: declarations.flatMap(
+        (declaration) => declaration.environmentNeeds?.deployment ?? [],
+      ),
+    },
     operations: declarations.flatMap((declaration) =>
       (declaration.resources ?? []).flatMap((resource): RenderOperation[] => [
         resource.operation,
