@@ -112,7 +112,8 @@ async function defaultFilter(workspaceRoot: string): Promise<string> {
 
 async function main(): Promise<void> {
   const workspaceRoot = path.resolve(process.cwd());
-  const filters = publicationFilters(process.argv.slice(2));
+  const argumentOffset = process.execArgv.includes("--eval") ? 1 : 2;
+  const filters = publicationFilters(process.argv.slice(argumentOffset));
   const selectors =
     filters.length > 0 ? filters : [await defaultFilter(workspaceRoot)];
   const filterArguments = selectors.flatMap((filter) => ["--filter", filter]);
