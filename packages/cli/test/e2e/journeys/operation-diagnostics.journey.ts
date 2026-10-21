@@ -43,22 +43,6 @@ const journey: CliJourney = {
     const snapshotPath = path.join(context.workDir, "binding-before-add.json");
     const commands: CliJourneyCommand[] = [
       {
-        name: "缺少所属模板执行数据时运行实际 CLI 初始化进程",
-        executable: process.execPath,
-        cwd: context.packageRoot,
-        args: [
-          ...(context.mode === "source" ? ["--conditions=source"] : []),
-          "--experimental-strip-types",
-          path.join(
-            context.packageRoot,
-            "test/e2e/journeys/run-owner-resource-failure.ts",
-          ),
-          context.mode,
-          context.packageRoot,
-          context.workDir,
-        ],
-      },
-      {
         name: "创建必要绑定反例项目",
         args: [
           "init",
@@ -116,28 +100,8 @@ const journey: CliJourney = {
     return commands;
   },
   async assertions({ context, results }) {
-    const resourceFailure = results[0];
-    assert.equal(resourceFailure?.exitCode, 1);
-    assert.equal(resourceFailure?.stdout, "");
-    const resourceEnvelope = JSON.parse(resourceFailure?.stderr ?? "");
-    assert.equal(resourceEnvelope.variant, "operationFailed");
-    assert.equal(resourceEnvelope.data.phase, "planning");
-    assert.match(
-      resourceEnvelope.data.error.message,
-      /@ykdz\/reference-ts-cli.*prepare 阶段失败.*模板执行数据未包含在参考资源范围中：src\/publication\/cli-command-identity\.ts/u,
-    );
-    assert.match(resourceEnvelope.data.error.suggestion, /声明资源/u);
-    assert.doesNotMatch(
-      resourceEnvelope.data.error.message,
-      /file:\/\/|\/(?:tmp|workspaces|root)\//u,
-    );
-    await assert.rejects(
-      stat(path.join(context.workDir, "owner-resource-project")),
-      { code: "ENOENT" },
-    );
-
-    assert.equal(results[1]?.exitCode, 0, results[1]?.stderr);
-    const bindingFailure = results[2];
+    assert.equal(results[0]?.exitCode, 0, results[0]?.stderr);
+    const bindingFailure = results[1];
     assert.equal(bindingFailure?.exitCode, 1);
     assert.equal(bindingFailure?.stdout, "");
     const bindingEnvelope = JSON.parse(bindingFailure?.stderr ?? "");

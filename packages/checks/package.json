@@ -13,11 +13,6 @@
       "source": "./src/workflow-contract.ts",
       "types": "./dist/workflow-contract.d.ts",
       "default": "./dist/workflow-contract.js"
-    },
-    "./publication-source": {
-      "source": "./src/check-publication-source.ts",
-      "types": "./dist/check-publication-source.d.ts",
-      "default": "./dist/check-publication-source.js"
     }
   },
   "scripts": {
@@ -52,6 +47,7 @@
   "devDependencies": {
     "@devcontainers/cli": "catalog:",
     "@types/node": "catalog:",
+    "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-tooling-config": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

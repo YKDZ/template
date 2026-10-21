@@ -56,7 +56,6 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
     defaultLeafName: "cli",
     role: "cli-tool",
     resources: ["."],
-    publicationIdentitySource: "src/publication/cli-command-identity.ts",
     template: {
       dependencies: [
         { name: "@ykdz/template-core", purpose: "template-execution" },
@@ -68,10 +67,6 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
       exports: ["./command-identity", "./creation-input"],
       scripts: ["build:template", "check:author-planning-roles"],
       resources: ["template", "tsconfig.template.json"],
-      executionData: [
-        "src/publication/cli-command-identity.ts",
-        "template/authoring/creation-input.ts",
-      ],
     },
     environmentNeeds: [],
     foundation: {
@@ -124,37 +119,55 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
         };
       }
       const npmPublication = publicCandidate
-        ? (() => {
-            const commandIdentitySource =
-              referencePackage.publicationIdentitySource;
-            if (commandIdentitySource === undefined) {
-              throw new Error("公开 CLI 候选缺少所属命令身份资源");
+        ? { kind: "public-cli-candidate" as const }
+        : undefined;
+      const operations = publicCandidate
+        ? contribution.operations.map((operation) => {
+            if (
+              operation.kind !== "writeJson" ||
+              operation.to !== `${input.definition.path}/turbo.json`
+            ) {
+              return operation;
             }
-            const creationInputResource = input.preparation.executionData.find(
-              (resource) =>
-                resource.path === "template/authoring/creation-input.ts",
-            );
-            if (creationInputResource === undefined) {
-              throw new Error("公开 CLI 候选缺少所属创建输入数据资源");
-            }
+            const turbo = operation.value as {
+              readonly tasks: Readonly<Record<string, unknown>>;
+            };
+            const testE2e = turbo.tasks["test:e2e"] as Record<string, unknown>;
             return {
-              kind: "public-cli-candidate" as const,
-              commandIdentitySource: {
-                source: commandIdentitySource,
-                from: ".",
-              },
-              creationInputSource: {
-                source: creationInputResource.source,
-                from: ".",
+              ...operation,
+              value: {
+                ...turbo,
+                tasks: {
+                  ...turbo.tasks,
+                  "test:e2e": { ...testE2e, dependsOn: [] },
+                },
               },
             };
-          })()
-        : undefined;
+          })
+        : contribution.operations;
+      const scripts = {
+        ...(contribution.manifest.scripts as Record<string, string>),
+        ...(publicCandidate
+          ? {
+              "test:e2e":
+                "node --conditions=source --experimental-strip-types --test --test-timeout=180000 --test-reporter=spec test/e2e/source-journeys.test.ts",
+              "publication:readiness":
+                "pnpm --workspace-root exec node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/generated/diagnose.ts",
+              "publication:accept":
+                "pnpm --workspace-root exec node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/generated/accept.ts",
+              "publication:consume":
+                "node --conditions=source --experimental-strip-types scripts/publication-consumer.ts",
+            }
+          : {}),
+      };
       return {
         ...contribution,
+        operations,
         manifest: {
           ...contribution.manifest,
+          ...(publicCandidate ? { private: false, version: "0.1.0" } : {}),
           bin: { [commandName]: Object.values(bin)[0]! },
+          scripts,
           devDependencies,
           engines: {
             node: publicCandidate

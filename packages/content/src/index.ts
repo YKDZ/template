@@ -11,6 +11,7 @@ export const templateContent = (await loadTemplateContent({
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
     "@ykdz/reference-ts-lib/template",
+    "@ykdz/reference-npm-publication/template",
     "@ykdz/reference-tooling-config/template",
     "@ykdz/preset-ts-lib/template",
     "@ykdz/reference-ts-cli/template",

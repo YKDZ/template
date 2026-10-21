@@ -53,11 +53,26 @@
     },
     "//#publication:artifact": {
       "cache": false,
-      "tags": ["quality:conditional"]
+      "tags": ["work:preparation"]
     },
     "//#publication:readiness": {
       "cache": false,
-      "tags": ["work:release"]
+      "tags": ["work:on-demand"]
+    },
+    "//#publication:remote:artifact": {
+      "cache": false,
+      "tags": ["work:preparation"]
+    },
+    "//#publication:prepare": {
+      "cache": false,
+      "dependsOn": [],
+      "inputs": [],
+      "outputs": [],
+      "passThroughEnv": [
+        "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
+        "PUBLICATION_BATCH_TARGET_COUNT"
+      ],
+      "tags": ["work:preparation"]
     },
     "//#toolchain:prepare": {
       "cache": false,

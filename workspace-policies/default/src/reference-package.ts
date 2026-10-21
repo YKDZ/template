@@ -138,8 +138,6 @@ export type ReferencePackage<
   readonly templateDependencies: readonly ReferenceTemplateDependency[];
   /** prepare 后可供策略和贡献共同消费的用途归一化事实。 */
   readonly dependencyUses: readonly ReferenceDependencyUse[];
-  /** prepare完成后从所属资源集合中取得的CLI发布身份来源。 */
-  readonly publicationIdentitySource?: TemplateSourceHandle;
   prepare(): ReferencePackagePreparation<OwnerFacts>;
   /** 完成原生模板编译后，公开可供collection装配的所属制品句柄。 */
   prepareArtifact(): PreparedNativeContentArtifact;
@@ -265,7 +263,6 @@ export function defineReferencePackage<
     readonly executionData?: readonly string[];
   };
   readonly prepare?: (options: ReferencePackagePreparationInput) => OwnerFacts;
-  readonly publicationIdentitySource?: string;
   readonly foundation: Contextual<
     PackageContribution["foundation"],
     CreationInput
@@ -321,7 +318,6 @@ export function defineReferencePackage<
     );
     return normalizedDependencyUses;
   };
-  const publicationIdentitySource = options.publicationIdentitySource;
   const defaultPath =
     options.defaultPath ?? `packages/${options.defaultLeafName}`;
   const inDeclaredResources = (file: string): boolean => {
@@ -483,16 +479,6 @@ export function defineReferencePackage<
         }
         return resource;
       });
-      if (
-        publicationIdentitySource !== undefined &&
-        !preparedResourcesByPath.has(
-          path.posix.normalize(publicationIdentitySource),
-        )
-      ) {
-        throw new Error(
-          `发布身份资源未包含在参考资源范围中：${publicationIdentitySource}`,
-        );
-      }
       preparedRuntimeResources = resources.filter(
         (resource) => !isTemplateResource(resource.path),
       );
@@ -806,22 +792,5 @@ export function defineReferencePackage<
       );
     },
   };
-  if (publicationIdentitySource !== undefined) {
-    Object.defineProperty(referencePackage, "publicationIdentitySource", {
-      enumerable: true,
-      get() {
-        const resourcePath = path.posix.normalize(publicationIdentitySource);
-        const preparedResource = requirePreparation().resources.find(
-          (resource) => resource.path === resourcePath,
-        );
-        if (preparedResource === undefined) {
-          throw new Error(
-            `参考包 ${options.packageName}/./template prepare 阶段缺少发布身份资源：${resourcePath}`,
-          );
-        }
-        return preparedResource.source;
-      },
-    });
-  }
   return referencePackage;
 }

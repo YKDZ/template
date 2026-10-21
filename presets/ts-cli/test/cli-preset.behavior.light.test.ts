@@ -28,6 +28,7 @@ const content = await loadContentSource({
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
     "@ykdz/reference-ts-cli/template",
+    "@ykdz/reference-npm-publication/template",
     "@ykdz/reference-ts-lib/template",
     "@ykdz/reference-rust-bin/template",
     "@ykdz/reference-tooling-config/template",
@@ -60,6 +61,14 @@ const rust = contentIndex.resolve(
   {
     namespace: "ykdz",
     packageName: "@ykdz/reference-rust-bin",
+    exportPath: "./template",
+  },
+  "reference",
+);
+const npmPublication = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/reference-npm-publication",
     exportPath: "./template",
   },
   "reference",
@@ -129,7 +138,9 @@ async function snapshotTree(root: string): Promise<string> {
 function generator() {
   return createGenerator({
     content,
-    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>({
+      cliPublicationReference: npmPublication.definition,
+    }),
   });
 }
 
@@ -162,14 +173,9 @@ void describe("TypeScript CLI 公开组合预设", () => {
         "utf8",
       ),
     ) as Record<string, unknown>;
-    assert.partialDeepStrictEqual(publicationConfiguration, {
+    assert.deepStrictEqual(publicationConfiguration, {
       packagePath: "packages/cli",
-      creationInput: { variant: "public-candidate" },
     });
-    assert.match(
-      publicationConfiguration.packageDefinitionId as string,
-      /^package-[a-f\d]{64}$/u,
-    );
     const publicationMode =
       (
         await stat(
@@ -186,13 +192,25 @@ void describe("TypeScript CLI 公开组合预设", () => {
       readonly bin: Record<string, string>;
       readonly scripts: Record<string, string>;
       readonly engines: { readonly node: string };
+      readonly private?: boolean;
+      readonly version?: string;
     };
     assert.deepStrictEqual(initialManifest.bin, { cli: "./dist/cli.js" });
+    assert.strictEqual(initialManifest.private, false);
+    assert.strictEqual(initialManifest.version, "0.1.0");
     assert.strictEqual(initialManifest.engines.node, "^24.21.0");
+    assert.match(
+      initialManifest.scripts["test:e2e"]!,
+      /source-journeys\.test\.ts/u,
+    );
     assert.match(
       initialManifest.scripts.postbuild!,
       /chmodSync\('dist\/cli\.js', 0o755\)/u,
     );
+    const candidateTurbo = JSON.parse(
+      await readFile(path.join(targetRoot, "packages/cli/turbo.json"), "utf8"),
+    ) as { readonly tasks: Record<string, { readonly dependsOn?: unknown }> };
+    assert.deepStrictEqual(candidateTurbo.tasks["test:e2e"]!.dependsOn, []);
 
     const privateAdded = await generated.add({
       repositoryRoot: targetRoot,
@@ -223,6 +241,19 @@ void describe("TypeScript CLI 公开组合预设", () => {
       "private-cli": "./dist/cli.js",
     });
     assert.strictEqual(privateManifest.engines.node, ">=24");
+    assert.match(
+      privateManifest.scripts["test:e2e"]!,
+      /run-journeys\.test\.ts/u,
+    );
+    const privateTurbo = JSON.parse(
+      await readFile(
+        path.join(targetRoot, "packages/private-cli/turbo.json"),
+        "utf8",
+      ),
+    ) as { readonly tasks: Record<string, { readonly dependsOn?: unknown }> };
+    assert.deepStrictEqual(privateTurbo.tasks["test:e2e"]!.dependsOn, [
+      "build",
+    ]);
     if (process.platform !== "win32") {
       const privateDist = path.join(targetRoot, "packages/private-cli/dist");
       await mkdir(privateDist, { recursive: true });

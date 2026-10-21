@@ -1,0 +1,62 @@
+{
+  "name": "@ykdz/reference-npm-publication",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./reference": "./package.json",
+    ".": {
+      "source": "./scripts/publication.ts",
+      "types": "./scripts/publication.ts",
+      "default": "./scripts/publication.ts"
+    },
+    "./prepare": {
+      "source": "./scripts/generated/prepare.ts",
+      "types": "./scripts/generated/prepare.ts",
+      "default": "./scripts/generated/prepare.ts"
+    },
+    "./artifact": {
+      "source": "./scripts/generated/artifact.ts",
+      "types": "./scripts/generated/artifact.ts",
+      "default": "./scripts/generated/artifact.ts"
+    },
+    "./configuration": "./scripts/configuration.ts",
+    "./remote-context": "./scripts/remote-context.ts",
+    "./publish": "./scripts/publish.ts",
+    "./release": "./scripts/release.ts",
+    "./template": {
+      "source": "./template/definition.ts",
+      "types": "./template-dist/definition.d.ts",
+      "default": "./template-dist/definition.js"
+    }
+  },
+  "scripts": {
+    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "test:integration": "node --conditions=source --experimental-strip-types --test --test-timeout=300000 --test-reporter=spec 'scripts/**/*.integration.test.ts'",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "semver": "catalog:",
+    "spdx-expression-parse": "catalog:",
+    "tar": "catalog:",
+    "validate-npm-package-name": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/semver": "catalog:",
+    "@types/spdx-expression-parse": "catalog:",
+    "@ykdz/reference-tooling-config": "workspace:*",
+    "@ykdz/template-workspace": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  },
+  "engines": {
+    "node": "^24.21.0"
+  }
+}

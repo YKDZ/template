@@ -4,7 +4,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "tags": ["quality:light"],
+      "tags": ["work:preparation"],
       "cache": true,
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": ["dist/**"],
@@ -42,6 +42,13 @@
       "outputs": [],
       "persistent": false
     },
+    "pack:bundled": {
+      "tags": ["work:preparation"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "tags": ["quality:light"],
@@ -50,9 +57,45 @@
       "outputs": [],
       "persistent": false
     },
-    "pack:bundled": {
+    "publication:prepare": {
+      "dependsOn": ["build"],
+      "tags": ["work:preparation"],
+      "cache": false,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "persistent": false,
+      "passThroughEnv": [
+        "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
+        "TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR",
+        "PUBLICATION_BATCH_TARGET_COUNT",
+        "PUBLICATION_SOURCE_SHA",
+        "GITHUB_DEFAULT_BRANCH"
+      ]
+    },
+    "publication:accept": {
+      "tags": ["work:preparation"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "publication:consume": {
+      "tags": ["work:preparation"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "publication:readiness": {
+      "tags": ["work:on-demand"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "publication:verify": {
       "dependsOn": [],
-      "tags": ["work:release"],
+      "tags": ["work:preparation"],
       "cache": false,
       "inputs": [],
       "outputs": [],
