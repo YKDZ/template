@@ -1,7 +1,5 @@
 import { fileURLToPath } from "node:url";
 
-import type { DeploymentCheckRequirement } from "@ykdz/template-workspace/project-requirements";
-
 import type { SuccessfulScenarioResult } from "../../../generated-content.ts";
 import {
   deriveFixtureGateContractIdentity,
@@ -11,30 +9,31 @@ import {
 
 export type DeploymentQualityPlanInput = {
   readonly scenarioId: string;
-  readonly requirement: DeploymentCheckRequirement;
+  readonly executionResources: readonly FixtureEvidenceExecutionResource[];
 };
 
 export function deriveDeploymentQualityPlanInput(
   result: SuccessfulScenarioResult,
   scenarioId: string,
 ): DeploymentQualityPlanInput | undefined {
-  const requirement = result.projection.ownerFacts.requirements.deploymentCheck;
-  return requirement === undefined
+  const executionResources: FixtureEvidenceExecutionResource[] =
+    result.projection.ownerFacts.environmentNeeds.deployment.some(
+      (need) => need.kind === "docker-engine",
+    )
+      ? ["docker"]
+      : [];
+  return executionResources.length === 0
     ? undefined
     : {
         scenarioId,
-        requirement,
+        executionResources,
       };
 }
 
 export function deploymentQualityExecutionResources(
   deployment: DeploymentQualityPlanInput,
 ): readonly FixtureEvidenceExecutionResource[] {
-  return deployment.requirement.environmentNeeds.some(
-    (need) => need.kind === "docker-engine",
-  )
-    ? ["docker"]
-    : [];
+  return deployment.executionResources;
 }
 
 export function normalizedDeploymentQualityPlan(

@@ -3,12 +3,15 @@ import { readFileSync } from "node:fs";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
 
 import { composeCiDiagnosticArtifacts } from "./ci-diagnostic-artifact.ts";
-import type { DeploymentEnvironmentNeed } from "./environment-needs.ts";
 import type { DependencyMaintenancePolicy } from "./project-requirements.ts";
 
 export type ProjectCheckWorkflowDiagnosticOptions = {
   readonly packagePaths: readonly string[];
   readonly diagnosticArtifacts?: readonly unknown[] | undefined;
+  readonly job?: {
+    readonly name?: string;
+    readonly timeoutMinutes?: number;
+  };
 };
 
 export type PreparedProjectGithubTemplates = {
@@ -41,40 +44,26 @@ export function prepareProjectGithubTemplates(): PreparedProjectGithubTemplates 
 
 /** 完整原生工作流拥有任务和工具设置；投影只选择已声明的能力。 */
 export function projectCheckWorkflow(
-  options: ProjectCheckWorkflowDiagnosticOptions & {
-    readonly deploymentCheck?:
-      | { readonly environmentNeeds: readonly DeploymentEnvironmentNeed[] }
-      | undefined;
-  },
+  options: ProjectCheckWorkflowDiagnosticOptions,
   template: string,
 ): string {
-  const hasDeployment = options.deploymentCheck !== undefined;
-  if (
-    hasDeployment &&
-    !options.deploymentCheck?.environmentNeeds.some(
-      (need) => need.kind === "docker-engine",
-    )
-  ) {
-    throw new Error("部署检查必须声明 Docker 环境需求");
-  }
   const diagnostics = composeCiDiagnosticArtifacts({
     packagePaths: options.packagePaths,
     declarations: options.diagnosticArtifacts ?? [],
   });
   const workflow = parseDocument(template);
+  workflow.setIn(["jobs", "check", "name"], "Root Check");
+  workflow.setIn(["jobs", "check", "timeout-minutes"], 30);
   const steps = workflow.getIn(["jobs", "check", "steps"]) as YAMLSeq<
     YAMLMap<string>
   >;
   steps.items = steps.items.filter((step) => {
     const identity = step.get("id");
-    if (identity === "prepare-deployment") return hasDeployment;
     if (identity === "stage-diagnostics" || identity === "upload-diagnostics")
       return diagnostics.length > 0;
     return true;
   });
-  if (!hasDeployment) {
-    workflow.setIn(["jobs", "check", "name"], "Root Check");
-    workflow.setIn(["jobs", "check", "timeout-minutes"], 30);
+  if (options.job === undefined) {
     for (const step of steps.items) {
       if (step.get("id") === "stage-diagnostics")
         step.set("name", "Stage Root Check diagnostics");
@@ -82,6 +71,16 @@ export function projectCheckWorkflow(
         step.set("name", "Upload Root Check diagnostics");
         step.setIn(["with", "name"], "root-check-diagnostics");
       }
+    }
+  } else {
+    if (options.job.name !== undefined) {
+      workflow.setIn(["jobs", "check", "name"], options.job.name);
+    }
+    if (options.job.timeoutMinutes !== undefined) {
+      workflow.setIn(
+        ["jobs", "check", "timeout-minutes"],
+        options.job.timeoutMinutes,
+      );
     }
   }
   const staging = steps.items.find(

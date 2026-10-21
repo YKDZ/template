@@ -72,10 +72,7 @@ void describe("Fixture Verification Evidence", () => {
       const changedDeploymentContractIdentity =
         await deriveDeploymentQualityContractIdentity({
           scenarioId: deployment!.scenarioId,
-          requirement: {
-            ...deployment!.requirement,
-            environmentNeeds: [],
-          },
+          executionResources: [],
         });
       const rootContractIdentity =
         await deriveGeneratedRootQualityContractIdentity(result, {

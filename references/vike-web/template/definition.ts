@@ -1,9 +1,4 @@
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
-import {
-  dockerEngineEnvironmentNeed,
-  playwrightBrowserAssetsEnvironmentNeed,
-} from "@ykdz/template-workspace/default-environment";
-import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
+import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-workspace/default-environment";
 import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 export const referencePackage = defineReferencePackage({
@@ -63,24 +58,3 @@ export const referencePackage = defineReferencePackage({
     ],
   }),
 });
-
-type DeploymentCheck = NonNullable<
-  PackageContribution["foundation"]["deploymentCheck"]
->;
-
-/** 部署资源由根共同能力提供，应用仅声明参与部署的公开包身份。 */
-export function deploymentCheck(options: {
-  readonly web: PackageDefinition;
-  readonly database: PackageDefinition;
-  readonly migrations: PackageDefinition;
-  readonly sources: DeploymentCheck["sources"];
-}): DeploymentCheck {
-  return {
-    kind: "application-container-with-database-migrations",
-    applicationPackageName: options.web.name,
-    databasePackageName: options.database.name,
-    migrationPackageName: options.migrations.name,
-    environmentNeeds: [dockerEngineEnvironmentNeed()],
-    sources: options.sources,
-  };
-}

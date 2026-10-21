@@ -15,7 +15,6 @@
     "scripts/**/*.ts",
     "publication/**/*.ts",
     "publication-setup/**/*.ts",
-    "resources/deployment/**/*.ts",
     "*.config.ts"
   ]
 }

@@ -25,13 +25,7 @@ import type {
   WorkspaceStrategy,
 } from "@ykdz/template-core/workspace-strategy";
 
-import {
-  assertDatabasePreparationManifestTruth,
-  readDatabasePreparationManifestTruth,
-  projectDependencyMaintenancePolicy,
-  type DatabasePreparationManifestRequirement,
-  type WorkspaceProjectRequirements,
-} from "./application-requirements.ts";
+import { projectDependencyMaintenancePolicy } from "./application-requirements.ts";
 import { composeCiDiagnosticArtifacts } from "./ci-diagnostic-artifact.ts";
 import type { CiDiagnosticArtifactDeclaration } from "./ci-diagnostic-artifact.ts";
 import {
@@ -58,7 +52,6 @@ import {
 import {
   normalizeEnvironmentNeeds,
   type CheckEnvironmentNeed,
-  shellCheckEnvironmentNeed,
 } from "./environment-needs.ts";
 import type { GenerationContext } from "./generation-context.ts";
 import {
@@ -83,9 +76,7 @@ import {
   readProjectLinkManifestTruth,
 } from "./project-linking.ts";
 import type {
-  DatabasePreparationRequirement,
   DependencyMaintenancePolicy,
-  DeploymentCheckRequirement,
   ProjectRequirement,
 } from "./project-requirements.ts";
 import type { ReferencePackage } from "./reference-package.ts";
@@ -114,10 +105,6 @@ import {
   projectRustTarget,
 } from "./rust-target-projection.ts";
 import { vuePnpmDependencyOverrides } from "./vue-policy.ts";
-import {
-  prepareWorkspaceProjectResources,
-  projectWorkspaceProjectResources,
-} from "./workspace-project-resources.ts";
 import {
   copyPreparedWorkspaceResource,
   prepareWorkspaceResources,
@@ -167,9 +154,12 @@ type DefaultWorkspaceContext = GenerationContext & {
 };
 
 export type DefaultWorkspaceOwnerFacts = {
-  readonly requirements: WorkspaceProjectRequirements;
   readonly environmentNeeds: ReturnType<typeof normalizeEnvironmentNeeds>;
   readonly diagnosticArtifacts: readonly CiDiagnosticArtifactDeclaration[];
+  readonly checkWorkflowJob: {
+    readonly name: string;
+    readonly timeoutMinutes: number;
+  };
   readonly container: {
     readonly dockerfileText: string;
     readonly buildArguments: ReturnType<
@@ -229,7 +219,6 @@ type DefaultWorkspacePreparedResources = {
   readonly developmentContainer: ReturnType<
     typeof prepareBuiltInDevelopmentContainerResources
   >;
-  readonly workspaceProject: PreparedWorkspaceResources;
   readonly cliPublication: PreparedWorkspaceResources;
   readonly workspaceFiles: PreparedWorkspaceResources;
   readonly projectLinkManifestTruth: ReadonlyMap<
@@ -253,7 +242,6 @@ function prepareDefaultWorkspaceResources(
     editorCustomizationDeclarations:
       prepareBuiltInEditorCustomizationDeclarations(),
     developmentContainer: prepareBuiltInDevelopmentContainerResources(),
-    workspaceProject: prepareWorkspaceProjectResources(),
     cliPublication: prepareCliPublicationResources(),
     workspaceFiles: prepareWorkspaceResources(
       defaultWorkspaceFiles,
@@ -348,11 +336,7 @@ function includeRequestedLinkFromIntents(
   return assertDefaultProjectBlueprint({ ...blueprint, packageLinkIntents });
 }
 
-const supportedProjectRequirementKinds = new Set([
-  "package-link",
-  "sqlite-database-preparation",
-  "application-container-with-database-migrations",
-]);
+const supportedProjectRequirementKinds = new Set(["package-link"]);
 
 function assertSupportedProjectRequirementKinds(
   requirements: readonly unknown[],
@@ -615,28 +599,11 @@ function requireProjectPackage(
   return actual;
 }
 
-function oneRequirement<T extends ProjectRequirement["kind"]>(
-  requirements: readonly ProjectRequirement[],
-  kind: T,
-): Extract<ProjectRequirement, { readonly kind: T }> | undefined {
-  const matches = requirements.filter(
-    (requirement): requirement is Extract<ProjectRequirement, { kind: T }> =>
-      requirement.kind === kind,
-  );
-  if (matches.length > 1) {
-    throw new Error(`工作区项目能力只能声明一次：${kind}`);
-  }
-  return matches[0];
-}
-
 function projectRequirements(
   blueprint: ProjectBlueprint,
   contributions: readonly PackageContribution[],
   presetProjectContributions: readonly (readonly DefaultWorkspaceProjectContribution[])[],
-): {
-  readonly blueprint: ProjectBlueprint;
-  readonly requirements: WorkspaceProjectRequirements;
-} {
+): ProjectBlueprint {
   const declarations = contributions.flatMap(
     (contribution) => contribution.projectRequirements ?? [],
   );
@@ -649,11 +616,6 @@ function projectRequirements(
       ),
   );
   assertSupportedProjectRequirementKinds(declarations);
-  const database = oneRequirement(declarations, "sqlite-database-preparation");
-  const deployment = oneRequirement(
-    declarations,
-    "application-container-with-database-migrations",
-  );
   const links: PackageLinkIntent[] = [];
   for (const requirement of declarations) {
     if (requirement.kind !== "package-link") continue;
@@ -672,86 +634,6 @@ function projectRequirements(
       providerPackagePath: provider.path,
     });
   }
-  const actualDatabase =
-    database === undefined
-      ? undefined
-      : ({
-          kind: database.kind,
-          web: requireProjectPackage(blueprint, database.web, database.kind),
-          database: requireProjectPackage(
-            blueprint,
-            database.database,
-            database.kind,
-          ),
-          migrations: requireProjectPackage(
-            blueprint,
-            database.migrations,
-            database.kind,
-          ),
-        } satisfies DatabasePreparationRequirement);
-  const actualDeployment =
-    deployment === undefined
-      ? undefined
-      : ({
-          kind: deployment.kind,
-          application: requireProjectPackage(
-            blueprint,
-            deployment.application,
-            deployment.kind,
-          ),
-          database: requireProjectPackage(
-            blueprint,
-            deployment.database,
-            deployment.kind,
-          ),
-          migrations: requireProjectPackage(
-            blueprint,
-            deployment.migrations,
-            deployment.kind,
-          ),
-          environmentNeeds: deployment.environmentNeeds,
-        } satisfies DeploymentCheckRequirement);
-  for (const requirement of [actualDatabase, actualDeployment]) {
-    if (requirement === undefined) continue;
-    const application =
-      requirement.kind === "sqlite-database-preparation"
-        ? requirement.web
-        : requirement.application;
-    if (
-      application.role !== "runtime-service" ||
-      requirement.database.role !== "shared-library" ||
-      requirement.migrations.role !== "shared-library"
-    ) {
-      throw new Error(
-        `${requirement.kind} 需要应用、数据库和迁移包的实际角色匹配`,
-      );
-    }
-    links.push(
-      {
-        consumerPackagePath: application.path,
-        providerPackagePath: requirement.database.path,
-      },
-      {
-        consumerPackagePath: requirement.migrations.path,
-        providerPackagePath: requirement.database.path,
-      },
-    );
-  }
-  if (
-    actualDatabase !== undefined &&
-    actualDeployment !== undefined &&
-    (!samePackageDefinition(actualDatabase.web, actualDeployment.application) ||
-      !samePackageDefinition(
-        actualDatabase.database,
-        actualDeployment.database,
-      ) ||
-      !samePackageDefinition(
-        actualDatabase.migrations,
-        actualDeployment.migrations,
-      ))
-  ) {
-    throw new Error("数据库准备与部署能力必须引用同一组实际包实例");
-  }
   const seenLinks = new Set<string>();
   const packageLinkIntents = [
     ...(blueprint.packageLinkIntents ?? []),
@@ -762,71 +644,15 @@ function projectRequirements(
     seenLinks.add(identity);
     return true;
   });
-  return {
-    blueprint: assertDefaultProjectBlueprint(
-      packageLinkIntents.length === 0 &&
-        blueprint.packageLinkIntents === undefined
-        ? {
-            schemaVersion: blueprint.schemaVersion,
-            packages: blueprint.packages,
-          }
-        : { ...blueprint, packageLinkIntents },
-    ),
-    requirements: {
-      ...(actualDatabase === undefined
-        ? {}
-        : { databasePreparation: actualDatabase }),
-      ...(actualDeployment === undefined
-        ? {}
-        : { deploymentCheck: actualDeployment }),
-    },
-  };
-}
-
-function databasePreparationScripts(
-  preparation: DatabasePreparationRequirement,
-): Readonly<Record<string, string>> {
-  const run = (
-    profile: "dev" | "test" | "e2e",
-    definition: PackageDefinition,
-    task: string,
-  ) =>
-    `DATABASE_PROFILE=${profile} pnpm --filter ${definition.name} run ${task}`;
-  return {
-    "database:prepare:dev": [
-      run("dev", preparation.migrations, "db:push"),
-      run("dev", preparation.database, "db:seed:example"),
-    ].join(" && "),
-    "database:prepare:test": [
-      run("test", preparation.database, "db:reset"),
-      run("test", preparation.migrations, "db:push"),
-      run("test", preparation.database, "db:seed:example"),
-    ].join(" && "),
-    "database:prepare:e2e": [
-      run("e2e", preparation.database, "db:reset"),
-      run("e2e", preparation.migrations, "db:push"),
-      run("e2e", preparation.database, "db:seed:example"),
-    ].join(" && "),
-  };
-}
-
-function projectRootScripts(
-  requirements: WorkspaceProjectRequirements,
-): Readonly<Record<string, string>> {
-  return {
-    ...(requirements.databasePreparation === undefined
-      ? {}
-      : {
-          ...databasePreparationScripts(requirements.databasePreparation),
-          dev: `pnpm run database:prepare:dev && turbo watch dev --filter=${requirements.databasePreparation.web.name}`,
-        }),
-    ...(requirements.deploymentCheck === undefined
-      ? {}
-      : {
-          deployment:
-            "node --conditions=source scripts/check-standalone-deployment.ts",
-        }),
-  };
+  return assertDefaultProjectBlueprint(
+    packageLinkIntents.length === 0 &&
+      blueprint.packageLinkIntents === undefined
+      ? {
+          schemaVersion: blueprint.schemaVersion,
+          packages: blueprint.packages,
+        }
+      : { ...blueprint, packageLinkIntents },
+  );
 }
 
 function projectOperations(options: {
@@ -840,7 +666,7 @@ function projectOperations(options: {
 }): WorkspaceProjection<DefaultWorkspaceOwnerFacts> {
   const { context } = options;
   const prepared = preparedResourcesForContext(context);
-  const projectState = projectRequirements(
+  const blueprint = projectRequirements(
     includeRequestedLinkFromIntents(
       assertDefaultProjectBlueprint(options.blueprint),
       options.packages,
@@ -848,7 +674,6 @@ function projectOperations(options: {
     options.contributions,
     options.presetProjectContributions,
   );
-  const { blueprint, requirements } = projectState;
   const linkPlan = planExplicitProjectLinks({
     blueprint,
     contributions: options.contributions,
@@ -869,7 +694,6 @@ function projectOperations(options: {
     contributions,
   });
   const rust = rustProjection.toolchain;
-  const hasDeployment = requirements.deploymentCheck !== undefined;
   const configurations = contributions.filter(
     (contribution) =>
       contribution.foundation.workspaceConfiguration?.kind ===
@@ -881,6 +705,15 @@ function projectOperations(options: {
     );
   }
   const configuration = configurations[0];
+  const ownerSharedRootContributions = [
+    ...options.presetProjectContributions
+      .flat()
+      .filter(
+        (declaration): declaration is SharedRootContribution =>
+          declaration.kind === "shared-root-files",
+      ),
+    ...options.sharedRootContributions,
+  ];
   const rootAutomationPaths = [
     "*.json",
     "pnpm-workspace.yaml",
@@ -909,13 +742,44 @@ function projectOperations(options: {
   });
   // 基础检查命令由默认政策按实际根检查范围构造，再参与来源合成。
   const baseScripts = baseManifest.scripts as Record<string, string>;
+  const checkEnvironmentNeedsFromOwners = ownerSharedRootContributions.flatMap(
+    (declaration) => declaration.environmentNeeds?.check ?? [],
+  );
+  const rootShellCheckRequested = checkEnvironmentNeedsFromOwners.some(
+    (need) => need.kind === "shellcheck-command",
+  );
+  const needsShellCheck =
+    rootShellCheckRequested ||
+    contributions.some((contribution) =>
+      contribution.environmentNeeds.some(
+        (need) => need.kind === "shellcheck-command",
+      ),
+    );
+  const shellResourcePaths = ownerSharedRootContributions.flatMap(
+    (declaration) =>
+      (declaration.resources ?? []).flatMap(({ operation }) =>
+        "to" in operation && operation.to.endsWith(".sh") ? [operation.to] : [],
+      ),
+  );
+  const shellQuote = (value: string): string =>
+    `'${value.replaceAll("'", "'\\''")}'`;
+  const rootShellcheckCommand =
+    rootShellCheckRequested && shellResourcePaths.length > 0
+      ? `shellcheck ${shellResourcePaths.map(shellQuote).join(" ")} && `
+      : "";
   baseScripts["format:check"] =
     `oxfmt --list-different --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
   baseScripts["format:write"] =
     `oxfmt --write --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
-  baseScripts.lint = `${hasDeployment ? "shellcheck scripts/container-entrypoint.sh && " : ""}oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test`;
+  baseScripts.lint =
+    "oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test";
   baseScripts["lint:fix"] =
     "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test --fix";
+  if (needsShellCheck) {
+    baseScripts.lint = `${rootShellcheckCommand}oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test`;
+    baseScripts["lint:fix"] =
+      "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test --fix";
+  }
   const shared = composeSharedRootFiles({
     source: "@ykdz/template-workspace/default-workspace-strategy",
     manifest: baseManifest,
@@ -973,24 +837,7 @@ function projectOperations(options: {
               : {}),
           })),
       },
-      {
-        kind: "shared-root-files",
-        source: "@ykdz/template-workspace/workspace-project-resources",
-        manifest: {
-          scripts: projectRootScripts(requirements),
-        },
-        resources: projectWorkspaceProjectResources({
-          requirements,
-          resources: prepared.workspaceProject,
-        }).map((operation) => ({ operation })),
-      },
-      ...options.presetProjectContributions
-        .flat()
-        .filter(
-          (declaration): declaration is SharedRootContribution =>
-            declaration.kind === "shared-root-files",
-        ),
-      ...options.sharedRootContributions,
+      ...ownerSharedRootContributions,
     ],
   });
   const rootManifest = shared.manifest;
@@ -1017,13 +864,9 @@ function projectOperations(options: {
       ...contributions.flatMap(
         (contribution) => contribution.ciDiagnosticArtifacts ?? [],
       ),
-      ...options.presetProjectContributions
-        .flat()
-        .flatMap((declaration) =>
-          declaration.kind === "shared-root-files"
-            ? (declaration.ciDiagnosticArtifacts ?? [])
-            : [],
-        ),
+      ...ownerSharedRootContributions.flatMap(
+        (declaration) => declaration.ciDiagnosticArtifacts ?? [],
+      ),
     ],
   });
   const editor = projectBuiltInEditorCustomization(
@@ -1032,19 +875,9 @@ function projectOperations(options: {
     ),
     prepared.editorCustomizationDeclarations,
   );
-  const deploymentEnvironmentNeeds =
-    requirements.deploymentCheck?.environmentNeeds ?? [];
   const checkEnvironmentNeeds = [
     ...contributions.flatMap((contribution) => contribution.environmentNeeds),
     ...shared.environmentNeeds.check,
-    ...(hasDeployment
-      ? [
-          shellCheckEnvironmentNeed({
-            kind: "workspace-orchestration",
-            path: ".",
-          }),
-        ]
-      : []),
   ];
   const containerLayers = [
     ...(checkEnvironmentNeeds.some(
@@ -1052,7 +885,7 @@ function projectOperations(options: {
     )
       ? [browserTestDevelopmentContainerToolLayer()]
       : []),
-    ...(hasDeployment ? [shellCheckDevelopmentContainerToolLayer()] : []),
+    ...(needsShellCheck ? [shellCheckDevelopmentContainerToolLayer()] : []),
     ...contributions.flatMap(
       (contribution) =>
         contribution.foundation.developmentContainerToolLayers ?? [],
@@ -1106,14 +939,13 @@ function projectOperations(options: {
   };
   const environmentNeeds = normalizeEnvironmentNeeds({
     check: checkEnvironmentNeeds as CheckEnvironmentNeed[],
-    deployment: [
-      ...deploymentEnvironmentNeeds,
-      ...shared.environmentNeeds.deployment,
-    ],
+    deployment: shared.environmentNeeds.deployment,
   });
   const dependencyMaintenance = projectDependencyMaintenancePolicy({
     contributions,
-    hasDeployment,
+    rootContributions: shared.dependencyMaintenance.map(
+      (dependencyMaintenance) => ({ dependencyMaintenance }),
+    ),
   });
   const reconciliation: readonly ProjectProjectionReconciliation[] = [
     ...shared.reconciliation,
@@ -1268,9 +1100,9 @@ function projectOperations(options: {
         projectCheckWorkflow(
           {
             packagePaths,
-            ...(requirements.deploymentCheck === undefined
+            ...(Object.keys(shared.ciJob).length === 0
               ? {}
-              : { deploymentCheck: requirements.deploymentCheck }),
+              : { job: shared.ciJob }),
             diagnosticArtifacts: artifacts,
           },
           prepared.githubTemplates.checkWorkflow,
@@ -1358,9 +1190,12 @@ function projectOperations(options: {
     ],
     reconciliation,
     ownerFacts: {
-      requirements,
       environmentNeeds,
       diagnosticArtifacts: artifacts,
+      checkWorkflowJob: {
+        name: shared.ciJob.name ?? "Root Check",
+        timeoutMinutes: shared.ciJob.timeoutMinutes ?? 30,
+      },
       container: {
         dockerfileText: container.dockerfileOperation.text,
         buildArguments: container.buildArguments,
@@ -1555,7 +1390,6 @@ export function createDefaultWorkspaceStrategy<
       packages,
       contributions,
       getAdditionContributions,
-      presetProjectContributions,
     }) {
       const requestedInput =
         creationInput === undefined ? undefined : creationInput;
@@ -1720,51 +1554,6 @@ export function createDefaultWorkspaceStrategy<
           }
         }
       }
-      const packageByName = new Map(
-        contributions.map((contribution) => [
-          contribution.definition.name,
-          contribution,
-        ]),
-      );
-      const requirements = [
-        ...contributions.flatMap(
-          (contribution) => contribution.projectRequirements ?? [],
-        ),
-        ...presetProjectContributions.flat(),
-      ];
-      const databasePreparations = requirements.filter(
-        (requirement): requirement is DatabasePreparationRequirement =>
-          requirement.kind === "sqlite-database-preparation",
-      );
-      if (databasePreparations.length > 1) {
-        throw new Error(
-          "工作区项目能力只能声明一次：sqlite-database-preparation",
-        );
-      }
-      const databasePreparation = databasePreparations[0];
-      const manifestRequirement:
-        | DatabasePreparationManifestRequirement
-        | undefined =
-        databasePreparation === undefined
-          ? undefined
-          : {
-              databasePackageName: databasePreparation.database.name,
-              migrationPackageName: databasePreparation.migrations.name,
-              consumers: {
-                "application-dev": databasePreparation.web.name,
-                "application-e2e": databasePreparation.web.name,
-              },
-            };
-      const manifestTruthByPackagePath = readDatabasePreparationManifestTruth({
-        repositoryRoot: targetRoot,
-        preparation: manifestRequirement,
-        packageByName,
-      });
-      assertDatabasePreparationManifestTruth({
-        preparation: manifestRequirement,
-        packageByName,
-        manifestTruthByPackagePath,
-      });
       return;
     },
     parseState(value) {
