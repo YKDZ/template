@@ -67,11 +67,6 @@
       "types": "./dist/default-package-identity.d.ts",
       "default": "./dist/default-package-identity.js"
     },
-    "./joint-e2e": {
-      "source": "./src/joint-e2e.ts",
-      "types": "./dist/joint-e2e.d.ts",
-      "default": "./dist/joint-e2e.js"
-    },
     "./package-addition-facts": {
       "source": "./src/package-addition-facts.ts",
       "types": "./dist/package-addition-facts.d.ts",
@@ -136,7 +131,6 @@
     "yaml": "catalog:"
   },
   "devDependencies": {
-    "@playwright/test": "catalog:",
     "@types/node": "catalog:",
     "@types/semver": "catalog:",
     "@types/spdx-expression-parse": "catalog:",

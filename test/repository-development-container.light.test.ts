@@ -126,7 +126,7 @@ void it("源码容器冻结检查当前工作树，成功后移除快照、失�
           "test:browser",
           "@ykdz/reference-vue-app#test:e2e",
           "@ykdz/reference-vike-web#test:e2e",
-          "//#test:e2e:vue-hono",
+          "@ykdz/preset-vue-hono-app#test:e2e",
           "--output-logs=errors-only",
         ],
       ],

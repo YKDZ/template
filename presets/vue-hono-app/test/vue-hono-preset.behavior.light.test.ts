@@ -22,9 +22,11 @@ import {
   createContentIndex,
   type LoadedContentMember,
 } from "@ykdz/template-core/content-identity";
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import { createGenerator } from "@ykdz/template-generator";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
 import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 const loadedContent = await loadContentSource({
@@ -150,7 +152,77 @@ const strategyInput = {
   defaultPackageScope: "demo",
 };
 
+const projectContext = {
+  targetDir: "/tmp/demo",
+  repositoryName: "demo",
+  defaultPackageScope: "demo",
+  toolchain: {
+    nodeLtsMajor: "24",
+    nodeVersion: "24.21.0",
+    packageManagerPin: "pnpm@12.9.1",
+  },
+};
+
+function projectPreset(options: {
+  readonly contributions: readonly PackageContribution[];
+  readonly nodeInstances: ReadonlyMap<string, PackageDefinition>;
+}) {
+  assert.ok(presetDefinition.project);
+  return presetDefinition.project({
+    context: projectContext,
+    ...options,
+  });
+}
+
 void describe("Vue-Hono 组合预设公开行为", () => {
+  void it("在产生根文件前拒绝角色错误的实际服务实例", () => {
+    assert.throws(
+      () =>
+        projectPreset({
+          contributions: [],
+          nodeInstances: new Map([
+            [
+              "web",
+              {
+                ...webDefinition.defaultIdentity("demo"),
+                role: "shared-library",
+              },
+            ],
+            ["api", apiDefinition.defaultIdentity("demo")],
+          ]),
+        }),
+      /web.*runtime-service/u,
+    );
+  });
+
+  void it("在产生根文件前拒绝绑定到其他 API 的实际 web 实例", () => {
+    const web = webDefinition.defaultIdentity("demo");
+    const api = apiDefinition.defaultIdentity("demo");
+    const otherApi = {
+      ...api,
+      name: "@demo/other-api",
+      path: "apps/other-api",
+    };
+    const webContribution = {
+      definition: web,
+      referenceBindings: {
+        [apiDefinition.manifest.name]: otherApi,
+      },
+    } as PackageContribution;
+
+    assert.throws(
+      () =>
+        projectPreset({
+          contributions: [webContribution],
+          nodeInstances: new Map([
+            ["web", web],
+            ["api", api],
+          ]),
+        }),
+      /web.*API.*apps\/api/u,
+    );
+  });
+
   void it("通过真实生成器投影 web 与 API 的联合验收和包连接", async (context) => {
     const temporaryRoot = await mkdtemp(
       path.join(tmpdir(), "template-vue-hono-preset-init-"),
@@ -211,16 +283,24 @@ void describe("Vue-Hono 组合预设公开行为", () => {
       apiManifest.dependencies["@demo/tooling-config"],
       "workspace:*",
     );
-    assert.strictEqual(
-      JSON.parse(
-        await readFile(
-          path.join(targetRoot, ".template/environment-needs.json"),
-          "utf8",
-        ),
-      ).check.some(
-        (need: { kind: string }) => need.kind === "playwright-browser-assets",
+    const environmentNeeds = JSON.parse(
+      await readFile(
+        path.join(targetRoot, ".template/environment-needs.json"),
+        "utf8",
       ),
-      true,
+    ) as {
+      check: readonly {
+        kind: string;
+        owner?: { kind: string; path: string };
+      }[];
+    };
+    assert.ok(
+      environmentNeeds.check.some(
+        (need) =>
+          need.kind === "playwright-browser-assets" &&
+          need.owner?.kind === "workspace-orchestration" &&
+          need.owner.path === ".",
+      ),
     );
     assert.strictEqual(
       JSON.parse(await readFile(path.join(targetRoot, "package.json"), "utf8"))
@@ -455,6 +535,57 @@ void describe("Vue-Hono 组合预设公开行为", () => {
       assert.match(added.error.message, /api/u);
     }
     assert.deepStrictEqual(await snapshotTree(targetRoot), before);
+  });
+
+  void it("新增包后保留联合验收共享根声明之外的用户脚本", async (context) => {
+    const temporaryRoot = await mkdtemp(
+      path.join(tmpdir(), "template-vue-hono-preset-add-customization-"),
+    );
+    context.after(async () =>
+      rm(temporaryRoot, { recursive: true, force: true }),
+    );
+    const targetRoot = path.join(temporaryRoot, "demo");
+    const generated = generator();
+    const initialized = await generated.init({
+      targetRoot,
+      selection: { roots: [{ preset: preset.identity }] },
+      strategyInput,
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+    if (initialized.status !== "success") return;
+
+    const manifestPath = path.join(targetRoot, "package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    manifest.scripts["user:check"] = "pnpm run check";
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const added = await generated.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: library.identity,
+      creationInput: {
+        leafName: "helper",
+        packagePath: "packages/helper",
+      },
+    });
+    assert.strictEqual(added.status, "success", JSON.stringify(added));
+
+    const reconciledManifest = JSON.parse(
+      await readFile(manifestPath, "utf8"),
+    ) as { scripts: Record<string, string> };
+    assert.strictEqual(
+      reconciledManifest.scripts["user:check"],
+      "pnpm run check",
+    );
+    assert.strictEqual(
+      reconciledManifest.scripts["test:e2e"],
+      "playwright test",
+    );
   });
 
   void it("加包协调冲突时保留用户文件且不部分加包", async (context) => {

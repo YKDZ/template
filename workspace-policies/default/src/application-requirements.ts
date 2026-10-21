@@ -1,12 +1,10 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import type { CiDiagnosticArtifactDeclaration } from "./ci-diagnostic-artifact.ts";
 import type { PackageContribution } from "./package-contribution.ts";
 import type {
   DatabasePreparationRequirement,
   DeploymentCheckRequirement,
-  VueHonoJointE2eRequirement,
 } from "./project-requirements.ts";
 import type { DependencyMaintenancePolicy } from "./project-requirements.ts";
 
@@ -17,33 +15,11 @@ type DependencyMaintenanceContribution = {
 };
 
 export type WorkspaceProjectRequirements = {
-  readonly vueHonoJointE2e?: VueHonoJointE2eRequirement;
   readonly databasePreparation?: DatabasePreparationRequirement;
   readonly deploymentCheck?: DeploymentCheckRequirement;
 };
 
 export type { DependencyMaintenancePolicy };
-
-/** 联合浏览器测试位于根工作区，因此根 typecheck 必须覆盖其源码。 */
-export function applicationRootTsconfigIncludes(
-  requirements: WorkspaceProjectRequirements,
-): readonly string[] {
-  return requirements.vueHonoJointE2e === undefined ? [] : ["test/**/*.ts"];
-}
-
-/** 根工作区联合 Playwright 失败时，需要收集根目录诊断材料。 */
-export function applicationCiDiagnosticArtifacts(
-  requirements: WorkspaceProjectRequirements,
-): readonly CiDiagnosticArtifactDeclaration[] {
-  return requirements.vueHonoJointE2e === undefined
-    ? []
-    : [
-        {
-          kind: "playwright",
-          owner: { kind: "workspace-orchestration", path: "." },
-        },
-      ];
-}
 
 /** 合并包的维护声明，并为部署 Dockerfile 保留根目录 Dependabot 覆盖。 */
 export function projectDependencyMaintenancePolicy(options: {
