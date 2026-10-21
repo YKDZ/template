@@ -23,23 +23,15 @@ export const referencePackage = defineReferencePackage({
     scripts: ["build:template", "check:author-planning-roles"],
     resources: ["template", "tsconfig.template.json"],
   },
-  foundation: ({ definition, bindings }) => {
-    const api = bindings?.get("@ykdz/reference-hono-api");
-    if (api === undefined) throw new Error("缺少已明确关联的 API 包实例");
-    return {
-      vueHonoJointE2e: {
-        kind: "vue-hono-joint-e2e",
-        apiPackageName: api.name,
-      },
-      toolchains: {},
-      editorCapabilities: ["oxc-format-lint", "vue", "tailwind", "vitest"],
-      dependencyMaintenance: {
-        ecosystems: ["npm", "github-actions", "docker"],
-        interval: "weekly",
-      },
-      workspacePackageGlobs: [`${definition.path.split("/")[0]}/*`],
-    };
-  },
+  foundation: ({ definition }) => ({
+    toolchains: {},
+    editorCapabilities: ["oxc-format-lint", "vue", "tailwind", "vitest"],
+    dependencyMaintenance: {
+      ecosystems: ["npm", "github-actions", "docker"],
+      interval: "weekly",
+    },
+    workspacePackageGlobs: [`${definition.path.split("/")[0]}/*`],
+  }),
   environmentNeeds: ({ definition }) => [
     playwrightBrowserAssetsEnvironmentNeed({
       browser: "chromium",

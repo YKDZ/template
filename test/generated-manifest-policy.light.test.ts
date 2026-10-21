@@ -63,11 +63,7 @@ void describe("生成项目包清单策略", () => {
         assert.strictEqual(rootManifest.private, true);
         assert.strictEqual(
           rootManifest.scripts["lint:fix"],
-          `oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs ${
-            preset.identity.packageName === "@ykdz/preset-vue-hono-app"
-              ? "scripts test"
-              : "scripts"
-          } --fix`,
+          "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test --fix",
         );
 
         const candidateRecords = initialized.generationRecord.packages.filter(

@@ -8,6 +8,7 @@ import type {
 } from "@ykdz/template-core/renderer";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
 
+import type { CiDiagnosticArtifactDeclaration } from "./ci-diagnostic-artifact.ts";
 import type {
   CheckEnvironmentNeed,
   DeploymentEnvironmentNeed,
@@ -60,6 +61,8 @@ export type SharedRootContribution = {
     readonly deployment?: readonly DeploymentEnvironmentNeed[];
   };
   readonly dependencyMaintenance?: DependencyMaintenancePolicy;
+  /** 由所属内容声明的 CI 失败诊断制品。 */
+  readonly ciDiagnosticArtifacts?: readonly CiDiagnosticArtifactDeclaration[];
   /** 外层拥有者的完整独占资源；禁止对共享文件或真实包范围打补丁。 */
   readonly resources?: readonly {
     readonly operation: RootResourceOperation;

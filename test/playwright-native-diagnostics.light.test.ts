@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 
 import { templateReferencePackages } from "@ykdz/template-content";
 import { resolveTemplateSource } from "@ykdz/template-core/renderer";
-import { jointE2eWorkspaceResources } from "@ykdz/template-workspace/joint-e2e";
 import ts from "typescript";
 
 function property(
@@ -65,7 +63,6 @@ void describe("maintained Playwright diagnostic configuration", () => {
   };
   for (const relativePath of [
     playwrightConfiguration("@ykdz/reference-vue-app"),
-    fileURLToPath(jointE2eWorkspaceResources.configuration),
     playwrightConfiguration("@ykdz/reference-vike-web"),
   ]) {
     void it(`uses native failure diagnostics in ${relativePath}`, async () => {

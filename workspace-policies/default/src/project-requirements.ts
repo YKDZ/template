@@ -29,13 +29,4 @@ export type PackageLinkRequirement = {
   readonly provider: PackageDefinition;
 };
 
-/** Vue-Hono 根策略以实际 web 与 API 实例配置联合浏览器验收。 */
-export type VueHonoJointE2eRequirement = {
-  readonly kind: "vue-hono-joint-e2e";
-  readonly web: PackageDefinition;
-  readonly api: PackageDefinition;
-};
-
-export type ProjectRequirement =
-  | PackageLinkRequirement
-  | VueHonoJointE2eRequirement;
+export type ProjectRequirement = PackageLinkRequirement;

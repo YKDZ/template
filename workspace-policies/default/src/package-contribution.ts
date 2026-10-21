@@ -25,11 +25,6 @@ export type FoundationContribution = {
   readonly workspaceConfiguration?: {
     readonly kind: "typescript-workspace-configuration";
   };
-  /** 由根策略拥有的封闭式 Vue-Hono 页面/API 浏览器验收能力。 */
-  readonly vueHonoJointE2e?: {
-    readonly kind: "vue-hono-joint-e2e";
-    readonly apiPackageName: string;
-  };
   /** 仅由协同根策略消费的封闭式发布能力。 */
   readonly npmPublication?: {
     readonly kind: "public-cli-candidate";

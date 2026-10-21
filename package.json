@@ -24,7 +24,6 @@
     "test": "node --conditions=source --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec 'test/**/*.light.test.ts'",
     "test:integration": "node --conditions=source scripts/run-root-integration.ts",
     "test:e2e:cli": "node scripts/check-cli-source-and-distribution.ts",
-    "test:e2e:vue-hono": "playwright test",
     "database:prepare:dev": "pnpm --filter @ykdz/preset-vike-app run database:prepare:dev",
     "database:prepare:e2e": "pnpm --filter @ykdz/preset-vike-app run database:prepare:e2e",
     "database:prepare:test": "pnpm --filter @ykdz/preset-vike-app run database:prepare:test",
@@ -33,7 +32,6 @@
   },
   "devDependencies": {
     "@devcontainers/cli": "catalog:",
-    "@playwright/test": "catalog:",
     "@types/node": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/reference-ts-cli": "workspace:*",

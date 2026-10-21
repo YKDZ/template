@@ -893,24 +893,6 @@ void describe("原生内容制品安装链", () => {
           ) as { readonly name: string };
           assert.equal(generatedManifest.name, definition.name);
         }
-        assert.match(
-          await readFile(path.join(targetRoot, "Dockerfile"), "utf8"),
-          /AS standalone/u,
-        );
-        assert.match(
-          await readFile(
-            path.join(targetRoot, "scripts/container-entrypoint.sh"),
-            "utf8",
-          ),
-          /drizzle-kit migrate/u,
-        );
-        assert.match(
-          await readFile(
-            path.join(targetRoot, "scripts/check-standalone-deployment.ts"),
-            "utf8",
-          ),
-          /Deployment mode \$\{mode\} failed during \$\{phase\}\./u,
-        );
       }
       const closure = await auditInstalledClosure(consumerRoot, [
         ...authorRoots,
