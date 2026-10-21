@@ -1,5 +1,0 @@
-# {{PACKAGE_NAME}}
-
-{{DESCRIPTION}}
-
-Install the package and run `{{COMMAND_NAME}} --help`.

@@ -10,6 +10,7 @@ export const referencePackage = defineReferencePackage({
   defaultPath: "tools/npm-publication",
   role: "shared-library",
   resources: [
+    "README.md",
     "resources/release.yml",
     "resources/setup",
     "scripts",
@@ -63,6 +64,7 @@ export const referencePackage = defineReferencePackage({
 });
 
 export { projectPublicationWorkspace } from "./workspace.ts";
+export { projectPublicationSetup } from "./setup-workspace.ts";
 
 export {
   normalizePublicationConfiguration,

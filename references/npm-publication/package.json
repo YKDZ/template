@@ -22,6 +22,7 @@
     "./release-target": "./scripts/release-target.ts",
     "./schedule-npm": "./scripts/schedule-npm.ts",
     "./schedule-release": "./scripts/schedule-release.ts",
+    "./setup": "./scripts/setup/acquire-entry.ts",
     "./prepare": {
       "source": "./scripts/generated/prepare.ts",
       "types": "./scripts/generated/prepare.ts",
