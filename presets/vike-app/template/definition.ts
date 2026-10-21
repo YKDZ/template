@@ -7,8 +7,8 @@ import {
   type PresetProjectOptions,
 } from "@ykdz/template-core/preset-definition";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
-import { dockerEngineEnvironmentNeed } from "@ykdz/template-environment/module-graph";
 import { defineNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
+import { dockerEngineEnvironmentNeed } from "@ykdz/template-workspace/default-environment";
 import type { GenerationContext } from "@ykdz/template-workspace/generation-context";
 import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
 import type { ProjectRequirement } from "@ykdz/template-workspace/project-requirements";
@@ -73,6 +73,9 @@ export const preset = defineNativeContentArtifact(
     manifest: presetPackage,
     resourceRoot: new URL("../", import.meta.url),
     exportPath: "./template",
-    executionDependencies: ["@ykdz/template-workspace-authoring"],
+    executionDependencies: [
+      "@ykdz/template-workspace",
+      "@ykdz/template-workspace-authoring",
+    ],
   },
 );

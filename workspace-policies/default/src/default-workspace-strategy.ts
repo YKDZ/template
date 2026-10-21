@@ -24,21 +24,6 @@ import type {
   WorkspaceProjection,
   WorkspaceStrategy,
 } from "@ykdz/template-core/workspace-strategy";
-import { composeCiDiagnosticArtifacts } from "@ykdz/template-environment/ci-diagnostic-artifact";
-import type { CiDiagnosticArtifactDeclaration } from "@ykdz/template-environment/ci-diagnostic-artifact";
-import {
-  prepareBuiltInDevelopmentContainerResources,
-  prepareBuiltInEditorCustomizationDeclarations,
-  projectBuiltInDevelopmentContainer,
-  projectBuiltInEditorCustomization,
-  shellCheckDevelopmentContainerToolLayer,
-} from "@ykdz/template-environment/development-environment";
-import {
-  normalizeEnvironmentNeeds,
-  type CheckEnvironmentNeed,
-  playwrightBrowserAssetsEnvironmentNeed,
-  shellCheckEnvironmentNeed,
-} from "@ykdz/template-environment/module-graph";
 
 import {
   assertDatabasePreparationManifestTruth,
@@ -49,6 +34,8 @@ import {
   type DatabasePreparationManifestRequirement,
   type WorkspaceProjectRequirements,
 } from "./application-requirements.ts";
+import { composeCiDiagnosticArtifacts } from "./ci-diagnostic-artifact.ts";
+import type { CiDiagnosticArtifactDeclaration } from "./ci-diagnostic-artifact.ts";
 import {
   prepareCliPublicationResources,
   projectCliPublication,
@@ -63,6 +50,19 @@ import {
   selectTemplateDependencyCatalogEntries,
 } from "./dependency-catalog.ts";
 import { browserTestDevelopmentContainerToolLayer } from "./development-container.ts";
+import {
+  prepareBuiltInDevelopmentContainerResources,
+  prepareBuiltInEditorCustomizationDeclarations,
+  projectBuiltInDevelopmentContainer,
+  projectBuiltInEditorCustomization,
+  shellCheckDevelopmentContainerToolLayer,
+} from "./development-environment.ts";
+import {
+  normalizeEnvironmentNeeds,
+  type CheckEnvironmentNeed,
+  playwrightBrowserAssetsEnvironmentNeed,
+  shellCheckEnvironmentNeed,
+} from "./environment-needs.ts";
 import type { GenerationContext } from "./generation-context.ts";
 import {
   assertReusablePackageExposure,
@@ -1154,6 +1154,7 @@ function projectOperations(options: {
     ...shared.reconciliation,
     { path: "tsconfig.json", driver: "structured" },
     { path: "turbo.json", driver: "structured" },
+    { path: ".vscode/settings.json", driver: "structured" },
     {
       path: ".devcontainer/devcontainer.json",
       driver: "structured",

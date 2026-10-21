@@ -25,7 +25,6 @@
     "@types/node": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/template-core": "workspace:*",
-    "@ykdz/template-environment": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

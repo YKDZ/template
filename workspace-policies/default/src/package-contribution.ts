@@ -7,17 +7,17 @@ import type {
   RenderOperation,
   TemplateSourceHandle,
 } from "@ykdz/template-core/renderer";
+import type { DevelopmentContainerToolLayer } from "@ykdz/template-environment/development-container-tool-layer";
+
 import {
   assertCiDiagnosticArtifactDeclaration,
   type CiDiagnosticArtifactDeclaration,
-} from "@ykdz/template-environment/ci-diagnostic-artifact";
-import type { DevelopmentContainerToolLayer } from "@ykdz/template-environment/development-container-tool-layer";
-import type { EditorCustomizationCapability } from "@ykdz/template-environment/editor-customization";
+} from "./ci-diagnostic-artifact.ts";
+import type { EditorCustomizationCapability } from "./editor-customization.ts";
 import type {
   CheckEnvironmentNeed,
   DeploymentEnvironmentNeed,
-} from "@ykdz/template-environment/module-graph";
-
+} from "./environment-needs.ts";
 import type {
   DependencyMaintenancePolicy,
   ProjectRequirement,
@@ -105,7 +105,7 @@ export type PackageContribution = PackageContributionSkeleton & {
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
   /** 只声明由策略解释的闭合项目协作，不授予内容根级写入权限。 */
   readonly projectRequirements?: readonly ProjectRequirement[];
-  /** 由此 Package Boundary 持有的封闭式原生 CI 证据。 */
+  /** 由此包边界持有的封闭式原生 CI 证据。 */
   readonly ciDiagnosticArtifacts?: readonly CiDiagnosticArtifactDeclaration[];
 };
 
@@ -199,7 +199,7 @@ export function assertPackageContribution(
     const declaration = assertCiDiagnosticArtifactDeclaration(artifact);
     if (declaration.owner.path !== contribution.definition.path) {
       throw new Error(
-        `CI Diagnostic Artifact owner must match its Package Contribution: ${contribution.definition.path}`,
+        `CI 诊断制品所有者必须与包贡献路径一致：${contribution.definition.path}`,
       );
     }
   }

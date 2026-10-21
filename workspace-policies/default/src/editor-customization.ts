@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 
 import * as v from "valibot";
 
-/** Capability identities are supplied by the owning Built-in Presets policy. */
+/** 能力身份由默认工作区策略提供。 */
 export type EditorCustomizationCapability = string;
 
 export type EditorCustomization = {
@@ -16,6 +17,7 @@ type CapabilityProjection = {
 };
 
 export type EditorCustomizationDeclarations = {
+  readonly source: string;
   readonly capabilityOrder: readonly EditorCustomizationCapability[];
   readonly capabilities: Readonly<
     Record<EditorCustomizationCapability, CapabilityProjection>
@@ -49,11 +51,12 @@ function errorMessage(error: unknown): string {
 }
 
 function editorCustomizationSharedResourceLabel(resourcePath: string): string {
-  return `Editor Customization Shared Resource ${resourcePath}`;
+  return `编辑器定制共享资源 ${resourcePath}`;
 }
 
 export function loadEditorCustomizationDeclarations(
   resourcePath: string,
+  sourceLabel: string,
 ): EditorCustomizationDeclarations {
   const resourceLabel = editorCustomizationSharedResourceLabel(resourcePath);
   let resourceText: string;
@@ -61,26 +64,29 @@ export function loadEditorCustomizationDeclarations(
   try {
     resourceText = readFileSync(resourcePath, "utf8");
   } catch (error) {
-    throw new Error(`${resourceLabel} is unreadable: ${errorMessage(error)}`, {
+    throw new Error(`${resourceLabel} 无法读取：${errorMessage(error)}`, {
       cause: error,
     });
   }
 
-  let source: unknown;
+  let parsedSource: unknown;
   try {
-    source = JSON.parse(resourceText) as unknown;
+    parsedSource = JSON.parse(resourceText) as unknown;
   } catch (error) {
     throw new Error(
-      `${resourceLabel} is invalid: invalid JSON: ${errorMessage(error)}`,
+      `${resourceLabel} 内容无效：JSON 语法错误：${errorMessage(error)}`,
       { cause: error },
     );
   }
 
-  const result = v.safeParse(editorCustomizationDeclarationsSchema, source);
+  const result = v.safeParse(
+    editorCustomizationDeclarationsSchema,
+    parsedSource,
+  );
 
   if (!result.success) {
     throw new Error(
-      `${resourceLabel} is invalid: ${result.issues
+      `${resourceLabel} 内容无效：${result.issues
         .map(
           (issue) =>
             `${editorCustomizationDeclarationIssuePath(issue)}: ${issue.message}`,
@@ -89,14 +95,11 @@ export function loadEditorCustomizationDeclarations(
     );
   }
 
-  return result.output;
+  return { ...result.output, source: sourceLabel };
 }
 
-function mergeSettings(
-  base: Record<string, unknown>,
-  patch: Record<string, unknown>,
-): Record<string, unknown> {
-  return { ...base, ...patch };
+function jsonPointerToken(value: string): string {
+  return value.replaceAll("~", "~0").replaceAll("/", "~1");
 }
 
 export function editorCustomizationForCapabilities(
@@ -105,7 +108,11 @@ export function editorCustomizationForCapabilities(
 ): EditorCustomization {
   const selected = new Set(capabilities);
   const extensions = new Set<string>();
-  let settings: Record<string, unknown> = {};
+  const settings: Record<string, unknown> = {};
+  const settingSources = new Map<
+    string,
+    { readonly source: string; readonly value: unknown }
+  >();
 
   for (const capability of declarations.capabilityOrder) {
     if (!selected.has(capability)) {
@@ -114,14 +121,22 @@ export function editorCustomizationForCapabilities(
 
     const projection = declarations.capabilities[capability];
     if (projection === undefined) {
-      throw new Error(
-        `Editor customization policy orders undeclared capability ${capability}`,
-      );
+      throw new Error(`编辑器定制策略列出了未声明的能力：${capability}`);
     }
     for (const extension of projection.extensions) {
       extensions.add(extension);
     }
-    settings = mergeSettings(settings, projection.settings);
+    for (const [setting, value] of Object.entries(projection.settings)) {
+      const source = `${declarations.source}#/capabilities/${jsonPointerToken(capability)}/settings/${jsonPointerToken(setting)}`;
+      const previous = settingSources.get(setting);
+      if (previous !== undefined && !isDeepStrictEqual(previous.value, value)) {
+        throw new Error(
+          `编辑器设置 /settings/${jsonPointerToken(setting)} 冲突：${previous.source} 与 ${source}`,
+        );
+      }
+      settingSources.set(setting, { source, value });
+      settings[setting] = value;
+    }
   }
 
   return {

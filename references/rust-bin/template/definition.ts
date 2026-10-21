@@ -1,8 +1,10 @@
 import type { RenderOperation } from "@ykdz/template-core/renderer";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
-import { rustDevelopmentContainerToolLayer } from "@ykdz/template-environment/development-environment";
-import { rustToolchainEnvironmentNeed } from "@ykdz/template-environment/module-graph";
+import {
+  rustDevelopmentContainerToolLayer,
+  rustToolchainEnvironmentNeed,
+} from "@ykdz/template-workspace/default-environment";
 import {
   defineReferencePackage,
   type ReferencePackage,
@@ -33,7 +35,6 @@ export const referencePackage: ReferencePackage<
   template: {
     dependencies: [
       { name: "@ykdz/template-core", purpose: "template-execution" },
-      { name: "@ykdz/template-environment", purpose: "template-execution" },
       {
         name: "@ykdz/template-workspace",
         purpose: "template-execution",

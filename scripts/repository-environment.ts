@@ -11,8 +11,8 @@ import {
   projectBuiltInEditorCustomization,
   rustDevelopmentContainerToolLayer,
   shellCheckDevelopmentContainerToolLayer,
-} from "@ykdz/template-environment/development-environment";
-import { browserTestDevelopmentContainerToolLayer } from "@ykdz/template-workspace/development-container";
+  browserTestDevelopmentContainerToolLayer,
+} from "@ykdz/template-workspace/default-environment";
 import { format } from "oxfmt";
 
 import formatterConfig from "../oxfmt.config.ts";

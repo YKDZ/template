@@ -2,7 +2,7 @@ import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import {
   dockerEngineEnvironmentNeed,
   playwrightBrowserAssetsEnvironmentNeed,
-} from "@ykdz/template-environment/module-graph";
+} from "@ykdz/template-workspace/default-environment";
 import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
 import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
@@ -22,7 +22,6 @@ export const referencePackage = defineReferencePackage({
     resources: ["template", "tsconfig.template.json"],
     dependencies: [
       { name: "@ykdz/template-core", purpose: "template-execution" },
-      { name: "@ykdz/template-environment", purpose: "template-execution" },
       {
         name: "@ykdz/template-workspace",
         purpose: "template-execution",
