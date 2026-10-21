@@ -37,10 +37,6 @@
       "types": "./dist/tooling/vitest.d.ts",
       "default": "./tooling/vitest.ts"
     },
-    "./typecheck": {
-      "types": "./dist/scripts/run-vue-tsc.d.ts",
-      "default": "./scripts/run-vue-tsc.ts"
-    },
     "./tsconfig.app.json": "./tsconfig.app.base.json",
     "./tsconfig.node.json": "./tsconfig.node.base.json"
   },
@@ -50,12 +46,12 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
-    "typecheck": "node --conditions=source scripts/run-vue-tsc.ts --build --noEmit --pretty false",
+    "typecheck": "vue-tsc --build --noEmit --pretty false",
     "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
     "browser:prepare": "playwright install chromium",
     "test:browser": "vitest run --project=browser --reporter=agent --silent=passed-only",
     "test": "vitest run --project=node --reporter=agent --silent=passed-only",
-    "build": "node --conditions=source scripts/run-vue-tsc.ts -p tsconfig.build.json --pretty false"
+    "build": "vue-tsc -p tsconfig.build.json --pretty false"
   },
   "dependencies": {
     "@tailwindcss/vite": "catalog:",

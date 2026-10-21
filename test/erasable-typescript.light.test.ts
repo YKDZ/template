@@ -399,15 +399,15 @@ void describe("Erasable TypeScript enforcement", () => {
       const scripts = Object.values(manifest.scripts ?? {}).filter(
         (command): command is string => typeof command === "string",
       );
-      const ownsVueCompatibility = scripts.some((command) =>
-        command.includes("scripts/run-vue-tsc.ts"),
+      const ownsVueTsc = scripts.some((command) =>
+        /(?:^|\s)vue-tsc(?:\s|$)/u.test(command),
       );
       const runsTypeScript6Api = scripts.some((command) =>
         typescript6ApiScripts.some((scriptPath) =>
           command.includes(scriptPath),
         ),
       );
-      if (scripts.some((command) => /\btsc(?:\s|$)/u.test(command))) {
+      if (scripts.some((command) => /(?:^|\s)tsc(?:\s|$)/u.test(command))) {
         assert.ok(
           "typescript-7" in
             {
@@ -417,11 +417,12 @@ void describe("Erasable TypeScript enforcement", () => {
           `${manifest.name ?? "(unnamed)"} owns its TypeScript 7 CLI`,
         );
       }
-      if (ownsVueCompatibility) {
+      if (ownsVueTsc) {
         assert.ok(
           manifest.devDependencies !== undefined &&
+            "vue-tsc" in manifest.devDependencies &&
             "typescript" in manifest.devDependencies,
-          `${manifest.name ?? "(unnamed)"} owns Vue's TypeScript 6 compatibility package`,
+          `${manifest.name ?? "(unnamed)"} owns vue-tsc and its TypeScript peer`,
         );
       } else if (runsTypeScript6Api) {
         assert.ok(

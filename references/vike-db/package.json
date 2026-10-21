@@ -53,7 +53,7 @@
   "scripts": {
     "check:author-planning-roles": "pnpm --workspace-root run author-planning-roles:workspace -- --owner-directory \"$PWD\"",
     "build": "tsc -p tsconfig.build.json --pretty false",
-    "db:reset": "node --conditions=source scripts/reset.ts",
+    "db:reset": "node --conditions=source --input-type=module -e \"import { resetDatabaseStorageTarget } from '#db/storage'; resetDatabaseStorageTarget();\"",
     "db:seed:example": "node --conditions=source scripts/seed-example.ts",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
