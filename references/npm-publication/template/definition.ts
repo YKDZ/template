@@ -26,18 +26,8 @@ export const referencePackage = defineReferencePackage({
       },
       { name: "@types/semver", purpose: "target" },
       { name: "@types/semver", purpose: "template-execution" },
-      {
-        name: "@types/spdx-expression-parse",
-        purpose: "target",
-      },
-      {
-        name: "@types/spdx-expression-parse",
-        purpose: "template-execution",
-      },
       { name: "semver", purpose: "target" },
       { name: "semver", purpose: "template-execution" },
-      { name: "spdx-expression-parse", purpose: "target" },
-      { name: "spdx-expression-parse", purpose: "template-execution" },
       { name: "tar", purpose: "target" },
       { name: "tar", purpose: "template-execution" },
       {

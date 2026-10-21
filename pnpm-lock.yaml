@@ -185,9 +185,6 @@ catalogs:
     '@types/semver':
       specifier: ^7.7.1
       version: 7.8.0
-    '@types/spdx-expression-parse':
-      specifier: ^4.0.0
-      version: 4.0.0
     '@types/web-bluetooth':
       specifier: ^0.0.21
       version: 0.0.21
@@ -269,9 +266,6 @@ catalogs:
     smol-toml:
       specifier: ^1.8.0
       version: 1.9.1
-    spdx-expression-parse:
-      specifier: ^5.0.0
-      version: 5.0.0
     srvx:
       specifier: ^1.0.0
       version: 1.0.5
@@ -460,9 +454,6 @@ importers:
       smol-toml:
         specifier: 'catalog:'
         version: 1.9.1
-      spdx-expression-parse:
-        specifier: 'catalog:'
-        version: 5.0.0
       turbo:
         specifier: 'catalog:'
         version: 2.11.10
@@ -1094,9 +1085,6 @@ importers:
       semver:
         specifier: 'catalog:'
         version: 7.8.5
-      spdx-expression-parse:
-        specifier: 'catalog:'
-        version: 5.0.0
       tar:
         specifier: 'catalog:'
         version: 7.5.22
@@ -1110,9 +1098,6 @@ importers:
       '@types/semver':
         specifier: 'catalog:'
         version: 7.8.0
-      '@types/spdx-expression-parse':
-        specifier: 'catalog:'
-        version: 4.0.0
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
@@ -2612,9 +2597,6 @@ packages:
   '@types/semver@7.8.0':
     resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
-  '@types/spdx-expression-parse@4.0.0':
-    resolution: {integrity: sha512-odQzy87phelGS4inXOzjmusx4hoCVD0IbxUANxHzVkmTzMRTNnUPoq1urIl7S1qf09KcDWKLFIftPmLtgbsAHA==}
-
   '@types/web-bluetooth@0.0.21':
     resolution: {integrity: sha512-oIQLCGWtcFZy2JW77j9k8nHzAOpqMHLQejDA48XXMWH6tjCQHz5RCFz1bzsmROyL6PUm+LLnUiI4BCn221inxA==}
 
@@ -3824,15 +3806,6 @@ packages:
     resolution: {integrity: sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g==}
     engines: {node: '>=0.10.0'}
 
-  spdx-exceptions@2.5.0:
-    resolution: {integrity: sha512-PiU42r+xO4UbUS1buo3LPJkjlO7430Xn5SVAhdpzzsPHsjbYVflnnFdATgabnLude+Cqu25p6N+g2lw/PFsa4w==}
-
-  spdx-expression-parse@5.0.0:
-    resolution: {integrity: sha512-vngmw3Rgn+o2arXNbnZaj5UtOEBuWBfvaI+Wc8GFfykIhA5/vdK9/Sp/XkLv63dykz2rxKDvKEHupF5P0FORcQ==}
-
-  spdx-license-ids@3.0.24:
-    resolution: {integrity: sha512-cLS9TtWkIQFyLkJ3/5aFQAOHOSKTlOs/7WDut/XPSdjom1fJhUdkepeJAKXa9Y05+FabHd0sti+Et559vDtkpQ==}
-
   srvx@0.12.8:
     resolution: {integrity: sha512-7k9HoDhluTlD7UJ+F+OopZoPZXB2J8f/5nW2VMLaB8KsSlZlRQxyyoX0hWEQCxB+F+3ZvB5QX3LqB6xSBRfxQQ==}
     engines: {node: '>=20.16.0'}
@@ -4763,8 +4736,6 @@ snapshots:
       undici-types: 7.24.6
 
   '@types/semver@7.8.0': {}
-
-  '@types/spdx-expression-parse@4.0.0': {}
 
   '@types/web-bluetooth@0.0.21': {}
 
@@ -5777,15 +5748,6 @@ snapshots:
       source-map: 0.6.1
 
   source-map@0.6.1: {}
-
-  spdx-exceptions@2.5.0: {}
-
-  spdx-expression-parse@5.0.0:
-    dependencies:
-      spdx-exceptions: 2.5.0
-      spdx-license-ids: 3.0.24
-
-  spdx-license-ids@3.0.24: {}
 
   srvx@0.12.8: {}
 
