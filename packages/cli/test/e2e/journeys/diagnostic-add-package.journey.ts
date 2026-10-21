@@ -9,6 +9,7 @@ import {
 import path from "node:path";
 
 import { templatePresets } from "@ykdz/template-content";
+import { parse as parseYaml } from "yaml";
 
 import type { CliJourney } from "../journey.ts";
 
@@ -252,14 +253,25 @@ const journey: CliJourney = {
 
     assert.equal(results[2]?.exitCode, 0);
     const workflow = await readFile(workflowPath, "utf8");
+    const workflowDocument = parseYaml(workflow) as {
+      readonly jobs: {
+        readonly check: {
+          readonly steps: readonly { readonly run?: unknown }[];
+        };
+      };
+    };
     assert.match(workflow, /^# user workflow policy\n/u);
-    assert.match(
-      workflow,
-      /name: Run Light Check\n        run: node --conditions=source scripts\/task-gates\.ts check/u,
+    assert.ok(
+      workflowDocument.jobs.check.steps.some(
+        ({ run }) =>
+          run === "node --conditions=source scripts/task-gates.ts check",
+      ),
     );
-    assert.match(
-      workflow,
-      /name: Run Heavy Check\n        run: node --conditions=source scripts\/task-gates\.ts check:heavy/u,
+    assert.ok(
+      workflowDocument.jobs.check.steps.some(
+        ({ run }) =>
+          run === "node --conditions=source scripts/task-gates.ts check:heavy",
+      ),
     );
     assert.match(workflow, /PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: \|-/u);
     assert.match(workflow, /VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: \|-/u);
