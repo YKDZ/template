@@ -47,7 +47,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@ykdz/reference-typescript-config": "link:../typescript-config",
+    "@ykdz/reference-tooling-config": "link:../tooling-config",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",

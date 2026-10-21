@@ -1,8 +1,10 @@
 import type { RenderOperation } from "@ykdz/template-core/renderer";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
-import { rustDevelopmentContainerToolLayer } from "@ykdz/template-environment/development-environment";
-import { rustToolchainEnvironmentNeed } from "@ykdz/template-environment/module-graph";
+import {
+  rustDevelopmentContainerToolLayer,
+  rustToolchainEnvironmentNeed,
+} from "@ykdz/template-workspace/default-environment";
 import {
   defineReferencePackage,
   type ReferencePackage,
@@ -33,7 +35,6 @@ export const referencePackage: ReferencePackage<
   template: {
     dependencies: [
       { name: "@ykdz/template-core", purpose: "template-execution" },
-      { name: "@ykdz/template-environment", purpose: "template-execution" },
       {
         name: "@ykdz/template-workspace",
         purpose: "template-execution",
@@ -98,6 +99,12 @@ export const referencePackage: ReferencePackage<
     const targetName = definition.name.slice(
       definition.name.lastIndexOf("/") + 1,
     );
+    const scripts: Record<string, string> = {
+      ...(contribution.manifest.scripts as Record<string, string>),
+      lint: "cargo clippy --workspace --all-targets -- -D warnings",
+    };
+    delete scripts["lint:fix"];
+    delete scripts.typecheck;
     const lockedPackages = cargoLock.data.package as Record<string, unknown>[];
     const replacements = new Map<string, RenderOperation>([
       [
@@ -129,7 +136,7 @@ export const referencePackage: ReferencePackage<
     ]);
     return {
       ...contribution,
-      manifest: contribution.manifest,
+      manifest: { ...contribution.manifest, scripts },
       foundation: {
         ...contribution.foundation,
         toolchains: {
@@ -140,11 +147,35 @@ export const referencePackage: ReferencePackage<
           },
         },
       },
-      operations: contribution.operations.map((operation) =>
-        "to" in operation
-          ? (replacements.get(operation.to) ?? operation)
-          : operation,
-      ),
+      operations: contribution.operations.map((operation) => {
+        const projected =
+          "to" in operation
+            ? (replacements.get(operation.to) ?? operation)
+            : operation;
+        if (
+          projected.kind !== "writeJson" ||
+          projected.to !== `${definition.path}/turbo.json`
+        ) {
+          return projected;
+        }
+
+        const turbo = projected.value as {
+          readonly tasks: Record<string, unknown>;
+        };
+        const tasks = { ...turbo.tasks };
+        delete tasks["lint:fix"];
+        delete tasks.typecheck;
+        const formatWrite = tasks["format:write"] as {
+          readonly dependsOn: readonly string[];
+        };
+        tasks["format:write"] = {
+          ...formatWrite,
+          dependsOn: formatWrite.dependsOn.filter(
+            (task) => task !== "lint:fix",
+          ),
+        };
+        return { ...projected, value: { ...turbo, tasks } };
+      }),
     };
   },
 });

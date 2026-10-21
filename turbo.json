@@ -227,6 +227,12 @@
     "NO_PROXY",
     "no_proxy"
   ],
+  "globalDependencies": [
+    "oxfmt.config.ts",
+    "oxlint.config.ts",
+    "references/tooling-config/oxfmt.config.ts",
+    "references/tooling-config/oxlint.config.ts"
+  ],
   "tasks": {
     "//#boundaries": {
       "tags": ["quality:light"]

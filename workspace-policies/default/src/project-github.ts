@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 
-import { composeCiDiagnosticArtifacts } from "@ykdz/template-environment/ci-diagnostic-artifact";
-import type { DeploymentEnvironmentNeed } from "@ykdz/template-environment/module-graph";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
 
+import { composeCiDiagnosticArtifacts } from "./ci-diagnostic-artifact.ts";
+import type { DeploymentEnvironmentNeed } from "./environment-needs.ts";
 import type { DependencyMaintenancePolicy } from "./project-requirements.ts";
 
 export type ProjectCheckWorkflowDiagnosticOptions = {
@@ -55,7 +55,7 @@ export function projectCheckWorkflow(
       (need) => need.kind === "docker-engine",
     )
   ) {
-    throw new Error("Deployment Check requires a Docker environment need");
+    throw new Error("部署检查必须声明 Docker 环境需求");
   }
   const diagnostics = composeCiDiagnosticArtifacts({
     packagePaths: options.packagePaths,

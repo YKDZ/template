@@ -1,6 +1,6 @@
-import type { ComponentOwner } from "./module-graph.ts";
+import type { ComponentOwner } from "./environment-needs.ts";
 
-/** Closed, owner-scoped native evidence a Package Contribution may retain in CI. */
+/** 包贡献可在 CI 中保留的封闭式、按所有者限定的原生诊断制品。 */
 export type CiDiagnosticArtifactDeclaration = {
   readonly kind: "playwright" | "vitest-browser";
   readonly owner: ComponentOwner;
@@ -40,22 +40,19 @@ function isSafePackagePath(value: string): boolean {
 }
 
 /**
- * Validates the intentionally closed diagnostic declaration surface.  It does
- * not accept paths: native paths are derived only after the owner is known.
+ * 校验封闭式诊断声明。声明不接收路径，原生路径只能在确定所有者后派生。
  */
 export function assertCiDiagnosticArtifactDeclaration(
   value: unknown,
 ): CiDiagnosticArtifactDeclaration {
   if (!isRecord(value) || !hasExactKeys(value, ["kind", "owner"])) {
-    throw new Error(
-      "CI Diagnostic Artifact declarations may contain only kind and owner",
-    );
+    throw new Error("CI 诊断制品声明只能包含 kind 和 owner");
   }
   if (value.kind !== "playwright" && value.kind !== "vitest-browser") {
-    throw new Error("Unsupported CI Diagnostic Artifact kind");
+    throw new Error("不支持的 CI 诊断制品 kind");
   }
   if (!isRecord(value.owner) || !hasExactKeys(value.owner, ["kind", "path"])) {
-    throw new Error("CI Diagnostic Artifact requires a Package Boundary owner");
+    throw new Error("CI 诊断制品必须声明包边界所有者");
   }
   if (
     (value.owner.kind !== "workspace-orchestration" ||
@@ -64,9 +61,7 @@ export function assertCiDiagnosticArtifactDeclaration(
       typeof value.owner.path !== "string" ||
       !isSafePackagePath(value.owner.path))
   ) {
-    throw new Error(
-      "CI Diagnostic Artifact owner has an unsafe Package Boundary path",
-    );
+    throw new Error("CI 诊断制品所有者的包边界路径不安全");
   }
   return {
     kind: value.kind,
@@ -78,8 +73,7 @@ export function assertCiDiagnosticArtifactDeclaration(
 }
 
 /**
- * Composes closed native diagnostics independently of presets and environment
- * preparation. Equivalent declarations collapse into stable owner order.
+ * 独立于预设与环境准备来合成封闭式原生诊断。同一声明按所有者稳定排序后合并。
  */
 export function composeCiDiagnosticArtifacts(options: {
   readonly packagePaths: readonly string[];
@@ -87,9 +81,7 @@ export function composeCiDiagnosticArtifacts(options: {
 }): readonly CiDiagnosticArtifactDeclaration[] {
   for (const packagePath of options.packagePaths) {
     if (!isSafePackagePath(packagePath)) {
-      throw new Error(
-        `CI Diagnostic Artifact Package Boundary path is unsafe: ${packagePath}`,
-      );
+      throw new Error(`CI 诊断制品包边界路径不安全：${packagePath}`);
     }
   }
   const owners = new Set(options.packagePaths);
@@ -101,7 +93,7 @@ export function composeCiDiagnosticArtifacts(options: {
       !owners.has(declaration.owner.path)
     ) {
       throw new Error(
-        `CI Diagnostic Artifact owner is not a declared Package Boundary: ${declaration.owner.path}`,
+        `CI 诊断制品所有者不是已声明的包边界：${declaration.owner.path}`,
       );
     }
     const key = `${declaration.kind}:${declaration.owner.path}`;

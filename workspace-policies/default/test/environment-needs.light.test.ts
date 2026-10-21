@@ -6,15 +6,15 @@ import {
   parseEnvironmentNeedsMetadata,
   playwrightBrowserAssetsEnvironmentNeed,
   shellCheckEnvironmentNeed,
-} from "@ykdz/template-environment/module-graph";
+} from "@ykdz/template-workspace/default-environment";
 
 const workspaceOwner = {
   kind: "workspace-orchestration" as const,
   path: "." as const,
 };
 
-void describe("Environment Need lifecycle", () => {
-  void it("uses the durable semantic declaration as canonical identity", () => {
+void describe("环境需求生命周期", () => {
+  void it("使用持久化语义声明作为规范身份", () => {
     const browser = playwrightBrowserAssetsEnvironmentNeed({
       browser: "chromium",
       owner: workspaceOwner,
@@ -34,7 +34,7 @@ void describe("Environment Need lifecycle", () => {
     );
   });
 
-  void it("strictly parses and normalizes versioned Local Template Metadata", () => {
+  void it("严格解析并规范化带版本的本地模板元数据", () => {
     assert.deepStrictEqual(
       parseEnvironmentNeedsMetadata({
         schemaVersion: 1,
@@ -68,13 +68,11 @@ void describe("Environment Need lifecycle", () => {
         }),
       (error) =>
         error instanceof Error &&
-        error.message.includes(
-          "check[0] contains unknown field: inferredFromTaskGraph",
-        ),
+        error.message.includes("check[0] 含有未知字段：inferredFromTaskGraph"),
     );
   });
 
-  void it("rejects semantic-parameter conflicts instead of persisting a second identity", () => {
+  void it("拒绝语义参数冲突，避免持久化第二个身份", () => {
     assert.throws(
       () =>
         normalizeEnvironmentNeeds({
@@ -93,11 +91,11 @@ void describe("Environment Need lifecycle", () => {
         }),
       (error) =>
         error instanceof Error &&
-        error.message.includes("check[1].browser must be chromium"),
+        error.message.includes("check[1].browser 必须是 chromium"),
     );
   });
 
-  void it("does not accept Deployment Environment Needs as ordinary Check Environment Needs or vice versa", () => {
+  void it("不把部署环境需求当成常规检查环境需求，反之亦然", () => {
     assert.throws(
       () =>
         parseEnvironmentNeedsMetadata({
@@ -107,7 +105,7 @@ void describe("Environment Need lifecycle", () => {
         }),
       (error) =>
         error instanceof Error &&
-        error.message.includes("check[0] has unsupported kind: docker-engine"),
+        error.message.includes("check[0] 含有不支持的 kind：docker-engine"),
     );
 
     assert.throws(
@@ -124,7 +122,7 @@ void describe("Environment Need lifecycle", () => {
         }),
       (error) =>
         error instanceof Error &&
-        error.message.includes("deployment[0] contains unknown field: owner"),
+        error.message.includes("deployment[0] 含有未知字段：owner"),
     );
   });
 });

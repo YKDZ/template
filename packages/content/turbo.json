@@ -5,7 +5,6 @@
     "build": {
       "dependsOn": [
         "@ykdz/template-core#build",
-        "@ykdz/template-environment#build",
         "@ykdz/template-generator#build",
         "@ykdz/template-workspace#build",
         "@ykdz/preset-rust-bin#build",
@@ -15,7 +14,7 @@
         "@ykdz/reference-rust-bin#build:template",
         "@ykdz/reference-ts-cli#build:template",
         "@ykdz/reference-ts-lib#build:template",
-        "@ykdz/reference-typescript-config#build:template",
+        "@ykdz/reference-tooling-config#build:template",
         "@ykdz/reference-vike-db#build:template",
         "@ykdz/reference-vike-migrations#build:template",
         "@ykdz/reference-vike-web#build:template",

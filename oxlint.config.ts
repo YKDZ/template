@@ -1,1 +1,7 @@
-export { default } from "@ykdz/reference-typescript-config/oxlint";
+import lintConfiguration from "@ykdz/reference-tooling-config/oxlint";
+import { defineConfig } from "oxlint";
+
+export default defineConfig({
+  extends: [lintConfiguration],
+  categories: { correctness: "error", suspicious: "warn" },
+});

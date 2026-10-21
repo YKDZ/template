@@ -94,7 +94,7 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
       );
       const bin = contribution.manifest.bin as Readonly<Record<string, string>>;
       const configuration = input.bindings?.get(
-        "@ykdz/reference-typescript-config",
+        "@ykdz/reference-tooling-config",
       );
       const devDependencies = {
         ...(contribution.manifest.devDependencies as Record<string, string>),

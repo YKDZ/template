@@ -24,21 +24,6 @@ import type {
   WorkspaceProjection,
   WorkspaceStrategy,
 } from "@ykdz/template-core/workspace-strategy";
-import { composeCiDiagnosticArtifacts } from "@ykdz/template-environment/ci-diagnostic-artifact";
-import type { CiDiagnosticArtifactDeclaration } from "@ykdz/template-environment/ci-diagnostic-artifact";
-import {
-  prepareBuiltInDevelopmentContainerResources,
-  prepareBuiltInEditorCustomizationDeclarations,
-  projectBuiltInDevelopmentContainer,
-  projectBuiltInEditorCustomization,
-  shellCheckDevelopmentContainerToolLayer,
-} from "@ykdz/template-environment/development-environment";
-import {
-  normalizeEnvironmentNeeds,
-  type CheckEnvironmentNeed,
-  playwrightBrowserAssetsEnvironmentNeed,
-  shellCheckEnvironmentNeed,
-} from "@ykdz/template-environment/module-graph";
 
 import {
   assertDatabasePreparationManifestTruth,
@@ -49,6 +34,8 @@ import {
   type DatabasePreparationManifestRequirement,
   type WorkspaceProjectRequirements,
 } from "./application-requirements.ts";
+import { composeCiDiagnosticArtifacts } from "./ci-diagnostic-artifact.ts";
+import type { CiDiagnosticArtifactDeclaration } from "./ci-diagnostic-artifact.ts";
 import {
   prepareCliPublicationResources,
   projectCliPublication,
@@ -63,6 +50,19 @@ import {
   selectTemplateDependencyCatalogEntries,
 } from "./dependency-catalog.ts";
 import { browserTestDevelopmentContainerToolLayer } from "./development-container.ts";
+import {
+  prepareBuiltInDevelopmentContainerResources,
+  prepareBuiltInEditorCustomizationDeclarations,
+  projectBuiltInDevelopmentContainer,
+  projectBuiltInEditorCustomization,
+  shellCheckDevelopmentContainerToolLayer,
+} from "./development-environment.ts";
+import {
+  normalizeEnvironmentNeeds,
+  type CheckEnvironmentNeed,
+  playwrightBrowserAssetsEnvironmentNeed,
+  shellCheckEnvironmentNeed,
+} from "./environment-needs.ts";
 import type { GenerationContext } from "./generation-context.ts";
 import {
   assertReusablePackageExposure,
@@ -934,7 +934,7 @@ function projectOperations(options: {
     name: context.repositoryName,
     ...(configuration === undefined
       ? {}
-      : { typescriptConfigurationPackageName: configuration.definition.name }),
+      : { toolingConfigPackageName: configuration.definition.name }),
     nodeDeclaration:
       context.toolchain.nodeVersion ?? context.toolchain.nodeLtsMajor,
     packageManagerPin: context.toolchain.packageManagerPin,
@@ -1126,6 +1126,9 @@ function projectOperations(options: {
       tasks: shared.turboTasks,
     },
     referenceNames,
+    ...(configuration === undefined
+      ? {}
+      : { toolingConfigPackagePath: configuration.definition.path }),
     turboBoundaryTags: boundaryTags(contributions),
     rootTsconfigTemplate: prepared.rootTemplates.tsconfig,
     rootTsconfigCompilerOptions: shared.typescript.compilerOptions,
@@ -1152,6 +1155,7 @@ function projectOperations(options: {
     ...shared.reconciliation,
     { path: "tsconfig.json", driver: "structured" },
     { path: "turbo.json", driver: "structured" },
+    { path: ".vscode/settings.json", driver: "structured" },
     {
       path: ".devcontainer/devcontainer.json",
       driver: "structured",
@@ -1238,17 +1242,27 @@ function projectOperations(options: {
             kind: "writeText" as const,
             to: "oxlint.config.ts",
             text:
-              "export { default } from " +
+              "import lintConfiguration from " +
               JSON.stringify(configuration.definition.name + "/oxlint") +
-              ";\n",
+              ";\n" +
+              'import { defineConfig } from "oxlint";\n\n' +
+              "export default defineConfig({\n" +
+              "  extends: [lintConfiguration],\n" +
+              '  categories: { correctness: "error", suspicious: "warn" },\n' +
+              "});\n",
           },
           {
             kind: "writeText" as const,
             to: "oxfmt.config.ts",
             text:
-              "export { default } from " +
+              "import formatterConfiguration from " +
               JSON.stringify(configuration.definition.name + "/oxfmt") +
-              ";\n",
+              ";\n" +
+              'import { defineConfig } from "oxfmt";\n\n' +
+              "export default defineConfig({\n" +
+              "  ...formatterConfiguration,\n" +
+              "  sortImports: true,\n" +
+              "});\n",
           },
         ]),
     editorExtensions,

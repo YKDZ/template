@@ -1,5 +1,6 @@
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
-import type { DeploymentEnvironmentNeed } from "@ykdz/template-environment/module-graph";
+
+import type { DeploymentEnvironmentNeed } from "./environment-needs.ts";
 
 export type DependencyEcosystem =
   | "npm"

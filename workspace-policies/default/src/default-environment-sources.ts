@@ -12,7 +12,7 @@ const source = (name: string) =>
     ),
   );
 export const environmentSources = {
-  base: source("."),
-  devcontainer: source("devcontainer"),
-  editorCustomization: source("editor-customization"),
+  base: source("environment"),
+  devcontainer: source("environment/devcontainer"),
+  editorCustomization: source("environment/editor-customization"),
 };

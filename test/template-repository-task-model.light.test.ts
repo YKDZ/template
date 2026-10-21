@@ -124,7 +124,7 @@ void describe("Template Repository native task model", () => {
     ] as const)
       assert.ok(packageTags.get(name)?.includes(tag));
     assert.ok(packageTags.has("@ykdz/reference-vue-shared"));
-    assert.ok(packageTags.has("@ykdz/reference-typescript-config"));
+    assert.ok(packageTags.has("@ykdz/reference-tooling-config"));
 
     for (const task of nativeTaskByName(directory).values()) {
       if (task.command !== null) {
@@ -164,14 +164,12 @@ void describe("Template Repository native task model", () => {
         ),
       );
     }
-    const configBuild = buildTasks.get(
-      "@ykdz/reference-typescript-config#build",
-    );
+    const configBuild = buildTasks.get("@ykdz/reference-tooling-config#build");
     assert.ok(configBuild);
     assert.equal(configBuild.command, "<NONEXISTENT>");
     assert.deepEqual(configBuild.resolvedTaskDefinition.dependsOn, ["^build"]);
     assert.deepEqual(
-      nativeTaskByName(directory).get("@ykdz/reference-typescript-config#build")
+      nativeTaskByName(directory).get("@ykdz/reference-tooling-config#build")
         ?.tags,
       [],
     );
@@ -188,7 +186,7 @@ void describe("Template Repository native task model", () => {
         "@ykdz/template-checks#build",
         [
           "@ykdz/reference-ts-cli#build",
-          "@ykdz/reference-typescript-config#build",
+          "@ykdz/reference-tooling-config#build",
           "@ykdz/template-content#build",
           "@ykdz/template-core#build",
           "@ykdz/template-generator#build",
@@ -204,7 +202,7 @@ void describe("Template Repository native task model", () => {
         );
     assert.deepEqual(
       buildTasks.get("@ykdz/template-core#build")?.dependencies,
-      ["@ykdz/reference-typescript-config#build"],
+      ["@ykdz/reference-tooling-config#build"],
     );
   });
 

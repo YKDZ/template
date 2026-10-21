@@ -29,7 +29,7 @@ export const packageConditionKeyOrder = ["source", "types", "default"] as const;
 
 export function createWorkspaceRootManifest(options: {
   readonly name: string;
-  readonly typescriptConfigurationPackageName?: string;
+  readonly toolingConfigPackageName?: string;
   readonly nodeDeclaration: string;
   readonly packageManagerPin: string;
 }): Record<string, unknown> {
@@ -49,10 +49,10 @@ export function createWorkspaceRootManifest(options: {
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
   const developmentDependencies = {
-    ...(options.typescriptConfigurationPackageName === undefined
+    ...(options.toolingConfigPackageName === undefined
       ? {}
       : {
-          [options.typescriptConfigurationPackageName]: "workspace:*",
+          [options.toolingConfigPackageName]: "workspace:*",
         }),
     "@types/node": "catalog:",
     oxfmt: "catalog:",
@@ -81,6 +81,7 @@ export function projectPreparedWorkspaceRoot(options: {
   readonly dependencyOverrides: Readonly<Record<string, string>>;
   readonly turboTemplate: Readonly<Record<string, unknown>>;
   readonly referenceNames: ReadonlyMap<string, string>;
+  readonly toolingConfigPackagePath?: string;
   readonly turboBoundaryTags?: readonly ("app" | "library")[];
   readonly rootTsconfigTemplate: Readonly<Record<string, unknown>>;
   readonly rootTsconfigCompilerOptions: Readonly<Record<string, unknown>>;
@@ -104,8 +105,20 @@ export function projectPreparedWorkspaceRoot(options: {
     options.referenceNames,
   ) as {
     tasks: Record<string, unknown>;
+    globalDependencies?: string[];
     boundaries?: { tags: Record<string, unknown> };
   };
+  rootTurbo.globalDependencies = [
+    ...new Set([
+      ...(rootTurbo.globalDependencies ?? []),
+      ...(options.toolingConfigPackagePath === undefined
+        ? []
+        : [
+            `${options.toolingConfigPackagePath}/oxfmt.config.ts`,
+            `${options.toolingConfigPackagePath}/oxlint.config.ts`,
+          ]),
+    ]),
+  ];
   rootTurbo.tasks = Object.fromEntries(
     Object.entries(rootTurbo.tasks).filter(
       ([task]) =>

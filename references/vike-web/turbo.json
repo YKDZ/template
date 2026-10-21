@@ -73,7 +73,6 @@
         "@ykdz/reference-vike-db#build",
         "@ykdz/reference-vue-shared#build",
         "@ykdz/template-core#build",
-        "@ykdz/template-environment#build",
         "@ykdz/template-workspace#build"
       ],
       "outputs": ["template-dist/**"],
@@ -84,7 +83,6 @@
         "@ykdz/reference-vike-db#build",
         "@ykdz/reference-vue-shared#build",
         "@ykdz/template-core#build",
-        "@ykdz/template-environment#build",
         "@ykdz/template-workspace#build"
       ],
       "outputs": [],

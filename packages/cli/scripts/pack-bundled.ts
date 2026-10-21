@@ -168,6 +168,10 @@ try {
   prepared = await prepareContentCollection({
     content: templateContent,
     roots: templateContent,
+    referencePreparation: {
+      specifier: "@ykdz/template-workspace/reference-package",
+      exportName: "defineReferencePackage",
+    },
     strategy: createDefaultWorkspaceStrategy({
       cliPublicationReference: npmPublicationReference.definition,
     }),

@@ -14,6 +14,7 @@
     }
   },
   "globalPassThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"],
+  "globalDependencies": ["oxfmt.config.ts", "oxlint.config.ts"],
   "tasks": {
     "//#boundaries": {
       "tags": ["quality:light"]

@@ -4,11 +4,9 @@ import { describe, it } from "node:test";
 import {
   composeCiDiagnosticArtifacts,
   type CiDiagnosticArtifactDeclaration,
-} from "@ykdz/template-environment/ci-diagnostic-artifact";
-import {
   dockerEngineEnvironmentNeed,
   type DeploymentEnvironmentNeed,
-} from "@ykdz/template-environment/module-graph";
+} from "@ykdz/template-workspace/default-environment";
 import {
   assertPackageContribution,
   type PackageContribution,
@@ -129,9 +127,7 @@ void describe("CI 诊断产物合同", () => {
           ),
         (error) =>
           error instanceof Error &&
-          error.message.includes(
-            "CI Diagnostic Artifact owner is not a declared Package Boundary",
-          ),
+          error.message.includes("CI 诊断制品所有者不是已声明的包边界"),
       );
     }
   });
@@ -197,9 +193,7 @@ void describe("CI 诊断产物合同", () => {
         ),
       (error) =>
         error instanceof Error &&
-        error.message.includes(
-          "CI Diagnostic Artifact owner must match its Package Contribution",
-        ),
+        error.message.includes("CI 诊断制品所有者必须与包贡献路径一致"),
     );
   });
 });

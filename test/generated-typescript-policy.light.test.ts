@@ -123,11 +123,11 @@ void describe("Generated Repository TypeScript policy", () => {
           );
           if (initialized.status !== "success") return;
 
-          const configPackageName = "@policy/typescript-config";
+          const configPackageName = "@policy/tooling-config";
           const configReference = `${configPackageName}/base.json`;
           const baselinePath = path.join(
             targetDir,
-            "packages/typescript-config/base.json",
+            "packages/tooling-config/base.json",
           );
           assert.deepStrictEqual(await readTsconfig(baselinePath), {
             compilerOptions: policyOptions,
@@ -136,7 +136,7 @@ void describe("Generated Repository TypeScript policy", () => {
             initialized.blueprint.packages.some(
               (pkg) =>
                 pkg.name === configPackageName &&
-                pkg.path === "packages/typescript-config" &&
+                pkg.path === "packages/tooling-config" &&
                 pkg.role === "shared-library",
             ),
           );

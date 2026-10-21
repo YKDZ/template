@@ -15,7 +15,7 @@ const content = await loadContentSource({
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
     "@ykdz/reference-ts-lib/template",
-    "@ykdz/reference-typescript-config/template",
+    "@ykdz/reference-tooling-config/template",
     "@ykdz/preset-ts-lib/template",
   ],
   prepareReferenceDefinition(definition) {

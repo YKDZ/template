@@ -87,7 +87,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@ykdz/reference-npm-publication": "workspace:*",
-    "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/reference-tooling-config": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

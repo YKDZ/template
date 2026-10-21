@@ -258,7 +258,7 @@ void describe("公开模板内容集合", () => {
     ) as { packages: { path: string }[] };
     assert.deepStrictEqual(
       blueprint.packages.map((item) => item.path).toSorted(),
-      ["packages/lib", "packages/typescript-config"].toSorted(),
+      ["packages/lib", "packages/tooling-config"].toSorted(),
     );
   });
 
@@ -335,6 +335,52 @@ void describe("公开模板内容集合", () => {
     assert.strictEqual(
       await readFile(path.join(targetRoot, "TODO.md"), "utf8"),
       todoOperation.text,
+    );
+  });
+
+  void it("正式加包保留消费者定制的编辑器设置", async () => {
+    const targetRoot = await createTargetRoot(
+      "template-content-editor-customization-",
+    );
+    const generator = createGenerator({
+      content: templateContent,
+      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+    });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { roots: [{ preset: tsCliPreset.identity }] },
+      strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+
+    const settingsPath = path.join(targetRoot, ".vscode/settings.json");
+    const settings = JSON.parse(await readFile(settingsPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const customizedSettings = {
+      ...settings,
+      "editor.formatOnSave": false,
+      "editor.tabSize": 2,
+    };
+    await writeFile(
+      settingsPath,
+      `${JSON.stringify(customizedSettings, null, 2)}\n`,
+    );
+
+    const added = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: libraryMember.identity,
+      creationInput: { packagePath: "packages/provider" },
+    });
+    assert.strictEqual(added.status, "success", JSON.stringify(added));
+    assert.deepStrictEqual(
+      JSON.parse(await readFile(settingsPath, "utf8")),
+      customizedSettings,
     );
   });
 
@@ -899,7 +945,7 @@ void describe("公开模板内容集合", () => {
     ) as { packages: { path: string }[] };
     assert.strictEqual(
       blueprint.packages.filter(
-        (definition) => definition.path === "packages/typescript-config",
+        (definition) => definition.path === "packages/tooling-config",
       ).length,
       1,
     );

@@ -3,35 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "files": [
-    "dist",
-    "assets"
+    "dist"
   ],
   "type": "module",
   "exports": {
-    "./module-graph": {
-      "source": "./src/module-graph.ts",
-      "types": "./dist/module-graph.d.ts",
-      "default": "./dist/module-graph.js"
-    },
     "./development-container-tool-layer": {
       "source": "./src/development-container-tool-layer.ts",
       "types": "./dist/development-container-tool-layer.d.ts",
       "default": "./dist/development-container-tool-layer.js"
-    },
-    "./editor-customization": {
-      "source": "./src/editor-customization.ts",
-      "types": "./dist/editor-customization.d.ts",
-      "default": "./dist/editor-customization.js"
-    },
-    "./ci-diagnostic-artifact": {
-      "source": "./src/ci-diagnostic-artifact.ts",
-      "types": "./dist/ci-diagnostic-artifact.d.ts",
-      "default": "./dist/ci-diagnostic-artifact.js"
-    },
-    "./development-environment": {
-      "source": "./src/development-environment.ts",
-      "types": "./dist/development-environment.d.ts",
-      "default": "./dist/development-environment.js"
     }
   },
   "scripts": {
@@ -44,12 +23,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
-    "@ykdz/template-core": "workspace:*",
-    "valibot": "catalog:"
+    "@ykdz/template-core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/reference-tooling-config": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
