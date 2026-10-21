@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  access,
   copyFile,
   mkdir,
   mkdtemp,
@@ -19,6 +20,7 @@ import { acceptArtifact, prepareArtifact } from "./publication.ts";
 import {
   markNpmPublicationAttempt,
   restoreNpmPublicationAttempt,
+  runWithInteractiveNpmSession,
   runDirectOidcPublication,
 } from "./publish.ts";
 import { runImmutableGithubRelease } from "./release.ts";
@@ -183,10 +185,15 @@ function registryAdapter(
   readonly calls: {
     readonly command: string;
     readonly arguments: readonly string[];
+    readonly stdio?: "inherit";
   }[];
   readonly publishes: string[][];
 } {
-  const calls: { command: string; arguments: readonly string[] }[] = [];
+  const calls: {
+    command: string;
+    arguments: readonly string[];
+    stdio?: "inherit";
+  }[] = [];
   const publishes: string[][] = [];
   let visible = options.initialIntegrity !== undefined;
   let integrity =
@@ -195,7 +202,11 @@ function registryAdapter(
       : `sha512-${Buffer.from(candidate.sha512, "hex").toString("base64")}`;
   let tags: Record<string, string> = { ...options.initialTags };
   const run: RemoteCommandRunner = async (command, arguments_, request) => {
-    calls.push({ command, arguments: [...arguments_] });
+    calls.push({
+      command,
+      arguments: [...arguments_],
+      ...(request.stdio === undefined ? {} : { stdio: request.stdio }),
+    });
     if (command === "git")
       return await defaultRemoteCommand(command, arguments_, request);
     if (command === "npm" && arguments_[0] === "pack") {
@@ -414,6 +425,150 @@ function githubAdapter(candidate: Candidate): {
   return { run, calls, writes };
 }
 
+void describe("首次发布临时 npm 会话", () => {
+  void it("登录一次并让整批复用临时配置，失败后注销并清理", async () => {
+    const repositoryRoot = await mkdtemp(
+      path.join(tmpdir(), "npm-interactive-session-"),
+    );
+    const hostConfig = path.join(repositoryRoot, "host-user.npmrc");
+    await writeFile(
+      hostConfig,
+      "//registry.npmjs.org/:_authToken=host-secret\n",
+    );
+    const environment = {
+      PATH: process.env.PATH,
+      HOME: "/host/home",
+      NPM_CONFIG_USERCONFIG: hostConfig,
+      npm_config_cache: "/host/cache",
+      NODE_AUTH_TOKEN: "host-token-remains-unmodified",
+      GH_TOKEN: "host-gh-token-remains-available",
+    };
+    const originalEnvironment = { ...environment };
+    const calls: {
+      readonly command: string;
+      readonly arguments: readonly string[];
+      readonly cwd: string;
+      readonly environment: NodeJS.ProcessEnv;
+      readonly stdio: "inherit";
+    }[] = [];
+    let sessionRoot: string | undefined;
+    let batchEnvironment: NodeJS.ProcessEnv | undefined;
+    let batchCalls = 0;
+
+    try {
+      const exitCode = await runWithInteractiveNpmSession({
+        repositoryRoot,
+        environment,
+        run: async (command, arguments_, options) => {
+          calls.push({
+            command,
+            arguments: [...arguments_],
+            cwd: options.cwd,
+            environment: options.env,
+            stdio: options.stdio,
+          });
+          return 0;
+        },
+        runNpmPhase: async (npmEnvironment) => {
+          batchCalls += 1;
+          batchEnvironment = npmEnvironment;
+          const userConfig = npmEnvironment.NPM_CONFIG_USERCONFIG;
+          assert.ok(userConfig);
+          sessionRoot = path.dirname(userConfig);
+          assert.equal(npmEnvironment.HOME, "/host/home");
+          assert.equal(
+            npmEnvironment.NPM_CONFIG_GLOBALCONFIG,
+            path.join(sessionRoot, "global.npmrc"),
+          );
+          assert.equal(
+            npmEnvironment.NPM_CONFIG_CACHE,
+            path.join(sessionRoot, "cache"),
+          );
+          assert.equal(npmEnvironment.NODE_AUTH_TOKEN, undefined);
+          assert.equal(
+            npmEnvironment.GH_TOKEN,
+            "host-gh-token-remains-available",
+          );
+          await stat(sessionRoot);
+          return 23;
+        },
+      });
+
+      assert.equal(exitCode, 23);
+      assert.equal(batchCalls, 1);
+      assert.ok(batchEnvironment);
+      assert.deepEqual(
+        calls.map(
+          ({ command, arguments: arguments_ }) => `${command} ${arguments_[0]}`,
+        ),
+        ["npm login", "npm whoami", "npm logout"],
+      );
+      assert.ok(calls.every(({ stdio }) => stdio === "inherit"));
+      assert.ok(calls.every(({ cwd }) => cwd === repositoryRoot));
+      const [login, whoami, logout] = calls;
+      assert.ok(login);
+      assert.ok(whoami);
+      assert.ok(logout);
+      assert.ok(login.arguments.includes("--auth-type=web"));
+      assert.deepEqual(
+        [login, whoami, logout].map(
+          ({ environment: childEnvironment }) =>
+            childEnvironment.NPM_CONFIG_USERCONFIG,
+        ),
+        [
+          batchEnvironment.NPM_CONFIG_USERCONFIG,
+          batchEnvironment.NPM_CONFIG_USERCONFIG,
+          batchEnvironment.NPM_CONFIG_USERCONFIG,
+        ],
+      );
+      assert.deepEqual(environment, originalEnvironment);
+      assert.equal(
+        await readFile(hostConfig, "utf8"),
+        "//registry.npmjs.org/:_authToken=host-secret\n",
+      );
+      assert.ok(sessionRoot);
+      await assert.rejects(access(sessionRoot));
+    } finally {
+      await rm(repositoryRoot, { recursive: true, force: true });
+    }
+  });
+
+  void it("登录失败时不启动批次并清理临时目录", async () => {
+    const repositoryRoot = await mkdtemp(
+      path.join(tmpdir(), "npm-interactive-session-failed-"),
+    );
+    const commands: string[] = [];
+    let sessionRoot: string | undefined;
+    let batchStarted = false;
+    try {
+      await assert.rejects(
+        runWithInteractiveNpmSession({
+          repositoryRoot,
+          environment: { PATH: process.env.PATH },
+          run: async (command, arguments_, options) => {
+            commands.push(`${command} ${arguments_[0]}`);
+            const userConfig = options.env.NPM_CONFIG_USERCONFIG;
+            assert.ok(userConfig);
+            sessionRoot = path.dirname(userConfig);
+            return 9;
+          },
+          runNpmPhase: async () => {
+            batchStarted = true;
+            return 0;
+          },
+        }),
+        /npm 登录失败/u,
+      );
+      assert.deepEqual(commands, ["npm login"]);
+      assert.equal(batchStarted, false);
+      assert.ok(sessionRoot);
+      await assert.rejects(access(sessionRoot));
+    } finally {
+      await rm(repositoryRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 void describe("单包远端发布与原件续办", () => {
   void it("续办沿用 receipt 绑定的原提交，不把推进后的默认分支当成原件来源", async () => {
     const candidate = await createCandidate("1.2.3-beta.1");
@@ -510,6 +665,12 @@ void describe("单包远端发布与原件续办", () => {
         registry.publishes[0]?.includes("--publish-wait-timeout=120000"),
       );
       assert.ok(registry.publishes[0]?.includes("--provenance"));
+      assert.equal(
+        registry.calls.find(
+          (call) => call.command === "pnpm" && call.arguments[0] === "publish",
+        )?.stdio,
+        undefined,
+      );
       assert.ok(
         registry.calls.some(
           (call) => call.command === "npm" && call.arguments[0] === "pack",
@@ -570,6 +731,12 @@ void describe("单包远端发布与原件续办", () => {
       assert.equal(registry.publishes.length, 1);
       assert.ok(registry.publishes[0]?.includes("--tag=latest"));
       assert.equal(registry.publishes[0]?.[1], stable.artifactPath);
+      assert.equal(
+        registry.calls.find(
+          (call) => call.command === "pnpm" && call.arguments[0] === "publish",
+        )?.stdio,
+        "inherit",
+      );
     } finally {
       await stable.dispose();
     }
