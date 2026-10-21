@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import {
   access,
   copyFile,
@@ -14,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { PublicationFailure } from "./failure.ts";
 import { acceptArtifact, prepareArtifact } from "./publication.ts";
@@ -550,7 +552,7 @@ void describe("首次发布临时 npm 会话", () => {
             const userConfig = options.env.NPM_CONFIG_USERCONFIG;
             assert.ok(userConfig);
             sessionRoot = path.dirname(userConfig);
-            return 9;
+            return arguments_[0] === "login" ? 9 : 0;
           },
           runNpmPhase: async () => {
             batchStarted = true;
@@ -559,11 +561,154 @@ void describe("首次发布临时 npm 会话", () => {
         }),
         /npm 登录失败/u,
       );
-      assert.deepEqual(commands, ["npm login"]);
+      assert.deepEqual(commands, ["npm login", "npm logout"]);
       assert.equal(batchStarted, false);
       assert.ok(sessionRoot);
       await assert.rejects(access(sessionRoot));
     } finally {
+      await rm(repositoryRoot, { recursive: true, force: true });
+    }
+  });
+
+  void it("进程收到 SIGTERM 时转发活动命令、注销并清理后再结束", async () => {
+    const repositoryRoot = await mkdtemp(
+      path.join(tmpdir(), "npm-interactive-session-signal-"),
+    );
+    const eventLog = path.join(repositoryRoot, "events.jsonl");
+    const publishModule = pathToFileURL(
+      path.resolve(new URL("./publish.ts", import.meta.url).pathname),
+    ).href;
+    const childScript = `
+      import { spawn } from "node:child_process";
+      import { appendFileSync } from "node:fs";
+      import { runWithInteractiveNpmSession } from ${JSON.stringify(publishModule)};
+      const log = (kind, values = {}) => appendFileSync(process.env.EVENT_LOG, JSON.stringify({ kind, ...values }) + "\\n");
+      runWithInteractiveNpmSession({
+        repositoryRoot: process.cwd(),
+        environment: process.env,
+        run: async (command, arguments_, options) => {
+          log("npm-command", { command, operation: arguments_[0], userConfig: options.env.NPM_CONFIG_USERCONFIG });
+          return 0;
+        },
+        runNpmPhase: (environment, setActiveChild) => new Promise((resolve) => {
+          const child = spawn(process.execPath, ["-e", "const fs=require('node:fs'); const log=(kind)=>fs.appendFileSync(process.env.EVENT_LOG, JSON.stringify({kind})+'\\\\n'); process.on('SIGTERM',()=>{log('phase-child-sigterm');process.exit(0)}); log('phase-child-ready'); setInterval(()=>{},1000)"], {
+            env: { ...environment, EVENT_LOG: process.env.EVENT_LOG },
+            stdio: ["ignore", "ignore", "inherit"],
+          });
+          log("phase-child-start", { pid: child.pid });
+          setActiveChild?.(child);
+          log("phase-start", { userConfig: environment.NPM_CONFIG_USERCONFIG });
+          process.stdout.write("SESSION_READY\\n");
+          child.once("close", (exitCode) => {
+            setActiveChild(undefined);
+            log("phase-child-close", { exitCode });
+            resolve(exitCode === 0 ? 0 : 1);
+          });
+        }),
+      }).then(() => {
+        log("unexpected-normal-return");
+        process.exitCode = 91;
+      }).catch((error) => {
+        log("session-error", { message: String(error) });
+        process.exitCode = 92;
+      });
+    `;
+    const child = spawn(
+      process.execPath,
+      [
+        "--conditions=source",
+        "--experimental-strip-types",
+        "--input-type=module",
+        "-e",
+        childScript,
+      ],
+      {
+        cwd: repositoryRoot,
+        env: { ...process.env, EVENT_LOG: eventLog },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const closeResult = once(child, "close");
+    let stderr = "";
+    child.stderr.on("data", (value: Buffer) => {
+      stderr += value.toString();
+    });
+
+    try {
+      const startDeadline = Date.now() + 10_000;
+      while (Date.now() < startDeadline) {
+        const events = await readFile(eventLog, "utf8").catch(() => "");
+        if (events.includes('"kind":"phase-child-ready"')) break;
+        if (child.exitCode !== null || child.signalCode !== null) {
+          throw new Error(
+            `session exited before its phase started: ${events}\n${stderr}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      const startEvents = await readFile(eventLog, "utf8").catch(() => "");
+      assert.ok(
+        startEvents.includes('"kind":"phase-child-ready"'),
+        `session did not start: ${startEvents}\n${stderr}`,
+      );
+
+      assert.equal(child.kill("SIGTERM"), true);
+      const [exitCode, signal] = await closeResult;
+      assert.equal(exitCode, null);
+      assert.equal(signal, "SIGTERM");
+
+      const events = (await readFile(eventLog, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const kinds = events.map((event) => event.kind);
+      assert.ok(kinds.includes("phase-child-sigterm"));
+      assert.ok(
+        kinds.indexOf("phase-child-sigterm") <
+          kinds.indexOf("phase-child-close"),
+      );
+      assert.ok(
+        kinds.indexOf("phase-child-close") < kinds.lastIndexOf("npm-command"),
+      );
+      assert.equal(events[0]?.operation, "login");
+      assert.equal(events[1]?.operation, "whoami");
+      assert.equal(events.at(-1)?.operation, "logout");
+      const userConfig = events.find(
+        (event) => event.kind === "phase-start",
+      )?.userConfig;
+      assert.equal(typeof userConfig, "string");
+      await assert.rejects(access(path.dirname(userConfig as string)));
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+        await closeResult;
+      }
+      const contents = await readFile(eventLog, "utf8").catch(() => "");
+      const events = contents
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      if (!events.some((event) => event.kind === "phase-child-close")) {
+        const phaseChild = events.find(
+          (event) => event.kind === "phase-child-start",
+        );
+        if (typeof phaseChild?.pid === "number") {
+          try {
+            process.kill(phaseChild.pid, "SIGKILL");
+          } catch {
+            // 子进程可能已自行退出。
+          }
+        }
+      }
+      for (const line of contents.split("\n").filter(Boolean)) {
+        const event = JSON.parse(line) as Record<string, unknown>;
+        if (typeof event.userConfig === "string") {
+          await rm(path.dirname(event.userConfig), {
+            recursive: true,
+            force: true,
+          });
+        }
+      }
       await rm(repositoryRoot, { recursive: true, force: true });
     }
   });

@@ -6,7 +6,10 @@ import {
   readAcceptedPublicationArtifacts,
   validateRemotePublicationTargets,
 } from "./accepted-artifacts.ts";
-import { runWithInteractiveNpmSession } from "./publish.ts";
+import {
+  runWithInteractiveNpmSession,
+  type InteractiveNpmSessionSetActiveChild,
+} from "./publish.ts";
 
 const repositoryRoot = path.resolve(
   process.env.PUBLICATION_REPOSITORY_ROOT ?? process.cwd(),
@@ -33,6 +36,7 @@ const filters = artifacts.flatMap((artifact) => [
 ]);
 async function runNpmScheduler(
   environment: NodeJS.ProcessEnv,
+  setActiveChild: InteractiveNpmSessionSetActiveChild,
 ): Promise<number> {
   const arguments_ = [
     "--recursive",
@@ -48,11 +52,14 @@ async function runNpmScheduler(
     env: environment,
     stdio: "inherit",
   });
+  setActiveChild(child);
   try {
     const [exitCode] = await once(child, "close");
     return typeof exitCode === "number" ? exitCode : 1;
   } catch (error) {
     throw new Error("无法启动 pnpm npm 发布调度。", { cause: error });
+  } finally {
+    setActiveChild(undefined);
   }
 }
 
@@ -63,4 +70,4 @@ process.exitCode =
         environment: process.env,
         runNpmPhase: runNpmScheduler,
       })
-    : await runNpmScheduler(process.env);
+    : await runNpmScheduler(process.env, () => {});
