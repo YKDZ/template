@@ -4,7 +4,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-import { projectPublicationWorkspace } from "@ykdz/reference-npm-publication/template";
 import { templateContent } from "@ykdz/template-content";
 import {
   prepareContentCollection,
@@ -12,7 +11,6 @@ import {
   type PackedArtifact,
   type PreparedContentCollection,
 } from "@ykdz/template-content/artifact-builder";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 import { execa } from "execa";
 
 type PackageManifest = {
@@ -158,9 +156,7 @@ try {
       specifier: "@ykdz/template-workspace/reference-package",
       exportName: "defineReferencePackage",
     },
-    strategy: createDefaultWorkspaceStrategy({
-      project: projectPublicationWorkspace,
-    }),
+
     workspaceRoot: await workspaceRoot(),
     root: path.join(temporaryRoot, "content"),
   });

@@ -19,7 +19,6 @@ import path from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { projectPublicationWorkspace } from "@ykdz/reference-npm-publication/template";
 import { templateContent } from "@ykdz/template-content";
 import {
   installContentCollection,
@@ -361,7 +360,7 @@ void describe("原生内容制品安装链", () => {
       },
       content: templateContent,
       roots: [preset],
-      strategy: createDefaultWorkspaceStrategy(),
+
       workspaceRoot,
       root: buildRoot,
     });
@@ -372,6 +371,7 @@ void describe("原生内容制品安装链", () => {
       prepared.members.map((member) => member.identity.packageName).sort(),
       [
         "@ykdz/preset-ts-lib",
+        "@ykdz/reference-npm-publication",
         "@ykdz/reference-ts-lib",
         "@ykdz/reference-tooling-config",
       ].sort(),
@@ -741,9 +741,7 @@ void describe("原生内容制品安装链", () => {
         },
         content: templateContent,
         roots: [preset],
-        strategy: createDefaultWorkspaceStrategy({
-          project: projectPublicationWorkspace,
-        }),
+
         workspaceRoot,
         root: await temporaryRoot(`preset-${preset.alias}-`),
         sdkArchives,
@@ -963,7 +961,7 @@ void describe("原生内容制品安装链", () => {
           },
           content: templateContent,
           roots: [preset, replayMember],
-          strategy: createDefaultWorkspaceStrategy(),
+
           workspaceRoot,
           packageName: `@fixture/replay-${preset.alias}`,
           collectionVersion: prepared.collection.version,
@@ -1429,7 +1427,6 @@ void describe("原生内容制品安装链", () => {
       },
       content: templateContent,
       roots: references,
-      strategy,
       workspaceRoot,
       root: await temporaryRoot("reference-content-"),
       sdkArchives: firstPartyPrepared.sdkPackages,
@@ -1947,7 +1944,7 @@ void describe("原生内容制品安装链", () => {
       },
       content: content as unknown as typeof templateContent,
       roots: [preset, addon] as unknown as typeof templateContent,
-      strategy: createDefaultWorkspaceStrategy(),
+
       workspaceRoot,
       packageName: "@fixture/authored-content",
       collectionVersion: collectionManifest.version,
@@ -2665,7 +2662,7 @@ void describe("原生内容制品安装链", () => {
       },
       content: members as unknown as typeof templateContent,
       roots: features as unknown as typeof templateContent,
-      strategy: createDefaultWorkspaceStrategy(),
+
       workspaceRoot,
       packageName: "@fixture/multi-source-content",
       collectionVersion: "1.0.0",

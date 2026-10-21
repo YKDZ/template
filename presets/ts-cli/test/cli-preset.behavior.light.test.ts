@@ -155,6 +155,12 @@ void describe("TypeScript CLI 公开组合预设", () => {
         ),
       );
     assert.equal((await manifest("packages/cli")).private, true);
+    const customizedRoot = await manifest(".");
+    customizedRoot.scripts.notes = "echo 维护者说明";
+    await writeFile(
+      path.join(targetRoot, "package.json"),
+      JSON.stringify(customizedRoot),
+    );
     const published = await generator().add({
       repositoryRoot: targetRoot,
       preset: preset.identity,
@@ -166,6 +172,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
     });
     assert.equal(published.status, "success", JSON.stringify(published));
     const root = await manifest(".");
+    assert.equal(root.scripts.notes, "echo 维护者说明");
     assert.equal(root.devDependencies["@demo/npm-publication"], "workspace:*");
     assert.equal((await manifest("packages/public-cli")).private, false);
     assert.equal(
