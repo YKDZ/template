@@ -45,7 +45,7 @@ export const dependencyCatalogSnapshot: Readonly<Record<string, string>> = {
   vitest: "^5.0.0",
   "vitest-browser-vue": "^3.1.0",
   vue: "^3.5.40",
-  "vue-tsc": "^3.3.9",
+  "vue-tsc": "^3.3.13",
   yaml: "^2.9.0",
   ignore: "^7.0.5",
   "jsonc-parser": "^3.3.1",

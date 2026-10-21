@@ -18,7 +18,7 @@
     "format:write": "cargo fmt --all && oxfmt --write .",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings && oxlint --quiet --format=unix --ignore-pattern node_modules --ignore-pattern target .",
     "lint:fix": "oxlint --format=unix --ignore-pattern node_modules --ignore-pattern target . --fix",
-    "test": "node --conditions=source scripts/run-rust-tests.ts",
+    "test": "cargo test --workspace",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "devDependencies": {
