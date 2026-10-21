@@ -27,7 +27,9 @@ void test("未选择目标时只说明公开入口，不访问远端或启动验
     });
 
     assert.equal(messages.length, 1);
-    assert.match(messages[0]!, /pnpm run publication:setup -- --filter/u);
+    const [message] = messages;
+    assert.ok(message);
+    assert.match(message, /pnpm run publication:setup -- --filter/u);
   } finally {
     await rm(repositoryRoot, { recursive: true, force: true });
   }
@@ -133,17 +135,23 @@ void test("远端批次复用验收清单，npm失败仍交给Release批次处�
         "run publication:remote:release",
       ],
     );
-    assert.deepEqual(
-      JSON.parse(commands[1]!.environment.PUBLICATION_DIST_TAGS!),
-      { "@example/cli": "RC", "@example/lib": "_beta" },
-    );
+    const npmCommand = commands[1];
+    const releaseCommand = commands[2];
+    assert.ok(npmCommand);
+    assert.ok(releaseCommand);
+    const distTags = npmCommand.environment.PUBLICATION_DIST_TAGS;
+    assert.ok(distTags);
+    assert.deepEqual(JSON.parse(distTags), {
+      "@example/cli": "RC",
+      "@example/lib": "_beta",
+    });
     assert.equal(
-      commands[1]!.environment.PUBLICATION_CREDENTIAL_MODE,
+      npmCommand.environment.PUBLICATION_CREDENTIAL_MODE,
       "interactive",
     );
     assert.equal(
-      commands[1]!.environment.PUBLICATION_ACCEPTED_ARTIFACTS_FILE,
-      commands[2]!.environment.PUBLICATION_ACCEPTED_ARTIFACTS_FILE,
+      npmCommand.environment.PUBLICATION_ACCEPTED_ARTIFACTS_FILE,
+      releaseCommand.environment.PUBLICATION_ACCEPTED_ARTIFACTS_FILE,
     );
   } finally {
     await rm(repositoryRoot, { recursive: true, force: true });
