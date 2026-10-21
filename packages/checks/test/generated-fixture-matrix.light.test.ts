@@ -134,8 +134,8 @@ void describe("registry-derived Package Addition Fixture Matrix", () => {
       try {
         const expectedError =
           manifestOwner === "root"
-            ? "Generated Repository Node manifest package.json must remain private"
-            : /Generated Repository Node manifest packages\/.+\/package\.json must remain private/u;
+            ? "生成工作区根 package.json 必须保持 private:true"
+            : /非候选包 packages\/.+\/package\.json 必须保持 private:true/u;
         await assert.rejects(
           runGeneratedScenarioSet("init", {
             workspace,

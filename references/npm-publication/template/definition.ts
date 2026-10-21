@@ -9,13 +9,7 @@ export const referencePackage = defineReferencePackage({
   defaultLeafName: "npm-publication",
   defaultPath: "tools/npm-publication",
   role: "shared-library",
-  resources: [
-    "scripts",
-    "template",
-    "tsconfig.json",
-    "tsconfig.template.json",
-    "turbo.json",
-  ],
+  resources: ["scripts", "tsconfig.json", "turbo.json"],
   template: {
     dependencies: [
       {

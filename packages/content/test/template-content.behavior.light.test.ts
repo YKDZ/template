@@ -56,7 +56,6 @@ const npmPublicationMember = requireReferenceMember(
 const rustBinMember = requireReferenceMember("@ykdz/reference-rust-bin");
 const vueAppMember = requireReferenceMember("@ykdz/reference-vue-app");
 const library = libraryMember.definition;
-const tsCli = tsCliMember.definition;
 const tsLibPreset = requirePresetMember("@ykdz/preset-ts-lib");
 const tsCliPreset = requirePresetMember("@ykdz/preset-ts-cli");
 const rustBinPreset = requirePresetMember("@ykdz/preset-rust-bin");
@@ -145,8 +144,8 @@ void describe("公开模板内容集合", () => {
         const customizedWorkflow = (
           await readFile(workflowPath, "utf8")
         ).replace(
-          "      - name: Run Heavy Check\n        run: node --conditions=source scripts/task-gates.ts check:heavy\n",
-          `      - name: Run Heavy Check\n        run: node --conditions=source scripts/task-gates.ts check:heavy\n${userStep}`,
+          "      - name: Run Heavy Check\n        id: run-heavy-check\n        run: node --conditions=source scripts/task-gates.ts check:heavy\n",
+          `      - name: Run Heavy Check\n        id: run-heavy-check\n        run: node --conditions=source scripts/task-gates.ts check:heavy\n${userStep}`,
         );
         assert.notStrictEqual(
           customizedWorkflow,
@@ -344,7 +343,7 @@ void describe("公开模板内容集合", () => {
     );
     const generator = createGenerator({
       content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+      strategy: createContentTestStrategy<WorkspaceCreationInput>(),
     });
     const initialized = await generator.init({
       targetRoot,
