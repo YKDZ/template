@@ -111,7 +111,9 @@ export function projectPublicationTarget(options: {
             passThroughEnv: [
               "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
               "PUBLICATION_BATCH_TARGET_COUNT",
+              "PUBLICATION_REPOSITORY_ROOT",
               "PUBLICATION_SOURCE_SHA",
+              "GITHUB_DEFAULT_BRANCH",
             ],
           };
           tasks["publication:consume"] = {

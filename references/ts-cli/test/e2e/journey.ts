@@ -1,4 +1,4 @@
-export type CliJourneyMode = "source" | "distribution" | "packed";
+export type CliJourneyMode = "source" | "packed";
 
 export type CliJourneyCommand = {
   readonly name: string;

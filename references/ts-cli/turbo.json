@@ -63,7 +63,7 @@
       "tags": ["quality:light"]
     },
     "test:e2e": {
-      "dependsOn": ["build"],
+      "dependsOn": [],
       "inputs": [],
       "outputs": [],
       "cache": false,

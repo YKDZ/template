@@ -246,6 +246,7 @@ async function prepareArtifacts(options: {
   readonly acceptedListPath: string;
   readonly filters: readonly string[];
   readonly sourceSha: string;
+  readonly defaultBranch: string;
   readonly environment: NodeJS.ProcessEnv;
   readonly runCommand: FirstReleaseCommandRunner;
   readonly readAcceptedPublicationArtifacts: PublicationOwnerApi["readAcceptedPublicationArtifacts"];
@@ -256,6 +257,8 @@ async function prepareArtifacts(options: {
   delete environment.PUBLICATION_ACCEPTED_ARTIFACTS_FILE;
   delete environment.TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR;
   environment.PUBLICATION_SOURCE_SHA = options.sourceSha;
+  environment.GITHUB_DEFAULT_BRANCH = options.defaultBranch;
+  environment.PUBLICATION_REPOSITORY_ROOT = options.repositoryRoot;
   environment.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY = options.artifactRoot;
   const arguments_ = options.filters.flatMap((filter) => ["--filter", filter]);
   const exitCode = await options.runCommand(
@@ -340,6 +343,7 @@ export async function runPublicationSetup(
       acceptedListPath,
       filters,
       sourceSha,
+      defaultBranch,
       environment,
       runCommand,
       readAcceptedPublicationArtifacts: owner.readAcceptedPublicationArtifacts,

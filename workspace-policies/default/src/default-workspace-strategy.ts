@@ -105,6 +105,7 @@ import {
   copyPreparedWorkspaceResource,
   prepareWorkspaceResources,
   prepareWorkspaceRootTemplates,
+  readPreparedWorkspaceText,
   type PreparedWorkspaceResources,
   type PreparedWorkspaceRootTemplates,
 } from "./workspace-resources.ts";
@@ -199,6 +200,8 @@ const defaultWorkspaceResourceOwner =
 const defaultWorkspaceFiles = [
   "assets/gitignore",
   "assets/agent-instructions.md",
+  "resources/oxlint.config.ts",
+  "resources/oxfmt.config.ts",
   "scripts/task-gates.ts",
 ] as const;
 
@@ -212,6 +215,8 @@ type DefaultWorkspacePreparedResources = {
     typeof prepareBuiltInDevelopmentContainerResources
   >;
   readonly workspaceFiles: PreparedWorkspaceResources;
+  readonly oxlintConfiguration: string;
+  readonly oxfmtConfiguration: string;
   readonly projectLinkManifestTruth: ReadonlyMap<
     string,
     Readonly<Record<string, unknown>>
@@ -227,16 +232,27 @@ function prepareDefaultWorkspaceResources(
   context: DefaultWorkspaceContext,
   packagePaths: readonly string[],
 ): void {
+  const workspaceFiles = prepareWorkspaceResources(
+    defaultWorkspaceFiles,
+    defaultWorkspaceResourceOwner,
+    defaultWorkspaceFiles,
+  );
   preparedResourcesByContext.set(context, {
     rootTemplates: prepareWorkspaceRootTemplates(),
     githubTemplates: prepareProjectGithubTemplates(),
     editorCustomizationDeclarations:
       prepareBuiltInEditorCustomizationDeclarations(),
     developmentContainer: prepareBuiltInDevelopmentContainerResources(),
-    workspaceFiles: prepareWorkspaceResources(
-      defaultWorkspaceFiles,
+    workspaceFiles,
+    oxlintConfiguration: readPreparedWorkspaceText(
+      workspaceFiles,
+      "resources/oxlint.config.ts",
       defaultWorkspaceResourceOwner,
-      defaultWorkspaceFiles,
+    ),
+    oxfmtConfiguration: readPreparedWorkspaceText(
+      workspaceFiles,
+      "resources/oxfmt.config.ts",
+      defaultWorkspaceResourceOwner,
     ),
     projectLinkManifestTruth: readProjectLinkManifestTruth({
       repositoryRoot: context.targetDir,
@@ -1013,28 +1029,18 @@ function projectOperations(options: {
           {
             kind: "writeText" as const,
             to: "oxlint.config.ts",
-            text:
-              "import lintConfiguration from " +
-              JSON.stringify(configuration.definition.name + "/oxlint") +
-              ";\n" +
-              'import { defineConfig } from "oxlint";\n\n' +
-              "export default defineConfig({\n" +
-              "  extends: [lintConfiguration],\n" +
-              '  categories: { correctness: "error", suspicious: "warn" },\n' +
-              "});\n",
+            text: prepared.oxlintConfiguration.replace(
+              '"@ykdz/reference-tooling-config/oxlint"',
+              JSON.stringify(`${configuration.definition.name}/oxlint`),
+            ),
           },
           {
             kind: "writeText" as const,
             to: "oxfmt.config.ts",
-            text:
-              "import formatterConfiguration from " +
-              JSON.stringify(configuration.definition.name + "/oxfmt") +
-              ";\n" +
-              'import { defineConfig } from "oxfmt";\n\n' +
-              "export default defineConfig({\n" +
-              "  ...formatterConfiguration,\n" +
-              "  sortImports: true,\n" +
-              "});\n",
+            text: prepared.oxfmtConfiguration.replace(
+              '"@ykdz/reference-tooling-config/oxfmt"',
+              JSON.stringify(`${configuration.definition.name}/oxfmt`),
+            ),
           },
         ]),
     editorExtensions,

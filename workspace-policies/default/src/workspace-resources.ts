@@ -25,6 +25,25 @@ export function readWorkspaceJson(file: string): Record<string, unknown> {
   }
 }
 
+/** 工作区策略在 prepare 阶段读取已登记的原生文本资源。 */
+export function readPreparedWorkspaceText(
+  resources: PreparedWorkspaceResources,
+  file: string,
+  owner: string,
+): string {
+  const resource = resources.get(file);
+  if (resource === undefined) {
+    throw new Error(`${owner} prepare 阶段缺少工作区资源：${file}`);
+  }
+  try {
+    return readFileSync(resourcePath(resource.from), "utf8");
+  } catch (error) {
+    throw new Error(`${owner} prepare 阶段无法读取工作区资源：${file}`, {
+      cause: error,
+    });
+  }
+}
+
 export type PreparedWorkspaceResource = {
   /** 仅供工作区 owner 识别已准备的公开资源，不含物理路径。 */
   readonly path: string;
