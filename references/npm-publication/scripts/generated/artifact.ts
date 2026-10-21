@@ -189,22 +189,21 @@ async function main(): Promise<void> {
         }),
   };
   const preparedTargets: PreparedArtifactBatchTarget[] = [];
-  for (const project of projects) {
-    const prepared = await pnpm(
-      [
-        "exec",
-        "turbo",
-        "run",
-        "publication:prepare",
-        "--filter",
-        project.name,
-        "--output-logs=full",
-      ],
-      { cwd: workspaceRoot, env: prepareEnv },
-    );
-    process.stdout.write(prepared.stdout);
-    process.stderr.write(prepared.stderr);
+  const prepared = await pnpm(
+    [
+      "exec",
+      "turbo",
+      "run",
+      "publication:prepare",
+      ...projects.flatMap((project) => ["--filter", project.name]),
+      "--output-logs=full",
+    ],
+    { cwd: workspaceRoot, env: prepareEnv },
+  );
+  process.stdout.write(prepared.stdout);
+  process.stderr.write(prepared.stderr);
 
+  for (const project of projects) {
     process.chdir(project.path);
     try {
       const target = await publicationTarget(prepareEnv);

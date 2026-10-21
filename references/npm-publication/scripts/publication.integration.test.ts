@@ -92,6 +92,7 @@ async function makeBatchPackage(
     readonly consumerExpectations?: Readonly<Record<string, string>>;
     readonly prepareCommand?: string;
     readonly postinstallCommand?: string;
+    readonly buildCommand?: string;
   },
 ): Promise<void> {
   await writeFile(
@@ -107,6 +108,9 @@ async function makeBatchPackage(
           prepack: "node lifecycle.mjs prepack",
           postinstall:
             options.postinstallCommand ?? "node lifecycle.mjs postinstall",
+          ...(options.buildCommand === undefined
+            ? {}
+            : { build: options.buildCommand }),
           "publication:consume": "node consume.mjs",
           ...(options.prepareCommand === undefined
             ? {}
@@ -192,7 +196,7 @@ async function makePublicationCommandShims(options: {
       `const command = ${JSON.stringify(command)};`,
       "const arguments_ = process.argv.slice(2);",
       'const write = command === "npm" && arguments_.includes("publish") || command === "pnpm" && arguments_.includes("publish") || command === "gh" && arguments_[0] === "release" && arguments_[1] === "create";',
-      "appendFileSync(process.env.NPM_PUBLICATION_EXTERNAL_WRITE_LOG, `${JSON.stringify({ command, arguments: arguments_, write })}${String.fromCharCode(10)}`);",
+      "if (process.env.NPM_PUBLICATION_EXTERNAL_WRITE_LOG) appendFileSync(process.env.NPM_PUBLICATION_EXTERNAL_WRITE_LOG, `${JSON.stringify({ command, arguments: arguments_, write })}${String.fromCharCode(10)}`);",
       "if (write) process.exit(97);",
       `const result = spawnSync(${JSON.stringify(realCommand)}, arguments_, { stdio: "inherit", env: process.env });`,
       "if (result.error) throw result.error;",
@@ -231,7 +235,11 @@ async function linkPublicationOwner(workspaceRoot: string): Promise<void> {
   );
 }
 
-async function makeTurboWorkspace(workspaceRoot: string): Promise<void> {
+async function makeTurboWorkspace(
+  workspaceRoot: string,
+  options: { readonly buildGraph?: boolean } = {},
+): Promise<void> {
+  const buildGraph = options.buildGraph ?? false;
   await writeFile(
     path.join(workspaceRoot, "turbo.json"),
     `${JSON.stringify(
@@ -239,7 +247,7 @@ async function makeTurboWorkspace(workspaceRoot: string): Promise<void> {
         $schema: "https://turbo.build/schema.json",
         tasks: {
           "publication:prepare": {
-            dependsOn: [],
+            dependsOn: buildGraph ? ["build"] : [],
             cache: false,
             outputs: [],
             passThroughEnv: [
@@ -250,6 +258,16 @@ async function makeTurboWorkspace(workspaceRoot: string): Promise<void> {
               "NPM_PUBLICATION_EVENT_LOG",
             ],
           },
+          ...(buildGraph
+            ? {
+                build: {
+                  dependsOn: ["^build"],
+                  cache: false,
+                  outputs: [],
+                  passThroughEnv: ["NPM_PUBLICATION_EVENT_LOG"],
+                },
+              }
+            : {}),
         },
       },
       null,
@@ -976,12 +994,13 @@ void describe("共享 npm 制品准备", () => {
         2,
       )}\n`,
     );
-    await makeTurboWorkspace(workspace);
+    await makeTurboWorkspace(workspace, { buildGraph: true });
     await makeBatchPackage(baseRoot, {
       name: "@example/batch-base",
       version: "2.4.0",
       value: "base",
       prepareCommand,
+      buildCommand: "node lifecycle.mjs build",
     });
     await makeBatchPackage(dependentRoot, {
       name: "@example/batch-dependent",
@@ -990,6 +1009,7 @@ void describe("共享 npm 制品准备", () => {
       dependencies: { "@example/batch-base": "workspace:^" },
       consumerExpectations: { "@example/batch-base": "base" },
       prepareCommand,
+      buildCommand: "node lifecycle.mjs build",
     });
     await makeBatchPackage(unselectedRoot, {
       name: "@example/not-selected-package",
@@ -1100,7 +1120,9 @@ void describe("共享 npm 制品准备", () => {
       assert.deepEqual(
         events.toSorted(),
         [
+          "base:build",
           "base:prepack",
+          "dependent:build",
           "dependent:prepack",
           "base:postinstall",
           "dependent:postinstall",
@@ -1108,6 +1130,14 @@ void describe("共享 npm 制品准备", () => {
           "dependent:consume",
         ].toSorted(),
         `${result.stdout}\n${JSON.stringify(events)}`,
+      );
+      assert.ok(
+        events.filter((event) => event === "base:build").length === 1,
+        "一次原生 Turbo 图应只构建所选依赖包一次",
+      );
+      assert.ok(
+        events.filter((event) => event === "dependent:build").length === 1,
+        "一次原生 Turbo 图应只构建所选目标一次",
       );
       assert.ok(
         events.indexOf("base:prepack") < events.indexOf("dependent:prepack"),
@@ -1260,7 +1290,7 @@ void describe("共享 npm 制品准备", () => {
       );
       assert.deepEqual(
         (await readFile(singleEventLog, "utf8")).trim().split("\n"),
-        ["base:prepack", "base:postinstall", "base:consume"],
+        ["base:build", "base:prepack", "base:postinstall", "base:consume"],
       );
     } finally {
       await rm(workspace, { recursive: true, force: true });
