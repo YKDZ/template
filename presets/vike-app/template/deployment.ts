@@ -18,10 +18,12 @@ import type {
   RootResourceOperation,
   SharedRootContribution,
 } from "@ykdz/template-workspace/shared-root-files";
+import { parseDocument } from "yaml";
 
 const deploymentDirectory = fileURLToPath(
   new URL("../resources/deployment/", import.meta.url),
 );
+const buildxStepPath = path.join(deploymentDirectory, "setup-buildx-step.yml");
 const checkerPath = fileURLToPath(
   new URL("../scripts/check-standalone-deployment.ts", import.meta.url),
 );
@@ -53,6 +55,7 @@ export const vikeDeploymentResources = [
     0o755,
   ),
   packageResource("scripts/check-standalone-deployment.ts", checkerPath),
+  packageResource("resources/deployment/setup-buildx-step.yml", buildxStepPath),
 ] as const satisfies readonly NativeContentArtifactResource[];
 
 const rootFiles = {
@@ -61,6 +64,34 @@ const rootFiles = {
   containerEntrypoint: vikeDeploymentResources[2],
   checker: vikeDeploymentResources[3],
 } as const;
+
+function readBuildxStep(): Readonly<Record<string, unknown>> & {
+  readonly id: string;
+} {
+  const document = parseDocument(readFileSync(buildxStepPath, "utf8"));
+  if (document.errors.length > 0 || document.warnings.length > 0) {
+    throw new Error(
+      `Vike 部署步骤 YAML 无效：${[...document.errors, ...document.warnings].map((error) => error.message).join("；")}`,
+    );
+  }
+  const value = document.toJS();
+  const id =
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>).id
+      : undefined;
+  if (
+    id === undefined ||
+    typeof id !== "string" ||
+    document.get("uses", true) === undefined
+  ) {
+    throw new Error("Vike Docker Buildx 步骤资源必须是带 uses 的 YAML 对象。");
+  }
+  return {
+    ...(value as Record<string, unknown>),
+    id,
+    uses: document.get("uses", true),
+  };
+}
 
 function copyResource(
   resource: NativeContentArtifactResource,
@@ -347,13 +378,7 @@ export function projectVikeDeploymentContribution(options: {
     ciSteps: [
       {
         before: "run-heavy-check",
-        steps: [
-          {
-            id: "prepare-deployment",
-            name: "Set up Docker Buildx",
-            uses: "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1",
-          },
-        ],
+        steps: [readBuildxStep()],
       },
     ],
     environmentNeeds: {
