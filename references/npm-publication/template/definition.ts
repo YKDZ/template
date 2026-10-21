@@ -3,13 +3,19 @@ import { defineReferencePackage } from "@ykdz/template-workspace/reference-packa
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-npm-publication",
   resolve: (specifier) => import.meta.resolve(specifier),
-  resourceRoot: new URL("../scripts/", import.meta.url),
+  resourceRoot: new URL("../", import.meta.url),
   alias: "npm-publication",
   instance: "shared",
   defaultLeafName: "npm-publication",
   defaultPath: "tools/npm-publication",
   role: "shared-library",
-  resources: ["publication.ts", "generated"],
+  resources: [
+    "scripts",
+    "template",
+    "tsconfig.json",
+    "tsconfig.template.json",
+    "turbo.json",
+  ],
   template: {
     dependencies: [
       {
@@ -17,7 +23,8 @@ export const referencePackage = defineReferencePackage({
         purpose: "template-execution",
       },
     ],
-    scripts: [],
+    scripts: ["build:template"],
+    resources: ["template", "tsconfig.template.json"],
   },
   environmentNeeds: [],
   foundation: {

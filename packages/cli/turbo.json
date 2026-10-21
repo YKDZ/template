@@ -57,7 +57,18 @@
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false,
-      "passThroughEnv": ["PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY"]
+      "passThroughEnv": [
+        "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
+        "TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR"
+      ]
+    },
+    "publication:verify": {
+      "dependsOn": [],
+      "tags": ["work:preparation"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
     },
     "prepack": {
       "dependsOn": [],

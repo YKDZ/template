@@ -6,11 +6,19 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { publicationPackagePath as packagePath } from "./configuration.ts";
+import { PublicationFailure } from "./failure.ts";
 import {
-  acceptDownloadedPublicationArtifact,
-  type AcceptedPublicationArtifact,
-  PublicationFailure,
-} from "./handoff.ts";
+  readPackageReleaseNotes,
+  readAcceptedRemoteArtifact,
+  type AcceptedRemoteArtifact,
+} from "./remote-context.ts";
+
+type AcceptedReleaseArtifact = AcceptedRemoteArtifact & {
+  readonly releaseNotes: string;
+};
+type ReleaseArtifact = AcceptedReleaseArtifact & {
+  readonly checksumPath: string;
+};
 
 type ProcessResult = {
   readonly exitCode: number;
@@ -347,19 +355,19 @@ async function taggedRelease(options: {
 
 async function assertReleaseIdentity(options: {
   readonly release: RemoteRelease;
-  readonly artifact: AcceptedPublicationArtifact;
+  readonly artifact: ReleaseArtifact;
   readonly tag: string;
   readonly draft: boolean;
   readonly identityFailure: string;
   readonly assetCountFailure: string;
 }): Promise<readonly RemoteAsset[]> {
-  const checksum = await readFile(options.artifact.checksum).catch(() =>
+  const checksum = await readFile(options.artifact.checksumPath).catch(() =>
     fail("release-artifact-invalid"),
   );
   const expected = [
     {
-      name: path.basename(options.artifact.tgz),
-      size: options.artifact.receipt.artifact.size,
+      name: options.artifact.artifactName,
+      size: options.artifact.size,
     },
     { name: "SHA512SUMS", size: checksum.byteLength },
   ];
@@ -372,8 +380,7 @@ async function assertReleaseIdentity(options: {
   if (
     options.release.tag !== options.tag ||
     options.release.title !== options.tag ||
-    options.release.body !==
-      options.artifact.receipt.publication.releaseNotes ||
+    options.release.body !== options.artifact.releaseNotes ||
     options.release.draft !== options.draft
   ) {
     fail(options.identityFailure);
@@ -397,11 +404,11 @@ async function verifyAssetBytes(options: {
   readonly run: NonNullable<ImmutableGithubReleaseOptions["run"]>;
   readonly repositoryRoot: string;
   readonly context: ReleaseContext;
-  readonly artifact: AcceptedPublicationArtifact;
+  readonly artifact: ReleaseArtifact;
   readonly assets: readonly RemoteAsset[];
   readonly temporaryDirectory: string;
 }): Promise<void> {
-  const expected = new Set([path.basename(options.artifact.tgz), "SHA512SUMS"]);
+  const expected = new Set([options.artifact.artifactName, "SHA512SUMS"]);
   const downloaded = new Map<string, string>();
   for (const asset of options.assets) {
     if (!expected.has(asset.name)) fail("release-asset-conflict");
@@ -424,17 +431,17 @@ async function verifyAssetBytes(options: {
     if (result.exitCode !== 0) fail("release-asset-conflict");
     downloaded.set(asset.name, destination);
   }
-  const tgz = downloaded.get(path.basename(options.artifact.tgz));
+  const tgz = downloaded.get(options.artifact.artifactName);
   const checksum = downloaded.get("SHA512SUMS");
   if (tgz === undefined || checksum === undefined)
     fail("release-asset-conflict");
   const [downloadedTgz, downloadedChecksum, localChecksum] = await Promise.all([
     readFile(tgz),
     readFile(checksum),
-    readFile(options.artifact.checksum),
+    readFile(options.artifact.checksumPath),
   ]).catch(() => fail("release-asset-conflict"));
   if (
-    downloadedTgz.byteLength !== options.artifact.receipt.artifact.size ||
+    downloadedTgz.byteLength !== options.artifact.size ||
     createHash("sha512").update(downloadedTgz).digest("hex") !==
       options.artifact.sha512 ||
     !downloadedChecksum.equals(localChecksum)
@@ -498,7 +505,7 @@ async function createDraft(options: {
   readonly run: NonNullable<ImmutableGithubReleaseOptions["run"]>;
   readonly repositoryRoot: string;
   readonly context: ReleaseContext;
-  readonly artifact: AcceptedPublicationArtifact;
+  readonly artifact: ReleaseArtifact;
   readonly tag: string;
   readonly notesPath: string;
 }): Promise<void> {
@@ -508,8 +515,8 @@ async function createDraft(options: {
       "release",
       "create",
       options.tag,
-      options.artifact.tgz,
-      options.artifact.checksum,
+      options.artifact.artifactPath,
+      options.artifact.checksumPath,
       "--draft",
       "--verify-tag",
       "--title",
@@ -533,35 +540,25 @@ async function publishDraft(options: {
   if (result.exitCode !== 0) fail("release-write-failed");
 }
 
-async function verifyAttestations(options: {
-  readonly run: NonNullable<ImmutableGithubReleaseOptions["run"]>;
-  readonly repositoryRoot: string;
-  readonly context: ReleaseContext;
-  readonly artifact: AcceptedPublicationArtifact;
-  readonly tag: string;
-}): Promise<void> {
-  for (const arguments_ of [
-    ["release", "verify", options.tag],
-    ["release", "verify-asset", options.tag, options.artifact.tgz],
-    ["release", "verify-asset", options.tag, options.artifact.checksum],
-  ] as const) {
-    const result = await gh({ ...options, arguments_ });
-    if (result.exitCode !== 0) fail("release-attestation-invalid");
-  }
-}
-
 async function acceptedArtifact(options: {
   readonly repositoryRoot: string;
   readonly artifactDirectory: string;
   readonly repository: string;
-}): Promise<AcceptedPublicationArtifact> {
+}): Promise<AcceptedReleaseArtifact> {
   try {
-    return await acceptDownloadedPublicationArtifact({
-      repositoryRoot: options.repositoryRoot,
-      packagePath,
+    const packageRoot = path.join(options.repositoryRoot, packagePath);
+    const accepted = await readAcceptedRemoteArtifact({
+      packageRoot,
       artifactDirectory: options.artifactDirectory,
       githubRepository: options.repository,
     });
+    return {
+      ...accepted,
+      releaseNotes: await readPackageReleaseNotes({
+        packageRoot,
+        packageVersion: accepted.packageVersion,
+      }),
+    };
   } catch {
     fail("release-artifact-invalid");
   }
@@ -610,7 +607,7 @@ export async function runImmutableGithubRelease(
     artifactDirectory: options.artifactDirectory,
     repository: context.repository,
   });
-  const tag = `v${artifact.receipt.packedManifest.version}`;
+  const tag = `v${artifact.artifactVersion}`;
   const annotation = `npm artifact SHA-512: ${artifact.sha512}`;
   const run = options.run ?? defaultRun;
   await assertCheckoutHead({
@@ -622,11 +619,19 @@ export async function runImmutableGithubRelease(
     path.join(tmpdir(), "npm-github-release-"),
   ).catch(() => fail("release-remote-unavailable"));
   const removeSignalCleanup = installSignalCleanup(temporaryDirectory);
+  const releaseArtifact: ReleaseArtifact = {
+    ...artifact,
+    checksumPath: path.join(temporaryDirectory, "SHA512SUMS"),
+  };
   let completed = false;
   try {
+    await writeFile(
+      releaseArtifact.checksumPath,
+      artifact.checksumContent,
+    ).catch(() => fail("release-write-failed"));
     const notesPath = path.join(temporaryDirectory, "notes.md");
-    await writeFile(notesPath, artifact.receipt.publication.releaseNotes).catch(
-      () => fail("release-write-failed"),
+    await writeFile(notesPath, artifact.releaseNotes).catch(() =>
+      fail("release-write-failed"),
     );
     let alreadyImmutable = false;
     const remoteTag = await tagReference({
@@ -663,7 +668,7 @@ export async function runImmutableGithubRelease(
         run,
         repositoryRoot: options.repositoryRoot,
         context,
-        artifact,
+        artifact: releaseArtifact,
         tag,
         notesPath,
       });
@@ -682,18 +687,11 @@ export async function runImmutableGithubRelease(
           fail("release-immutability-unproven");
         await assertReleaseIdentity({
           release: remoteRelease,
-          artifact,
+          artifact: releaseArtifact,
           tag,
           draft: false,
           identityFailure: "release-asset-conflict",
           assetCountFailure: "release-incomplete-conflict",
-        });
-        await verifyAttestations({
-          run,
-          repositoryRoot: options.repositoryRoot,
-          context,
-          artifact,
-          tag,
         });
         alreadyImmutable = true;
       }
@@ -708,7 +706,7 @@ export async function runImmutableGithubRelease(
       });
       const draftAssets = await assertReleaseIdentity({
         release: draft,
-        artifact,
+        artifact: releaseArtifact,
         tag,
         draft: true,
         identityFailure:
@@ -724,7 +722,7 @@ export async function runImmutableGithubRelease(
         run,
         repositoryRoot: options.repositoryRoot,
         context,
-        artifact,
+        artifact: releaseArtifact,
         assets: draftAssets,
         temporaryDirectory,
       });
@@ -750,7 +748,7 @@ export async function runImmutableGithubRelease(
       if (published.draft) fail("release-write-failed");
       await assertReleaseIdentity({
         release: published,
-        artifact,
+        artifact: releaseArtifact,
         tag,
         draft: false,
         identityFailure: "release-write-failed",
@@ -764,13 +762,6 @@ export async function runImmutableGithubRelease(
         context,
         tag,
         annotation,
-      });
-      await verifyAttestations({
-        run,
-        repositoryRoot: options.repositoryRoot,
-        context,
-        artifact,
-        tag,
       });
     }
     completed = true;

@@ -1,7 +1,5 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const workerPidFile = process.env.TEMPLATE_ROOT_TEST_WORKER_PID_FILE;
@@ -15,9 +13,12 @@ type AcceptedArtifact = {
   readonly packageName: string;
   readonly artifactVersion: string;
   readonly sha512: string;
+  readonly receiptPath: string;
 };
 
-const outputDirectory = process.env.TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR;
+const outputDirectory =
+  process.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY ??
+  process.env.TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR;
 const stdout: string[] = [];
 const child = spawn(
   "pnpm",
@@ -57,23 +58,16 @@ if (exitCode !== 0) {
     reportLine.slice("NPM_PUBLICATION_ACCEPTED_JSON:".length),
   ) as AcceptedArtifact;
   if (outputDirectory !== undefined && outputDirectory.length > 0) {
-    await rm(outputDirectory, { recursive: true, force: true });
-    await mkdir(outputDirectory, { recursive: true });
-    const archiveName = path.basename(accepted.artifactPath);
-    const outputArchive = path.join(outputDirectory, archiveName);
-    await cp(accepted.artifactPath, outputArchive);
-    const digest = createHash("sha512")
-      .update(await readFile(outputArchive))
-      .digest("hex");
-    if (digest !== accepted.sha512) {
+    const directory = path.resolve(outputDirectory);
+    if (
+      path.dirname(path.resolve(accepted.artifactPath)) !== directory ||
+      path.resolve(accepted.receiptPath) !==
+        path.join(directory, "publication-preparation.json")
+    ) {
       throw new Error(
-        `验收后保留的 CLI 原件字节身份不一致：${accepted.sha512} != ${digest}`,
+        "CLI 正式验收未使用指定目录中的共享原件与同一份 receipt。",
       );
     }
-    await writeFile(
-      path.join(outputDirectory, "SHA512SUMS"),
-      `${digest}  ${archiveName}\n`,
-    );
   }
   console.log(
     `根任务消费同一正式原件：${accepted.packageName}@${accepted.artifactVersion}`,

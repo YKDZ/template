@@ -80,10 +80,10 @@
       "cache": false,
       "tags": ["work:on-demand"]
     },
-    "publication:prepare": {
+    "//#publication:prepare": {
       "cache": false,
       "dependsOn": [],
-      "inputs": ["$TURBO_DEFAULT$"],
+      "inputs": [],
       "outputs": [],
       "passThroughEnv": ["PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY"],
       "tags": ["work:preparation"]

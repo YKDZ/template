@@ -12,8 +12,6 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "scripts/**/*.ts",
-    "publication/**/*.ts",
-    "publication-setup/**/*.ts",
     "resources/deployment/**/*.ts",
     "resources/joint-e2e/**/*.ts",
     "*.config.ts"

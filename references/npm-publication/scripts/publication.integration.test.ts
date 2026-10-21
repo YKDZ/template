@@ -8,6 +8,7 @@ import {
   acceptArtifact,
   inspectTarget,
   prepareArtifact,
+  readAcceptedArtifact,
   readPreparedArtifact,
 } from "./publication.ts";
 
@@ -18,6 +19,7 @@ async function makePackage(root: string): Promise<void> {
       {
         name: "@example/lifecycle-package",
         version: "1.2.3-beta.1+build.2",
+        code: "consumer-metadata",
         type: "module",
         exports: "./index.mjs",
         files: ["index.mjs", "lifecycle.mjs", "consume.mjs"],
@@ -85,6 +87,13 @@ void describe("shared npm artifact preparation", () => {
       if (prepared.kind !== "prepared") throw new Error("共享制品准备被阻断");
       assert.equal(prepared.packageVersion, "1.2.3-beta.1+build.2");
       assert.equal(prepared.artifactVersion, "1.2.3-beta.1");
+      await assert.rejects(
+        readAcceptedArtifact({
+          packageRoot,
+          artifactDirectory: outputDirectory,
+        }),
+        /消费验收尚未通过/u,
+      );
 
       await writeFile(
         path.join(packageRoot, "package.json"),
@@ -109,6 +118,15 @@ void describe("shared npm artifact preparation", () => {
       if (accepted.kind !== "accepted") throw new Error("共享制品验收被阻断");
       assert.equal(accepted.sha512, prepared.sha512);
       assert.equal(accepted.artifactVersion, prepared.artifactVersion);
+      const acceptedArtifact = await readAcceptedArtifact({
+        packageRoot,
+        artifactDirectory: outputDirectory,
+      });
+      assert.equal(acceptedArtifact.kind, "prepared");
+      if (acceptedArtifact.kind !== "prepared") {
+        throw new Error("已验收共享制品回执读取被阻断");
+      }
+      assert.equal(acceptedArtifact.sha512, prepared.sha512);
       const receipt = JSON.parse(
         await readFile(
           path.join(outputDirectory, "publication-preparation.json"),
@@ -189,6 +207,27 @@ void describe("shared npm artifact preparation", () => {
           item.code === "publication-package-version-invalid" &&
           item.target === packageRoot &&
           item.nextAction.includes("SemVer"),
+      ),
+    );
+
+    await writeFile(
+      path.join(packageRoot, "package.json"),
+      '{"name":"JSONStream","version":"1.3.5","scripts":{"publication:consume":"node consume.mjs"}}\n',
+    );
+    const legacyName = await inspectTarget({ packageRoot });
+    assert.equal(legacyName.kind, "ready");
+
+    await writeFile(
+      path.join(packageRoot, "package.json"),
+      '{"name":"%%%","version":"1.3.5","scripts":{"publication:consume":"node consume.mjs"}}\n',
+    );
+    const invalidName = await inspectTarget({ packageRoot });
+    assert.equal(invalidName.kind, "blocked");
+    assert.ok(
+      invalidName.blockers.some(
+        (item) =>
+          item.field === "package.json#/name" &&
+          item.code === "publication-package-name-invalid",
       ),
     );
 

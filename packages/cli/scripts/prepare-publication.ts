@@ -10,12 +10,14 @@ import {
 import { execa } from "execa";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
-const outputDirectory = path.resolve(
+const outputDirectoryOverride =
   process.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY ??
+  process.env.TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR;
+const outputDirectory = path.resolve(
+  outputDirectoryOverride ??
     path.join(packageRoot, "node_modules/.cache/npm-publication"),
 );
-const temporaryOutput =
-  process.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY === undefined;
+const temporaryOutput = outputDirectoryOverride === undefined;
 
 if (temporaryOutput) {
   await rm(outputDirectory, { recursive: true, force: true });

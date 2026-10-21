@@ -825,6 +825,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
       '@ykdz/reference-rust-bin':
         specifier: workspace:*
         version: link:../../references/rust-bin
@@ -1635,6 +1638,9 @@ importers:
       '@types/spdx-expression-parse':
         specifier: 'catalog:'
         version: 4.0.0
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config

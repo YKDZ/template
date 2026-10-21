@@ -890,7 +890,6 @@ function projectOperations(options: {
     linkPlan,
   });
   const cliPublication = projectCliPublication({
-    packages: options.packages,
     contributions,
     resources: prepared.cliPublication,
     referencePackage: options.cliPublicationReference,

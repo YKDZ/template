@@ -202,7 +202,7 @@ cleanup_artifact_best_effort() {
   cleanup_artifact_root >/dev/null 2>&1 || :
 }
 trap cleanup_artifact_best_effort EXIT HUP INT TERM
-if [ "$debug" = true ]; then printf 'COMMAND %s\n' "verifyNpmPublicationArtifact [temporary output]"; fi
+if [ "$debug" = true ]; then printf 'COMMAND node --conditions=source %s artifact\n' "$script_dir/bridge.ts"; fi
 artifact_result=$(REPOSITORY_ROOT="$repository_root" ARTIFACT_OUTPUT_DIRECTORY="$artifact_root" node --conditions=source "$script_dir/bridge.ts" artifact)
 artifact_status=$?
 if [ "$artifact_status" -ne 0 ]; then

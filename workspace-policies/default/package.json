@@ -6,13 +6,13 @@
     "dist",
     "assets",
     "scripts",
-    "publication",
     "publication-setup",
     "resources"
   ],
   "type": "module",
   "imports": {
-    "#npm-publication/*": "./publication/*.ts"
+    "#npm-publication/*": "./scripts/npm-publication/*.ts",
+    "#shared-publication": "@ykdz/reference-npm-publication"
   },
   "exports": {
     "./dependency-catalog": {
@@ -20,7 +20,7 @@
       "types": "./dist/dependency-catalog.d.ts",
       "default": "./dist/dependency-catalog.js"
     },
-    "./publication/*": "./publication/*.ts",
+    "./npm-publication/*": "./scripts/npm-publication/*.ts",
     "./task-gates": "./scripts/task-gates.ts",
     "./project-github": {
       "source": "./src/project-github.ts",
@@ -140,6 +140,7 @@
     "@types/node": "catalog:",
     "@types/semver": "catalog:",
     "@types/spdx-expression-parse": "catalog:",
+    "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/reference-ts-cli": "link:../../references/ts-cli",
     "oxfmt": "catalog:",

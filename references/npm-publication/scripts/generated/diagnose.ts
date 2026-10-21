@@ -1,6 +1,7 @@
 import { inspectTarget } from "../publication.ts";
+import { publicationTarget } from "./target.ts";
 
-const packageRoot = process.cwd();
+const { packageRoot } = await publicationTarget();
 const result = await inspectTarget({ packageRoot });
 if (process.argv.includes("--json")) {
   console.log(JSON.stringify(result));

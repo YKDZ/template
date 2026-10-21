@@ -1,13 +1,7 @@
-import path from "node:path";
-
 import { prepareArtifact } from "../publication.ts";
+import { publicationTarget } from "./target.ts";
 
-const packageRoot = process.cwd();
-const configuredDirectory = process.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY;
-const outputDirectory =
-  configuredDirectory === undefined
-    ? path.join(packageRoot, ".publication-artifacts")
-    : path.resolve(configuredDirectory);
+const { packageRoot, outputDirectory } = await publicationTarget();
 const result = await prepareArtifact({
   packageRoot,
   outputDirectory,
@@ -22,6 +16,8 @@ if (result.kind === "blocked") {
   }
   process.exitCode = 1;
 } else {
+  process.stdout.write(result.pack.stdout);
+  process.stderr.write(result.pack.stderr);
   console.log(`npm 制品：${result.artifactPath}`);
   console.log(`源清单版本：${result.packageVersion}`);
   console.log(`归档身份：${result.packageName}@${result.artifactVersion}`);

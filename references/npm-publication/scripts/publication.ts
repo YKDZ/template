@@ -20,6 +20,7 @@ import * as tar from "tar";
 
 type NpmNameValidation = {
   readonly validForNewPackages: boolean;
+  readonly validForOldPackages?: boolean;
   readonly errors?: readonly string[];
   readonly warnings?: readonly string[];
 };
@@ -117,6 +118,7 @@ export type ReadPreparedArtifactResult =
       readonly packageVersion: string;
       readonly artifactVersion: string;
       readonly sha512: string;
+      readonly packedManifest: PublicationManifest;
       readonly receipt: PublicationPreparationReceipt;
     }
   | {
@@ -163,12 +165,6 @@ function blocker(options: PublicationBlocker): PublicationBlocker {
   return options;
 }
 
-function isPublicationBlocker(
-  value: PublicationManifest | PublicationBlocker,
-): value is PublicationBlocker {
-  return typeof (value as PublicationBlocker).code === "string";
-}
-
 function objectValue(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -177,34 +173,43 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
 
 async function packageManifest(
   packageRoot: string,
-): Promise<PublicationManifest | PublicationBlocker> {
+): Promise<
+  | { readonly kind: "parsed"; readonly manifest: PublicationManifest }
+  | { readonly kind: "blocked"; readonly blocker: PublicationBlocker }
+> {
   const manifestPath = path.join(packageRoot, packageManifestName);
   let raw: string;
   try {
     raw = await readFile(manifestPath, "utf8");
   } catch (error) {
-    return blocker({
-      code: "publication-manifest-missing",
-      target: packageRoot,
-      field: packageManifestName,
-      observed: error instanceof Error ? error.message : String(error),
-      expected: `可读取的 ${packageManifestName}`,
-      nextAction: `在 ${packageRoot} 创建有效的 ${packageManifestName}，声明 npm 包名称、版本及消费验收命令。`,
-    });
+    return {
+      kind: "blocked",
+      blocker: blocker({
+        code: "publication-manifest-missing",
+        target: packageRoot,
+        field: packageManifestName,
+        observed: error instanceof Error ? error.message : String(error),
+        expected: `可读取的 ${packageManifestName}`,
+        nextAction: `在 ${packageRoot} 创建有效的 ${packageManifestName}，声明 npm 包名称、版本及消费验收命令。`,
+      }),
+    };
   }
   try {
     const manifest = objectValue(JSON.parse(raw));
     if (manifest === undefined) throw new Error("根值不是 JSON 对象");
-    return manifest;
+    return { kind: "parsed", manifest };
   } catch (error) {
-    return blocker({
-      code: "publication-manifest-invalid",
-      target: packageRoot,
-      field: packageManifestName,
-      observed: error instanceof Error ? error.message : String(error),
-      expected: "有效的 npm package.json JSON 对象",
-      nextAction: `修复 ${manifestPath} 的 JSON 语法后重新运行发布诊断。`,
-    });
+    return {
+      kind: "blocked",
+      blocker: blocker({
+        code: "publication-manifest-invalid",
+        target: packageRoot,
+        field: packageManifestName,
+        observed: error instanceof Error ? error.message : String(error),
+        expected: "有效的 npm package.json JSON 对象",
+        nextAction: `修复 ${manifestPath} 的 JSON 语法后重新运行发布诊断。`,
+      }),
+    };
   }
 }
 
@@ -301,11 +306,11 @@ async function packedManifest(
   }
 }
 
-async function verifyArtifactIdentity(options: {
+async function verifiedPackedManifest(options: {
   readonly artifactPath: string;
   readonly packageName: string;
   readonly packageVersion: string;
-}): Promise<string> {
+}): Promise<PublicationManifest> {
   const manifest = await packedManifest(options.artifactPath);
   const packedVersion = parseSemver(options.packageVersion)?.version;
   if (
@@ -316,6 +321,15 @@ async function verifyArtifactIdentity(options: {
       `npm tgz 身份与目标不一致：目标 ${options.packageName}@${options.packageVersion}；制品 ${String(manifest.name)}@${String(manifest.version)}。npm pack 会移除版本 build metadata；其余 name、prerelease 和版本坐标必须匹配。修正目标 package.json 或打包 adapter。`,
     );
   }
+  return manifest;
+}
+
+async function verifyArtifactIdentity(options: {
+  readonly artifactPath: string;
+  readonly packageName: string;
+  readonly packageVersion: string;
+}): Promise<string> {
+  const manifest = await verifiedPackedManifest(options);
   return manifest.version as string;
 }
 
@@ -449,11 +463,12 @@ export async function readPreparedArtifact(options: {
       `共享制品回执与原始 tgz 字节不一致：${artifactPath}。保留的原件已变化。`,
     );
   }
-  const artifactVersion = await verifyArtifactIdentity({
+  const packedManifest = await verifiedPackedManifest({
     artifactPath,
     packageName: inspection.packageName,
     packageVersion: inspection.packageVersion,
   });
+  const artifactVersion = packedManifest.version as string;
   if (artifact.version !== artifactVersion) {
     throw new Error(
       `共享制品回执与原始 tgz 身份不一致：${artifactPath}。保留的 npm 身份已变化。`,
@@ -467,8 +482,33 @@ export async function readPreparedArtifact(options: {
     packageVersion: inspection.packageVersion,
     artifactVersion,
     sha512,
+    packedManifest,
     receipt: value as unknown as PublicationPreparationReceipt,
   };
+}
+
+/** 重读已消费验收的原件；外部写入方必须使用此入口。 */
+export async function readAcceptedArtifact(options: {
+  readonly packageRoot: string;
+  readonly artifactDirectory?: string;
+  readonly artifactPath?: string;
+}): Promise<ReadPreparedArtifactResult> {
+  const prepared = await readPreparedArtifact(options);
+  if (prepared.kind === "blocked") return prepared;
+  const acceptance = prepared.receipt.acceptance;
+  if (
+    acceptance === undefined ||
+    acceptance.packageName !== prepared.packageName ||
+    acceptance.artifactVersion !== prepared.artifactVersion ||
+    acceptance.sha512 !== prepared.sha512 ||
+    acceptance.installation !== "passed" ||
+    acceptance.consumption !== "passed"
+  ) {
+    throw new Error(
+      `共享制品消费验收尚未通过或与原件不一致：${prepared.receiptPath}。先通过正式安装和包自有消费命令验收，再执行外部写入。`,
+    );
+  }
+  return prepared;
 }
 
 /** 检查 npm 目标本身需要的身份、版本与包自有消费验收命令。 */
@@ -476,10 +516,15 @@ export async function inspectTarget(options: {
   readonly packageRoot: string;
 }): Promise<PublicationInspection> {
   const packageRoot = path.resolve(options.packageRoot);
-  const parsed = await packageManifest(packageRoot);
-  if (isPublicationBlocker(parsed)) {
-    return { kind: "blocked", packageRoot, blockers: [parsed] };
+  const manifestResult = await packageManifest(packageRoot);
+  if (manifestResult.kind === "blocked") {
+    return {
+      kind: "blocked",
+      packageRoot,
+      blockers: [manifestResult.blocker],
+    };
   }
+  const parsed = manifestResult.manifest;
 
   const blockers: PublicationBlocker[] = [];
   const name = parsed.name;
@@ -487,13 +532,16 @@ export async function inspectTarget(options: {
     typeof name === "string"
       ? validateNpmPackageName(name)
       : { validForNewPackages: false };
-  if (!nameValidation.validForNewPackages) {
+  if (
+    !nameValidation.validForNewPackages &&
+    !nameValidation.validForOldPackages
+  ) {
     blockers.push({
       code: "publication-package-name-invalid",
       target: packageRoot,
       field: `${packageManifestName}#/name`,
       observed: `${String(name)}${nameValidation.errors?.length ? `（${nameValidation.errors.join("；")}）` : ""}`,
-      expected: "npm 接受的新包名称",
+      expected: "npm 接受的现有或新包名称",
       nextAction: `按 npm 包名规则修正 ${path.join(packageRoot, packageManifestName)} 的 name 字段。`,
     });
   }

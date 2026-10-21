@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const consumerRoot = process.env.NPM_PUBLICATION_CONSUMER_ROOT;
 const packageName = process.env.NPM_PUBLICATION_PACKAGE_NAME;
@@ -26,20 +27,26 @@ if (bin === undefined) {
   throw new Error(`${packageName} 没有可执行入口，不能完成 CLI 自有消费验收。`);
 }
 
-for (const argument of ["--help", "--version"]) {
-  const result = spawnSync(
-    process.execPath,
-    [path.join(installedPackageRoot, bin), argument],
-    { cwd: consumerRoot, encoding: "utf8" },
+const packageRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
+const journeyRunner = path.join(packageRoot, "test/e2e/run-journeys.ts");
+const packed = spawnSync(
+  process.execPath,
+  [
+    "--conditions=source",
+    "--experimental-strip-types",
+    journeyRunner,
+    "packed",
+    path.resolve(installedPackageRoot, bin),
+  ],
+  { cwd: packageRoot, encoding: "utf8" },
+);
+if (packed.error !== undefined || packed.status !== 0) {
+  throw new Error(
+    `已安装 ${packageName} 的 CLI 消费旅程失败：退出状态 ${String(packed.status)}；${packed.stderr || packed.stdout || packed.error?.message || "无诊断"}`,
   );
-  if (result.error !== undefined || result.status !== 0) {
-    throw new Error(
-      `已安装 ${packageName} ${argument} 失败：退出状态 ${String(result.status)}；${result.stderr || result.stdout || result.error?.message || "无诊断"}`,
-    );
-  }
-  if (result.stdout.trim().length === 0) {
-    throw new Error(`已安装 ${packageName} ${argument} 没有输出。`);
-  }
 }
 
-console.log(`已安装 ${packageName} 的命令行入口可正常消费。`);
+console.log(packed.stdout.trim());

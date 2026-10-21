@@ -1,35 +1,31 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { acceptArtifact } from "@ykdz/reference-npm-publication";
+import {
+  acceptArtifact,
+  readPreparedArtifact,
+} from "@ykdz/reference-npm-publication";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const explicitArtifact = process.env.TEMPLATE_PUBLICATION_ARTIFACT_PATH;
-const outputDirectory = path.resolve(
+const outputDirectoryOverride =
   process.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY ??
+  process.env.TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR;
+const outputDirectory = path.resolve(
+  outputDirectoryOverride ??
     path.join(packageRoot, "node_modules/.cache/npm-publication"),
 );
 
 async function preparedArtifactPath(): Promise<string> {
   if (explicitArtifact !== undefined) return path.resolve(explicitArtifact);
-  const receiptPath = path.join(
-    outputDirectory,
-    "publication-preparation.json",
-  );
-  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as unknown;
-  if (
-    typeof receipt !== "object" ||
-    receipt === null ||
-    !("artifact" in receipt) ||
-    typeof receipt.artifact !== "object" ||
-    receipt.artifact === null ||
-    !("path" in receipt.artifact) ||
-    typeof receipt.artifact.path !== "string"
-  ) {
-    throw new Error(`正式 CLI 制品准备记录格式无效：${receiptPath}`);
+  const prepared = await readPreparedArtifact({
+    packageRoot,
+    artifactDirectory: outputDirectory,
+  });
+  if (prepared.kind === "blocked") {
+    throw new Error("正式 CLI 制品尚不满足共享发布目标配置。");
   }
-  return path.join(outputDirectory, receipt.artifact.path);
+  return prepared.artifactPath;
 }
 
 const artifactPath = await preparedArtifactPath();
@@ -54,6 +50,7 @@ if (accepted.kind === "blocked") {
       packageName: accepted.packageName,
       artifactVersion: accepted.artifactVersion,
       sha512: accepted.sha512,
+      receiptPath: accepted.receiptPath,
     })}`,
   );
 }
