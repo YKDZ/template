@@ -5,6 +5,7 @@ import {
   definePreset,
   presetOwnerFromManifest,
   type PresetProjectOptions,
+  type PresetUpdateOptions,
 } from "@ykdz/template-core/preset-definition";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import { defineNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
@@ -16,6 +17,7 @@ import presetPackage from "../package.json" with { type: "json" };
 import {
   projectVikeDeploymentContribution,
   vikeDeploymentResources,
+  validateVikePackageTruth,
 } from "./deployment.ts";
 
 const owner = presetOwnerFromManifest(presetPackage, "./template");
@@ -48,8 +50,20 @@ export const preset = defineNativeContentArtifact(
     operations: ["init"],
     nodes,
     owner,
+    validateUpdate({
+      targetRoot,
+      contributions,
+      nodeInstances,
+    }: PresetUpdateOptions<GenerationContext, PackageContribution>) {
+      validateVikePackageTruth({
+        targetRoot,
+        contributions,
+        application: requireNode(nodeInstances, "web"),
+        database: requireNode(nodeInstances, "database"),
+        migrations: requireNode(nodeInstances, "migrations"),
+      });
+    },
     project({
-      context,
       contributions,
       nodeInstances,
     }: PresetProjectOptions<GenerationContext, PackageContribution>) {
@@ -58,7 +72,6 @@ export const preset = defineNativeContentArtifact(
       const migrationPackage = requireNode(nodeInstances, "migrations");
       const deployment: SharedRootContribution =
         projectVikeDeploymentContribution({
-          context,
           contributions,
           application,
           database: databasePackage,
