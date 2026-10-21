@@ -49,8 +49,9 @@ export function projectPublicationTarget(options: {
   readonly contribution: PackageContribution;
   readonly configuration: unknown;
   readonly bindings: ReadonlyMap<string, PackageDefinition> | undefined;
+  readonly buildTask?: string;
 }): PackageContribution {
-  const { contribution } = options;
+  const { contribution, buildTask } = options;
   const scripts = {
     ...(contribution.manifest.scripts as Record<string, string>),
   };
@@ -67,6 +68,9 @@ export function projectPublicationTarget(options: {
       `node --import ${tool.name}/publish-target --eval '' --`;
     scripts["publication:remote:release"] =
       `node --import ${tool.name}/release-target --eval '' --`;
+    if (buildTask !== undefined) {
+      scripts.prepack = `node --import ${tool.name}/prepack-build --eval '' -- ${JSON.stringify(buildTask)}`;
+    }
   } else {
     delete scripts["publication:prepare"];
     delete scripts["publication:consume"];
@@ -106,6 +110,7 @@ export function projectPublicationTarget(options: {
           if (name.startsWith("publication:")) delete tasks[name];
         if (enabled) {
           tasks["publication:prepare"] = {
+            ...(buildTask === undefined ? {} : { dependsOn: [buildTask] }),
             tags: ["work:preparation"],
             cache: false,
             passThroughEnv: [
@@ -114,6 +119,9 @@ export function projectPublicationTarget(options: {
               "PUBLICATION_REPOSITORY_ROOT",
               "PUBLICATION_SOURCE_SHA",
               "GITHUB_DEFAULT_BRANCH",
+              ...(buildTask === undefined
+                ? []
+                : ["NPM_PUBLICATION_PREBUILT_TARGETS"]),
             ],
           };
           tasks["publication:consume"] = {

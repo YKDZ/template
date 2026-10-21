@@ -19,10 +19,12 @@ import { fileURLToPath } from "node:url";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
 
+import { runPublicationSetup } from "../../scripts/setup/first-release.ts";
 import { projectPublicationTarget } from "../../template/target.ts";
-import { runPublicationSetup } from "./first-release.ts";
 
-const entry = fileURLToPath(new URL("./first-release.ts", import.meta.url));
+const entry = fileURLToPath(
+  new URL("../../scripts/setup/first-release.ts", import.meta.url),
+);
 const ownerPackage = fileURLToPath(new URL("../../", import.meta.url));
 
 async function executableInPath(name: string): Promise<string> {

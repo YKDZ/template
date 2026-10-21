@@ -510,6 +510,10 @@ void it("已有内部实例正式开启发布保持身份和定制，第二实�
   )!;
   const manifestPath = path.join(targetRoot, "packages/cli/package.json");
   const customized = JSON.parse(await readFile(manifestPath, "utf8"));
+  assert.equal(
+    customized.scripts.prepack,
+    "pnpm exec turbo run build --filter=.",
+  );
   customized.scripts.notes = "echo 维护者的命令";
   customized.description = "维护者的包说明";
   await writeFile(manifestPath, JSON.stringify(customized));
@@ -551,6 +555,19 @@ void it("已有内部实例正式开启发布保持身份和定制，第二实�
   assert.equal(actual.devDependencies["@demo/npm-publication"], "workspace:*");
   assert.equal(actual.description, "维护者的包说明");
   assert.equal(actual.scripts.notes, "echo 维护者的命令");
+  assert.equal(
+    actual.scripts.prepack,
+    "node --import @demo/npm-publication/prepack-build --eval '' -- \"build\"",
+  );
+  const cliTurbo = JSON.parse(
+    await readFile(path.join(targetRoot, "packages/cli/turbo.json"), "utf8"),
+  );
+  assert.deepEqual(cliTurbo.tasks["publication:prepare"].dependsOn, ["build"]);
+  assert.ok(
+    cliTurbo.tasks["publication:prepare"].passThroughEnv.includes(
+      "NPM_PUBLICATION_PREBUILT_TARGETS",
+    ),
+  );
   const added = await generator().add({
     repositoryRoot: targetRoot,
     contentIdentity: library.identity,
@@ -561,6 +578,16 @@ void it("已有内部实例正式开启发布保持身份和定制，第二实�
   const later = added.generationRecord.packages.find(
     (record) => record.creationInput?.leafName === "later",
   )!;
+  const laterDefinition = added.blueprint.packages.find(
+    (item) => item.packageDefinitionId === later.packageDefinitionId,
+  )!;
+  const laterManifestPath = path.join(
+    targetRoot,
+    laterDefinition.path,
+    "package.json",
+  );
+  const internalLibrary = JSON.parse(await readFile(laterManifestPath, "utf8"));
+  assert.equal(internalLibrary.scripts.prepack, "pnpm run build");
   const second = await generator().configure({
     repositoryRoot: targetRoot,
     packageDefinitionId: later.packageDefinitionId,
@@ -568,6 +595,22 @@ void it("已有内部实例正式开启发布保持身份和定制，第二实�
   });
   assert.equal(second.status, "success", JSON.stringify(second));
   if (second.status !== "success") return;
+  const publishedLibrary = JSON.parse(
+    await readFile(laterManifestPath, "utf8"),
+  );
+  assert.equal(
+    publishedLibrary.scripts.prepack,
+    "node --import @demo/npm-publication/prepack-build --eval '' -- \"build\"",
+  );
+  const libraryTurbo = JSON.parse(
+    await readFile(
+      path.join(targetRoot, laterDefinition.path, "turbo.json"),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(libraryTurbo.tasks["publication:prepare"].dependsOn, [
+    "build",
+  ]);
   assert.equal(
     second.generationRecord.packages.filter(
       (record) =>
