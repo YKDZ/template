@@ -98,7 +98,6 @@ import {
   createWorkspaceRootManifest,
   packageConditionKeyOrder,
   packageManifestKeyOrder,
-  projectToolchainMirrorManifest,
   projectPreparedWorkspaceRoot,
   type WorkspaceRootInsertion,
 } from "./root-projection.ts";
@@ -211,7 +210,6 @@ const defaultWorkspaceResourceOwner =
 const defaultWorkspaceFiles = [
   "assets/gitignore",
   "assets/agent-instructions.md",
-  "scripts/check-toolchain-versions.ts",
   "scripts/task-gates.ts",
   "scripts/run-turbo-boundaries.ts",
 ] as const;
@@ -1174,12 +1172,6 @@ function projectOperations(options: {
       "AGENTS.md",
     ),
     rootProjection.turbo,
-    workspaceFile(
-      prepared.workspaceFiles,
-      "scripts/check-toolchain-versions.ts",
-      "scripts/check-toolchain-versions.ts",
-    ),
-    projectToolchainMirrorManifest(reconciliation),
     workspaceFile(
       prepared.workspaceFiles,
       "scripts/task-gates.ts",
