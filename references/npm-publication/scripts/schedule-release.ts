@@ -5,7 +5,7 @@ import path from "node:path";
 
 import {
   readAcceptedPublicationArtifacts,
-  validateAcceptedPublicationArtifacts,
+  validateRemotePublicationTargets,
 } from "./accepted-artifacts.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -34,7 +34,7 @@ for (const artifact of artifacts) {
 if (ready.length === 0) {
   process.stdout.write("没有 npm 已就绪的目标需要创建 GitHub Release。\n");
 } else {
-  await validateAcceptedPublicationArtifacts(ready);
+  await validateRemotePublicationTargets(ready, "publication:remote:release");
   const filters = ready.flatMap((artifact) => [
     "--filter",
     artifact.packageName,

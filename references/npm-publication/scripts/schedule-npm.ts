@@ -4,7 +4,7 @@ import path from "node:path";
 
 import {
   readAcceptedPublicationArtifacts,
-  validateAcceptedPublicationArtifacts,
+  validateRemotePublicationTargets,
 } from "./accepted-artifacts.ts";
 
 const repositoryRoot = path.resolve(
@@ -14,7 +14,7 @@ const artifacts = await readAcceptedPublicationArtifacts({
   repositoryRoot,
   environment: process.env,
 });
-await validateAcceptedPublicationArtifacts(artifacts);
+await validateRemotePublicationTargets(artifacts, "publication:remote:npm");
 const filters = artifacts.flatMap((artifact) => [
   "--filter",
   artifact.packageName,
