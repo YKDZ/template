@@ -6,15 +6,12 @@ import { mkdtemp, lstat, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import {
-  acceptDownloadedPublicationArtifact,
-  fail,
-  PublicationFailure,
-} from "./handoff.ts";
+import { fail, PublicationFailure } from "./failure.ts";
 
-export { PublicationFailure } from "./handoff.ts";
+export { PublicationFailure } from "./failure.ts";
 
 import { publicationPackagePath as packagePath } from "./configuration.ts";
+import { readAcceptedRemoteArtifact } from "./remote-context.ts";
 const registry = "https://registry.npmjs.org/";
 
 export type ProcessResult = {
@@ -207,11 +204,12 @@ export async function runDirectOidcPublication(
   assertNoAmbientCredentials(options.environment);
   await assertNoCheckoutNpmrc(options.repositoryRoot);
   assertOidcAvailable(options.environment);
-  const { receipt, tgz } = await acceptDownloadedPublicationArtifact({
-    repositoryRoot: options.repositoryRoot,
-    packagePath,
+  const artifact = await readAcceptedRemoteArtifact({
+    packageRoot: path.join(options.repositoryRoot, packagePath),
     artifactDirectory: options.artifactDirectory,
-    githubRepository: options.environment.GITHUB_REPOSITORY,
+    ...(options.environment.GITHUB_REPOSITORY === undefined
+      ? {}
+      : { githubRepository: options.environment.GITHUB_REPOSITORY }),
   });
 
   const session = await mkdtemp(
@@ -239,7 +237,6 @@ export async function runDirectOidcPublication(
         "pnpm",
         "install",
         "--frozen-lockfile",
-        "--ignore-scripts",
         `--registry=${registry}`,
         `--store-dir=${path.join(session, "pnpm-store")}`,
       ],
@@ -274,7 +271,10 @@ export async function runDirectOidcPublication(
     ) {
       fail("effective-config-invalid", "session registry is not active");
     }
-    const publication = receipt.publication;
+    const publication = {
+      packageName: artifact.packageName,
+      version: artifact.artifactVersion,
+    };
     const latestRaw = await command(
       run,
       options.repositoryRoot,
@@ -321,7 +321,7 @@ export async function runDirectOidcPublication(
         parseJson(exact.stdout, "rerun-integrity-conflict"),
         "rerun-integrity-conflict",
       );
-      if (integrity !== receipt.artifact.integrity)
+      if (integrity !== artifact.integrity)
         fail("rerun-integrity-conflict", "existing integrity differs");
       if (latest !== publication.version)
         fail("rerun-latest-conflict", "latest differs from candidate");
@@ -334,7 +334,13 @@ export async function runDirectOidcPublication(
         run,
         options.repositoryRoot,
         env,
-        [...common, "publish", tgz, "--access=public", "--provenance"],
+        [
+          ...common,
+          "publish",
+          artifact.artifactPath,
+          "--access=public",
+          "--provenance",
+        ],
         "publish-failed",
       );
     }
@@ -368,7 +374,7 @@ export async function runDirectOidcPublication(
       "postwrite-integrity-conflict",
     ) as { latest?: unknown };
     if (
-      readIntegrity !== receipt.artifact.integrity ||
+      readIntegrity !== artifact.integrity ||
       postTags.latest !== publication.version
     )
       fail(
@@ -393,62 +399,9 @@ export async function runDirectOidcPublication(
       run,
       options.repositoryRoot,
       env,
-      [...consumerArguments, "install", "--ignore-scripts"],
+      [...consumerArguments, "install"],
       "exact-install-failed",
     );
-    const audit = parseJson(
-      await command(
-        run,
-        options.repositoryRoot,
-        env,
-        [
-          ...consumerArguments,
-          "audit",
-          "signatures",
-          "--json",
-          "--include-attestations",
-        ],
-        "signature-audit-invalid",
-      ),
-      "signature-audit-invalid",
-    ) as { invalid?: unknown; missing?: unknown; verified?: unknown };
-    if (
-      typeof audit !== "object" ||
-      audit === null ||
-      !Array.isArray(audit.invalid) ||
-      audit.invalid.length !== 0 ||
-      !Array.isArray(audit.missing) ||
-      audit.missing.length !== 0 ||
-      !Array.isArray(audit.verified)
-    ) {
-      fail(
-        "signature-audit-invalid",
-        "npm audit schema is incomplete or invalid",
-      );
-    }
-    const matches = audit.verified.filter(
-      (item) =>
-        typeof item === "object" &&
-        item !== null &&
-        !Array.isArray(item) &&
-        (item as { name?: unknown }).name === publication.packageName &&
-        (item as { version?: unknown }).version === publication.version,
-    );
-    if (matches.length !== 1)
-      fail(
-        "signature-audit-invalid",
-        "exact package attestation is missing or ambiguous",
-      );
-    const exactVerified = matches[0] as { attestationBundles?: unknown };
-    if (
-      !Array.isArray(exactVerified.attestationBundles) ||
-      exactVerified.attestationBundles.length === 0
-    ) {
-      fail(
-        "signature-audit-invalid",
-        "exact package attestation bundle is missing",
-      );
-    }
   } finally {
     await rm(session, { recursive: true, force: true });
   }

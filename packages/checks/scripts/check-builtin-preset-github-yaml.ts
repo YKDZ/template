@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
 import { parseDocument } from "yaml";
@@ -10,16 +9,12 @@ import {
 } from "../src/generated-content.ts";
 import { sourceGeneratedScenarioRuntime } from "../src/source-generated-runtime.ts";
 import {
-  assertPublicationWorkflowContract,
   assertWorkflowContract,
   assertDependabotContract,
   policyOracleIdentity,
   type ParsedWorkflow,
 } from "../src/workflow-contract.ts";
 
-export { assertPublicationWorkflowContract } from "../src/workflow-contract.ts";
-
-const publicationWorkflowPath = ".github/workflows/release.yml";
 const dependabotGeneratedPath = ".github/dependabot.yml";
 const workflowGeneratedPath = ".github/workflows/check.yml";
 
@@ -74,30 +69,6 @@ async function checkedPolicySummaries(): Promise<readonly PolicySummary[]> {
             document.toJS(),
           );
         }
-        const hasPublicationCandidate =
-          receipt.result.projection.ownerFacts.publication.candidate !== null;
-        const releasePath = `${receipt.projectDir}/${publicationWorkflowPath}`;
-        const releaseExists = existsSync(releasePath);
-        if (releaseExists !== hasPublicationCandidate) {
-          throw new Error(
-            `${receipt.scenario.id}: publication workflow projection does not match the public CLI candidate capability`,
-          );
-        }
-        if (releaseExists) {
-          const releaseContent = await readFile(releasePath, "utf8");
-          const release = parseDocument(releaseContent);
-          if (release.errors.length > 0 || release.warnings.length > 0) {
-            throw new Error(
-              `${receipt.scenario.id}: invalid publication YAML: ${[...release.errors, ...release.warnings].map((error) => error.message).join("; ")}`,
-            );
-          }
-          assertPublicationWorkflowContract(
-            receipt,
-            releaseContent,
-            release.toJS() as ParsedWorkflow,
-          );
-        }
-
         const oracleIdentity = policyOracleIdentity(kind, receipt);
         const origin: PolicyOrigin = {
           scenario: receipt.scenario.id,

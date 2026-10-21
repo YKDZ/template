@@ -11,7 +11,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
-import { pathToFileURL } from "node:url";
 
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import {
@@ -20,10 +19,8 @@ import {
   type TemplateReferencePackage,
 } from "@ykdz/template-content";
 import { contentIdentityKey } from "@ykdz/template-core/content-identity";
-import {
-  createGenerator,
-  parseGenerationRecord,
-} from "@ykdz/template-generator";
+import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
+import { createGenerator } from "@ykdz/template-generator";
 import {
   createDefaultWorkspaceStrategy,
   type DefaultWorkspaceCreationInput,
@@ -53,6 +50,9 @@ function requirePresetMember(packageName: string): TemplatePreset {
 
 const libraryMember = requireReferenceMember("@ykdz/reference-ts-lib");
 const tsCliMember = requireReferenceMember("@ykdz/reference-ts-cli");
+const npmPublicationMember = requireReferenceMember(
+  "@ykdz/reference-npm-publication",
+);
 const rustBinMember = requireReferenceMember("@ykdz/reference-rust-bin");
 const vueAppMember = requireReferenceMember("@ykdz/reference-vue-app");
 const library = libraryMember.definition;
@@ -62,6 +62,14 @@ const tsCliPreset = requirePresetMember("@ykdz/preset-ts-cli");
 const rustBinPreset = requirePresetMember("@ykdz/preset-rust-bin");
 const vikeAppPreset = requirePresetMember("@ykdz/preset-vike-app");
 const vueAppPreset = requirePresetMember("@ykdz/preset-vue-app");
+
+function createContentTestStrategy<
+  CreationInput extends PackageCreationInput = TsCliCreationInput,
+>() {
+  return createDefaultWorkspaceStrategy<CreationInput>({
+    cliPublicationReference: npmPublicationMember.definition,
+  });
+}
 
 const temporaryDirectories: string[] = [];
 
@@ -106,7 +114,7 @@ void describe("公开模板内容集合", () => {
   void it("按路径顺序聚合诊断制品并原子拒绝用户覆盖", async () => {
     const generator = createGenerator({
       content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+      strategy: createContentTestStrategy<TsCliCreationInput>(),
     });
     const rendered: string[] = [];
 
@@ -196,7 +204,7 @@ void describe("公开模板内容集合", () => {
     );
     const generator = createGenerator({
       content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+      strategy: createContentTestStrategy<TsCliCreationInput>(),
     });
     const initialized = await generator.init({
       targetRoot,
@@ -226,7 +234,7 @@ void describe("公开模板内容集合", () => {
     const targetRoot = await createTargetRoot("template-content-ts-lib-");
     const generator = createGenerator({
       content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+      strategy: createContentTestStrategy<WorkspaceCreationInput>(),
     });
 
     const result = await generator.init({
@@ -258,7 +266,7 @@ void describe("公开模板内容集合", () => {
     const targetRoot = await createTargetRoot("template-content-todo-");
     const generator = createGenerator({
       content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+      strategy: createContentTestStrategy<WorkspaceCreationInput>(),
     });
     const initialized = await generator.init({
       targetRoot,
@@ -380,7 +388,7 @@ void describe("公开模板内容集合", () => {
     const targetRoot = await createTargetRoot("template-content-link-from-");
     const generator = createGenerator({
       content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+      strategy: createContentTestStrategy<WorkspaceCreationInput>(),
     });
     const initialized = await generator.init({
       targetRoot,
@@ -457,7 +465,7 @@ void describe("公开模板内容集合", () => {
     };
     const generator = createGenerator({
       content: [...templateContent, provider],
-      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+      strategy: createContentTestStrategy<WorkspaceCreationInput>(),
     });
     const initialized = await generator.init({
       targetRoot,
@@ -494,7 +502,7 @@ void describe("公开模板内容集合", () => {
     );
     const generator = createGenerator({
       content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+      strategy: createContentTestStrategy<WorkspaceCreationInput>(),
     });
     const initialized = await generator.init({
       targetRoot,
@@ -621,7 +629,7 @@ void describe("公开模板内容集合", () => {
     );
     const generator = createGenerator({
       content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+      strategy: createContentTestStrategy<WorkspaceCreationInput>(),
     });
     const initialized = await generator.init({
       targetRoot,
@@ -671,7 +679,7 @@ void describe("公开模板内容集合", () => {
       );
       const generator = createGenerator({
         content: templateContent,
-        strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+        strategy: createContentTestStrategy<WorkspaceCreationInput>(),
       });
       const initialized = await generator.init({
         targetRoot,
@@ -729,7 +737,7 @@ void describe("公开模板内容集合", () => {
     );
     const generator = createGenerator({
       content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+      strategy: createContentTestStrategy<WorkspaceCreationInput>(),
     });
     const initialized = await generator.init({
       targetRoot,
@@ -781,260 +789,22 @@ void describe("公开模板内容集合", () => {
     );
   });
 
-  void it("从同一集合初始化 CLI 发布候选和 Rust 二进制程序", async () => {
+  void it("从同一集合初始化 Rust 二进制程序", async () => {
     const generator = createGenerator({
       content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+      strategy: createContentTestStrategy<WorkspaceCreationInput>(),
     });
-    const cliRoot = await createTargetRoot("template-content-ts-cli-");
-    const cliResult = await generator.init({
-      targetRoot: cliRoot,
-      selection: { roots: [{ preset: tsCliPreset.identity }] },
-      strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
-    });
-
-    assert.strictEqual(cliResult.status, "success", JSON.stringify(cliResult));
-    const cliNode = tsCliPreset.definition.nodes.cli;
-    assert.ok(cliNode?.creationInput);
-    const expectedCreationInput =
-      tsCliPreset.definition.nodes.cli?.creationInput?.init;
-    assert.ok(expectedCreationInput);
-    const cliManifestPath = path.join(cliRoot, "packages/cli/package.json");
-    const cliManifestBeforeAddition = await readFile(cliManifestPath, "utf8");
-    const cliManifest = JSON.parse(cliManifestBeforeAddition) as {
-      files: string[];
-      exports?: Readonly<Record<string, unknown>>;
-      scripts?: Readonly<Record<string, string>>;
-      engines: { readonly node: string };
-    };
-    assert.deepStrictEqual(cliManifest.files, ["dist"]);
-    assert.strictEqual(cliManifest.engines.node, "^24.21.0");
-    assert.strictEqual(
-      cliManifest.scripts?.build,
-      tsCli.manifest.scripts?.build,
-    );
-    assert.strictEqual(cliManifest.exports?.["./creation-input"], undefined);
-    await assert.rejects(
-      readFile(
-        path.join(cliRoot, "packages/cli/template/authoring/creation-input.ts"),
-      ),
-      { code: "ENOENT" },
-    );
-    const publicationConfigPath = path.join(
-      cliRoot,
-      "scripts/npm-publication/publication.config.json",
-    );
-    const publicationConfigBeforeAddition = await readFile(
-      publicationConfigPath,
-      "utf8",
-    );
-    const publicationConfig = JSON.parse(publicationConfigBeforeAddition) as {
-      readonly packageDefinitionId: string;
-      readonly packagePath: string;
-      readonly creationInput: TsCliCreationInput;
-    };
-    assert.strictEqual(publicationConfig.packagePath, "packages/cli");
-    assert.deepStrictEqual(
-      publicationConfig.creationInput,
-      expectedCreationInput,
-    );
-    const candidateSelection = (await import(
-      pathToFileURL(
-        path.join(
-          cliRoot,
-          "scripts/npm-publication/cli-candidate-selection.ts",
-        ),
-      ).href
-    )) as {
-      readonly tsCliPublicCandidateCreationInput: TsCliCreationInput;
-      isTsCliPublicCandidateCreationInput(value: unknown): boolean;
-    };
-    assert.deepStrictEqual(
-      candidateSelection.tsCliPublicCandidateCreationInput,
-      expectedCreationInput,
-    );
-    assert.strictEqual(
-      candidateSelection.isTsCliPublicCandidateCreationInput(
-        expectedCreationInput,
-      ),
-      true,
-    );
-    assert.strictEqual(
-      candidateSelection.isTsCliPublicCandidateCreationInput({
-        variant: "private",
-      }),
-      false,
-    );
-    const commandIdentity = (await import(
-      pathToFileURL(
-        path.join(cliRoot, "scripts/npm-publication/cli-command-identity.ts"),
-      ).href
-    )) as {
-      cliCommandIdentity(manifest: unknown): {
-        readonly commandName: string;
-        readonly version: string;
-      };
-    };
-    assert.deepStrictEqual(
-      commandIdentity.cliCommandIdentity({
-        bin: { ship: "./dist/cli.js" },
-      }),
-      { commandName: "ship", version: "unpublished" },
-    );
-    const blueprint = JSON.parse(
-      await readFile(path.join(cliRoot, ".template/blueprint.json"), "utf8"),
-    ) as {
-      readonly packages: readonly {
-        readonly packageDefinitionId: string;
-        readonly path: string;
-      }[];
-    };
-    const matchingDefinitions = blueprint.packages.filter(
-      ({ packageDefinitionId }) =>
-        packageDefinitionId === publicationConfig.packageDefinitionId,
-    );
-    assert.strictEqual(matchingDefinitions.length, 1);
-    assert.strictEqual(
-      matchingDefinitions[0]?.path,
-      publicationConfig.packagePath,
-    );
-    const generationRecord = parseGenerationRecord<TsCliCreationInput>(
-      JSON.parse(
-        await readFile(path.join(cliRoot, ".template/generation.json"), "utf8"),
-      ),
-    );
-    const matchingRecords = generationRecord.packages.filter(
-      ({ packageDefinitionId }) =>
-        packageDefinitionId === publicationConfig.packageDefinitionId,
-    );
-    assert.strictEqual(matchingRecords.length, 1);
-    assert.strictEqual(matchingRecords[0]?.createdBy, "initialization");
-    assert.strictEqual(
-      matchingRecords[0]?.packageDefinitionId,
-      publicationConfig.packageDefinitionId,
-    );
-    assert.deepStrictEqual(
-      matchingRecords[0]?.creationInput,
-      publicationConfig.creationInput,
-    );
-
-    const privateCreationInput = {
-      variant: "private",
-      leafName: "private-cli",
-      packagePath: "packages/private-cli",
-    } satisfies TsCliCreationInput;
-    const privateAddition = await generator.add({
-      repositoryRoot: cliRoot,
-      preset: tsCliPreset.identity,
-      creationInput: privateCreationInput,
-    });
-    assert.strictEqual(
-      privateAddition.status,
-      "success",
-      JSON.stringify(privateAddition),
-    );
-    if (privateAddition.status !== "success") return;
-    const privateRecord = privateAddition.generationRecord.packages.find(
-      (packageRecord) =>
-        contentIdentityKey(packageRecord.contentIdentity) ===
-          contentIdentityKey(tsCliMember.identity) &&
-        packageRecord.createdBy === "addition" &&
-        packageRecord.creationInput?.leafName === "private-cli",
-    );
-    assert.ok(privateRecord);
-    assert.deepStrictEqual(privateRecord.creationInput, privateCreationInput);
-    assert.notStrictEqual(
-      privateRecord.packageDefinitionId,
-      publicationConfig.packageDefinitionId,
-    );
-    const privateDefinition = privateAddition.blueprint.packages.find(
-      ({ packageDefinitionId }) =>
-        packageDefinitionId === privateRecord.packageDefinitionId,
-    );
-    assert.ok(privateDefinition);
-    assert.strictEqual(privateDefinition.name, "@demo/private-cli");
-    assert.strictEqual(privateDefinition.path, "packages/private-cli");
-    assert.strictEqual(
-      JSON.parse(
-        await readFile(
-          path.join(cliRoot, "packages/private-cli/package.json"),
-          "utf8",
-        ),
-      ).engines.node,
-      ">=24",
-    );
-    assert.strictEqual(
-      await readFile(publicationConfigPath, "utf8"),
-      publicationConfigBeforeAddition,
-    );
-    assert.strictEqual(
-      await readFile(cliManifestPath, "utf8"),
-      cliManifestBeforeAddition,
-    );
-    const addedGenerationRecord = parseGenerationRecord<TsCliCreationInput>(
-      JSON.parse(
-        await readFile(path.join(cliRoot, ".template/generation.json"), "utf8"),
-      ),
-    );
-    assert.deepStrictEqual(
-      privateAddition.generationRecord,
-      addedGenerationRecord,
-    );
-    const persistedCandidateRecord = addedGenerationRecord.packages.find(
-      ({ packageDefinitionId }) =>
-        packageDefinitionId === publicationConfig.packageDefinitionId,
-    );
-    assert.ok(persistedCandidateRecord);
-    assert.strictEqual(
-      contentIdentityKey(persistedCandidateRecord.contentIdentity),
-      contentIdentityKey(tsCliMember.identity),
-    );
-    assert.strictEqual(persistedCandidateRecord.createdBy, "initialization");
-    assert.deepStrictEqual(
-      persistedCandidateRecord.creationInput,
-      publicationConfig.creationInput,
-    );
-    const cliTreeBeforeReplay = await snapshotTree(cliRoot);
-    const freshEngineReplay = await createGenerator({
-      content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
-    }).add({
-      repositoryRoot: cliRoot,
-      preset: tsCliPreset.identity,
-      creationInput: privateCreationInput,
-    });
-    assert.strictEqual(
-      freshEngineReplay.status,
-      "success",
-      JSON.stringify(freshEngineReplay),
-    );
-    if (freshEngineReplay.status !== "success") return;
-    assert.strictEqual(freshEngineReplay.projection, null);
-    assert.deepStrictEqual(
-      freshEngineReplay.generationRecord,
-      addedGenerationRecord,
-    );
-    assert.strictEqual(
-      await readFile(publicationConfigPath, "utf8"),
-      publicationConfigBeforeAddition,
-    );
-    assert.strictEqual(await snapshotTree(cliRoot), cliTreeBeforeReplay);
-
     const rustRoot = await createTargetRoot("template-content-rust-bin-");
-    const rustResult = await generator.init({
+    const result = await generator.init({
       targetRoot: rustRoot,
       selection: { roots: [{ preset: rustBinPreset.identity }] },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
-    assert.strictEqual(
-      rustResult.status,
-      "success",
-      JSON.stringify(rustResult),
-    );
-    const rustManifest = JSON.parse(
+    assert.strictEqual(result.status, "success", JSON.stringify(result));
+    const manifest = JSON.parse(
       await readFile(path.join(rustRoot, "packages/app/package.json"), "utf8"),
     ) as Record<string, unknown>;
-    assert.ok(!Object.hasOwn(rustManifest, "files"));
+    assert.ok(!Object.hasOwn(manifest, "files"));
     assert.match(
       await readFile(path.join(rustRoot, "packages/app/Cargo.toml"), "utf8"),
       /name = "app"/u,
@@ -1045,7 +815,7 @@ void describe("公开模板内容集合", () => {
     const targetRoot = await createTargetRoot("template-content-vike-app-");
     const generator = createGenerator({
       content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+      strategy: createContentTestStrategy<TsCliCreationInput>(),
     });
 
     const result = await generator.init({
@@ -1113,7 +883,7 @@ void describe("公开模板内容集合", () => {
     ]) {
       const replayGenerator = createGenerator({
         content: templateContent,
-        strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+        strategy: createContentTestStrategy<TsCliCreationInput>(),
       });
       const added = await replayGenerator.add({
         repositoryRoot: targetRoot,

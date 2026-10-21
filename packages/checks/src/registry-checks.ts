@@ -348,7 +348,7 @@ export async function assertGeneratedManifestPublicationPolicy(options: {
   ) as Record<string, unknown>;
   if (rootManifest.private !== true) {
     throw new Error(
-      `${options.scenarioId}: Generated Repository Node manifest package.json must remain private`,
+      `${options.scenarioId}：生成工作区根 package.json 必须保持 private:true`,
     );
   }
   if (
@@ -359,18 +359,24 @@ export async function assertGeneratedManifestPublicationPolicy(options: {
         definition.path === candidate.path,
     )
   ) {
-    throw new Error(
-      `${options.scenarioId}: public candidate must identify a generated package`,
-    );
+    throw new Error(`${options.scenarioId}：公开候选必须对应一个已生成包`);
   }
   for (const definition of options.result.blueprint.packages) {
     const manifestPath = `${definition.path}/package.json`;
     const manifest = JSON.parse(
       await readFile(path.join(options.projectDir, manifestPath), "utf8"),
     ) as Record<string, unknown>;
-    if (manifest.private !== true) {
+    const isPublicCandidate =
+      candidate !== null &&
+      definition.name === candidate.name &&
+      definition.path === candidate.path;
+    if (
+      isPublicCandidate ? manifest.private === true : manifest.private !== true
+    ) {
       throw new Error(
-        `${options.scenarioId}: Generated Repository Node manifest ${manifestPath} must remain private`,
+        isPublicCandidate
+          ? `${options.scenarioId}：公开候选 ${manifestPath} 必须允许发布`
+          : `${options.scenarioId}：非候选包 ${manifestPath} 必须保持 private:true`,
       );
     }
   }

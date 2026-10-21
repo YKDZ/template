@@ -39,6 +39,10 @@ jobs:
         with:
           node-version-file: package.json
           registry-url: https://registry.npmjs.org
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: 下载已验证的 packed 候选
         uses: actions/download-artifact@v8
@@ -50,11 +54,5 @@ jobs:
         run: |
           set -euo pipefail
           artifact_directory="$RUNNER_TEMP/verified-packed-publication"
-          archive_paths=("$artifact_directory"/*.tgz)
-          test "${#archive_paths[@]}" -eq 1
-          archive_path="${archive_paths[0]}"
-          test "$(find "$artifact_directory" -mindepth 1 -maxdepth 1 | wc -l)" -eq 2
-          test -f "$artifact_directory/SHA512SUMS"
-          test "$(wc -l < "$artifact_directory/SHA512SUMS")" -eq 1
-          (cd "$artifact_directory" && sha512sum --check --strict SHA512SUMS)
-          npm publish "$archive_path" --access public --provenance --ignore-scripts
+          archive_path="$(PUBLICATION_ARTIFACT_DIRECTORY="$artifact_directory" pnpm --filter @ykdz/template --silent run publication:verify)"
+          npm publish "$archive_path" --access public --provenance

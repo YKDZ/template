@@ -27,8 +27,10 @@ import type {
 
 import {
   assertDatabasePreparationManifestTruth,
+  applicationCiDiagnosticArtifacts,
   readDatabasePreparationManifestTruth,
   projectDependencyMaintenancePolicy,
+  applicationRootTsconfigIncludes,
   type DatabasePreparationManifestRequirement,
   type WorkspaceProjectRequirements,
 } from "./application-requirements.ts";
@@ -58,6 +60,7 @@ import {
 import {
   normalizeEnvironmentNeeds,
   type CheckEnvironmentNeed,
+  playwrightBrowserAssetsEnvironmentNeed,
   shellCheckEnvironmentNeed,
 } from "./environment-needs.ts";
 import type { GenerationContext } from "./generation-context.ts";
@@ -87,6 +90,7 @@ import type {
   DependencyMaintenancePolicy,
   DeploymentCheckRequirement,
   ProjectRequirement,
+  VueHonoJointE2eRequirement,
 } from "./project-requirements.ts";
 import type { ReferencePackage } from "./reference-package.ts";
 import {
@@ -230,8 +234,8 @@ type DefaultWorkspacePreparedResources = {
     typeof prepareBuiltInDevelopmentContainerResources
   >;
   readonly workspaceProject: PreparedWorkspaceResources;
-  readonly cliPublication: PreparedWorkspaceResources;
   readonly workspaceFiles: PreparedWorkspaceResources;
+  readonly cliPublication: PreparedWorkspaceResources;
   readonly projectLinkManifestTruth: ReadonlyMap<
     string,
     Readonly<Record<string, unknown>>
@@ -254,12 +258,12 @@ function prepareDefaultWorkspaceResources(
       prepareBuiltInEditorCustomizationDeclarations(),
     developmentContainer: prepareBuiltInDevelopmentContainerResources(),
     workspaceProject: prepareWorkspaceProjectResources(),
-    cliPublication: prepareCliPublicationResources(),
     workspaceFiles: prepareWorkspaceResources(
       defaultWorkspaceFiles,
       defaultWorkspaceResourceOwner,
       defaultWorkspaceFiles,
     ),
+    cliPublication: prepareCliPublicationResources(),
     projectLinkManifestTruth: readProjectLinkManifestTruth({
       repositoryRoot: context.targetDir,
       packagePaths,
@@ -350,6 +354,7 @@ function includeRequestedLinkFromIntents(
 
 const supportedProjectRequirementKinds = new Set([
   "package-link",
+  "vue-hono-joint-e2e",
   "sqlite-database-preparation",
   "application-container-with-database-migrations",
 ]);
@@ -649,6 +654,7 @@ function projectRequirements(
       ),
   );
   assertSupportedProjectRequirementKinds(declarations);
+  const joint = oneRequirement(declarations, "vue-hono-joint-e2e");
   const database = oneRequirement(declarations, "sqlite-database-preparation");
   const deployment = oneRequirement(
     declarations,
@@ -670,6 +676,26 @@ function projectRequirements(
     links.push({
       consumerPackagePath: consumer.path,
       providerPackagePath: provider.path,
+    });
+  }
+  const actualJoint =
+    joint === undefined
+      ? undefined
+      : ({
+          kind: joint.kind,
+          web: requireProjectPackage(blueprint, joint.web, joint.kind),
+          api: requireProjectPackage(blueprint, joint.api, joint.kind),
+        } satisfies VueHonoJointE2eRequirement);
+  if (actualJoint !== undefined) {
+    if (
+      actualJoint.web.role !== "runtime-service" ||
+      actualJoint.api.role !== "runtime-service"
+    ) {
+      throw new Error("Vue-Hono 联合验收需要 web 与 API 服务实例");
+    }
+    links.push({
+      consumerPackagePath: actualJoint.web.path,
+      providerPackagePath: actualJoint.api.path,
     });
   }
   const actualDatabase =
@@ -773,6 +799,7 @@ function projectRequirements(
         : { ...blueprint, packageLinkIntents },
     ),
     requirements: {
+      ...(actualJoint === undefined ? {} : { vueHonoJointE2e: actualJoint }),
       ...(actualDatabase === undefined
         ? {}
         : { databasePreparation: actualDatabase }),
@@ -826,6 +853,9 @@ function projectRootScripts(
           deployment:
             "node --conditions=source scripts/check-standalone-deployment.ts",
         }),
+    ...(requirements.vueHonoJointE2e === undefined
+      ? {}
+      : { "test:e2e": "playwright test" }),
   };
 }
 
@@ -835,6 +865,7 @@ function projectOperations(options: {
   readonly blueprint: ProjectBlueprint;
   readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
+  readonly cliPublicationReference: ReferencePackage | undefined;
   readonly presetProjectContributions: readonly (readonly DefaultWorkspaceProjectContribution[])[];
   readonly sharedRootContributions: readonly SharedRootContribution[];
 }): WorkspaceProjection<DefaultWorkspaceOwnerFacts> {
@@ -859,9 +890,9 @@ function projectOperations(options: {
     linkPlan,
   });
   const cliPublication = projectCliPublication({
-    packages: options.packages,
     contributions,
     resources: prepared.cliPublication,
+    referencePackage: options.cliPublicationReference,
   });
   const rustProjection = projectRustTarget({
     context,
@@ -870,6 +901,7 @@ function projectOperations(options: {
   });
   const rust = rustProjection.toolchain;
   const hasDeployment = requirements.deploymentCheck !== undefined;
+  const hasJointE2e = requirements.vueHonoJointE2e !== undefined;
   const configurations = contributions.filter(
     (contribution) =>
       contribution.foundation.workspaceConfiguration?.kind ===
@@ -886,7 +918,6 @@ function projectOperations(options: {
     "pnpm-workspace.yaml",
     "pnpm-lock.yaml",
     "*.config.ts",
-    ".pnpmfile.mjs",
     ".gitignore",
     ".dockerignore",
     "Dockerfile",
@@ -896,7 +927,7 @@ function projectOperations(options: {
     ".github",
     ".devcontainer",
     "scripts",
-    "test",
+    ...(hasJointE2e ? ["test"] : []),
   ].join(" ");
   const baseManifest = createWorkspaceRootManifest({
     name: context.repositoryName,
@@ -909,13 +940,15 @@ function projectOperations(options: {
   });
   // 基础检查命令由默认政策按实际根检查范围构造，再参与来源合成。
   const baseScripts = baseManifest.scripts as Record<string, string>;
-  baseScripts["format:check"] =
-    `oxfmt --list-different --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
-  baseScripts["format:write"] =
-    `oxfmt --write --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
-  baseScripts.lint = `${hasDeployment ? "shellcheck scripts/container-entrypoint.sh && " : ""}oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test`;
-  baseScripts["lint:fix"] =
-    "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test --fix";
+  if (hasDeployment || hasJointE2e) {
+    baseScripts["format:check"] =
+      `oxfmt --list-different --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
+    baseScripts["format:write"] =
+      `oxfmt --write --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
+    baseScripts.lint = `${hasDeployment ? "shellcheck scripts/container-entrypoint.sh && " : ""}oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts scripts${hasJointE2e ? " test" : ""}`;
+    baseScripts["lint:fix"] =
+      `oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts scripts${hasJointE2e ? " test" : ""} --fix`;
+  }
   const shared = composeSharedRootFiles({
     source: "@ykdz/template-workspace/default-workspace-strategy",
     manifest: baseManifest,
@@ -978,7 +1011,11 @@ function projectOperations(options: {
         source: "@ykdz/template-workspace/workspace-project-resources",
         manifest: {
           scripts: projectRootScripts(requirements),
+          devDependencies: hasJointE2e
+            ? { "@playwright/test": "catalog:" }
+            : {},
         },
+        typescript: { include: applicationRootTsconfigIncludes(requirements) },
         resources: projectWorkspaceProjectResources({
           requirements,
           resources: prepared.workspaceProject,
@@ -1017,13 +1054,7 @@ function projectOperations(options: {
       ...contributions.flatMap(
         (contribution) => contribution.ciDiagnosticArtifacts ?? [],
       ),
-      ...options.presetProjectContributions
-        .flat()
-        .flatMap((declaration) =>
-          declaration.kind === "shared-root-files"
-            ? (declaration.ciDiagnosticArtifacts ?? [])
-            : [],
-        ),
+      ...applicationCiDiagnosticArtifacts(requirements),
     ],
   });
   const editor = projectBuiltInEditorCustomization(
@@ -1036,7 +1067,14 @@ function projectOperations(options: {
     requirements.deploymentCheck?.environmentNeeds ?? [];
   const checkEnvironmentNeeds = [
     ...contributions.flatMap((contribution) => contribution.environmentNeeds),
-    ...shared.environmentNeeds.check,
+    ...(hasJointE2e
+      ? [
+          playwrightBrowserAssetsEnvironmentNeed({
+            browser: "chromium",
+            owner: { kind: "workspace-orchestration", path: "." },
+          }),
+        ]
+      : []),
     ...(hasDeployment
       ? [
           shellCheckEnvironmentNeed({
@@ -1106,10 +1144,7 @@ function projectOperations(options: {
   };
   const environmentNeeds = normalizeEnvironmentNeeds({
     check: checkEnvironmentNeeds as CheckEnvironmentNeed[],
-    deployment: [
-      ...deploymentEnvironmentNeeds,
-      ...shared.environmentNeeds.deployment,
-    ],
+    deployment: deploymentEnvironmentNeeds,
   });
   const dependencyMaintenance = projectDependencyMaintenancePolicy({
     contributions,
@@ -1391,6 +1426,8 @@ export function createDefaultWorkspaceStrategy<
   CreationInput extends PackageCreationInput = DefaultWorkspaceCreationInput,
 >(
   options: {
+    /** 默认 CLI 内容集合显式装配的共享发布参考包。 */
+    readonly cliPublicationReference?: ReferencePackage;
     readonly project?: (options: {
       readonly context: DefaultWorkspaceContext;
       readonly blueprint: ProjectBlueprint;
@@ -1811,6 +1848,7 @@ export function createDefaultWorkspaceStrategy<
     project(projectOptions) {
       return projectOperations({
         ...projectOptions,
+        cliPublicationReference: options.cliPublicationReference,
         sharedRootContributions: options.project?.(projectOptions) ?? [],
       });
     },

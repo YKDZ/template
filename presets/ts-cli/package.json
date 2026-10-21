@@ -32,6 +32,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-rust-bin": "workspace:*",
     "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/reference-ts-lib": "workspace:*",

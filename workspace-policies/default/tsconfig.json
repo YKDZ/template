@@ -11,10 +11,7 @@
   "include": [
     "src/**/*.ts",
     "test/**/*.ts",
-    "assets/.pnpmfile.mjs",
     "scripts/**/*.ts",
-    "publication/**/*.ts",
-    "publication-setup/**/*.ts",
     "resources/deployment/**/*.ts",
     "*.config.ts"
   ]

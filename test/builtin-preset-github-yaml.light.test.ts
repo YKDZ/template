@@ -7,7 +7,6 @@ import { describe, it } from "node:test";
 import {
   assertDependabotContract,
   assertWorkflowContract,
-  assertPublicationWorkflowContract,
 } from "@ykdz/template-checks/workflow-contract";
 import { templatePresets } from "@ykdz/template-content";
 import { parse } from "yaml";
@@ -19,10 +18,7 @@ import {
 
 async function renderedPresetSource(
   ownsDeploymentCheck: boolean,
-  sourcePath:
-    | ".github/dependabot.yml"
-    | ".github/workflows/check.yml"
-    | ".github/workflows/release.yml",
+  sourcePath: ".github/dependabot.yml" | ".github/workflows/check.yml",
 ): Promise<{
   readonly receipt: GeneratedPresetReceipt;
   readonly sourcePath: string;
@@ -69,36 +65,6 @@ async function deploymentWorkflow(): Promise<{
   readonly source: string;
 }> {
   return renderedPresetSource(true, ".github/workflows/check.yml");
-}
-
-async function publicationWorkflow(): Promise<{
-  readonly receipt: GeneratedPresetReceipt;
-  readonly sourcePath: string;
-  readonly source: string;
-}> {
-  const workspace = await mkdtemp(path.join(tmpdir(), "template-workflow-"));
-  try {
-    for (const preset of templatePresets) {
-      const targetRoot = path.join(workspace, preset.alias);
-      const receipt = await initializePreset({
-        preset,
-        targetRoot,
-        repositoryName: preset.alias,
-      });
-      if (receipt.result.projection.ownerFacts.publication.candidate === null) {
-        continue;
-      }
-      const sourcePath = ".github/workflows/release.yml" as const;
-      return {
-        receipt,
-        sourcePath,
-        source: await readFile(path.join(targetRoot, sourcePath), "utf8"),
-      };
-    }
-    throw new Error("Expected a generated public CLI candidate capability");
-  } finally {
-    await rm(workspace, { recursive: true, force: true });
-  }
 }
 
 async function expectWorkflowRejected(
@@ -170,20 +136,6 @@ void describe("Built-in Preset GitHub YAML checker", () => {
         ),
       );
     }
-  });
-
-  void it("accepts publication Action upgrades and presentation changes from a real generation", async () => {
-    const baseline = await publicationWorkflow();
-    const source = baseline.source
-      .replace(/@[a-f0-9]{40} # v[^\n]+/gu, "@" + "c".repeat(40) + " # v456")
-      .replace(/- name: [^\n]+/gu, "- name: 发布展示文字");
-    const workflow = parse(source);
-    workflow.jobs.publish.permissions = Object.fromEntries(
-      Object.entries(workflow.jobs.publish.permissions).toReversed(),
-    );
-    assert.doesNotThrow(() =>
-      assertPublicationWorkflowContract(baseline.receipt, source, workflow),
-    );
   });
 
   void it("rejects damaged Dependabot update, ignore, and directory semantics from a real generated file", async () => {

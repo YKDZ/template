@@ -16,11 +16,9 @@ const cleanupGraceMs = 60_000;
 const forcedCleanupTimeoutMs = 10_000;
 
 const testArguments = [
-  "--test",
-  "--test-concurrency=1",
-  "--test-timeout=1200000",
-  "--test-reporter=spec",
-  "scripts/packed-publication/*.integration.test.ts",
+  "--conditions=source",
+  "--experimental-strip-types",
+  "scripts/accept-packed-publication.ts",
 ];
 
 function exitStatus(
