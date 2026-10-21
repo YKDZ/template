@@ -770,9 +770,6 @@ void describe("共享 npm 制品准备", () => {
     const baseRoot = path.join(packagesRoot, "base");
     const dependentRoot = path.join(packagesRoot, "dependent");
     const unselectedRoot = path.join(packagesRoot, "unselected");
-    const generatedArtifact = fileURLToPath(
-      new URL("./generated/artifact.ts", import.meta.url),
-    );
     const prepareCommand =
       "node --conditions=source --experimental-strip-types --import @ykdz/reference-npm-publication/prepare";
 
@@ -781,7 +778,7 @@ void describe("共享 npm 制品准备", () => {
     await mkdir(unselectedRoot, { recursive: true });
     await writeFile(
       path.join(workspace, "pnpm-workspace.yaml"),
-      "packages:\n  - packages/*\n",
+      "packages:\n  - packages/*\nverifyDepsBeforeRun: false\n",
     );
     await writeFile(
       path.join(workspace, "package.json"),
@@ -790,8 +787,10 @@ void describe("共享 npm 制品准备", () => {
           name: "@example/formal-workspace",
           private: true,
           packageManager: "pnpm@12.9.1",
+          devDependencies: { turbo: "2.11.10" },
           scripts: {
-            "publication:artifact": `node --conditions=source --experimental-strip-types ${JSON.stringify(generatedArtifact)}`,
+            "publication:artifact":
+              "node --conditions=source --experimental-strip-types --import @ykdz/reference-npm-publication/artifact --eval '' --",
           },
         },
         null,
@@ -891,6 +890,7 @@ void describe("共享 npm 制品准备", () => {
           "base:consume",
           "dependent:consume",
         ].toSorted(),
+        `${result.stdout}\n${JSON.stringify(events)}`,
       );
       assert.ok(
         events.indexOf("base:prepack") < events.indexOf("dependent:prepack"),
@@ -1060,9 +1060,6 @@ void describe("共享 npm 制品准备", () => {
     const externalWriteLog = path.join(workspace, "external-writes.log");
     const consumerRoot = path.join(packagesRoot, "consumer");
     const unselectedRoot = path.join(packagesRoot, "unselected");
-    const generatedArtifact = fileURLToPath(
-      new URL("./generated/artifact.ts", import.meta.url),
-    );
     const prepareCommand =
       "node --conditions=source --experimental-strip-types --import @ykdz/reference-npm-publication/prepare";
 
@@ -1070,7 +1067,7 @@ void describe("共享 npm 制品准备", () => {
     await mkdir(unselectedRoot, { recursive: true });
     await writeFile(
       path.join(workspace, "pnpm-workspace.yaml"),
-      "packages:\n  - packages/*\n",
+      "packages:\n  - packages/*\nverifyDepsBeforeRun: false\n",
     );
     await writeFile(
       path.join(workspace, "package.json"),
@@ -1079,8 +1076,10 @@ void describe("共享 npm 制品准备", () => {
           name: "@example/missing-dependency-workspace",
           private: true,
           packageManager: "pnpm@12.9.1",
+          devDependencies: { turbo: "2.11.10" },
           scripts: {
-            "publication:artifact": `node --conditions=source --experimental-strip-types ${JSON.stringify(generatedArtifact)}`,
+            "publication:artifact":
+              "node --conditions=source --experimental-strip-types --import @ykdz/reference-npm-publication/artifact --eval '' --",
           },
         },
         null,
@@ -1150,9 +1149,11 @@ void describe("共享 npm 制品准备", () => {
         /@example\/unselected-consumer.*@example\/not-selected@\^3\.2\.0.*ENOTCACHED/isu,
       );
       assert.doesNotMatch(output, /NPM_PUBLICATION_ACCEPTED_JSON:/u);
-      assert.deepEqual((await readFile(eventLog, "utf8")).trim().split("\n"), [
-        "consumer:prepack",
-      ]);
+      assert.deepEqual(
+        (await readFile(eventLog, "utf8")).trim().split("\n"),
+        ["consumer:prepack"],
+        failure.stdout,
+      );
       const receipt = JSON.parse(
         await readFile(
           path.join(artifactRoot, "publication-preparation.json"),
