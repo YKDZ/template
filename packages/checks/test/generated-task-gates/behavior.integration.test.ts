@@ -84,6 +84,7 @@ void describe("生成任务公共入口", () => {
             "check:heavy": rootManifest.scripts["check:heavy"],
             "check:full": rootManifest.scripts["check:full"],
             fix: rootManifest.scripts.fix,
+            boundaries: rootManifest.scripts.boundaries,
           },
           {
             check: "node --conditions=source scripts/task-gates.ts check",
@@ -92,6 +93,7 @@ void describe("生成任务公共入口", () => {
             "check:full":
               "node --conditions=source scripts/task-gates.ts check:full",
             fix: "node --conditions=source scripts/task-gates.ts fix",
+            boundaries: "turbo boundaries",
           },
         );
         await writeFile(
@@ -110,6 +112,29 @@ void describe("生成任务公共入口", () => {
         environment.PATH = [path.dirname(process.execPath), environment.PATH]
           .filter((entry) => entry !== undefined)
           .join(path.delimiter);
+        const runRootCommand = (command: string) =>
+          spawnSync("pnpm", ["run", command], {
+            cwd: targetRoot,
+            encoding: "utf8",
+            env: environment,
+            maxBuffer: 16 * 1024 * 1024,
+            timeout: 180_000,
+          });
+        const assertRootCommandFailsWith = (
+          command: string,
+          diagnostic: string,
+        ) => {
+          const result = runRootCommand(command);
+          const output = `${result.stdout}\n${result.stderr}`;
+          assert.strictEqual(result.status, 1, output);
+          assert.ok(output.includes(diagnostic), output);
+        };
+        const passingBoundariesRun = runRootCommand("boundaries");
+        assert.strictEqual(
+          passingBoundariesRun.status,
+          0,
+          `${passingBoundariesRun.stdout}\n${passingBoundariesRun.stderr}`,
+        );
         const addedPackageRun = spawnSync("pnpm", ["run", "test"], {
           cwd: addedPackageRoot,
           encoding: "utf8",
@@ -134,6 +159,81 @@ void describe("生成任务公共入口", () => {
         );
 
         const packageRoot = path.join(targetRoot, "packages/lib");
+        const rootManifestPath = path.join(targetRoot, "package.json");
+        const rootTurboPath = path.join(targetRoot, "turbo.json");
+        const libraryManifestPath = path.join(packageRoot, "package.json");
+        const libraryTurboPath = path.join(packageRoot, "turbo.json");
+        type TurboTaskConfiguration = {
+          tags?: string[];
+          dependsOn?: string[];
+          [key: string]: unknown;
+        };
+        type RootManifest = {
+          scripts: Record<string, string>;
+          [key: string]: unknown;
+        };
+        type TurboManifest = {
+          tasks: Record<string, TurboTaskConfiguration>;
+          [key: string]: unknown;
+        };
+        const originalRootManifest = JSON.parse(
+          await readFile(rootManifestPath, "utf8"),
+        ) as RootManifest;
+        const originalRootTurbo = JSON.parse(
+          await readFile(rootTurboPath, "utf8"),
+        ) as TurboManifest;
+        const originalLibraryManifest = JSON.parse(
+          await readFile(libraryManifestPath, "utf8"),
+        ) as RootManifest;
+        const originalLibraryTurbo = JSON.parse(
+          await readFile(libraryTurboPath, "utf8"),
+        ) as TurboManifest;
+        const writeJson = async (filePath: string, value: unknown) =>
+          writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
+
+        const missingRoleTurbo = structuredClone(originalLibraryTurbo);
+        missingRoleTurbo.tasks.test!.tags = [];
+        await writeJson(libraryTurboPath, missingRoleTurbo);
+        assertRootCommandFailsWith("check", "缺少唯一职责标签");
+        await writeJson(libraryTurboPath, originalLibraryTurbo);
+
+        const ambiguousRoleTurbo = structuredClone(originalLibraryTurbo);
+        ambiguousRoleTurbo.tasks.test!.tags = [
+          "quality:light",
+          "work:development",
+        ];
+        await writeJson(libraryTurboPath, ambiguousRoleTurbo);
+        assertRootCommandFailsWith("check", "有多个职责标签");
+        await writeJson(libraryTurboPath, originalLibraryTurbo);
+
+        const danglingRoleTurbo = structuredClone(originalLibraryTurbo);
+        danglingRoleTurbo.tasks["orphan-check"] = {
+          tags: ["work:on-demand"],
+        };
+        await writeJson(libraryTurboPath, danglingRoleTurbo);
+        assertRootCommandFailsWith("check", "悬空职责标签");
+        await writeJson(libraryTurboPath, originalLibraryTurbo);
+
+        const wrongRootEntry = structuredClone(originalRootManifest);
+        wrongRootEntry.scripts["check:heavy"] =
+          "node --conditions=source scripts/task-gates.ts check:full";
+        await writeJson(rootManifestPath, wrongRootEntry);
+        assertRootCommandFailsWith("check", "公共入口接线错误");
+        await writeJson(rootManifestPath, originalRootManifest);
+
+        const heavyScopeManifest = structuredClone(originalLibraryManifest);
+        heavyScopeManifest.scripts["test:e2e"] = 'node -e "process.exit(0)"';
+        await writeJson(libraryManifestPath, heavyScopeManifest);
+        const heavyScopeTurbo = structuredClone(originalLibraryTurbo);
+        heavyScopeTurbo.tasks.test!.dependsOn = ["test:e2e"];
+        heavyScopeTurbo.tasks["test:e2e"] = {
+          tags: ["quality:heavy"],
+        };
+        await writeJson(libraryTurboPath, heavyScopeTurbo);
+        assertRootCommandFailsWith("check", "轻检查不能间接启动重验收");
+        await writeJson(libraryManifestPath, originalLibraryManifest);
+        await writeJson(libraryTurboPath, originalLibraryTurbo);
+
         const greetTest = path.join(packageRoot, "test/greet.test.ts");
         const disabledGreetTest = path.join(
           packageRoot,
@@ -188,6 +288,51 @@ void describe("生成任务公共入口", () => {
         const rootOutput = `${rootFailure.stdout}\n${rootFailure.stderr}`;
         assert.strictEqual(rootFailure.status, 1, rootOutput);
         assert.ok(rootOutput.includes("newly added business case"), rootOutput);
+
+        const emptyRootManifest = structuredClone(originalRootManifest);
+        emptyRootManifest.scripts = Object.fromEntries(
+          ["check", "check:heavy", "check:full", "fix"].map((name) => [
+            name,
+            originalRootManifest.scripts[name]!,
+          ]),
+        );
+        await writeJson(rootManifestPath, emptyRootManifest);
+        const emptyRootTurbo = structuredClone(originalRootTurbo);
+        emptyRootTurbo.tasks = Object.fromEntries(
+          Object.entries(originalRootTurbo.tasks).filter(([taskName]) =>
+            ["//#check", "//#check:heavy", "//#check:full", "//#fix"].includes(
+              taskName,
+            ),
+          ),
+        );
+        await writeJson(rootTurboPath, emptyRootTurbo);
+        for (const packagePath of [
+          "packages/lib",
+          "packages/utilities",
+          "packages/typescript-config",
+        ]) {
+          const packageManifestPath = path.join(
+            targetRoot,
+            packagePath,
+            "package.json",
+          );
+          const packageManifest = JSON.parse(
+            await readFile(packageManifestPath, "utf8"),
+          ) as RootManifest;
+          packageManifest.scripts = {};
+          await writeJson(packageManifestPath, packageManifest);
+          const packageTurboPath = path.join(
+            targetRoot,
+            packagePath,
+            "turbo.json",
+          );
+          const packageTurbo = JSON.parse(
+            await readFile(packageTurboPath, "utf8"),
+          ) as TurboManifest;
+          packageTurbo.tasks = {};
+          await writeJson(packageTurboPath, packageTurbo);
+        }
+        assertRootCommandFailsWith("check", "轻检查没有选中有效任务");
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }

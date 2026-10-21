@@ -37,7 +37,7 @@ export function createWorkspaceRootManifest(options: {
     check: "node --conditions=source scripts/task-gates.ts check",
     "check:heavy": "node --conditions=source scripts/task-gates.ts check:heavy",
     "check:full": "node --conditions=source scripts/task-gates.ts check:full",
-    boundaries: "node --conditions=source scripts/run-turbo-boundaries.ts",
+    boundaries: "turbo boundaries",
     fix: "node --conditions=source scripts/task-gates.ts fix",
     "format:check":
       "oxfmt --list-different --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer scripts",
