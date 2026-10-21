@@ -82,8 +82,25 @@ async function loadLockedSemver(): Promise<LockedSemver> {
 async function defaultRun(
   command: string,
   arguments_: readonly string[],
-  options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
+  options: {
+    readonly cwd: string;
+    readonly env: NodeJS.ProcessEnv;
+    readonly stdio?: "inherit";
+  },
 ): Promise<RemoteProcessResult> {
+  if (options.stdio === "inherit") {
+    return await new Promise((resolve, reject) => {
+      const child = spawn(command, [...arguments_], {
+        cwd: options.cwd,
+        env: options.env,
+        stdio: "inherit",
+      });
+      child.once("error", reject);
+      child.once("close", (exitCode) =>
+        resolve({ exitCode: exitCode ?? 1, stdout: "", stderr: "" }),
+      );
+    });
+  }
   return await new Promise((resolve, reject) => {
     const child = spawn(command, [...arguments_], {
       cwd: options.cwd,
@@ -99,6 +116,165 @@ async function defaultRun(
       resolve({ exitCode: exitCode ?? 1, stdout, stderr }),
     );
   });
+}
+
+export type InteractiveNpmSessionCommandRunner = (
+  command: string,
+  arguments_: readonly string[],
+  options: {
+    readonly cwd: string;
+    readonly env: NodeJS.ProcessEnv;
+    readonly stdio: "inherit";
+  },
+) => Promise<number>;
+
+export type InteractiveNpmSessionOptions = {
+  readonly repositoryRoot: string;
+  readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly runNpmPhase: (environment: NodeJS.ProcessEnv) => Promise<number>;
+  readonly run?: InteractiveNpmSessionCommandRunner;
+};
+
+function isAmbientNpmCredential(key: string): boolean {
+  const canonical = canonicalEnvironmentKey(key);
+  return (
+    canonical === "nodeauthtoken" ||
+    ((canonical.startsWith("npm") || canonical.startsWith("pnpm")) &&
+      (canonical.includes("auth") ||
+        canonical.includes("token") ||
+        canonical.includes("password")))
+  );
+}
+
+function isNpmSessionConfig(key: string): boolean {
+  const canonical = canonicalEnvironmentKey(key);
+  return [
+    "npmconfiguserconfig",
+    "npmconfigglobalconfig",
+    "npmconfigcache",
+    "npmconfigregistry",
+    "npmconfigprefix",
+    "pnpmconfiguserconfig",
+    "pnpmconfigglobalconfig",
+    "pnpmconfigcache",
+    "pnpmconfigregistry",
+    "pnpmconfigprefix",
+  ].includes(canonical);
+}
+
+async function defaultInteractiveNpmSessionCommand(
+  command: string,
+  arguments_: readonly string[],
+  options: {
+    readonly cwd: string;
+    readonly env: NodeJS.ProcessEnv;
+    readonly stdio: "inherit";
+  },
+): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, [...arguments_], {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: options.stdio,
+      windowsHide: true,
+    });
+    child.once("error", reject);
+    child.once("close", (exitCode) => resolve(exitCode ?? 1));
+  });
+}
+
+/** 整批 npm 上传共享一次性原生认证会话，不改宿主 GitHub 配置。 */
+export async function runWithInteractiveNpmSession(
+  options: InteractiveNpmSessionOptions,
+): Promise<number> {
+  await assertNoCheckoutNpmrc(options.repositoryRoot);
+  const sessionRoot = await mkdtemp(
+    path.join(tmpdir(), "npm-publication-interactive-"),
+  );
+  const userConfig = path.join(sessionRoot, "user.npmrc");
+  const globalConfig = path.join(sessionRoot, "global.npmrc");
+  const cache = path.join(sessionRoot, "cache");
+  const environment: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(options.environment)) {
+    if (
+      value !== undefined &&
+      !isAmbientNpmCredential(key) &&
+      !isNpmSessionConfig(key)
+    ) {
+      environment[key] = value;
+    }
+  }
+  Object.assign(environment, {
+    NPM_CONFIG_USERCONFIG: userConfig,
+    NPM_CONFIG_GLOBALCONFIG: globalConfig,
+    NPM_CONFIG_CACHE: cache,
+    NPM_CONFIG_REGISTRY: registry,
+  });
+
+  const runner = options.run ?? defaultInteractiveNpmSessionCommand;
+  const npmArguments = [
+    `--registry=${registry}`,
+    `--userconfig=${userConfig}`,
+    `--globalconfig=${globalConfig}`,
+    `--cache=${cache}`,
+  ];
+  let loginSucceeded = false;
+  let failure: unknown;
+  let result = 1;
+  try {
+    await mkdir(cache, { recursive: true });
+    await writeFile(userConfig, "", { mode: 0o600 });
+    await writeFile(globalConfig, "", { mode: 0o600 });
+
+    const login = await runner(
+      "npm",
+      ["login", "--auth-type=web", ...npmArguments],
+      { cwd: options.repositoryRoot, env: environment, stdio: "inherit" },
+    );
+    if (login !== 0) throw new Error("npm 登录失败。");
+    loginSucceeded = true;
+
+    const whoami = await runner("npm", ["whoami", ...npmArguments], {
+      cwd: options.repositoryRoot,
+      env: environment,
+      stdio: "inherit",
+    });
+    if (whoami !== 0) throw new Error("npm 登录状态核验失败。");
+
+    result = await options.runNpmPhase(environment);
+  } catch (error) {
+    failure = error;
+  }
+
+  let cleanupFailure: unknown;
+  try {
+    if (loginSucceeded) {
+      const logout = await runner("npm", ["logout", ...npmArguments], {
+        cwd: options.repositoryRoot,
+        env: environment,
+        stdio: "inherit",
+      });
+      if (logout !== 0) cleanupFailure = new Error("npm 登出失败。");
+    }
+  } catch (error) {
+    cleanupFailure = error;
+  } finally {
+    try {
+      await rm(sessionRoot, { recursive: true, force: true });
+    } catch (error) {
+      cleanupFailure ??= error;
+    }
+  }
+
+  if (failure !== undefined && cleanupFailure !== undefined) {
+    throw new AggregateError(
+      [failure, cleanupFailure],
+      "npm 首发会话失败，且清理会话时发生错误。",
+    );
+  }
+  if (failure !== undefined) throw failure;
+  if (cleanupFailure !== undefined) throw cleanupFailure;
+  return result;
 }
 
 function isolatedEnvironment(
@@ -808,6 +984,9 @@ export async function runDirectOidcPublication(
     const published = await runner("pnpm", publishArguments, {
       cwd: options.repositoryRoot,
       env,
+      ...(credentialMode === "interactive"
+        ? { stdio: "inherit" as const }
+        : {}),
     });
     if (published.exitCode !== 0) {
       fail(

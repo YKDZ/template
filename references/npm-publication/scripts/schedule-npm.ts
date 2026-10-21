@@ -6,10 +6,22 @@ import {
   readAcceptedPublicationArtifacts,
   validateRemotePublicationTargets,
 } from "./accepted-artifacts.ts";
+import { runWithInteractiveNpmSession } from "./publish.ts";
 
 const repositoryRoot = path.resolve(
   process.env.PUBLICATION_REPOSITORY_ROOT ?? process.cwd(),
 );
+const credentialMode = process.env.PUBLICATION_CREDENTIAL_MODE;
+if (
+  credentialMode !== undefined &&
+  credentialMode !== "oidc" &&
+  credentialMode !== "interactive"
+) {
+  throw new Error("PUBLICATION_CREDENTIAL_MODE 只接受 oidc 或 interactive。");
+}
+if (credentialMode === "interactive" && process.env.GITHUB_ACTIONS === "true") {
+  throw new Error("GitHub Actions 发布必须使用 OIDC 凭据。");
+}
 const artifacts = await readAcceptedPublicationArtifacts({
   repositoryRoot,
   environment: process.env,
@@ -19,21 +31,36 @@ const filters = artifacts.flatMap((artifact) => [
   "--filter",
   artifact.packageName,
 ]);
-const child = spawn(
-  "pnpm",
-  [
+async function runNpmScheduler(
+  environment: NodeJS.ProcessEnv,
+): Promise<number> {
+  const arguments_ = [
     "--recursive",
     "--sort",
     "--no-bail",
+    ...(credentialMode === "interactive" ? ["--workspace-concurrency=1"] : []),
     ...filters,
     "run",
     "publication:remote:npm",
-  ],
-  { cwd: repositoryRoot, env: process.env, stdio: "inherit" },
-);
-try {
-  const [exitCode] = await once(child, "close");
-  process.exitCode = typeof exitCode === "number" ? exitCode : 1;
-} catch (error) {
-  throw new Error("无法启动 pnpm npm 发布调度。", { cause: error });
+  ];
+  const child = spawn("pnpm", arguments_, {
+    cwd: repositoryRoot,
+    env: environment,
+    stdio: "inherit",
+  });
+  try {
+    const [exitCode] = await once(child, "close");
+    return typeof exitCode === "number" ? exitCode : 1;
+  } catch (error) {
+    throw new Error("无法启动 pnpm npm 发布调度。", { cause: error });
+  }
 }
+
+process.exitCode =
+  credentialMode === "interactive"
+    ? await runWithInteractiveNpmSession({
+        repositoryRoot,
+        environment: process.env,
+        runNpmPhase: runNpmScheduler,
+      })
+    : await runNpmScheduler(process.env);

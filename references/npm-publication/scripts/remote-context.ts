@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -19,7 +19,11 @@ export type RemoteProcessResult = {
 export type RemoteCommandRunner = (
   command: string,
   arguments_: readonly string[],
-  options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
+  options: {
+    readonly cwd: string;
+    readonly env: NodeJS.ProcessEnv;
+    readonly stdio?: "inherit";
+  },
 ) => Promise<RemoteProcessResult>;
 
 export type AcceptedRemoteArtifact = {
@@ -51,8 +55,26 @@ export type AcceptedRemoteArtifact = {
 export async function defaultRemoteCommand(
   command: string,
   arguments_: readonly string[],
-  options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
+  options: {
+    readonly cwd: string;
+    readonly env: NodeJS.ProcessEnv;
+    readonly stdio?: "inherit";
+  },
 ): Promise<RemoteProcessResult> {
+  if (options.stdio === "inherit") {
+    return await new Promise((resolve, reject) => {
+      const child = spawn(command, [...arguments_], {
+        cwd: options.cwd,
+        env: options.env,
+        stdio: "inherit",
+        windowsHide: true,
+      });
+      child.once("error", reject);
+      child.once("close", (exitCode) =>
+        resolve({ exitCode: exitCode ?? 1, stdout: "", stderr: "" }),
+      );
+    });
+  }
   try {
     const result = await execFileAsync(command, [...arguments_], {
       cwd: options.cwd,

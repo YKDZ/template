@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
 import {
+  access,
   chmod,
   copyFile,
   mkdir,
@@ -52,6 +53,7 @@ type CommandRecord = {
   readonly route?: string;
   readonly write?: boolean;
   readonly controlled?: boolean;
+  readonly userConfig?: string;
 };
 
 function git(repositoryRoot: string, ...arguments_: string[]): string {
@@ -293,6 +295,7 @@ async function makeCommandAdapters(options: {
   readonly acceptedListPath: string;
   readonly failNpmPackage?: string;
   readonly failGithubTag?: string;
+  readonly credentialMode?: "interactive" | "oidc";
 }): Promise<{
   readonly environment: NodeJS.ProcessEnv;
   readonly eventLog: string;
@@ -352,6 +355,10 @@ async function makeCommandAdapters(options: {
     `const eventLog = ${JSON.stringify(eventLog)};`,
     `const artifacts = ${JSON.stringify(acceptedList.artifacts)};`,
     "const args = process.argv.slice(2);",
+    "if (['login', 'whoami', 'logout'].includes(args[0])) {",
+    "  fs.appendFileSync(eventLog, `${JSON.stringify({ command: 'npm', arguments: args, userConfig: process.env.NPM_CONFIG_USERCONFIG, controlled: true })}\\n`);",
+    "  process.stdout.write(`controlled npm ${args[0]}\\n`); process.exit(0);",
+    "}",
     "const item = artifacts.find((value) => args[1] === `${value.packageName}@${value.artifactVersion}`);",
     "if (args[0] !== 'pack' || !item) process.exit(96);",
     "fs.appendFileSync(eventLog, `${JSON.stringify({ command: 'npm', arguments: args, packageName: item.packageName, controlled: true })}\\n`);",
@@ -394,7 +401,7 @@ async function makeCommandAdapters(options: {
         "../repository",
       ),
       PUBLICATION_ACCEPTED_ARTIFACTS_FILE: options.acceptedListPath,
-      PUBLICATION_CREDENTIAL_MODE: "interactive",
+      PUBLICATION_CREDENTIAL_MODE: options.credentialMode ?? "interactive",
       PUBLICATION_DIST_TAGS: JSON.stringify({
         "@example/a": "RC",
         "@example/b": "_beta",
@@ -497,6 +504,58 @@ async function makeReleaseReadyArtifacts(options: {
 }
 
 void describe("已验收多包原件的原生远端调度", () => {
+  void it("OIDC 模式不创建本地 npm 登录会话", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "npm-publication-oidc-session-"),
+    );
+    try {
+      const { repositoryRoot, sourceSha, targets } =
+        await makeWorkspace(workspace);
+      const artifactRoot = path.join(workspace, "accepted");
+      await mkdir(artifactRoot, { recursive: true });
+      const artifacts = await prepareAndAccept({
+        repositoryRoot,
+        sourceSha,
+        targets: targets.slice(0, 1),
+        artifactRoot,
+      });
+      const acceptedListPath = await writeAcceptedList({
+        repositoryRoot,
+        artifactRoot,
+        artifacts,
+      });
+      const adapter = await makeCommandAdapters({
+        root: path.join(workspace, "control"),
+        acceptedListPath,
+        credentialMode: "oidc",
+      });
+      const environment = { ...adapter.environment };
+      delete environment.GITHUB_ACTIONS;
+      delete environment.ACTIONS_ID_TOKEN_REQUEST_URL;
+      delete environment.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+      const result = await runOwnerCommand({
+        repositoryRoot,
+        command: "schedule-npm",
+        environment,
+      });
+      assert.equal(result.exitCode, 1);
+      assert.ok(
+        result.stderr.includes("GitHub OIDC request variables are required"),
+      );
+      const calls = (await readFile(adapter.eventLog, "utf8"))
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as CommandRecord);
+      assert.deepEqual(
+        calls.filter((call) => call.command === "npm"),
+        [],
+      );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   void it("已验收目标缺少阶段脚本时先诊断并禁止整批外写", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "npm-publication-missing-remote-script-"),
@@ -627,6 +686,34 @@ void describe("已验收多包原件的原生远端调度", () => {
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as CommandRecord);
+      const authCalls = npmCalls.filter(
+        (call) =>
+          call.command === "npm" &&
+          ["login", "whoami", "logout"].includes(call.arguments?.[0] ?? ""),
+      );
+      assert.deepEqual(
+        authCalls.map((call) => call.arguments?.[0]),
+        ["login", "whoami", "logout"],
+      );
+      const userConfigs = authCalls.map((call) => call.userConfig);
+      assert.equal(new Set(userConfigs).size, 1);
+      const userConfig = userConfigs[0];
+      assert.ok(userConfig);
+      await assert.rejects(access(path.dirname(userConfig)));
+      for (const artifact of artifacts) {
+        assert.ok(
+          !(await readFile(artifact.receiptPath, "utf8")).includes(userConfig),
+          "临时 npm 配置路径不得进入原件回执",
+        );
+      }
+      const nativeSchedule = npmCalls.find(
+        (call) => call.command === "pnpm-native",
+      );
+      assert.ok(nativeSchedule);
+      assert.ok(
+        nativeSchedule.arguments?.includes("--workspace-concurrency=1"),
+      );
+      assert.ok(!nativeSchedule.arguments?.includes("--stream"));
       const attemptedPackages = npmCalls
         .filter(
           (call) =>
