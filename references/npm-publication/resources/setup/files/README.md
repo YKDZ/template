@@ -6,7 +6,7 @@
 pnpm run publication:setup -- --filter @组织/包名
 ```
 
-每个目标重复传入 `--filter`；选择器由 pnpm 原生解析。目标版本直接取自各自的 `package.json`。准备前要求工作区干净，且当前提交与远端默认分支一致。命令会先为全部目标生成并安装验收原始 tgz，再列出目标与 SHA-512，确认后逐项进行 npm 首发和 GitHub Release。预发布版本会分别询问非 `latest` 的 npm dist-tag。
+每个目标重复传入 `--filter`；选择器由 pnpm 原生解析。目标版本直接取自各自的 `package.json`。准备前要求工作区干净，且当前提交与远端默认分支一致。命令会先为全部目标生成并安装验收原始 tgz，再列出目标与 SHA-512。确认后依次运行共享 npm 整批调度和就绪目标的 GitHub Release 调度。预发布版本会分别询问 npm dist-tag。
 
 向导不会更改源码、文档或提交，也不会创建分支、commit、push 或 PR。pnpm、npm 与 GitHub CLI 使用你本机的正常认证方式；向导不会读取或保存发布令牌。
 
