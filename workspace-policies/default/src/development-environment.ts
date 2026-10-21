@@ -4,20 +4,20 @@ import {
   resolveTemplateSource,
   type WriteTextOperation,
 } from "@ykdz/template-core/renderer";
-
 import {
   developmentContainerDockerfileFromText,
   planDevelopmentContainerToolLayersFromTexts,
   type DevelopmentContainerToolLayer,
   type DevelopmentContainerToolLayerPlan,
-} from "./development-container-tool-layer.ts";
+} from "@ykdz/template-environment/development-container-tool-layer";
+
+import { environmentSources } from "./default-environment-sources.ts";
 import {
   editorCustomizationForCapabilities,
   loadEditorCustomizationDeclarations,
   type EditorCustomization,
   type EditorCustomizationCapability,
 } from "./editor-customization.ts";
-import { environmentSources } from "./sources.ts";
 
 export function githubCliDevelopmentContainerToolLayer(): DevelopmentContainerToolLayer {
   return {
@@ -91,7 +91,7 @@ export function prepareBuiltInDevelopmentContainerResources(): PreparedBuiltInDe
       return readFileSync(resolveTemplateSource(source, file), "utf8");
     } catch (cause) {
       throw new Error(
-        `环境资源 @ykdz/template-environment#./development-environment prepare 阶段无法读取 ${file}`,
+        `默认环境资源 @ykdz/template-workspace#./default-environment prepare 阶段无法读取 ${file}`,
         { cause },
       );
     }
@@ -120,7 +120,7 @@ export function prepareBuiltInDevelopmentContainerResources(): PreparedBuiltInDe
     ) as PreparedBuiltInDevelopmentContainerResources["configuration"];
   } catch (cause) {
     throw new Error(
-      "环境资源 @ykdz/template-environment#./development-environment prepare 阶段无法读取 workspace-template.json",
+      "默认环境资源 @ykdz/template-workspace#./default-environment prepare 阶段无法读取 workspace-template.json",
       { cause },
     );
   }
@@ -299,11 +299,12 @@ export function prepareBuiltInEditorCustomizationDeclarations() {
         environmentSources.editorCustomization,
         "capabilities.json",
       ),
+      "@ykdz/template-workspace#./assets/environment/editor-customization/capabilities.json",
     );
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     throw new Error(
-      `环境资源 @ykdz/template-environment#./development-environment prepare 阶段失败：${detail}`,
+      `默认环境资源 @ykdz/template-workspace#./default-environment prepare 阶段失败：${detail}`,
       { cause },
     );
   }

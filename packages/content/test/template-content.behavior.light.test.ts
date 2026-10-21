@@ -330,6 +330,52 @@ void describe("公开模板内容集合", () => {
     );
   });
 
+  void it("正式加包保留消费者定制的编辑器设置", async () => {
+    const targetRoot = await createTargetRoot(
+      "template-content-editor-customization-",
+    );
+    const generator = createGenerator({
+      content: templateContent,
+      strategy: createDefaultWorkspaceStrategy<WorkspaceCreationInput>(),
+    });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { roots: [{ preset: tsCliPreset.identity }] },
+      strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+
+    const settingsPath = path.join(targetRoot, ".vscode/settings.json");
+    const settings = JSON.parse(await readFile(settingsPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const customizedSettings = {
+      ...settings,
+      "editor.formatOnSave": false,
+      "editor.tabSize": 2,
+    };
+    await writeFile(
+      settingsPath,
+      `${JSON.stringify(customizedSettings, null, 2)}\n`,
+    );
+
+    const added = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: libraryMember.identity,
+      creationInput: { packagePath: "packages/provider" },
+    });
+    assert.strictEqual(added.status, "success", JSON.stringify(added));
+    assert.deepStrictEqual(
+      JSON.parse(await readFile(settingsPath, "utf8")),
+      customizedSettings,
+    );
+  });
+
   void it("linkFrom 让现有 consumer 在正式加包事务中依赖新 provider", async () => {
     const targetRoot = await createTargetRoot("template-content-link-from-");
     const generator = createGenerator({

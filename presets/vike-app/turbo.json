@@ -72,7 +72,7 @@
         "@ykdz/reference-vike-migrations#build:template",
         "@ykdz/reference-vike-web#build:template",
         "@ykdz/template-core#build",
-        "@ykdz/template-environment#build",
+        "@ykdz/template-workspace#build",
         "@ykdz/template-workspace-authoring#build"
       ],
       "tags": ["work:preparation"],
