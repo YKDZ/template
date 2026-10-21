@@ -1,8 +1,10 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { readAcceptedArtifact } from "#shared-publication";
-import type { PublicationManifest } from "#shared-publication";
+import {
+  readAcceptedArtifact,
+  type PublicationManifest,
+} from "@ykdz/reference-npm-publication";
 
 export type AcceptedRemoteArtifact = {
   readonly artifactPath: string;

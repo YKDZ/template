@@ -36,6 +36,14 @@ const cliPublicationFiles = [
   "publication-setup/setup.sh",
 ] as const;
 
+// 根脚本目录由工作区根配置治理；包级配置和所属集成测试留在参考包验收中。
+const referencePackageOnlyResources = new Set([
+  "scripts/publication.integration.test.ts",
+  "tsconfig.json",
+  "turbo.json",
+  "turbo.jsonc",
+]);
+
 /** 工作区 CLI owner 在策略准备阶段检查其有限发布资源。 */
 export function prepareCliPublicationResources(): PreparedWorkspaceResources {
   return prepareWorkspaceResources(cliPublicationFiles, cliPublicationOwner);
@@ -96,8 +104,16 @@ function publicationOperations(
   ): RootResourceOperation =>
     copyPreparedWorkspaceResource(resources, file, to, cliPublicationOwner);
   referencePackage.prepare();
+  const scriptOperations = referencePackage
+    .operations("scripts/npm-publication")
+    .filter(
+      (operation) =>
+        !referencePackageOnlyResources.has(
+          path.posix.relative("scripts/npm-publication", operation.to),
+        ),
+    );
   return [
-    ...referencePackage.operations("scripts/npm-publication"),
+    ...scriptOperations,
     ...cliPublicationFiles
       .filter((file) => file.startsWith("scripts/npm-publication/"))
       .map((file) => copy(file, file)),
