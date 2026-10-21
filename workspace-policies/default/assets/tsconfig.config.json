@@ -1,5 +1,5 @@
 {
-  "extends": "@ykdz/reference-typescript-config/node.json",
+  "extends": "@ykdz/reference-tooling-config/node.json",
   "compilerOptions": {
     "types": ["node"]
   }

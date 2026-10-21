@@ -6,8 +6,8 @@ import { describe, it } from "node:test";
 
 import { referencePackage as honoApi } from "@ykdz/reference-hono-api/template";
 import { referencePackage as rustBin } from "@ykdz/reference-rust-bin/template";
+import { referenceDefinition as configurationDefinition } from "@ykdz/reference-tooling-config/template";
 import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
-import { referenceDefinition as configurationDefinition } from "@ykdz/reference-typescript-config/template";
 import { referencePackage as vueApp } from "@ykdz/reference-vue-app/template";
 import { referencePackage as vueShared } from "@ykdz/reference-vue-shared/template";
 import type { LoadedContentMember } from "@ykdz/template-core/content-identity";

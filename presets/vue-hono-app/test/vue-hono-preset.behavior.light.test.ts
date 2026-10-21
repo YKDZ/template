@@ -34,7 +34,7 @@ const loadedContent = await loadContentSource({
     "@ykdz/reference-hono-api/template",
     "@ykdz/reference-vue-hono-web/template",
     "@ykdz/reference-vue-shared/template",
-    "@ykdz/reference-typescript-config/template",
+    "@ykdz/reference-tooling-config/template",
     "@ykdz/reference-ts-lib/template",
     "@ykdz/preset-vue-hono-app/template",
   ],
@@ -59,7 +59,7 @@ const library = referenceMember(libraryDefinition);
 const configuration = contentIndex.resolve(
   {
     namespace: "ykdz",
-    packageName: "@ykdz/reference-typescript-config",
+    packageName: "@ykdz/reference-tooling-config",
     exportPath: "./template",
   },
   "reference",
@@ -174,7 +174,7 @@ void describe("Vue-Hono 组合预设公开行为", () => {
       [
         "apps/web",
         "apps/api",
-        "packages/typescript-config",
+        "packages/tooling-config",
         "packages/vue-shared",
       ],
     );
@@ -200,7 +200,7 @@ void describe("Vue-Hono 组合预设公开行为", () => {
       "workspace:*",
     );
     assert.strictEqual(
-      webManifest.devDependencies["@demo/typescript-config"],
+      webManifest.devDependencies["@demo/tooling-config"],
       "workspace:*",
     );
 
@@ -208,7 +208,7 @@ void describe("Vue-Hono 组合预设公开行为", () => {
       await readFile(path.join(targetRoot, "apps/api/package.json"), "utf8"),
     ) as { dependencies: Record<string, string> };
     assert.strictEqual(
-      apiManifest.dependencies["@demo/typescript-config"],
+      apiManifest.dependencies["@demo/tooling-config"],
       "workspace:*",
     );
     assert.strictEqual(

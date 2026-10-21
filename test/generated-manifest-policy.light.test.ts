@@ -22,7 +22,7 @@ void describe("生成项目包清单策略", () => {
     const nativeConfigurationManifest = JSON.parse(
       await readFile(
         new URL(
-          import.meta.resolve("@ykdz/reference-typescript-config/reference"),
+          import.meta.resolve("@ykdz/reference-tooling-config/reference"),
         ),
         "utf8",
       ),
@@ -115,7 +115,7 @@ void describe("生成项目包清单策略", () => {
 
         const configuration = initialized.blueprint.packages.find(
           (definition) =>
-            definition.path === "packages/typescript-config" &&
+            definition.path === "packages/tooling-config" &&
             definition.role === "shared-library",
         );
         assert.ok(configuration, "生成项目必须复用原生 TypeScript 配置包");

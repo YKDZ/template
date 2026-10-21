@@ -790,7 +790,7 @@ async function registerTestOwnedCollectionMember(options: {
       [sourceReferenceName]: `file:${relativeReferencePackage}`,
     },
     devDependencies: {
-      "@ykdz/reference-typescript-config": "workspace:*",
+      "@ykdz/reference-tooling-config": "workspace:*",
     },
   };
   const referenceManifest = {

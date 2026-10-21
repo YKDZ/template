@@ -309,7 +309,7 @@ void describe("生成任务公共入口", () => {
         for (const packagePath of [
           "packages/lib",
           "packages/utilities",
-          "packages/typescript-config",
+          "packages/tooling-config",
         ]) {
           const packageManifestPath = path.join(
             targetRoot,

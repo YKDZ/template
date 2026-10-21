@@ -1,5 +1,5 @@
 {
-  "extends": "@ykdz/reference-typescript-config/base.json",
+  "extends": "@ykdz/reference-tooling-config/base.json",
   "compilerOptions": {
     "erasableSyntaxOnly": true,
     "module": "esnext",
@@ -11,10 +11,5 @@
     "types": ["node"],
     "resolveJsonModule": true
   },
-  "include": [
-    "drizzle.config.ts",
-    "scripts/**/*.ts",
-    "oxlint.config.ts",
-    "oxfmt.config.ts"
-  ]
+  "include": ["drizzle.config.ts", "scripts/**/*.ts"]
 }

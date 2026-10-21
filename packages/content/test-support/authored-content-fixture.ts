@@ -350,7 +350,7 @@ export async function createAuthoredContentFixture(
     dependencies:
       options.featureDependsOnTheme === false
         ? {}
-        : { "@fixture/typescript-config": "workspace:*" },
+        : { "@fixture/tooling-config": "workspace:*" },
     ...(options.featureNativeDevDependencies === undefined
       ? {}
       : { devDependencies: options.featureNativeDevDependencies }),
@@ -364,13 +364,13 @@ export async function createAuthoredContentFixture(
   await writeReferencePackage({
     collectionRoot,
     authorsRoot,
-    leafName: "typescript-config",
+    leafName: "tooling-config",
     version: options.contentVersion ?? "1.0.0",
     nativeWorkspace,
     sdkVersions,
     marker: `${options.marker}:theme`,
     alias: "theme",
-    defaultLeafName: "typescript-config",
+    defaultLeafName: "tooling-config",
     instance: "shared",
     resourcePath: "src/theme.ts",
   });
@@ -387,13 +387,13 @@ export async function createAuthoredContentFixture(
     resourcePath: "src/addon.ts",
     dependencies:
       options.addonDependsOnTheme === true
-        ? { "@fixture/typescript-config": "workspace:*" }
+        ? { "@fixture/tooling-config": "workspace:*" }
         : {},
     ...(options.addonTemplateDependencies === undefined
       ? options.addonDependsOnTheme === true
         ? {
             templateDependencies: [
-              { name: "@fixture/typescript-config", purpose: "target" },
+              { name: "@fixture/tooling-config", purpose: "target" },
             ],
           }
         : {}
@@ -417,7 +417,7 @@ export async function createAuthoredContentFixture(
       sdkVersions.get("@ykdz/template-workspace") ?? "workspace:*",
   };
   if (options.includeTheme !== false) {
-    collectionDependencies["@fixture/typescript-config"] = "workspace:*";
+    collectionDependencies["@fixture/tooling-config"] = "workspace:*";
   }
   if (options.includeAddon !== false) {
     collectionDependencies["@fixture/addon"] = "workspace:*";
@@ -470,8 +470,8 @@ export async function createAuthoredContentFixture(
     if (options.featureDependsOnTheme !== false) {
       await linkPackage(
         path.join(authorsRoot, "feature", "node_modules"),
-        "@fixture/typescript-config",
-        path.join(authorsRoot, "typescript-config"),
+        "@fixture/tooling-config",
+        path.join(authorsRoot, "tooling-config"),
       );
     }
   }
@@ -489,7 +489,7 @@ export async function createAuthoredContentFixture(
     `${featurePackageName}/template`,
     ...(options.includeTheme === false
       ? []
-      : ["@fixture/typescript-config/template"]),
+      : ["@fixture/tooling-config/template"]),
     ...(options.includeAddon === false ? [] : ["@fixture/addon/template"]),
     "@fixture/preset/template",
   ];

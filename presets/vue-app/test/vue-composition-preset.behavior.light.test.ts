@@ -34,7 +34,7 @@ const content = await loadContentSource({
     "@ykdz/reference-vue-app/template",
     "@ykdz/reference-vue-shared/template",
     "@ykdz/reference-ts-lib/template",
-    "@ykdz/reference-typescript-config/template",
+    "@ykdz/reference-tooling-config/template",
     "@ykdz/preset-vue-app/template",
   ],
   prepareReferenceDefinition(definition) {
@@ -63,7 +63,7 @@ const library = contentIndex.resolve(
 const configuration = contentIndex.resolve(
   {
     namespace: "ykdz",
-    packageName: "@ykdz/reference-typescript-config",
+    packageName: "@ykdz/reference-tooling-config",
     exportPath: "./template",
   },
   "reference",
@@ -203,11 +203,7 @@ void describe("Vue 独立组合预设", () => {
       initialized.blueprint.packages
         .map(({ path: packagePath }) => packagePath)
         .toSorted(),
-      [
-        "apps/web",
-        "packages/typescript-config",
-        "packages/vue-shared",
-      ].toSorted(),
+      ["apps/web", "packages/tooling-config", "packages/vue-shared"].toSorted(),
     );
     const appManifest = JSON.parse(
       await readFile(path.join(targetRoot, "apps/web/package.json"), "utf8"),
@@ -223,7 +219,7 @@ void describe("Vue 独立组合预设", () => {
       vue: "catalog:",
     });
     assert.strictEqual(
-      appManifest.devDependencies["@demo/typescript-config"],
+      appManifest.devDependencies["@demo/tooling-config"],
       "workspace:*",
     );
     assert.strictEqual(
@@ -238,7 +234,7 @@ void describe("Vue 独立组合预设", () => {
     );
     const configurationPath = path.join(
       targetRoot,
-      "packages/typescript-config/base.json",
+      "packages/tooling-config/base.json",
     );
     const customizedApp =
       (await readFile(appSourcePath, "utf8")) + "\n<!-- 保留已有页面定制 -->\n";
@@ -284,7 +280,7 @@ void describe("Vue 独立组合预设", () => {
         "workspace:*",
       );
       assert.strictEqual(
-        addedManifest.devDependencies["@demo/typescript-config"],
+        addedManifest.devDependencies["@demo/tooling-config"],
         "workspace:*",
       );
       assert.strictEqual(
@@ -305,7 +301,7 @@ void describe("Vue 独立组合预设", () => {
       "workspace:*",
     );
     assert.strictEqual(
-      retainedWebManifest.devDependencies["@demo/typescript-config"],
+      retainedWebManifest.devDependencies["@demo/tooling-config"],
       "workspace:*",
     );
     assert.strictEqual(await readFile(appSourcePath, "utf8"), customizedApp);

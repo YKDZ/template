@@ -93,7 +93,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       ]);
 
       const featureIdentity = identityFor(fixture, "@fixture/feature");
-      const themeIdentity = identityFor(fixture, "@fixture/typescript-config");
+      const themeIdentity = identityFor(fixture, "@fixture/tooling-config");
       const featureRecord = initialized.generationRecord.packages.find(
         (record) =>
           contentIdentityKey(record.contentIdentity) ===
@@ -295,9 +295,9 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
           name: "@ykdz/template-workspace",
           purpose: "template-execution",
         },
-        { name: "@fixture/typescript-config", purpose: "target" },
+        { name: "@fixture/tooling-config", purpose: "target" },
         {
-          name: "@fixture/typescript-config",
+          name: "@fixture/tooling-config",
           purpose: "template-execution",
         },
         { name: "@fixture/execution-only", purpose: "template-execution" },
@@ -329,7 +329,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     ).prepare();
     assert.deepEqual(
       preparation.dependencyUses.find(
-        (dependency) => dependency.name === "@fixture/typescript-config",
+        (dependency) => dependency.name === "@fixture/tooling-config",
       )?.purposes,
       ["target", "template-execution"],
     );
@@ -353,7 +353,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     );
 
     const featureIdentity = identityFor(fixture, "@fixture/feature");
-    const themeIdentity = identityFor(fixture, "@fixture/typescript-config");
+    const themeIdentity = identityFor(fixture, "@fixture/tooling-config");
     const featureRecord = initialized.generationRecord.packages.find(
       (record) =>
         contentIdentityKey(record.contentIdentity) ===
@@ -387,7 +387,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       };
     const assertTargetDependencies = async () => {
       const manifest = await readGeneratedManifest();
-      assert.ok(manifest.dependencies?.["@uses/typescript-config"]);
+      assert.ok(manifest.dependencies?.["@uses/tooling-config"]);
       for (const field of ["dependencies", "devDependencies"] as const) {
         assert.equal(
           Object.hasOwn(manifest[field] ?? {}, "@fixture/execution-only"),
@@ -573,7 +573,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     if (initialized.status !== "success") return;
 
     const featureIdentity = identityFor(current, "@fixture/feature");
-    const themeIdentity = identityFor(current, "@fixture/typescript-config");
+    const themeIdentity = identityFor(current, "@fixture/tooling-config");
     const originalFeature = initialized.generationRecord.packages.find(
       (record) =>
         contentIdentityKey(record.contentIdentity) ===
@@ -616,7 +616,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     assert.equal(
       Object.hasOwn(
         currentFeatureManifest.dependencies ?? {},
-        "@fixture/typescript-config",
+        "@fixture/tooling-config",
       ),
       false,
     );
@@ -740,7 +740,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     const betaTheme = index.resolve(
       {
         namespace: "beta",
-        packageName: "@fixture/typescript-config",
+        packageName: "@fixture/tooling-config",
         exportPath: "./template",
       },
       "reference",
@@ -878,7 +878,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       if (initialized.status !== "success") continue;
 
       const featureIdentity = identityFor(fixture, "@fixture/feature");
-      const themeIdentity = identityFor(fixture, "@fixture/typescript-config");
+      const themeIdentity = identityFor(fixture, "@fixture/tooling-config");
       const featureRecord = initialized.generationRecord.packages.find(
         (record) =>
           contentIdentityKey(record.contentIdentity) ===
@@ -1113,8 +1113,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
           ),
       );
       const theme = record.packages.find(
-        (pkg) =>
-          pkg.contentIdentity.packageName === "@fixture/typescript-config",
+        (pkg) => pkg.contentIdentity.packageName === "@fixture/tooling-config",
       );
       assert.ok(feature);
       assert.ok(theme);

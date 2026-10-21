@@ -264,7 +264,7 @@ const journey: CliJourney = {
     const library = packageRecord(finalRecord, "@ykdz/reference-ts-lib");
     const configuration = packageRecord(
       finalRecord,
-      "@ykdz/reference-typescript-config",
+      "@ykdz/reference-tooling-config",
     );
     const initialLibrary = packageRecord(
       initialRecord,
@@ -272,7 +272,7 @@ const journey: CliJourney = {
     );
     const initialConfiguration = packageRecord(
       initialRecord,
-      "@ykdz/reference-typescript-config",
+      "@ykdz/reference-tooling-config",
     );
     const cli = packageRecord(finalRecord, "@ykdz/reference-ts-cli");
     const configKey = contentIdentityKey(configuration.contentIdentity);
@@ -300,7 +300,7 @@ const journey: CliJourney = {
       library.packageDefinitionId,
     );
     assert.equal(
-      finalRecord.nodeInstances["typescript-configuration"],
+      finalRecord.nodeInstances["tooling-configuration"],
       configuration.packageDefinitionId,
     );
     assert.equal(

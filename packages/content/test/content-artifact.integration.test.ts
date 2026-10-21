@@ -104,7 +104,7 @@ async function buildNativeAuthoredContent(
       "--filter",
       "@fixture/preset...",
       "--filter",
-      "@fixture/typescript-config",
+      "@fixture/tooling-config",
       "--filter",
       "@fixture/addon",
       "--if-present",
@@ -368,7 +368,7 @@ void describe("原生内容制品安装链", () => {
       [
         "@ykdz/preset-ts-lib",
         "@ykdz/reference-ts-lib",
-        "@ykdz/reference-typescript-config",
+        "@ykdz/reference-tooling-config",
       ].sort(),
     );
 
@@ -439,9 +439,9 @@ void describe("原生内容制品安装链", () => {
         'await writeFile(userFile, "keep the initialized workspace\\n", { mode: 0o640 });',
         "await chmod(userFile, 0o640);",
         'const library = templateContent.find((member) => member.kind === "reference" && member.identity.packageName === "@ykdz/reference-ts-lib");',
-        'const configuration = templateContent.find((member) => member.kind === "reference" && member.identity.packageName === "@ykdz/reference-typescript-config");',
+        'const configuration = templateContent.find((member) => member.kind === "reference" && member.identity.packageName === "@ykdz/reference-tooling-config");',
         'const libraryRecord = initialized.generationRecord.packages.find((record) => record.contentIdentity.packageName === "@ykdz/reference-ts-lib");',
-        'const configurationRecord = initialized.generationRecord.packages.find((record) => record.contentIdentity.packageName === "@ykdz/reference-typescript-config");',
+        'const configurationRecord = initialized.generationRecord.packages.find((record) => record.contentIdentity.packageName === "@ykdz/reference-tooling-config");',
         "assert.ok(library && configuration && libraryRecord && configurationRecord);",
         "assert.equal(library.source.moduleURL.includes(process.argv[5]), false);",
         "assert.equal(library.source.manifestURL.includes(process.argv[5]), false);",
@@ -551,7 +551,7 @@ void describe("原生内容制品安装链", () => {
     );
     assert.ok(
       result.blueprint.packages.some(
-        (definition) => definition.path === "packages/typescript-config",
+        (definition) => definition.path === "packages/tooling-config",
       ),
     );
     assert.match(result.generated, /export function/u);
@@ -1898,7 +1898,7 @@ void describe("原生内容制品安装链", () => {
         "@fixture/addon",
         "@fixture/feature",
         "@fixture/preset",
-        "@fixture/typescript-config",
+        "@fixture/tooling-config",
       ].sort(),
     );
     const featureOwner = prepared.owners.find(
@@ -1942,7 +1942,7 @@ void describe("原生内容制品安装链", () => {
     const workspaceRootMetadata = await stat(workspaceRoot);
     const workspaceRootMode = workspaceRootMetadata.mode & 0o777;
     const workspaceRootTime = workspaceRootMetadata.mtimeMs;
-    const authorRoots = ["feature", "typescript-config", "addon", "preset"].map(
+    const authorRoots = ["feature", "tooling-config", "addon", "preset"].map(
       (name) => path.join(fixture.root, namespace, "authors", name),
     );
     const authorModes = await Promise.all(
@@ -2024,7 +2024,7 @@ void describe("原生内容制品安装链", () => {
         'assert.equal(initialized.status, "success", JSON.stringify(initialized));',
         'if (initialized.status !== "success") process.exit(2);',
         'const featureIdentity = { namespace: "native-authored", packageName: "@fixture/feature", exportPath: "./template" };',
-        'const themeIdentity = { namespace: "native-authored", packageName: "@fixture/typescript-config", exportPath: "./template" };',
+        'const themeIdentity = { namespace: "native-authored", packageName: "@fixture/tooling-config", exportPath: "./template" };',
         "const featureRecord = initialized.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(featureIdentity));",
         "const themeRecord = initialized.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(themeIdentity));",
         "assert.ok(featureRecord && themeRecord);",
@@ -2650,7 +2650,7 @@ void describe("原生内容制品安装链", () => {
       ...authored.flatMap(({ fixture, namespace }) => [
         fixture.root,
         path.join(fixture.root, namespace, "authors"),
-        ...["feature", "typescript-config", "addon", "preset"].map((owner) =>
+        ...["feature", "tooling-config", "addon", "preset"].map((owner) =>
           path.join(fixture.root, namespace, "authors", owner),
         ),
       ]),

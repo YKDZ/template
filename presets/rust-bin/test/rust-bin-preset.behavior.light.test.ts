@@ -27,7 +27,7 @@ const content = await loadContentSource({
   members: [
     "@ykdz/reference-rust-bin/template",
     "@ykdz/reference-ts-lib/template",
-    "@ykdz/reference-typescript-config/template",
+    "@ykdz/reference-tooling-config/template",
     "@ykdz/preset-rust-bin/template",
   ],
   prepareReferenceDefinition(definition) {
@@ -274,12 +274,12 @@ void describe("Rust 二进制公开组合预设", () => {
           path.join(targetRoot, "packages/native/package.json"),
           "utf8",
         ),
-      ).devDependencies["@demo/typescript-config"],
+      ).devDependencies["@demo/tooling-config"],
       "workspace:*",
     );
     assert.strictEqual(
       await stat(
-        path.join(targetRoot, "packages/typescript-config/tsconfig.json"),
+        path.join(targetRoot, "packages/tooling-config/tsconfig.json"),
       ).then((file) => file.isFile()),
       true,
     );

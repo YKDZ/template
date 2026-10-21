@@ -70,7 +70,7 @@ function requireReference(packageName: string) {
 }
 
 const library = requireReference("@ykdz/reference-ts-lib");
-const configuration = requireReference("@ykdz/reference-typescript-config");
+const configuration = requireReference("@ykdz/reference-tooling-config");
 const generator = createGenerator({
   content: templateContent,
   strategy: createDefaultWorkspaceStrategy(),
@@ -81,7 +81,7 @@ const result = await generator.init({
     roots: [
       { nodeIdentity: "library", contentIdentity: library.identity },
       {
-        nodeIdentity: "typescript-configuration",
+        nodeIdentity: "tooling-configuration",
         contentIdentity: configuration.identity,
       },
     ],

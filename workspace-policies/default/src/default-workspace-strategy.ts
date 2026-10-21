@@ -933,7 +933,7 @@ function projectOperations(options: {
     name: context.repositoryName,
     ...(configuration === undefined
       ? {}
-      : { typescriptConfigurationPackageName: configuration.definition.name }),
+      : { toolingConfigPackageName: configuration.definition.name }),
     nodeDeclaration:
       context.toolchain.nodeVersion ?? context.toolchain.nodeLtsMajor,
     packageManagerPin: context.toolchain.packageManagerPin,
@@ -1125,6 +1125,9 @@ function projectOperations(options: {
       tasks: shared.turboTasks,
     },
     referenceNames,
+    ...(configuration === undefined
+      ? {}
+      : { toolingConfigPackagePath: configuration.definition.path }),
     turboBoundaryTags: boundaryTags(contributions),
     rootTsconfigTemplate: prepared.rootTemplates.tsconfig,
     rootTsconfigCompilerOptions: shared.typescript.compilerOptions,
@@ -1237,17 +1240,27 @@ function projectOperations(options: {
             kind: "writeText" as const,
             to: "oxlint.config.ts",
             text:
-              "export { default } from " +
+              "import lintConfiguration from " +
               JSON.stringify(configuration.definition.name + "/oxlint") +
-              ";\n",
+              ";\n" +
+              'import { defineConfig } from "oxlint";\n\n' +
+              "export default defineConfig({\n" +
+              "  extends: [lintConfiguration],\n" +
+              '  categories: { correctness: "error", suspicious: "warn" },\n' +
+              "});\n",
           },
           {
             kind: "writeText" as const,
             to: "oxfmt.config.ts",
             text:
-              "export { default } from " +
+              "import formatterConfiguration from " +
               JSON.stringify(configuration.definition.name + "/oxfmt") +
-              ";\n",
+              ";\n" +
+              'import { defineConfig } from "oxfmt";\n\n' +
+              "export default defineConfig({\n" +
+              "  ...formatterConfiguration,\n" +
+              "  sortImports: true,\n" +
+              "});\n",
           },
         ]),
     editorExtensions,
