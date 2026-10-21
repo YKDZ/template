@@ -202,7 +202,7 @@ const journey: CliJourney = {
         readonly toolchain: Record<string, unknown>;
       };
     };
-    assert.equal(generationRecord.schemaVersion, 3);
+    assert.equal(generationRecord.schemaVersion, 4);
     assert.deepEqual(generationRecord.strategyState.toolchain, {
       nodeLtsMajor: snapshotNodeMajor,
       nodeVersion: releaseToolchainSnapshot.nodeVersion,
@@ -242,7 +242,7 @@ const journey: CliJourney = {
         await readFile(path.join(project, ".template/generation.json"), "utf8"),
       );
       assert.deepEqual(data.generationRecord, generationRecord);
-      assert.equal(generationRecord.schemaVersion, 3);
+      assert.equal(generationRecord.schemaVersion, 4);
       assert.equal(generationRecord.strategyIdentity, "default");
       assert.equal(generationRecord.strategyState.repositoryName, projectName);
       assert.equal(generationRecord.strategyState.defaultPackageScope, "acme");

@@ -22,7 +22,6 @@ export const initializationSchema = standardSchema(
       packageManagerPin: v.string(),
     }),
     nextSteps: v.array(v.object({ display: v.string() })),
-    publicationSetup: v.nullable(v.object({ command: v.string() })),
     followUpDocument: v.object({
       enabled: v.boolean(),
       path: v.optional(v.string()),

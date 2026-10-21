@@ -35,6 +35,7 @@ export type GeneratorSelectionRoot<
   readonly nodeIdentity: string;
   readonly contentIdentity: ContentSelector;
   readonly creationInput?: CreationInput;
+  readonly configuration?: unknown;
   /** 仅由拥有策略解释；通用生成器不解析布局内容。 */
   readonly layout?: NodeLayout;
 };
@@ -56,8 +57,11 @@ export type GeneratorContentDefinition<
   readonly role: PackageDefinition["role"];
   /** 所属内容准备自身声明的资源事实；通用生成器只管理调用时机。 */
   prepare?(): unknown;
+  /** 所属内容规范化现行配置；通用机制不解释配置字段。 */
+  normalizeConfiguration?(input: unknown): unknown;
   contribute(options: {
     readonly context: Context;
+    readonly configuration: unknown;
     readonly definition: PackageDefinition;
     readonly bindings?: ReadonlyMap<string, PackageDefinition>;
     /** 创建该包实例时持久化的原始操作。 */
@@ -87,6 +91,8 @@ export type GeneratorPackageRecord<CreationInput = PackageCreationInput> = {
   readonly packageDefinitionId: PackageDefinitionId;
   /** 内容拥有者解释原始输入；null 明确表示本次没有显式输入。 */
   readonly creationInput: CreationInput | null;
+  /** 所属内容解释的唯一现行配置，与创建来源和布局分开。 */
+  readonly configuration: unknown;
   /** 以内容身份为键，记录已选包实例的持久化标识。 */
   readonly bindings: Readonly<Record<string, string>>;
 };
@@ -100,9 +106,9 @@ export type GeneratorPackageState<CreationInput = PackageCreationInput> =
     readonly definition: PersistedPackageDefinition;
   };
 
-/** 当前记录合同的实际公开形状；持久化格式为 schema3。 */
+/** 当前记录合同的实际公开形状；持久化格式为 schema4。 */
 export type GenerationRecord<CreationInput = PackageCreationInput> = {
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 4;
   readonly strategyIdentity: string;
   readonly strategyState: unknown;
   readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
@@ -183,6 +189,7 @@ export type WorkspaceStrategy<
     readonly state: StrategyState;
     readonly content: Content;
     readonly contentByIdentity: ReadonlyMap<string, Content>;
+    readonly configuration: unknown;
     readonly packages: readonly GeneratorPackageState<CreationInput>[];
     readonly nodeInstances: GeneratorNodeInstances;
     /** 本次加包原始输入由策略解释，生成器只透传。 */
@@ -216,6 +223,8 @@ export type WorkspaceStrategy<
   dependencies(options: {
     readonly content: Content;
     readonly contentByIdentity: ReadonlyMap<string, Content>;
+    readonly configuration: unknown;
+    readonly creationInput?: CreationInput;
   }): readonly ContentIdentity[];
   /** 策略把已选依赖实例映射为内容原生的绑定键。 */
   bindings(options: {

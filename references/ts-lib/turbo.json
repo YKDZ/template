@@ -47,7 +47,8 @@
     "build:template": {
       "dependsOn": [
         "@ykdz/template-core#build",
-        "@ykdz/template-workspace#build"
+        "@ykdz/template-workspace#build",
+        "@ykdz/reference-npm-publication#build:template"
       ],
       "outputs": ["template-dist/**"],
       "tags": ["work:preparation"]
@@ -56,6 +57,14 @@
       "cache": false,
       "outputs": [],
       "tags": ["quality:light"]
+    },
+    "publication:consume": {
+      "tags": ["quality:conditional"],
+      "cache": false
+    },
+    "prepack": {
+      "tags": ["work:release"],
+      "cache": false
     }
   }
 }

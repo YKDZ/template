@@ -60,6 +60,7 @@ export function initializationInputSchema(cwd: string) {
         ),
         dryRun: v.optional(v.boolean(), false),
         todo: v.optional(v.boolean(), true),
+        publication: v.optional(v.boolean(), false),
       }),
       v.rawCheck(({ dataset, addIssue }) => {
         if (!dataset.typed) return;
@@ -118,6 +119,7 @@ export const packageAdditionInputSchema = standardSchema(
         ),
         [],
       ),
+      publication: v.optional(v.boolean(), false),
       dryRun: v.optional(v.boolean(), false),
     }),
     v.rawCheck(({ dataset, addIssue }) => {

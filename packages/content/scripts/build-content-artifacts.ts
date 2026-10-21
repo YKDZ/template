@@ -28,13 +28,6 @@ type NativeMember =
 type PresetMember = Extract<NativeMember, { readonly kind: "preset" }>;
 type ReferenceMember = Extract<NativeMember, { readonly kind: "reference" }>;
 
-export type ContentCollectionDependencyStrategy = {
-  dependencies(options: {
-    readonly content: NativeMember;
-    readonly contentByIdentity: ReadonlyMap<string, NativeMember>;
-  }): readonly ContentIdentity[];
-};
-
 type WorkspaceProject = {
   readonly name: string;
   readonly version?: string;
@@ -80,7 +73,6 @@ export type PrepareContentCollectionOptions = {
   readonly content: readonly NativeMember[];
   /** 从同一已加载集合中选择任意预设或参考入口作为闭包根。 */
   readonly roots: readonly NativeMember[];
-  readonly strategy: ContentCollectionDependencyStrategy;
   /** raw参考声明的拥有者公开准备入口；已准备内容无需提供。 */
   readonly referencePreparation?: {
     readonly specifier: string;
@@ -111,10 +103,38 @@ function ownerDefinition(member: NativeMember): PreparedOwnerDefinition {
   return member.definition as PreparedOwnerDefinition;
 }
 
+/** 分发保留所属制品的完整静态用途，实例条件只约束生成目标。 */
+function distributionDependencies(
+  member: ReferenceMember,
+  contentByIdentity: ReadonlyMap<string, ReferenceMember>,
+): readonly ContentIdentity[] {
+  const dependencies = new Map<string, ContentIdentity>();
+  const artifact = ownerDefinition(member).prepareArtifact?.();
+  for (const dependency of artifact?.dependencies ?? []) {
+    const candidates = [...contentByIdentity.values()].filter(
+      (candidate) => candidate.identity.packageName === dependency.name,
+    );
+    const sameNamespace = candidates.filter(
+      (candidate) => candidate.identity.namespace === member.identity.namespace,
+    );
+    const matching = sameNamespace.length > 0 ? sameNamespace : candidates;
+    if (matching.length > 1)
+      throw new Error(
+        `所属制品 ${contentIdentityLabel(member.identity)} 的静态依赖 ${dependency.name} 对应多个内容入口，无法按来源消歧`,
+      );
+    const provider = matching[0];
+    if (provider !== undefined)
+      dependencies.set(
+        contentIdentityKey(provider.identity),
+        provider.identity,
+      );
+  }
+  return [...dependencies.values()];
+}
+
 function selectedMembers(
   content: readonly NativeMember[],
   roots: readonly NativeMember[],
-  strategy: ContentCollectionDependencyStrategy,
 ): {
   readonly roots: readonly NativeMember[];
   readonly presets: readonly PresetMember[];
@@ -174,10 +194,10 @@ function selectedMembers(
     selected.set(key, member);
     if (visited.has(key)) return;
     visited.add(key);
-    for (const dependency of strategy.dependencies({
-      content: member,
-      contentByIdentity: referencesByIdentity,
-    })) {
+    for (const dependency of distributionDependencies(
+      member,
+      referencesByIdentity,
+    )) {
       const child = referencesByIdentity.get(contentIdentityKey(dependency));
       if (child === undefined) {
         throw new Error(
@@ -236,7 +256,6 @@ function selectedMembers(
 function orderedMembers(
   presets: readonly PresetMember[],
   members: readonly NativeMember[],
-  strategy: ContentCollectionDependencyStrategy,
 ): readonly NativeMember[] {
   const references = members.filter(
     (member): member is ReferenceMember => member.kind === "reference",
@@ -254,10 +273,7 @@ function orderedMembers(
       throw new Error(`原生内容依赖形成循环：${member.identity.packageName}`);
     }
     visiting.add(key);
-    for (const dependency of strategy.dependencies({
-      content: member,
-      contentByIdentity: byIdentity,
-    })) {
+    for (const dependency of distributionDependencies(member, byIdentity)) {
       const child = byIdentity.get(contentIdentityKey(dependency));
       if (child === undefined) {
         throw new Error(
@@ -1096,9 +1112,8 @@ export async function prepareContentCollection(
   const { roots, presets, members } = selectedMembers(
     options.content as readonly NativeMember[],
     options.roots as readonly NativeMember[],
-    options.strategy,
   );
-  const buildOrder = orderedMembers(presets, members, options.strategy);
+  const buildOrder = orderedMembers(presets, members);
   const collectionName = options.packageName ?? "@ykdz/template-content";
   const workspace = await workspaceProjects(workspaceRoot, commandLog);
 

@@ -10,6 +10,10 @@
       "types": "./scripts/publication.ts",
       "default": "./scripts/publication.ts"
     },
+    "./configuration": "./scripts/configuration.ts",
+    "./remote-context": "./scripts/remote-context.ts",
+    "./publish": "./scripts/publish.ts",
+    "./release": "./scripts/release.ts",
     "./prepare": {
       "source": "./scripts/generated/prepare.ts",
       "types": "./scripts/generated/prepare.ts",
@@ -20,10 +24,6 @@
       "types": "./scripts/generated/artifact.ts",
       "default": "./scripts/generated/artifact.ts"
     },
-    "./configuration": "./scripts/configuration.ts",
-    "./remote-context": "./scripts/remote-context.ts",
-    "./publish": "./scripts/publish.ts",
-    "./release": "./scripts/release.ts",
     "./template": {
       "source": "./template/definition.ts",
       "types": "./template-dist/definition.d.ts",
@@ -54,6 +54,7 @@
     "@types/semver": "catalog:",
     "@types/spdx-expression-parse": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
+    "@ykdz/template-core": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

@@ -1,3 +1,8 @@
+import {
+  normalizePublicationConfiguration,
+  publicationTargetDependencies,
+  projectPublicationTarget,
+} from "@ykdz/reference-npm-publication/template";
 import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 export const referencePackage = defineReferencePackage({
@@ -9,8 +14,15 @@ export const referencePackage = defineReferencePackage({
   defaultLeafName: "lib",
   role: "shared-library",
   resources: ["."],
+  normalizeConfiguration: normalizePublicationConfiguration,
+  targetDependencies: publicationTargetDependencies,
   template: {
     dependencies: [
+      { name: "@ykdz/reference-npm-publication", purpose: "target" },
+      {
+        name: "@ykdz/reference-npm-publication",
+        purpose: "template-execution",
+      },
       { name: "@ykdz/template-core", purpose: "template-execution" },
       {
         name: "@ykdz/template-workspace",
@@ -19,6 +31,13 @@ export const referencePackage = defineReferencePackage({
     ],
     scripts: ["build:template", "check:author-planning-roles"],
     resources: ["template", "tsconfig.template.json"],
+  },
+  project(contribution, input) {
+    return projectPublicationTarget({
+      contribution,
+      configuration: input.configuration,
+      bindings: input.bindings,
+    });
   },
   environmentNeeds: [],
   foundation: {
