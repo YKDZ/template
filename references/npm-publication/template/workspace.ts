@@ -5,6 +5,7 @@ import type { GeneratorPackageState } from "@ykdz/template-core/workspace-strate
 import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
 import type { SharedRootContribution } from "@ykdz/template-workspace/shared-root-files";
 
+import { projectPublicationSetup } from "./setup-workspace.ts";
 import { isPublicationEnabled } from "./target.ts";
 
 const resourceSource = createTemplateSourceHandle(
@@ -86,5 +87,6 @@ export function projectPublicationWorkspace(options: {
         },
       ],
     },
+    projectPublicationSetup({ toolName }),
   ];
 }
