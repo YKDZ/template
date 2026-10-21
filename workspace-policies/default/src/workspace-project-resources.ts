@@ -1,10 +1,10 @@
-import type { RenderOperation } from "@ykdz/template-core/renderer";
 import type {
   DeploymentCheckRequirement,
   VueHonoJointE2eRequirement,
 } from "@ykdz/template-workspace-authoring/project-requirements";
 
 import type { WorkspaceProjectRequirements } from "./application-requirements.ts";
+import type { RootResourceOperation } from "./shared-root-files.ts";
 import {
   copyPreparedWorkspaceResource,
   prepareWorkspaceResources,
@@ -36,7 +36,7 @@ function copy(
   resources: PreparedWorkspaceResources,
   file: (typeof workspaceProjectFiles)[number],
   to: string,
-): RenderOperation {
+): RootResourceOperation {
   return copyPreparedWorkspaceResource(
     resources,
     file,
@@ -48,7 +48,7 @@ function copy(
 function projectVueHonoJointE2eResources(
   requirement: VueHonoJointE2eRequirement,
   resources: PreparedWorkspaceResources,
-): readonly RenderOperation[] {
+): readonly RootResourceOperation[] {
   return [
     copy(
       resources,
@@ -79,7 +79,7 @@ function projectVueHonoJointE2eResources(
 function projectDeploymentResources(
   requirement: DeploymentCheckRequirement,
   resources: PreparedWorkspaceResources,
-): readonly RenderOperation[] {
+): readonly RootResourceOperation[] {
   return [
     copy(resources, "resources/deployment/Dockerfile", "Dockerfile"),
     copy(
@@ -122,7 +122,7 @@ function projectDeploymentResources(
 export function projectWorkspaceProjectResources(options: {
   readonly requirements: WorkspaceProjectRequirements;
   readonly resources: PreparedWorkspaceResources;
-}): readonly RenderOperation[] {
+}): readonly RootResourceOperation[] {
   return [
     ...(options.requirements.vueHonoJointE2e === undefined
       ? []

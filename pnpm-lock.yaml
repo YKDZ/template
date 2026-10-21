@@ -373,7 +373,7 @@ importers:
         version: link:packages/generator
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:packages/workspace
+        version: link:workspace-policies/default
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:packages/workspace-authoring
@@ -424,7 +424,7 @@ importers:
         version: link:../generator
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../workspace
+        version: link:../../workspace-policies/default
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../workspace-authoring
@@ -494,7 +494,7 @@ importers:
         version: link:../generator
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../workspace
+        version: link:../../workspace-policies/default
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../workspace-authoring
@@ -625,7 +625,7 @@ importers:
         version: 24.19.2
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../workspace
+        version: link:../../workspace-policies/default
       execa:
         specifier: 'catalog:'
         version: 10.1.1
@@ -738,64 +738,6 @@ importers:
         specifier: 'catalog:'
         version: typescript@7.0.2
 
-  packages/workspace:
-    dependencies:
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../core
-      '@ykdz/template-environment':
-        specifier: workspace:*
-        version: link:../environment
-      '@ykdz/template-workspace-authoring':
-        specifier: workspace:*
-        version: link:../workspace-authoring
-      smol-toml:
-        specifier: 'catalog:'
-        version: 1.9.1
-      yaml:
-        specifier: 'catalog:'
-        version: 2.9.1
-    devDependencies:
-      '@playwright/test':
-        specifier: 'catalog:'
-        version: 1.64.0
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@types/semver':
-        specifier: 'catalog:'
-        version: 7.8.0
-      '@types/spdx-expression-parse':
-        specifier: 'catalog:'
-        version: 4.0.0
-      '@ykdz/reference-ts-cli':
-        specifier: link:../../references/ts-cli
-        version: link:../../references/ts-cli
-      '@ykdz/reference-typescript-config':
-        specifier: workspace:*
-        version: link:../../references/typescript-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      semver:
-        specifier: 'catalog:'
-        version: 7.8.5
-      spdx-expression-parse:
-        specifier: 'catalog:'
-        version: 5.0.0
-      tar:
-        specifier: 'catalog:'
-        version: 7.5.22
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
   packages/workspace-authoring:
     dependencies:
       '@ykdz/template-environment':
@@ -856,7 +798,7 @@ importers:
         version: link:../../packages/generator
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace
+        version: link:../../workspace-policies/default
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../../packages/workspace-authoring
@@ -902,7 +844,7 @@ importers:
         version: link:../../packages/generator
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace
+        version: link:../../workspace-policies/default
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../../packages/workspace-authoring
@@ -942,7 +884,7 @@ importers:
         version: link:../../packages/generator
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace
+        version: link:../../workspace-policies/default
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../../packages/workspace-authoring
@@ -1000,7 +942,7 @@ importers:
         version: link:../../packages/generator
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace
+        version: link:../../workspace-policies/default
       execa:
         specifier: 'catalog:'
         version: 10.1.1
@@ -1043,7 +985,7 @@ importers:
         version: link:../../packages/generator
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace
+        version: link:../../workspace-policies/default
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../../packages/workspace-authoring
@@ -1095,7 +1037,7 @@ importers:
         version: link:../../packages/generator
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace
+        version: link:../../workspace-policies/default
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1636,6 +1578,64 @@ importers:
       vue-tsc:
         specifier: 'catalog:'
         version: 3.3.13(@typescript/typescript6@6.0.2)
+
+  workspace-policies/default:
+    dependencies:
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../../packages/environment
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../packages/workspace-authoring
+      smol-toml:
+        specifier: 'catalog:'
+        version: 1.9.1
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.1
+    devDependencies:
+      '@playwright/test':
+        specifier: 'catalog:'
+        version: 1.64.0
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@types/semver':
+        specifier: 'catalog:'
+        version: 7.8.0
+      '@types/spdx-expression-parse':
+        specifier: 'catalog:'
+        version: 4.0.0
+      '@ykdz/reference-ts-cli':
+        specifier: link:../../references/ts-cli
+        version: link:../../references/ts-cli
+      '@ykdz/reference-typescript-config':
+        specifier: workspace:*
+        version: link:../../references/typescript-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      semver:
+        specifier: 'catalog:'
+        version: 7.8.5
+      spdx-expression-parse:
+        specifier: 'catalog:'
+        version: 5.0.0
+      tar:
+        specifier: 'catalog:'
+        version: 7.5.22
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
 
 packages:
 

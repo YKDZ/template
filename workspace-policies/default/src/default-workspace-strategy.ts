@@ -93,13 +93,24 @@ import {
   canProvideSourceConditionPackageNameImportForRole,
   readProjectLinkManifestTruth,
 } from "./project-linking.ts";
+import {
+  assertExclusiveRootResources,
+  composeSharedRootFiles,
+  composeCheckWorkflow,
+  type SharedRootContribution,
+} from "./shared-root-files.ts";
+
+/** 预设负责校验项目事实；共享根声明由外层策略统一协调。 */
+export type DefaultWorkspaceProjectContribution =
+  | ProjectRequirement
+  | SharedRootContribution;
+
 import { releaseToolchainSnapshot } from "./release-toolchain-snapshot.ts";
 import {
   createWorkspaceRootManifest,
   packageConditionKeyOrder,
   packageManifestKeyOrder,
   projectPreparedWorkspaceRoot,
-  type WorkspaceRootInsertion,
 } from "./root-projection.ts";
 import {
   initialRustVersion,
@@ -627,7 +638,7 @@ function oneRequirement<T extends ProjectRequirement["kind"]>(
 function projectRequirements(
   blueprint: ProjectBlueprint,
   contributions: readonly PackageContribution[],
-  presetProjectContributions: readonly (readonly ProjectRequirement[])[],
+  presetProjectContributions: readonly (readonly DefaultWorkspaceProjectContribution[])[],
 ): {
   readonly blueprint: ProjectBlueprint;
   readonly requirements: WorkspaceProjectRequirements;
@@ -635,7 +646,14 @@ function projectRequirements(
   const declarations = contributions.flatMap(
     (contribution) => contribution.projectRequirements ?? [],
   );
-  declarations.push(...presetProjectContributions.flat());
+  declarations.push(
+    ...presetProjectContributions
+      .flat()
+      .filter(
+        (declaration): declaration is ProjectRequirement =>
+          declaration.kind !== "shared-root-files",
+      ),
+  );
   assertSupportedProjectRequirementKinds(declarations);
   const joint = oneRequirement(declarations, "vue-hono-joint-e2e");
   const database = oneRequirement(declarations, "sqlite-database-preparation");
@@ -820,41 +838,26 @@ function databasePreparationScripts(
   };
 }
 
-function projectRootScriptInsertions(
+function projectRootScripts(
   requirements: WorkspaceProjectRequirements,
-): WorkspaceRootInsertion[] {
-  const insertions: WorkspaceRootInsertion[] = [];
-  const database = requirements.databasePreparation;
-  if (database !== undefined) {
-    insertions.push({
-      before: "fix",
-      values: databasePreparationScripts(database),
-    });
-  }
-  if (requirements.deploymentCheck !== undefined) {
-    insertions.push({
-      before: "fix",
-      values: {
-        deployment:
-          "node --conditions=source scripts/check-standalone-deployment.ts",
-      },
-    });
-  }
-  if (database !== undefined) {
-    insertions.push({
-      before: "fix",
-      values: {
-        dev: `pnpm run database:prepare:dev && turbo watch dev --filter=${database.web.name}`,
-      },
-    });
-  }
-  if (requirements.vueHonoJointE2e !== undefined) {
-    insertions.push({
-      before: "typecheck",
-      values: { "test:e2e": "playwright test" },
-    });
-  }
-  return insertions;
+): Readonly<Record<string, string>> {
+  return {
+    ...(requirements.databasePreparation === undefined
+      ? {}
+      : {
+          ...databasePreparationScripts(requirements.databasePreparation),
+          dev: `pnpm run database:prepare:dev && turbo watch dev --filter=${requirements.databasePreparation.web.name}`,
+        }),
+    ...(requirements.deploymentCheck === undefined
+      ? {}
+      : {
+          deployment:
+            "node --conditions=source scripts/check-standalone-deployment.ts",
+        }),
+    ...(requirements.vueHonoJointE2e === undefined
+      ? {}
+      : { "test:e2e": "playwright test" }),
+  };
 }
 
 function projectOperations(options: {
@@ -863,7 +866,8 @@ function projectOperations(options: {
   readonly blueprint: ProjectBlueprint;
   readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
-  readonly presetProjectContributions: readonly (readonly ProjectRequirement[])[];
+  readonly presetProjectContributions: readonly (readonly DefaultWorkspaceProjectContribution[])[];
+  readonly sharedRootContributions: readonly SharedRootContribution[];
 }): WorkspaceProjection<DefaultWorkspaceOwnerFacts> {
   const { context } = options;
   const prepared = preparedResourcesForContext(context);
@@ -926,7 +930,7 @@ function projectOperations(options: {
     "scripts",
     ...(hasJointE2e ? ["test"] : []),
   ].join(" ");
-  const rootManifest = createWorkspaceRootManifest({
+  const baseManifest = createWorkspaceRootManifest({
     name: context.repositoryName,
     ...(configuration === undefined
       ? {}
@@ -934,47 +938,100 @@ function projectOperations(options: {
     nodeDeclaration:
       context.toolchain.nodeVersion ?? context.toolchain.nodeLtsMajor,
     packageManagerPin: context.toolchain.packageManagerPin,
-    ...(cliPublication.imports === undefined
-      ? {}
-      : { imports: cliPublication.imports }),
-    scriptInsertions: [
-      ...(rust === undefined
-        ? []
-        : [
-            {
-              before: "boundaries",
-              values: { "toolchain:prepare": "cargo --version" },
-            },
-          ]),
-      ...cliPublication.scriptInsertions,
-      ...projectRootScriptInsertions(requirements),
-    ],
-    ...(hasJointE2e || cliPublication.candidate !== undefined
-      ? {
-          dependencyInsertions: [
-            ...(hasJointE2e
-              ? [
-                  {
-                    before: "@types/node",
-                    values: { "@playwright/test": "catalog:" },
-                  },
-                ]
-              : []),
-            ...cliPublication.dependencyInsertions,
-          ],
-        }
-      : {}),
-    ...(hasDeployment || hasJointE2e
-      ? {
-          scriptOverrides: {
-            "format:check": `oxfmt --list-different --no-error-on-unmatched-pattern ${rootAutomationPaths}`,
-            "format:write": `oxfmt --write --no-error-on-unmatched-pattern ${rootAutomationPaths}`,
-            lint: `${hasDeployment ? "shellcheck scripts/container-entrypoint.sh && " : ""}oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts${hasJointE2e ? " test" : ""}`,
-            "lint:fix": `oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts${hasJointE2e ? " test" : ""} --fix`,
-          },
-        }
-      : {}),
   });
+  // 基础检查命令由默认政策按实际根检查范围构造，再参与来源合成。
+  const baseScripts = baseManifest.scripts as Record<string, string>;
+  if (hasDeployment || hasJointE2e) {
+    baseScripts["format:check"] =
+      `oxfmt --list-different --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
+    baseScripts["format:write"] =
+      `oxfmt --write --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
+    baseScripts.lint = `${hasDeployment ? "shellcheck scripts/container-entrypoint.sh && " : ""}oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts${hasJointE2e ? " test" : ""}`;
+    baseScripts["lint:fix"] =
+      `oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts${hasJointE2e ? " test" : ""} --fix`;
+  }
+  const shared = composeSharedRootFiles({
+    source: "@ykdz/template-workspace/default-workspace-strategy",
+    manifest: baseManifest,
+    turboTasks: prepared.rootTemplates.turbo.tasks as Readonly<
+      Record<string, unknown>
+    >,
+    typescript: {
+      compilerOptions: {
+        ...(prepared.rootTemplates.tsconfig.compilerOptions as Readonly<
+          Record<string, unknown>
+        >),
+        rewriteRelativeImportExtensions: false,
+        allowImportingTsExtensions: true,
+      },
+      include: ["*.config.ts", "scripts/**/*.ts"],
+    },
+    packagePaths: blueprint.packages.map((definition) => definition.path),
+
+    declarations: [
+      {
+        kind: "shared-root-files",
+        source: "@ykdz/template-workspace/rust-target-projection",
+        manifest: {
+          scripts:
+            rust === undefined
+              ? {}
+              : { "toolchain:prepare": "cargo --version" },
+        },
+      },
+      {
+        kind: "shared-root-files",
+        source: "@ykdz/template-workspace/cli-publication-projection",
+        manifest: {
+          ...(cliPublication.imports === undefined
+            ? {}
+            : { imports: cliPublication.imports }),
+          scripts: cliPublication.scripts,
+          devDependencies: cliPublication.devDependencies,
+        },
+        typescript: {
+          compilerOptions: cliPublication.tsconfigCompilerOptions,
+          include: cliPublication.tsconfigInclude,
+        },
+        gitignoreFragments: cliPublication.gitignoreFragments,
+        resources: cliPublication.operations
+          .filter((operation) => operation.kind !== "setExecutable")
+          .map((operation) => ({
+            operation,
+            ...(cliPublication.operations.some(
+              (candidate) =>
+                candidate.kind === "setExecutable" &&
+                candidate.path === operation.to,
+            )
+              ? { executable: true }
+              : {}),
+          })),
+      },
+      {
+        kind: "shared-root-files",
+        source: "@ykdz/template-workspace/workspace-project-resources",
+        manifest: {
+          scripts: projectRootScripts(requirements),
+          devDependencies: hasJointE2e
+            ? { "@playwright/test": "catalog:" }
+            : {},
+        },
+        typescript: { include: applicationRootTsconfigIncludes(requirements) },
+        resources: projectWorkspaceProjectResources({
+          requirements,
+          resources: prepared.workspaceProject,
+        }).map((operation) => ({ operation })),
+      },
+      ...options.presetProjectContributions
+        .flat()
+        .filter(
+          (declaration): declaration is SharedRootContribution =>
+            declaration.kind === "shared-root-files",
+        ),
+      ...options.sharedRootContributions,
+    ],
+  });
+  const rootManifest = shared.manifest;
   const dependencyCatalog = selectTemplateDependencyCatalogEntries(
     collectGeneratedManifestCatalogReferences([
       ...contributions.map((contribution) => contribution.manifest),
@@ -1064,21 +1121,15 @@ function projectOperations(options: {
     packageGlobs: packages,
     dependencyCatalog,
     dependencyOverrides,
-    turboTemplate: prepared.rootTemplates.turbo,
+    turboTemplate: {
+      ...prepared.rootTemplates.turbo,
+      tasks: shared.turboTasks,
+    },
     referenceNames,
     turboBoundaryTags: boundaryTags(contributions),
     rootTsconfigTemplate: prepared.rootTemplates.tsconfig,
-    rootTsconfigCompilerOptions: {
-      ...cliPublication.tsconfigCompilerOptions,
-      rewriteRelativeImportExtensions: false,
-      allowImportingTsExtensions: true,
-    },
-    rootTsconfigInclude: [
-      "*.config.ts",
-      "scripts/**/*.ts",
-      ...cliPublication.tsconfigInclude,
-      ...applicationRootTsconfigIncludes(requirements),
-    ],
+    rootTsconfigCompilerOptions: shared.typescript.compilerOptions,
+    rootTsconfigInclude: shared.typescript.include,
     tsconfigConfigTemplate: prepared.rootTemplates.tsconfigConfig,
   });
   const editorExtensions = {
@@ -1098,6 +1149,7 @@ function projectOperations(options: {
     hasDeployment,
   });
   const reconciliation: readonly ProjectProjectionReconciliation[] = [
+    ...shared.reconciliation,
     { path: "tsconfig.json", driver: "structured" },
     { path: "turbo.json", driver: "structured" },
     {
@@ -1159,12 +1211,12 @@ function projectOperations(options: {
   const defaultOperations: RenderOperation[] = [
     rootProjection.manifest,
     rootProjection.workspace,
-    cliPublication.gitignoreFragments.length === 0
+    shared.gitignoreFragments.length === 0
       ? gitignore
       : {
           kind: "writeTextFromFragments",
           to: ".gitignore",
-          fragments: [gitignore, ...cliPublication.gitignoreFragments],
+          fragments: [gitignore, ...shared.gitignoreFragments],
         },
     workspaceResource(
       prepared.workspaceFiles,
@@ -1184,7 +1236,6 @@ function projectOperations(options: {
     ),
     rootProjection.tsconfig,
     rootProjection.tsconfigConfig,
-    ...cliPublication.operations,
     ...(configuration === undefined
       ? []
       : [
@@ -1240,15 +1291,19 @@ function projectOperations(options: {
     {
       kind: "writeText",
       to: ".github/workflows/check.yml",
-      text: projectCheckWorkflow(
-        {
-          packagePaths,
-          ...(requirements.deploymentCheck === undefined
-            ? {}
-            : { deploymentCheck: requirements.deploymentCheck }),
-          diagnosticArtifacts: artifacts,
-        },
-        prepared.githubTemplates.checkWorkflow,
+      text: composeCheckWorkflow(
+        projectCheckWorkflow(
+          {
+            packagePaths,
+            ...(requirements.deploymentCheck === undefined
+              ? {}
+              : { deploymentCheck: requirements.deploymentCheck }),
+            diagnosticArtifacts: artifacts,
+          },
+          prepared.githubTemplates.checkWorkflow,
+        ),
+        "@ykdz/template-workspace/project-github",
+        shared.ciSteps,
       ),
     },
     {
@@ -1277,6 +1332,11 @@ function projectOperations(options: {
       value: environmentNeeds,
     },
   ];
+  assertExclusiveRootResources(
+    defaultOperations,
+    "@ykdz/template-workspace/default-workspace-strategy",
+    shared.resourceOwners,
+  );
   const packageOperations = contributions.flatMap((contribution) =>
     contribution.operations.map((operation) =>
       operation.kind === "writeJson" &&
@@ -1320,10 +1380,7 @@ function projectOperations(options: {
     operations: [
       ...packageOperations,
       ...defaultOperations,
-      ...projectWorkspaceProjectResources({
-        requirements,
-        resources: prepared.workspaceProject,
-      }),
+      ...shared.operations,
       { kind: "writeJson", to: ".template/blueprint.json", value: blueprint },
     ],
     reconciliation,
@@ -1359,7 +1416,16 @@ function projectOperations(options: {
 /** 创建拥有 Node、pnpm、catalog、Turbo 与根任务政策的默认工作区策略。 */
 export function createDefaultWorkspaceStrategy<
   CreationInput extends PackageCreationInput = DefaultWorkspaceCreationInput,
->(): WorkspaceStrategy<
+>(
+  options: {
+    readonly project?: (options: {
+      readonly context: DefaultWorkspaceContext;
+      readonly blueprint: ProjectBlueprint;
+      readonly contributions: readonly PackageContribution[];
+      readonly packages: readonly GeneratorPackageState[];
+    }) => readonly SharedRootContribution[];
+  } = {},
+): WorkspaceStrategy<
   DefaultWorkspaceContext,
   DefaultWorkspaceInput,
   DefaultWorkspaceState,
@@ -1367,7 +1433,7 @@ export function createDefaultWorkspaceStrategy<
   CreationInput,
   DefaultReferenceContent<CreationInput>,
   DefaultWorkspaceNodeLayout,
-  readonly ProjectRequirement[],
+  readonly DefaultWorkspaceProjectContribution[],
   DefaultWorkspaceOwnerFacts
 > {
   return {
@@ -1769,8 +1835,11 @@ export function createDefaultWorkspaceStrategy<
         role: reference.role,
       });
     },
-    project(options) {
-      return projectOperations(options);
+    project(projectOptions) {
+      return projectOperations({
+        ...projectOptions,
+        sharedRootContributions: options.project?.(projectOptions) ?? [],
+      });
     },
   };
 }

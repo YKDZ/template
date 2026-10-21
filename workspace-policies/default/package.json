@@ -82,6 +82,11 @@
       "source": "./src/rust-toolchain-facts.ts",
       "types": "./dist/rust-toolchain-facts.d.ts",
       "default": "./dist/rust-toolchain-facts.js"
+    },
+    "./shared-root-files": {
+      "source": "./src/shared-root-files.ts",
+      "types": "./dist/shared-root-files.d.ts",
+      "default": "./dist/shared-root-files.js"
     }
   },
   "scripts": {
@@ -91,9 +96,10 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
-    "sync:policy-snapshot": "node scripts/sync-policy-snapshot.ts",
+    "sync:policy-snapshot": "node scripts/sync-snapshot.ts src/workspace-policy-snapshot.ts",
     "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec --test-reporter=@ykdz/reference-typescript-config/reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.light.test.ts'",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "sync:release-toolchain-snapshot": "node scripts/sync-snapshot.ts src/release-toolchain-snapshot.ts"
   },
   "dependencies": {
     "@ykdz/template-core": "workspace:*",

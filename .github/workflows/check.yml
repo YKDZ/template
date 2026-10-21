@@ -72,9 +72,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .fixture-native-cache/buildkit
-          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/environment/assets/**/*.Dockerfile', 'packages/environment/assets/devcontainer/workspace-template.json', 'packages/workspace/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/environment/assets/**/*.Dockerfile', 'packages/environment/assets/devcontainer/workspace-template.json', 'workspace-policies/default/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/environment/assets/**/*.Dockerfile', 'packages/environment/assets/devcontainer/workspace-template.json', 'packages/workspace/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts') }}-
+            fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/environment/assets/**/*.Dockerfile', 'packages/environment/assets/devcontainer/workspace-template.json', 'workspace-policies/default/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts') }}-
             fixture-buildkit-${{ runner.os }}-
 
       - name: Restore pnpm downloads cache
@@ -228,7 +228,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: .fixture-native-cache/buildkit
-          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/environment/assets/**/*.Dockerfile', 'packages/environment/assets/devcontainer/workspace-template.json', 'packages/workspace/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/environment/assets/**/*.Dockerfile', 'packages/environment/assets/devcontainer/workspace-template.json', 'workspace-policies/default/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Save pnpm downloads cache
         if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'
