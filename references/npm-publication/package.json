@@ -1,0 +1,37 @@
+{
+  "name": "@ykdz/reference-npm-publication",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./reference": "./package.json",
+    ".": {
+      "source": "./scripts/publication.ts",
+      "types": "./scripts/publication.ts",
+      "default": "./scripts/publication.ts"
+    },
+    "./resources": {
+      "source": "./scripts/resources.ts",
+      "types": "./scripts/resources.ts",
+      "default": "./scripts/resources.ts"
+    }
+  },
+  "scripts": {
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "test:integration": "node --conditions=source --experimental-strip-types --test --test-timeout=300000 --test-reporter=spec 'scripts/**/*.integration.test.ts'",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@ykdz/reference-typescript-config": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  },
+  "engines": {
+    "node": "^24.21.0"
+  }
+}

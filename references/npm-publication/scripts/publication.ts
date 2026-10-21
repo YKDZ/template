@@ -1,0 +1,462 @@
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  access,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+const packageManifestName = "package.json";
+const consumerScriptName = "publication:consume";
+
+export type PublicationBlocker = {
+  readonly code: string;
+  readonly target: string;
+  readonly field: string;
+  readonly observed: string;
+  readonly expected: string;
+  readonly nextAction: string;
+};
+
+export type PublicationManifest = {
+  readonly name?: unknown;
+  readonly version?: unknown;
+  readonly private?: unknown;
+  readonly scripts?: unknown;
+  readonly [key: string]: unknown;
+};
+
+export type PublicationInspection =
+  | {
+      readonly kind: "ready";
+      readonly packageRoot: string;
+      readonly manifest: PublicationManifest;
+      readonly packageName: string;
+      readonly packageVersion: string;
+      readonly consumerCommand: string;
+    }
+  | {
+      readonly kind: "blocked";
+      readonly packageRoot: string;
+      readonly blockers: readonly PublicationBlocker[];
+    };
+
+export type PublicationExecution = {
+  readonly command: string;
+  readonly arguments: readonly string[];
+  readonly stdout: string;
+  readonly stderr: string;
+};
+
+export type PreparedArtifact = {
+  readonly kind: "prepared";
+  readonly packageRoot: string;
+  readonly packageName: string;
+  readonly packageVersion: string;
+  readonly artifactPath: string;
+  readonly sha512: string;
+  readonly pack: PublicationExecution;
+};
+
+export type PrepareArtifactResult =
+  | PreparedArtifact
+  | {
+      readonly kind: "blocked";
+      readonly inspection: Extract<PublicationInspection, { kind: "blocked" }>;
+    };
+
+export type AcceptedArtifact = {
+  readonly kind: "accepted";
+  readonly packageRoot: string;
+  readonly packageName: string;
+  readonly artifactPath: string;
+  readonly sha512: string;
+  readonly installation: PublicationExecution;
+  readonly consumption: PublicationExecution;
+};
+
+export type AcceptArtifactResult =
+  | AcceptedArtifact
+  | {
+      readonly kind: "blocked";
+      readonly inspection: Extract<PublicationInspection, { kind: "blocked" }>;
+    };
+
+export type PackAdapter = (options: {
+  readonly packageRoot: string;
+  readonly outputDirectory: string;
+  readonly env: NodeJS.ProcessEnv;
+}) => Promise<{
+  readonly artifactPath: string;
+  readonly execution: PublicationExecution;
+}>;
+
+function blocker(options: PublicationBlocker): PublicationBlocker {
+  return options;
+}
+
+function isPublicationBlocker(
+  value: PublicationManifest | PublicationBlocker,
+): value is PublicationBlocker {
+  return typeof (value as PublicationBlocker).code === "string";
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+async function packageManifest(
+  packageRoot: string,
+): Promise<PublicationManifest | PublicationBlocker> {
+  const manifestPath = path.join(packageRoot, packageManifestName);
+  let raw: string;
+  try {
+    raw = await readFile(manifestPath, "utf8");
+  } catch (error) {
+    return blocker({
+      code: "publication-manifest-missing",
+      target: packageRoot,
+      field: packageManifestName,
+      observed: error instanceof Error ? error.message : String(error),
+      expected: `可读取的 ${packageManifestName}`,
+      nextAction: `在 ${packageRoot} 创建有效的 ${packageManifestName}，声明 npm 包名称、版本及消费验收命令。`,
+    });
+  }
+  try {
+    const manifest = objectValue(JSON.parse(raw));
+    if (manifest === undefined) throw new Error("根值不是 JSON 对象");
+    return manifest;
+  } catch (error) {
+    return blocker({
+      code: "publication-manifest-invalid",
+      target: packageRoot,
+      field: packageManifestName,
+      observed: error instanceof Error ? error.message : String(error),
+      expected: "有效的 npm package.json JSON 对象",
+      nextAction: `修复 ${manifestPath} 的 JSON 语法后重新运行发布诊断。`,
+    });
+  }
+}
+
+function validPackageName(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value === value.trim() &&
+    !/[\s\\]/u.test(value)
+  );
+}
+
+async function digestFile(filePath: string): Promise<string> {
+  const bytes = await readFile(filePath);
+  return createHash("sha512").update(bytes).digest("hex");
+}
+
+async function execute(
+  command: string,
+  arguments_: readonly string[],
+  options: {
+    readonly cwd: string;
+    readonly env: NodeJS.ProcessEnv;
+    readonly operation: string;
+  },
+): Promise<PublicationExecution> {
+  try {
+    const result = await execFileAsync(command, [...arguments_], {
+      cwd: options.cwd,
+      env: options.env,
+      encoding: "utf8",
+      maxBuffer: 32 * 1024 * 1024,
+      windowsHide: true,
+    });
+    return {
+      command,
+      arguments: [...arguments_],
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
+  } catch (error) {
+    const record = objectValue(error);
+    const exitCode = record?.code;
+    const stdout = typeof record?.stdout === "string" ? record.stdout : "";
+    const stderr = typeof record?.stderr === "string" ? record.stderr : "";
+    throw new Error(
+      `${options.operation}失败：${command} ${arguments_.join(" ")}；退出状态 ${String(exitCode)}。\n${stderr || stdout}`,
+      { cause: error },
+    );
+  }
+}
+
+function archiveFromPackOutput(stdout: string): string | undefined {
+  const firstObject = stdout.indexOf("{");
+  if (firstObject < 0) return undefined;
+  try {
+    const value = JSON.parse(stdout.slice(firstObject)) as unknown;
+    const record = Array.isArray(value) ? value[0] : value;
+    const filename = objectValue(record)?.filename;
+    return typeof filename === "string" ? filename : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function regularFile(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return (await stat(filePath)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** 检查 npm 目标本身需要的身份、版本与包自有消费验收命令。 */
+export async function inspectTarget(options: {
+  readonly packageRoot: string;
+}): Promise<PublicationInspection> {
+  const packageRoot = path.resolve(options.packageRoot);
+  const parsed = await packageManifest(packageRoot);
+  if (isPublicationBlocker(parsed)) {
+    return { kind: "blocked", packageRoot, blockers: [parsed] };
+  }
+
+  const blockers: PublicationBlocker[] = [];
+  const name = parsed.name;
+  if (!validPackageName(name)) {
+    blockers.push({
+      code: "publication-package-name-missing",
+      target: packageRoot,
+      field: `${packageManifestName}#/name`,
+      observed: String(name),
+      expected: "非空 npm 包名称",
+      nextAction: `在 ${path.join(packageRoot, packageManifestName)} 的 name 字段填写有效 npm 包名。`,
+    });
+  }
+  const version = parsed.version;
+  if (typeof version !== "string" || version.trim().length === 0) {
+    blockers.push({
+      code: "publication-package-version-missing",
+      target: packageRoot,
+      field: `${packageManifestName}#/version`,
+      observed: String(version),
+      expected: "非空 npm 包版本",
+      nextAction: `在 ${path.join(packageRoot, packageManifestName)} 的 version 字段选择该包自己的版本。`,
+    });
+  }
+  if (parsed.private === true) {
+    blockers.push({
+      code: "publication-package-private",
+      target: packageRoot,
+      field: `${packageManifestName}#/private`,
+      observed: "true",
+      expected: "可打包发布的 npm 目标（未设置 private: true）",
+      nextAction: `移除 ${path.join(packageRoot, packageManifestName)} 中的 private: true，或改用非发布工作区包。`,
+    });
+  }
+  const scripts = objectValue(parsed.scripts);
+  const consumerCommand = scripts?.[consumerScriptName];
+  if (
+    typeof consumerCommand !== "string" ||
+    consumerCommand.trim().length === 0
+  ) {
+    blockers.push({
+      code: "publication-consumer-command-missing",
+      target: packageRoot,
+      field: `${packageManifestName}#/scripts/${consumerScriptName}`,
+      observed: String(consumerCommand),
+      expected: `包自有的 ${consumerScriptName} 消费验收命令`,
+      nextAction: `在 ${path.join(packageRoot, packageManifestName)} 声明 scripts.${consumerScriptName}，让它通过安装后的 tgz 验证该包的实际用途。`,
+    });
+  }
+  if (blockers.length > 0) return { kind: "blocked", packageRoot, blockers };
+
+  return {
+    kind: "ready",
+    packageRoot,
+    manifest: parsed,
+    packageName: name as string,
+    packageVersion: version as string,
+    consumerCommand: consumerCommand as string,
+  };
+}
+
+/** 只打包一次；默认路径使用 pnpm 原生 pack 与包自身生命周期。 */
+export async function prepareArtifact(options: {
+  readonly packageRoot: string;
+  readonly outputDirectory: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly pack?: PackAdapter;
+}): Promise<PrepareArtifactResult> {
+  const inspection = await inspectTarget(options);
+  if (inspection.kind === "blocked") return { kind: "blocked", inspection };
+
+  const outputDirectory = path.resolve(options.outputDirectory);
+  await mkdir(outputDirectory, { recursive: true });
+  const existing = await readdir(outputDirectory);
+  if (existing.length > 0) {
+    throw new Error(
+      `制品输出目录必须为空：${outputDirectory}；现有内容：${existing.join("、")}`,
+    );
+  }
+
+  const env = { ...process.env, ...options.env };
+  let artifactPath: string;
+  let execution: PublicationExecution;
+  if (options.pack !== undefined) {
+    const packed = await options.pack({
+      packageRoot: inspection.packageRoot,
+      outputDirectory,
+      env,
+    });
+    artifactPath = path.resolve(packed.artifactPath);
+    execution = packed.execution;
+  } else {
+    const packed = await execute(
+      "pnpm",
+      ["pack", "--json", "--pack-destination", outputDirectory],
+      {
+        cwd: inspection.packageRoot,
+        env,
+        operation: `${inspection.packageName}@${inspection.packageVersion} 原生打包`,
+      },
+    );
+    const filename = archiveFromPackOutput(packed.stdout);
+    if (filename === undefined) {
+      throw new Error(
+        `pnpm pack 未返回可识别的 tgz 文件名：${inspection.packageName}@${inspection.packageVersion}\n${packed.stdout}\n${packed.stderr}`,
+      );
+    }
+    artifactPath = path.resolve(outputDirectory, filename);
+    execution = packed;
+  }
+
+  if (!(await regularFile(artifactPath))) {
+    throw new Error(
+      `打包命令没有生成普通 tgz 文件：${artifactPath}。检查目标包的 pack/prepack 生命周期及其输出位置。`,
+    );
+  }
+  if (path.dirname(artifactPath) !== outputDirectory) {
+    throw new Error(
+      `打包 adapter 必须把原始 tgz 写入声明的输出目录：目标 ${artifactPath}；目录 ${outputDirectory}。`,
+    );
+  }
+
+  const sha512 = await digestFile(artifactPath);
+  const receiptPath = path.join(
+    outputDirectory,
+    "publication-preparation.json",
+  );
+  await writeFile(
+    receiptPath,
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        target: {
+          packageRoot: inspection.packageRoot,
+          name: inspection.packageName,
+          version: inspection.packageVersion,
+        },
+        pack: {
+          count: 1,
+          command: execution.command,
+          arguments: execution.arguments,
+        },
+        artifact: { path: path.basename(artifactPath), sha512 },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  return {
+    kind: "prepared",
+    packageRoot: inspection.packageRoot,
+    packageName: inspection.packageName,
+    packageVersion: inspection.packageVersion,
+    artifactPath,
+    sha512,
+    pack: execution,
+  };
+}
+
+/** 正常安装原始 tgz，再运行目标清单声明的消费验收命令。 */
+export async function acceptArtifact(options: {
+  readonly packageRoot: string;
+  readonly artifactPath: string;
+  readonly env?: NodeJS.ProcessEnv;
+}): Promise<AcceptArtifactResult> {
+  const inspection = await inspectTarget(options);
+  if (inspection.kind === "blocked") return { kind: "blocked", inspection };
+
+  const artifactPath = path.resolve(options.artifactPath);
+  if (!(await regularFile(artifactPath))) {
+    throw new Error(`待验收原始 tgz 不存在或不是普通文件：${artifactPath}`);
+  }
+  const sha512 = await digestFile(artifactPath);
+  const { mkdtemp } = await import("node:fs/promises");
+  const consumerRoot = await mkdtemp(
+    path.join(tmpdir(), "npm-publication-consumer-"),
+  );
+  const env = { ...process.env, ...options.env };
+
+  try {
+    await writeFile(
+      path.join(consumerRoot, packageManifestName),
+      `${JSON.stringify({ private: true }, null, 2)}\n`,
+    );
+    const installation = await execute(
+      "npm",
+      [
+        "install",
+        "--no-audit",
+        "--no-fund",
+        "--foreground-scripts",
+        artifactPath,
+      ],
+      {
+        cwd: consumerRoot,
+        env,
+        operation: `${inspection.packageName} 原始 tgz 正常安装`,
+      },
+    );
+    const consumption = await execute(
+      "npm",
+      ["run", "--silent", consumerScriptName],
+      {
+        cwd: inspection.packageRoot,
+        env: {
+          ...env,
+          NPM_PUBLICATION_ARTIFACT_PATH: artifactPath,
+          NPM_PUBLICATION_CONSUMER_ROOT: consumerRoot,
+          NPM_PUBLICATION_PACKAGE_NAME: inspection.packageName,
+        },
+        operation: `${inspection.packageName} 包自有消费验收`,
+      },
+    );
+    const acceptedSha512 = await digestFile(artifactPath);
+    if (acceptedSha512 !== sha512) {
+      throw new Error(
+        `消费验收期间原始 tgz 字节发生变化：验收前 ${sha512}，验收后 ${acceptedSha512}。`,
+      );
+    }
+    return {
+      kind: "accepted",
+      packageRoot: inspection.packageRoot,
+      packageName: inspection.packageName,
+      artifactPath,
+      sha512,
+      installation,
+      consumption,
+    };
+  } finally {
+    await rm(consumerRoot, { recursive: true, force: true });
+  }
+}
