@@ -40,8 +40,21 @@ export type PresetProjectOptions<Context, Contribution> = {
   readonly nodeInstances: ReadonlyMap<string, PackageDefinition>;
 };
 
+/** 既有仓更新前的效果阶段，可读取并校验预设仍依赖的工作树事实。 */
+export type PresetUpdateOptions<Context, Contribution> = PresetProjectOptions<
+  Context,
+  Contribution
+> & {
+  readonly targetRoot: string;
+};
+
 type PresetProjectFields<Options, ProjectContribution> = {
   readonly owner?: PresetOwnerDeclaration;
+  readonly validateUpdate?: [Options] extends [never]
+    ? never
+    : (
+        options: Options & { readonly targetRoot: string },
+      ) => void | Promise<void>;
   readonly project?: [Options] extends [never]
     ? never
     : (options: Options) => ProjectContribution;
@@ -136,6 +149,7 @@ export function definePreset<const Nodes extends PresetNodeMap>(
   options: PresetBaseOptions<Nodes> & {
     readonly owner?: PresetOwnerDeclaration;
     readonly project?: never;
+    readonly validateUpdate?: never;
   },
 ): PresetDefinition<
   NodeReference<Nodes>,
@@ -150,6 +164,9 @@ export function definePreset<
   options: PresetBaseOptions<Nodes> & {
     readonly owner: PresetOwnerDeclaration;
     readonly project: (options: ProjectOptions) => ProjectContribution;
+    readonly validateUpdate?: (
+      options: ProjectOptions & { readonly targetRoot: string },
+    ) => void | Promise<void>;
   },
 ): PresetDefinition<
   NodeReference<Nodes>,
@@ -162,6 +179,7 @@ export function definePreset<const Nodes extends PresetNodeMap>(
   options: PresetBaseOptions<Nodes> & {
     readonly owner?: PresetOwnerDeclaration;
     readonly project?: (...args: never[]) => unknown;
+    readonly validateUpdate?: (...args: never[]) => void | Promise<void>;
   },
 ): unknown {
   requireText(options.metadata.alias, "别名");
@@ -254,6 +272,9 @@ export function definePreset<const Nodes extends PresetNodeMap>(
       ? {}
       : { owner: Object.freeze({ ...options.owner }) }),
     ...(options.project === undefined ? {} : { project: options.project }),
+    ...(options.validateUpdate === undefined
+      ? {}
+      : { validateUpdate: options.validateUpdate }),
   }) as unknown as PresetDefinition<
     NodeReference<Nodes>,
     NodeLayout<Nodes>,
