@@ -57,11 +57,7 @@ void describe("公开内容集合中的 Vue 预设", () => {
       )
         .packages.map((definition: { path: string }) => definition.path)
         .toSorted(),
-      [
-        "apps/web",
-        "packages/typescript-config",
-        "packages/vue-shared",
-      ].toSorted(),
+      ["apps/web", "packages/tooling-config", "packages/vue-shared"].toSorted(),
     );
     assert.deepStrictEqual(
       JSON.parse(

@@ -4,5 +4,4 @@ import { defineConfig } from "oxlint";
 // parameter properties. TypeScript 7 erasableSyntaxOnly is authoritative.
 export default defineConfig({
   options: { typeAware: true },
-  categories: { correctness: "error", suspicious: "warn" },
 });

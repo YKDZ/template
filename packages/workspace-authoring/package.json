@@ -42,7 +42,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

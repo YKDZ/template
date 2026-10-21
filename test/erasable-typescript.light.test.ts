@@ -291,8 +291,7 @@ void describe("Erasable TypeScript enforcement", () => {
           `${JSON.stringify(
             {
               extends: fileURLToPath(
-                import.meta
-                  .resolve("@ykdz/reference-typescript-config/node.json"),
+                import.meta.resolve("@ykdz/reference-tooling-config/node.json"),
               ),
               compilerOptions: { noEmit: true },
               include: ["non-erasable.ts"],

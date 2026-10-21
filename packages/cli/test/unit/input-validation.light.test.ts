@@ -7,12 +7,12 @@ void test("initialization rejects package identities owned by selected configura
   const name = validateInitializationInput({
     preset: "ts-lib",
     targetDir: "demo",
-    overrides: { name: "typescript-config" },
+    overrides: { name: "tooling-config" },
   });
   const path = validateInitializationInput({
     preset: "ts-lib",
     targetDir: "demo",
-    overrides: { path: "packages/typescript-config" },
+    overrides: { path: "packages/tooling-config" },
   });
 
   assert.deepEqual(name, {

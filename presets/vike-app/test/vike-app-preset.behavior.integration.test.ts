@@ -19,7 +19,7 @@ const content = await loadContentSource({
     "@ykdz/reference-vike-migrations/template",
     "@ykdz/reference-vue-shared/template",
     "@ykdz/reference-ts-lib/template",
-    "@ykdz/reference-typescript-config/template",
+    "@ykdz/reference-tooling-config/template",
     "@ykdz/preset-vike-app/template",
   ],
   prepareReferenceDefinition(definition) {

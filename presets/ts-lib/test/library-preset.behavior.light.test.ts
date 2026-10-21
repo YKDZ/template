@@ -31,7 +31,7 @@ const content = await loadContentSource({
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
     "@ykdz/reference-ts-lib/template",
-    "@ykdz/reference-typescript-config/template",
+    "@ykdz/reference-tooling-config/template",
     "@ykdz/preset-ts-lib/template",
   ],
   prepareReferenceDefinition(definition) {
@@ -51,7 +51,7 @@ const library = contentIndex.fromDefinition(
 const configuration = contentIndex.resolve(
   {
     namespace: "ykdz",
-    packageName: "@ykdz/reference-typescript-config",
+    packageName: "@ykdz/reference-tooling-config",
     exportPath: "./template",
   },
   "reference",
@@ -226,7 +226,7 @@ void describe("TypeScript 库公开预设", () => {
     ) as { packages: { path: string }[] };
     assert.strictEqual(
       blueprint.packages.filter(
-        (item) => item.path === "packages/typescript-config",
+        (item) => item.path === "packages/tooling-config",
       ).length,
       1,
     );
@@ -388,7 +388,7 @@ void describe("TypeScript 库公开预设", () => {
         "modules/fallback",
         "modules/second",
         "modules/third",
-        "packages/typescript-config",
+        "packages/tooling-config",
       ].toSorted(),
     );
     await assert.rejects(stat(path.join(targetRoot, "packages/lib")));

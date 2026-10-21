@@ -32,7 +32,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*",

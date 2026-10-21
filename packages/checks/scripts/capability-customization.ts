@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import formatterConfig from "@ykdz/reference-typescript-config/oxfmt";
+import formatterConfig from "@ykdz/reference-tooling-config/oxfmt";
 import {
   contentIdentityKey,
   type ContentIdentity,

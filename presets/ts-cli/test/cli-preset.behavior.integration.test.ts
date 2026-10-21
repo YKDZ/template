@@ -26,7 +26,7 @@ const content = await loadContentSource({
     "@ykdz/reference-ts-cli/template",
     "@ykdz/reference-ts-lib/template",
     "@ykdz/reference-rust-bin/template",
-    "@ykdz/reference-typescript-config/template",
+    "@ykdz/reference-tooling-config/template",
     "@ykdz/preset-ts-cli/template",
   ],
   prepareReferenceDefinition(definition) {

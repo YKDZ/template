@@ -29,7 +29,7 @@ async function snapshot(
 
 const configurationIdentity = {
   namespace: "ykdz",
-  packageName: "@ykdz/reference-typescript-config",
+  packageName: "@ykdz/reference-tooling-config",
   exportPath: "./template",
 } as const;
 const configurationKey = contentIdentityKey(configurationIdentity);
@@ -145,7 +145,7 @@ const journey: CliJourney = {
     assert.equal(bindingEnvelope.data.phase, "metadata");
     assert.match(
       bindingEnvelope.data.error.message,
-      /@ykdz\/reference-ts-lib.*缺少必要实例绑定.*@ykdz\/reference-typescript-config/u,
+      /@ykdz\/reference-ts-lib.*缺少必要实例绑定.*@ykdz\/reference-tooling-config/u,
     );
     assert.match(bindingEnvelope.data.error.suggestion, /生成记录|包绑定/u);
     assert.doesNotMatch(

@@ -91,7 +91,7 @@ const journey: CliJourney = {
         async prepare() {
           for (const file of [
             "packages/vue-shared/src/stores/counter.ts",
-            "packages/typescript-config/oxfmt.config.ts",
+            "packages/tooling-config/oxfmt.config.ts",
           ]) {
             const full = path.join(project, file);
             await writeFile(
@@ -221,7 +221,7 @@ const journey: CliJourney = {
     }
     for (const file of [
       "packages/vue-shared/src/stores/counter.ts",
-      "packages/typescript-config/oxfmt.config.ts",
+      "packages/tooling-config/oxfmt.config.ts",
     ]) {
       assert.ok(
         (await readFile(path.join(project, file), "utf8")).endsWith(

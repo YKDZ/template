@@ -81,7 +81,7 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
       [
         "apps/api",
         "apps/web",
-        "packages/typescript-config",
+        "packages/tooling-config",
         "packages/vue-shared",
       ].toSorted(),
     );
@@ -162,7 +162,7 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
         "packages/extra-lib",
         "packages/native",
         "packages/tool",
-        "packages/typescript-config",
+        "packages/tooling-config",
         "packages/vue-shared",
       ].toSorted(),
     );
@@ -198,14 +198,14 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
       "workspace:*",
     );
     assert.strictEqual(
-      finalWebManifest.devDependencies["@demo/typescript-config"],
+      finalWebManifest.devDependencies["@demo/tooling-config"],
       "workspace:*",
     );
     const finalApiManifest = JSON.parse(
       await readFile(path.join(targetRoot, "apps/api/package.json"), "utf8"),
     ) as { dependencies: Record<string, string> };
     assert.strictEqual(
-      finalApiManifest.dependencies["@demo/typescript-config"],
+      finalApiManifest.dependencies["@demo/tooling-config"],
       "workspace:*",
     );
     const finalTurbo = JSON.parse(
@@ -244,7 +244,7 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
       "workspace:*",
     );
     assert.strictEqual(
-      vueManifest.devDependencies["@demo/typescript-config"],
+      vueManifest.devDependencies["@demo/tooling-config"],
       "workspace:*",
     );
     assert.strictEqual(

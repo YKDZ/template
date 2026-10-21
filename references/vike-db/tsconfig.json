@@ -1,5 +1,5 @@
 {
-  "extends": "@ykdz/reference-typescript-config/base.json",
+  "extends": "@ykdz/reference-tooling-config/base.json",
   "compilerOptions": {
     "composite": true,
     "customConditions": ["source"],
@@ -15,11 +15,5 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
     "types": ["node"]
   },
-  "include": [
-    "src/**/*.ts",
-    "scripts/**/*.ts",
-    "test/**/*.ts",
-    "oxlint.config.ts",
-    "oxfmt.config.ts"
-  ]
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
 }

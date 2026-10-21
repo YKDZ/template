@@ -33,9 +33,9 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/reference-ts-cli": "workspace:*",
     "@ykdz/reference-ts-lib": "workspace:*",
-    "@ykdz/reference-typescript-config": "workspace:*",
     "@ykdz/reference-vue-shared": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",

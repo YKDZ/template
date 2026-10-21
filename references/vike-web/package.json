@@ -61,7 +61,7 @@
     "@types/node": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
     "@vitest/browser-playwright": "catalog:",
-    "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/reference-vue-shared": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",

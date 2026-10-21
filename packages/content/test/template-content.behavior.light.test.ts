@@ -250,7 +250,7 @@ void describe("公开模板内容集合", () => {
     ) as { packages: { path: string }[] };
     assert.deepStrictEqual(
       blueprint.packages.map((item) => item.path).toSorted(),
-      ["packages/lib", "packages/typescript-config"].toSorted(),
+      ["packages/lib", "packages/tooling-config"].toSorted(),
     );
   });
 
@@ -1129,7 +1129,7 @@ void describe("公开模板内容集合", () => {
     ) as { packages: { path: string }[] };
     assert.strictEqual(
       blueprint.packages.filter(
-        (definition) => definition.path === "packages/typescript-config",
+        (definition) => definition.path === "packages/tooling-config",
       ).length,
       1,
     );

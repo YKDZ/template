@@ -1,10 +1,10 @@
 export const referenceDefinition = {
-  packageName: "@ykdz/reference-typescript-config",
+  packageName: "@ykdz/reference-tooling-config",
   resolve: (specifier: string) => import.meta.resolve(specifier),
   resourceRoot: new URL("../", import.meta.url),
-  alias: "typescript-config",
+  alias: "tooling-config",
   instance: "shared",
-  defaultLeafName: "typescript-config",
+  defaultLeafName: "tooling-config",
   workspaceConfiguration: {
     kind: "typescript-workspace-configuration",
   },
