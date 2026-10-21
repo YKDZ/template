@@ -504,6 +504,50 @@ async function makeReleaseReadyArtifacts(options: {
 }
 
 void describe("已验收多包原件的原生远端调度", () => {
+  void it(
+    "交互发布缺少 pkill 时先停止，不启动登录或上传",
+    { skip: process.platform === "win32" },
+    async () => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "npm-publication-missing-pkill-"),
+      );
+      try {
+        const { repositoryRoot, sourceSha, targets } =
+          await makeWorkspace(workspace);
+        const artifactRoot = path.join(workspace, "accepted");
+        await mkdir(artifactRoot, { recursive: true });
+        const artifacts = await prepareAndAccept({
+          repositoryRoot,
+          sourceSha,
+          targets: targets.slice(0, 1),
+          artifactRoot,
+        });
+        const acceptedListPath = await writeAcceptedList({
+          repositoryRoot,
+          artifactRoot,
+          artifacts,
+        });
+        const adapter = await makeCommandAdapters({
+          root: path.join(workspace, "control"),
+          acceptedListPath,
+        });
+        const unavailableCommands = path.join(workspace, "empty-path");
+        await mkdir(unavailableCommands);
+        const result = await runOwnerCommand({
+          repositoryRoot,
+          command: "schedule-npm",
+          environment: { ...adapter.environment, PATH: unavailableCommands },
+        });
+
+        assert.equal(result.exitCode, 1, result.stdout);
+        assert.ok(result.stderr.includes("procps 的 pkill（支持 -s）"));
+        assert.equal(await readFile(adapter.eventLog, "utf8"), "");
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    },
+  );
+
   void it("OIDC 模式不创建本地 npm 登录会话", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "npm-publication-oidc-session-"),

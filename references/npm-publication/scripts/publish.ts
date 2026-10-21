@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import {
@@ -125,13 +125,22 @@ export type InteractiveNpmSessionCommandRunner = (
     readonly cwd: string;
     readonly env: NodeJS.ProcessEnv;
     readonly stdio: "inherit";
+    readonly setActiveChild: InteractiveNpmSessionSetActiveChild;
   },
 ) => Promise<number>;
+
+export type InteractiveNpmSessionSetActiveChild = (
+  child: Pick<ChildProcess, "kill" | "pid"> | undefined,
+  detachedSession?: boolean,
+) => void;
 
 export type InteractiveNpmSessionOptions = {
   readonly repositoryRoot: string;
   readonly environment: Readonly<Record<string, string | undefined>>;
-  readonly runNpmPhase: (environment: NodeJS.ProcessEnv) => Promise<number>;
+  readonly runNpmPhase: (
+    environment: NodeJS.ProcessEnv,
+    setActiveChild: InteractiveNpmSessionSetActiveChild,
+  ) => Promise<number>;
   readonly run?: InteractiveNpmSessionCommandRunner;
 };
 
@@ -169,6 +178,7 @@ async function defaultInteractiveNpmSessionCommand(
     readonly cwd: string;
     readonly env: NodeJS.ProcessEnv;
     readonly stdio: "inherit";
+    readonly setActiveChild: InteractiveNpmSessionSetActiveChild;
   },
 ): Promise<number> {
   return await new Promise((resolve, reject) => {
@@ -178,8 +188,16 @@ async function defaultInteractiveNpmSessionCommand(
       stdio: options.stdio,
       windowsHide: true,
     });
-    child.once("error", reject);
-    child.once("close", (exitCode) => resolve(exitCode ?? 1));
+    const clearActiveChild = (): void => options.setActiveChild(undefined);
+    options.setActiveChild(child);
+    child.once("error", (error) => {
+      clearActiveChild();
+      reject(error);
+    });
+    child.once("close", (exitCode) => {
+      clearActiveChild();
+      resolve(exitCode ?? 1);
+    });
   });
 }
 
@@ -188,71 +206,164 @@ export async function runWithInteractiveNpmSession(
   options: InteractiveNpmSessionOptions,
 ): Promise<number> {
   await assertNoCheckoutNpmrc(options.repositoryRoot);
-  const sessionRoot = await mkdtemp(
-    path.join(tmpdir(), "npm-publication-interactive-"),
-  );
-  const userConfig = path.join(sessionRoot, "user.npmrc");
-  const globalConfig = path.join(sessionRoot, "global.npmrc");
-  const cache = path.join(sessionRoot, "cache");
-  const environment: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(options.environment)) {
+  if (process.platform !== "win32") {
+    const probe = spawnSync("pkill", ["-0", "-s", String(process.pid)], {
+      env: { PATH: options.environment.PATH ?? "" },
+      stdio: "ignore",
+    });
     if (
-      value !== undefined &&
-      !isAmbientNpmCredential(key) &&
-      !isNpmSessionConfig(key)
+      probe.error !== undefined ||
+      (probe.status !== 0 && probe.status !== 1)
     ) {
-      environment[key] = value;
+      throw new Error(
+        "POSIX 首次交互发布需要 procps 的 pkill（支持 -s）；请安装 procps 后重试。",
+        { cause: probe.error },
+      );
     }
   }
-  Object.assign(environment, {
-    NPM_CONFIG_USERCONFIG: userConfig,
-    NPM_CONFIG_GLOBALCONFIG: globalConfig,
-    NPM_CONFIG_CACHE: cache,
-    NPM_CONFIG_REGISTRY: registry,
-  });
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  type SessionSignal = (typeof signals)[number];
+  let receivedSignal: SessionSignal | undefined;
+  let activeChild: Pick<ChildProcess, "kill" | "pid"> | undefined;
+  let activeChildUsesDetachedSession = false;
+  let signalForwardFailure: unknown;
+  const stopActiveChild = (signal: SessionSignal): void => {
+    if (activeChild === undefined) return;
+    if (
+      activeChildUsesDetachedSession &&
+      process.platform !== "win32" &&
+      activeChild.pid !== undefined
+    ) {
+      const stopped = spawnSync(
+        "pkill",
+        ["-KILL", "-s", String(activeChild.pid)],
+        {
+          env: { PATH: options.environment.PATH ?? "" },
+          stdio: "ignore",
+        },
+      );
+      if (stopped.error !== undefined) {
+        signalForwardFailure ??= stopped.error;
+        activeChild.kill(signal);
+      } else if (stopped.status !== 0 && stopped.status !== 1) {
+        signalForwardFailure ??= new Error(
+          `pkill 无法停止交互发布进程会话（退出码 ${String(stopped.status)}）。`,
+        );
+        activeChild.kill(signal);
+      }
+      return;
+    }
+    activeChild.kill(signal);
+  };
+  const setActiveChild: InteractiveNpmSessionSetActiveChild = (
+    child,
+    detachedSession = false,
+  ) => {
+    activeChild = child;
+    activeChildUsesDetachedSession = child !== undefined && detachedSession;
+    if (child !== undefined && receivedSignal !== undefined) {
+      stopActiveChild(receivedSignal);
+    }
+  };
+  const signalListeners = new Map<SessionSignal, () => void>();
+  for (const signal of signals) {
+    const listener = (): void => {
+      receivedSignal ??= signal;
+      stopActiveChild(receivedSignal);
+    };
+    signalListeners.set(signal, listener);
+    process.on(signal, listener);
+  }
 
   const runner = options.run ?? defaultInteractiveNpmSessionCommand;
-  const npmArguments = [
-    `--registry=${registry}`,
-    `--userconfig=${userConfig}`,
-    `--globalconfig=${globalConfig}`,
-    `--cache=${cache}`,
-  ];
+  let sessionRoot: string | undefined;
+  let userConfig: string | undefined;
+  let globalConfig: string | undefined;
+  let cache: string | undefined;
+  let environment: NodeJS.ProcessEnv = {};
+  let npmArguments: string[] = [];
+  let loginStarted = false;
   let loginSucceeded = false;
   let failure: unknown;
   let result = 1;
   try {
+    if (receivedSignal !== undefined) throw new Error("npm 会话已中断。");
+    sessionRoot = await mkdtemp(
+      path.join(tmpdir(), "npm-publication-interactive-"),
+    );
+    userConfig = path.join(sessionRoot, "user.npmrc");
+    globalConfig = path.join(sessionRoot, "global.npmrc");
+    cache = path.join(sessionRoot, "cache");
+    for (const [key, value] of Object.entries(options.environment)) {
+      if (
+        value !== undefined &&
+        !isAmbientNpmCredential(key) &&
+        !isNpmSessionConfig(key)
+      ) {
+        environment[key] = value;
+      }
+    }
+    Object.assign(environment, {
+      NPM_CONFIG_USERCONFIG: userConfig,
+      NPM_CONFIG_GLOBALCONFIG: globalConfig,
+      NPM_CONFIG_CACHE: cache,
+      NPM_CONFIG_REGISTRY: registry,
+    });
+    npmArguments = [
+      `--registry=${registry}`,
+      `--userconfig=${userConfig}`,
+      `--globalconfig=${globalConfig}`,
+      `--cache=${cache}`,
+    ];
+
     await mkdir(cache, { recursive: true });
     await writeFile(userConfig, "", { mode: 0o600 });
     await writeFile(globalConfig, "", { mode: 0o600 });
 
+    if (receivedSignal !== undefined) throw new Error("npm 会话已中断。");
+    loginStarted = true;
     const login = await runner(
       "npm",
       ["login", "--auth-type=web", ...npmArguments],
-      { cwd: options.repositoryRoot, env: environment, stdio: "inherit" },
+      {
+        cwd: options.repositoryRoot,
+        env: environment,
+        stdio: "inherit",
+        setActiveChild,
+      },
     );
-    if (login !== 0) throw new Error("npm 登录失败。");
-    loginSucceeded = true;
+    loginSucceeded = login === 0;
+    if (receivedSignal !== undefined) throw new Error("npm 会话已中断。");
+    if (!loginSucceeded) throw new Error("npm 登录失败。");
 
     const whoami = await runner("npm", ["whoami", ...npmArguments], {
       cwd: options.repositoryRoot,
       env: environment,
       stdio: "inherit",
+      setActiveChild,
     });
+    if (receivedSignal !== undefined) throw new Error("npm 会话已中断。");
     if (whoami !== 0) throw new Error("npm 登录状态核验失败。");
 
-    result = await options.runNpmPhase(environment);
+    result = await options.runNpmPhase(environment, setActiveChild);
+    if (signalForwardFailure !== undefined) {
+      throw new Error("无法停止交互发布的原生进程会话。", {
+        cause: signalForwardFailure,
+      });
+    }
   } catch (error) {
     failure = error;
   }
 
   let cleanupFailure: unknown;
   try {
-    if (loginSucceeded) {
+    if (loginStarted && userConfig !== undefined) {
       const logout = await runner("npm", ["logout", ...npmArguments], {
         cwd: options.repositoryRoot,
         env: environment,
         stdio: "inherit",
+        setActiveChild:
+          receivedSignal === undefined ? setActiveChild : () => {},
       });
       if (logout !== 0) cleanupFailure = new Error("npm 登出失败。");
     }
@@ -260,10 +371,25 @@ export async function runWithInteractiveNpmSession(
     cleanupFailure = error;
   } finally {
     try {
-      await rm(sessionRoot, { recursive: true, force: true });
+      if (sessionRoot !== undefined) {
+        await rm(sessionRoot, { recursive: true, force: true });
+      }
     } catch (error) {
       cleanupFailure ??= error;
+    } finally {
+      for (const [signal, listener] of signalListeners) {
+        process.removeListener(signal, listener);
+      }
     }
+  }
+
+  if (signalForwardFailure !== undefined) {
+    throw new Error("无法安全停止交互发布的原生进程会话。", {
+      cause: signalForwardFailure,
+    });
+  }
+  if (receivedSignal !== undefined) {
+    process.kill(process.pid, receivedSignal);
   }
 
   if (failure !== undefined && cleanupFailure !== undefined) {
