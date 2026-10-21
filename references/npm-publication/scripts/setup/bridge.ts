@@ -1599,7 +1599,12 @@ async function setupRemoteCommand(
   readonly stdout: string;
   readonly stderr: string;
 }> {
-  if (command !== "pnpm" && command !== "git" && command !== "gh") {
+  if (
+    command !== "pnpm" &&
+    command !== "npm" &&
+    command !== "git" &&
+    command !== "gh"
+  ) {
     return {
       exitCode: 127,
       stdout: "",

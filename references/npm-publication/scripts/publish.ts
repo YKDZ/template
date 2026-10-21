@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -141,6 +143,82 @@ function stringValue(value: unknown, code: string): string {
   if (typeof value !== "string" || value.length === 0)
     return fail(code, "expected string");
   return value;
+}
+
+async function assertRemoteTarballMatches(options: {
+  readonly artifact: {
+    readonly packageName: string;
+    readonly artifactVersion: string;
+    readonly sha512: string;
+  };
+  readonly repositoryRoot: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly run: RemoteCommandRunner;
+}): Promise<void> {
+  const directory = await mkdtemp(
+    path.join(tmpdir(), "npm-publication-registry-copy-"),
+  );
+  try {
+    let downloaded: RemoteProcessResult;
+    try {
+      downloaded = await options.run(
+        "npm",
+        [
+          "pack",
+          `${options.artifact.packageName}@${options.artifact.artifactVersion}`,
+          `--pack-destination=${directory}`,
+          "--json",
+          "--ignore-scripts",
+          `--registry=${registry}`,
+        ],
+        { cwd: options.repositoryRoot, env: options.env },
+      );
+    } catch {
+      fail(
+        "registry-download-failed",
+        "exact registry tarball download failed",
+      );
+    }
+    if (downloaded.exitCode !== 0) {
+      fail(
+        "registry-download-failed",
+        "exact registry tarball download failed",
+      );
+    }
+    const packed = parseJson(downloaded.stdout, "registry-download-failed");
+    if (!Array.isArray(packed) || packed.length !== 1 || !isRecord(packed[0])) {
+      fail("registry-download-failed", "npm pack did not return one tarball");
+    }
+    const filename = stringValue(
+      packed[0].filename,
+      "registry-download-failed",
+    );
+    if (path.basename(filename) !== filename || !filename.endsWith(".tgz")) {
+      fail("registry-download-failed", "npm pack returned an invalid filename");
+    }
+    const hash = createHash("sha512");
+    try {
+      for await (const chunk of createReadStream(
+        path.join(directory, filename),
+      )) {
+        hash.update(chunk);
+      }
+    } catch {
+      fail(
+        "registry-download-failed",
+        "downloaded registry tarball is missing",
+      );
+    }
+    const sha512 = hash.digest("hex");
+    if (sha512 !== options.artifact.sha512) {
+      fail(
+        "registry-bytes-conflict",
+        "downloaded registry bytes differ from receipt",
+      );
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -335,6 +413,12 @@ export async function runDirectOidcPublication(
           "published version is not on the requested dist-tag",
         );
       }
+      await assertRemoteTarballMatches({
+        artifact,
+        repositoryRoot: options.repositoryRoot,
+        env,
+        run: runner,
+      });
       return;
     }
 
@@ -406,6 +490,12 @@ export async function runDirectOidcPublication(
     if (integrity !== artifact.integrity) {
       fail("publish-readback-conflict", "published bytes differ from receipt");
     }
+    await assertRemoteTarballMatches({
+      artifact,
+      repositoryRoot: options.repositoryRoot,
+      env,
+      run: runner,
+    });
     const tagReadback = await runner(
       "pnpm",
       ["view", artifact.packageName, "dist-tags", "--json", ...common],
