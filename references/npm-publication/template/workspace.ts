@@ -36,7 +36,7 @@ export function projectPublicationWorkspace(options: {
       manifest: {
         devDependencies: { [toolName]: "workspace:*" },
         scripts: {
-          "publication:artifact": `node --import ${toolName}/artifact`,
+          "publication:artifact": `node --import ${toolName}/artifact --eval '' --`,
         },
       },
       turboTasks: {

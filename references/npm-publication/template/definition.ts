@@ -18,6 +18,7 @@ export const referencePackage = defineReferencePackage({
   ],
   template: {
     dependencies: [
+      { name: "@ykdz/template-core", purpose: "template-execution" },
       {
         name: "@ykdz/template-workspace",
         purpose: "template-execution",

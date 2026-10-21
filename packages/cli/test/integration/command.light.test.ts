@@ -252,7 +252,6 @@ void describe("template CLI command control", () => {
           ),
         ),
       );
-
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

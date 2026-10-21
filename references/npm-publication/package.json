@@ -50,6 +50,7 @@
     "@types/semver": "catalog:",
     "@types/spdx-expression-parse": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
+    "@ykdz/template-core": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

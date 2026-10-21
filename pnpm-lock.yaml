@@ -1116,6 +1116,9 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../../workspace-policies/default

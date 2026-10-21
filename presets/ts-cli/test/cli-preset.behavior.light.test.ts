@@ -225,6 +225,49 @@ void describe("TypeScript CLI 公开组合预设", () => {
     );
   });
 
+  void it("发布拥有者与另一声明来源冲突时在初始化写入前诊断双方", async () => {
+    const targetRoot = await createTargetRoot(
+      "template-publication-source-conflict-",
+    );
+    const generated = createGenerator({
+      content,
+      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>({
+        project(options) {
+          return [
+            ...projectPublicationWorkspace(options),
+            {
+              kind: "shared-root-files",
+              source: "consumer#publication",
+              manifest: {
+                scripts: {
+                  "publication:artifact": "node consumer-artifact.ts",
+                },
+              },
+            },
+          ];
+        },
+      }),
+    });
+    const result = await generated.init({
+      targetRoot,
+      selection: {
+        roots: [
+          { preset: preset.identity, configuration: { publication: true } },
+        ],
+      },
+      strategyInput,
+    });
+    assert.equal(result.status, "operation-failure", JSON.stringify(result));
+    if (result.status !== "operation-failure")
+      throw new Error("应在写入前拒绝来源冲突");
+    assert.match(
+      result.error.message,
+      /@ykdz\/reference-npm-publication#\.\/template/u,
+    );
+    assert.match(result.error.message, /consumer#publication/u);
+    await assert.rejects(stat(targetRoot), { code: "ENOENT" });
+  });
+
   void it("发布共享根脚本与消费者冲突时拒绝整次加包", async () => {
     const targetRoot = await createTargetRoot("template-publication-conflict-");
     const initialized = await generator().init({

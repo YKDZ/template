@@ -73,34 +73,44 @@ export function projectPublicationTarget(options: {
       ...(enabled ? { private: false } : {}),
       scripts,
     },
-    operations: contribution.operations.map((operation) => {
-      if (
-        operation.kind !== "writeJson" ||
-        operation.to !== `${contribution.definition.path}/turbo.json`
+    operations: contribution.operations
+      .filter(
+        (operation) =>
+          enabled ||
+          !(
+            "to" in operation &&
+            operation.to ===
+              `${contribution.definition.path}/scripts/publication-consumer.ts`
+          ),
       )
-        return operation;
-      const turbo = operation.value as {
-        readonly tasks: Readonly<Record<string, unknown>>;
-      };
-      const tasks = { ...turbo.tasks };
-      for (const name of Object.keys(tasks))
-        if (name.startsWith("publication:")) delete tasks[name];
-      if (enabled) {
-        tasks["publication:prepare"] = {
-          tags: ["work:preparation"],
-          cache: false,
-          passThroughEnv: [
-            "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
-            "PUBLICATION_BATCH_TARGET_COUNT",
-            "PUBLICATION_SOURCE_SHA",
-          ],
+      .map((operation) => {
+        if (
+          operation.kind !== "writeJson" ||
+          operation.to !== `${contribution.definition.path}/turbo.json`
+        )
+          return operation;
+        const turbo = operation.value as {
+          readonly tasks: Readonly<Record<string, unknown>>;
         };
-        tasks["publication:consume"] = {
-          tags: ["quality:conditional"],
-          cache: false,
-        };
-      }
-      return { ...operation, value: { ...turbo, tasks } };
-    }),
+        const tasks = { ...turbo.tasks };
+        for (const name of Object.keys(tasks))
+          if (name.startsWith("publication:")) delete tasks[name];
+        if (enabled) {
+          tasks["publication:prepare"] = {
+            tags: ["work:preparation"],
+            cache: false,
+            passThroughEnv: [
+              "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
+              "PUBLICATION_BATCH_TARGET_COUNT",
+              "PUBLICATION_SOURCE_SHA",
+            ],
+          };
+          tasks["publication:consume"] = {
+            tags: ["quality:conditional"],
+            cache: false,
+          };
+        }
+        return { ...operation, value: { ...turbo, tasks } };
+      }),
   };
 }
