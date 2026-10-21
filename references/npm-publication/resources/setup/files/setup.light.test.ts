@@ -47,7 +47,7 @@ void test("远端批次复用验收清单，npm失败仍交给Release批次处�
     await assert.rejects(
       runPublicationSetup({
         repositoryRoot,
-        arguments_: ["--filter", "@example/cli"],
+        arguments_: ["--filter", "@example/cli", "--filter", "@example/lib"],
         run: async (_command, arguments_) => {
           if (arguments_[0] === "rev-parse") {
             return { exitCode: 0, stdout: `${sourceSha}\n`, stderr: "" };
@@ -94,6 +94,15 @@ void test("远端批次复用验收清单，npm失败仍交给Release批次处�
                       "%40example%2Fcli/publication-preparation.json",
                     sha512: "a".repeat(128),
                   },
+                  {
+                    packageRoot: "packages/lib",
+                    packageName: "@example/lib",
+                    artifactVersion: "2.0.0-rc.1",
+                    artifactPath: "%40example%2Flib/example-lib.tgz",
+                    receiptPath:
+                      "%40example%2Flib/publication-preparation.json",
+                    sha512: "c".repeat(128),
+                  },
                 ],
               }),
             );
@@ -105,7 +114,11 @@ void test("远端批次复用验收清单，npm失败仍交给Release批次处�
         },
         prompt: async (message) => {
           messages.push(message);
-          return messages.length === 1 ? "beta" : "yes";
+          return messages.length === 1
+            ? "RC"
+            : messages.length === 2
+              ? "_beta"
+              : "yes";
         },
         write: () => undefined,
       }),
@@ -115,14 +128,14 @@ void test("远端批次复用验收清单，npm失败仍交给Release批次处�
     assert.deepEqual(
       commands.map(({ arguments_ }) => arguments_.join(" ")),
       [
-        "run publication:artifact -- --filter @example/cli",
+        "run publication:artifact -- --filter @example/cli --filter @example/lib",
         "run publication:remote:npm",
         "run publication:remote:release",
       ],
     );
     assert.deepEqual(
       JSON.parse(commands[1]!.environment.PUBLICATION_DIST_TAGS!),
-      { "@example/cli": "beta" },
+      { "@example/cli": "RC", "@example/lib": "_beta" },
     );
     assert.equal(
       commands[1]!.environment.PUBLICATION_CREDENTIAL_MODE,
@@ -222,6 +235,51 @@ void test("取消后重跑只续办已验收原件，不重复打包", async () 
       "publication:remote:npm",
       "publication:remote:release",
     ]);
+  } finally {
+    await rm(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
+void test("预发布 tag 沿用 npm 语义拒绝版本范围和空格", async () => {
+  const repositoryRoot = await mkdtemp(
+    path.join(os.tmpdir(), "publication-first-release-tags-"),
+  );
+  const artifactRoot = path.join(
+    repositoryRoot,
+    ".verified-packed-publication/first-release",
+  );
+  try {
+    await mkdir(artifactRoot, { recursive: true });
+    await writeFile(
+      path.join(artifactRoot, "publication-accepted-artifacts.json"),
+      JSON.stringify({
+        artifacts: [
+          {
+            packageRoot: "packages/cli",
+            packageName: "@example/cli",
+            artifactVersion: "1.2.3-rc.1",
+            artifactPath: "%40example%2Fcli/example-cli.tgz",
+            receiptPath: "%40example%2Fcli/publication-preparation.json",
+            sha512: "d".repeat(128),
+          },
+        ],
+      }),
+    );
+
+    for (const tag of ["1.2", "two words"]) {
+      await assert.rejects(
+        runPublicationSetup({
+          repositoryRoot,
+          arguments_: [],
+          runCommand: async () => {
+            throw new Error("无效 tag 不应进入远端批次");
+          },
+          prompt: async () => tag,
+          write: () => undefined,
+        }),
+        /有效的非 latest dist-tag/u,
+      );
+    }
   } finally {
     await rm(repositoryRoot, { recursive: true, force: true });
   }
