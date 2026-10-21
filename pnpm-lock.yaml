@@ -344,9 +344,6 @@ importers:
       '@devcontainers/cli':
         specifier: 'catalog:'
         version: 0.89.0
-      '@playwright/test':
-        specifier: 'catalog:'
-        version: 1.64.0
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
@@ -1002,6 +999,9 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workspace-authoring
     devDependencies:
+      '@playwright/test':
+        specifier: 'catalog:'
+        version: 1.64.0
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
@@ -1032,6 +1032,9 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 7.0.2004
+      typescript:
+        specifier: 'catalog:'
+        version: '@typescript/typescript6@6.0.2'
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
@@ -1579,9 +1582,6 @@ importers:
         specifier: 'catalog:'
         version: 2.9.1
     devDependencies:
-      '@playwright/test':
-        specifier: 'catalog:'
-        version: 1.64.0
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2

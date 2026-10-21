@@ -54,6 +54,18 @@
       "outputs": [],
       "persistent": false
     },
+    "test:e2e": {
+      "dependsOn": [
+        "@ykdz/reference-hono-api#build",
+        "@ykdz/reference-vue-hono-web#build",
+        "@ykdz/reference-vue-hono-web#browser:prepare"
+      ],
+      "tags": ["quality:heavy"],
+      "cache": false,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "persistent": false
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "tags": ["quality:light"],

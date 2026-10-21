@@ -31,13 +31,6 @@ export type PackageLinkRequirement = {
   readonly provider: PackageDefinition;
 };
 
-/** Vue-Hono 根策略以实际 web 与 API 实例配置联合浏览器验收。 */
-export type VueHonoJointE2eRequirement = {
-  readonly kind: "vue-hono-joint-e2e";
-  readonly web: PackageDefinition;
-  readonly api: PackageDefinition;
-};
-
 /** Vike 数据准备只引用已解析的应用、数据库和迁移包实例。 */
 export type DatabasePreparationRequirement = {
   readonly kind: "sqlite-database-preparation";
@@ -57,6 +50,5 @@ export type DeploymentCheckRequirement = {
 
 export type ProjectRequirement =
   | PackageLinkRequirement
-  | VueHonoJointE2eRequirement
   | DatabasePreparationRequirement
   | DeploymentCheckRequirement;
