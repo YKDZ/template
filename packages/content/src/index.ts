@@ -12,6 +12,7 @@ export const templateContent = (await loadTemplateContent({
   members: [
     "@ykdz/reference-ts-lib/template",
     "@ykdz/reference-typescript-config/template",
+    "@ykdz/reference-npm-publication/template",
     "@ykdz/preset-ts-lib/template",
     "@ykdz/reference-ts-cli/template",
     "@ykdz/preset-ts-cli/template",

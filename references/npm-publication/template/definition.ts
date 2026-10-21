@@ -1,0 +1,31 @@
+import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+
+export const referencePackage = defineReferencePackage({
+  packageName: "@ykdz/reference-npm-publication",
+  resolve: (specifier) => import.meta.resolve(specifier),
+  resourceRoot: new URL("../scripts/", import.meta.url),
+  alias: "npm-publication",
+  instance: "shared",
+  defaultLeafName: "npm-publication",
+  defaultPath: "tools/npm-publication",
+  role: "shared-library",
+  resources: ["publication.ts", "generated"],
+  template: {
+    dependencies: [
+      {
+        name: "@ykdz/template-workspace",
+        purpose: "template-execution",
+      },
+    ],
+    scripts: [],
+  },
+  environmentNeeds: [],
+  foundation: {
+    toolchains: {},
+    editorCapabilities: ["oxc-format-lint"],
+    dependencyMaintenance: {
+      ecosystems: ["npm", "github-actions"],
+      interval: "weekly",
+    },
+  },
+});

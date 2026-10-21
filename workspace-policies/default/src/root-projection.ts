@@ -40,12 +40,12 @@ export function createWorkspaceRootManifest(options: {
     boundaries: "turbo boundaries",
     fix: "node --conditions=source scripts/task-gates.ts fix",
     "format:check":
-      "oxfmt --list-different --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer scripts",
+      "oxfmt --list-different --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer scripts",
     "format:write":
-      "oxfmt --write --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer scripts",
-    lint: "oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts",
+      "oxfmt --write --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer scripts",
+    lint: "oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts scripts",
     "lint:fix":
-      "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts --fix",
+      "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts scripts --fix",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
   const developmentDependencies = {

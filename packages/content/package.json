@@ -41,6 +41,7 @@
     "@ykdz/preset-vue-app": "workspace:*",
     "@ykdz/preset-vue-hono-app": "workspace:*",
     "@ykdz/reference-hono-api": "workspace:*",
+    "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-rust-bin": "workspace:*",
     "@ykdz/reference-ts-cli": "workspace:*",
     "@ykdz/reference-ts-lib": "workspace:*",

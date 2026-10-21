@@ -234,8 +234,8 @@ type DefaultWorkspacePreparedResources = {
     typeof prepareBuiltInDevelopmentContainerResources
   >;
   readonly workspaceProject: PreparedWorkspaceResources;
-  readonly cliPublication: PreparedWorkspaceResources;
   readonly workspaceFiles: PreparedWorkspaceResources;
+  readonly cliPublication: PreparedWorkspaceResources;
   readonly projectLinkManifestTruth: ReadonlyMap<
     string,
     Readonly<Record<string, unknown>>
@@ -258,12 +258,12 @@ function prepareDefaultWorkspaceResources(
       prepareBuiltInEditorCustomizationDeclarations(),
     developmentContainer: prepareBuiltInDevelopmentContainerResources(),
     workspaceProject: prepareWorkspaceProjectResources(),
-    cliPublication: prepareCliPublicationResources(),
     workspaceFiles: prepareWorkspaceResources(
       defaultWorkspaceFiles,
       defaultWorkspaceResourceOwner,
       defaultWorkspaceFiles,
     ),
+    cliPublication: prepareCliPublicationResources(),
     projectLinkManifestTruth: readProjectLinkManifestTruth({
       repositoryRoot: context.targetDir,
       packagePaths,
@@ -865,6 +865,7 @@ function projectOperations(options: {
   readonly blueprint: ProjectBlueprint;
   readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
+  readonly cliPublicationReference: ReferencePackage | undefined;
   readonly presetProjectContributions: readonly (readonly DefaultWorkspaceProjectContribution[])[];
   readonly sharedRootContributions: readonly SharedRootContribution[];
 }): WorkspaceProjection<DefaultWorkspaceOwnerFacts> {
@@ -892,6 +893,7 @@ function projectOperations(options: {
     packages: options.packages,
     contributions,
     resources: prepared.cliPublication,
+    referencePackage: options.cliPublicationReference,
   });
   const rustProjection = projectRustTarget({
     context,
@@ -917,7 +919,6 @@ function projectOperations(options: {
     "pnpm-workspace.yaml",
     "pnpm-lock.yaml",
     "*.config.ts",
-    ".pnpmfile.mjs",
     ".gitignore",
     ".dockerignore",
     "Dockerfile",
@@ -945,9 +946,9 @@ function projectOperations(options: {
       `oxfmt --list-different --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
     baseScripts["format:write"] =
       `oxfmt --write --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
-    baseScripts.lint = `${hasDeployment ? "shellcheck scripts/container-entrypoint.sh && " : ""}oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts${hasJointE2e ? " test" : ""}`;
+    baseScripts.lint = `${hasDeployment ? "shellcheck scripts/container-entrypoint.sh && " : ""}oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts scripts${hasJointE2e ? " test" : ""}`;
     baseScripts["lint:fix"] =
-      `oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts${hasJointE2e ? " test" : ""} --fix`;
+      `oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts scripts${hasJointE2e ? " test" : ""} --fix`;
   }
   const shared = composeSharedRootFiles({
     source: "@ykdz/template-workspace/default-workspace-strategy",
@@ -1412,6 +1413,8 @@ export function createDefaultWorkspaceStrategy<
   CreationInput extends PackageCreationInput = DefaultWorkspaceCreationInput,
 >(
   options: {
+    /** 默认 CLI 内容集合显式装配的共享发布参考包。 */
+    readonly cliPublicationReference?: ReferencePackage;
     readonly project?: (options: {
       readonly context: DefaultWorkspaceContext;
       readonly blueprint: ProjectBlueprint;
@@ -1832,6 +1835,7 @@ export function createDefaultWorkspaceStrategy<
     project(projectOptions) {
       return projectOperations({
         ...projectOptions,
+        cliPublicationReference: options.cliPublicationReference,
         sharedRootContributions: options.project?.(projectOptions) ?? [],
       });
     },

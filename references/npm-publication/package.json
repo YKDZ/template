@@ -1,5 +1,6 @@
 {
   "name": "@ykdz/reference-npm-publication",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -9,13 +10,14 @@
       "types": "./scripts/publication.ts",
       "default": "./scripts/publication.ts"
     },
-    "./resources": {
-      "source": "./scripts/resources.ts",
-      "types": "./scripts/resources.ts",
-      "default": "./scripts/resources.ts"
+    "./template": {
+      "source": "./template/definition.ts",
+      "types": "./template-dist/definition.d.ts",
+      "default": "./template-dist/definition.js"
     }
   },
   "scripts": {
+    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix .",
@@ -32,6 +34,7 @@
     "@types/node": "catalog:",
     "@types/semver": "catalog:",
     "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

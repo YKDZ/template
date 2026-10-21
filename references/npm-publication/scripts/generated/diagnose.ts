@@ -1,6 +1,7 @@
 import { inspectTarget } from "../publication.ts";
 
-const result = await inspectTarget({ packageRoot: process.cwd() });
+const packageRoot = process.env.INIT_CWD ?? process.cwd();
+const result = await inspectTarget({ packageRoot });
 if (result.kind === "ready") {
   console.log(
     `npm 发布目标已配置：${result.packageName}@${result.packageVersion}`,

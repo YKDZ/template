@@ -52,6 +52,7 @@
     "pack:bundled": "pnpm exec turbo run publication:prepare --filter=.",
     "publication:readiness": "node --conditions=source --experimental-strip-types scripts/inspect-publication.ts",
     "publication:prepare": "node --conditions=source --experimental-strip-types scripts/prepare-publication.ts",
+    "publication:accept": "node --conditions=source --experimental-strip-types scripts/accept-publication.ts",
     "publication:consume": "node --conditions=source --experimental-strip-types scripts/consume-publication.ts",
     "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec 'test/**/*.light.test.ts'",
     "test:integration": "node --conditions=source --experimental-strip-types --test --test-concurrency=1 --test-timeout=300000 --test-reporter=spec 'test/**/*.integration.test.ts'",

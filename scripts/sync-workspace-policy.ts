@@ -117,20 +117,3 @@ await Promise.all([
     rendererPolicySnapshot,
   ),
 ]);
-
-const publicationResources = await execa(
-  "pnpm",
-  [
-    "--filter",
-    "@ykdz/template-workspace",
-    "run",
-    "sync:npm-publication-resources",
-    ...(check ? ["--", "--check"] : []),
-  ],
-  { cwd: fileURLToPath(root), reject: false },
-);
-if (publicationResources.failed) {
-  throw new Error(
-    `共享 npm 发布资源同步失败：${publicationResources.stderr || publicationResources.stdout}`,
-  );
-}

@@ -295,19 +295,19 @@
     },
     "//#test": {
       "outputs": [],
-      "tags": ["quality:light"],
-      "dependsOn": ["@ykdz/template#build"]
+      "tags": ["quality:light"]
     },
     "//#test:integration": {
       "cache": false,
-      "tags": ["quality:heavy"],
-      "dependsOn": ["@ykdz/template#build"]
+      "tags": ["quality:heavy"]
     },
     "//#test:packed-publication": {
       "cache": false,
       "tags": ["quality:heavy"],
-      "dependsOn": ["@ykdz/template-checks#build", "@ykdz/template#build"],
+      "dependsOn": ["@ykdz/template#publication:prepare"],
       "passThroughEnv": [
+        "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
+        "TEMPLATE_PUBLICATION_ARTIFACT_PATH",
         "TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR",
         "TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR"
       ],

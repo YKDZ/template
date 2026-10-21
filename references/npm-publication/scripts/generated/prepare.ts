@@ -2,13 +2,14 @@ import path from "node:path";
 
 import { prepareArtifact } from "../publication.ts";
 
+const packageRoot = process.env.INIT_CWD ?? process.cwd();
 const configuredDirectory = process.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY;
 const outputDirectory =
   configuredDirectory === undefined
-    ? path.join(process.cwd(), ".publication-artifacts")
+    ? path.join(packageRoot, ".publication-artifacts")
     : path.resolve(configuredDirectory);
 const result = await prepareArtifact({
-  packageRoot: process.cwd(),
+  packageRoot,
   outputDirectory,
 });
 
@@ -22,5 +23,7 @@ if (result.kind === "blocked") {
   process.exitCode = 1;
 } else {
   console.log(`npm 制品：${result.artifactPath}`);
+  console.log(`源清单版本：${result.packageVersion}`);
+  console.log(`归档身份：${result.packageName}@${result.artifactVersion}`);
   console.log(`SHA-512：${result.sha512}`);
 }

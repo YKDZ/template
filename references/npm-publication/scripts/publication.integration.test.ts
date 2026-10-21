@@ -81,6 +81,9 @@ void describe("shared npm artifact preparation", () => {
         env,
       });
       assert.equal(prepared.kind, "prepared");
+      if (prepared.kind !== "prepared") throw new Error("共享制品准备被阻断");
+      assert.equal(prepared.packageVersion, "1.2.3-beta.1+build.2");
+      assert.equal(prepared.artifactVersion, "1.2.3-beta.1");
 
       await writeFile(
         path.join(packageRoot, "package.json"),
@@ -102,7 +105,9 @@ void describe("shared npm artifact preparation", () => {
         env,
       });
       assert.equal(accepted.kind, "accepted");
+      if (accepted.kind !== "accepted") throw new Error("共享制品验收被阻断");
       assert.equal(accepted.sha512, prepared.sha512);
+      assert.equal(accepted.artifactVersion, prepared.artifactVersion);
       assert.deepEqual((await readFile(eventLog, "utf8")).trim().split("\n"), [
         "prepack",
         "postinstall",

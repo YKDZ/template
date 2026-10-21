@@ -79,8 +79,9 @@ if (result.kind === "blocked") {
   process.exitCode = 1;
 } else {
   console.log(
-    `npm 原始制品已准备：${result.packageName}@${result.packageVersion}`,
+    `npm 原始制品已准备：${result.packageName}@${result.artifactVersion}`,
   );
+  console.log(`源清单版本：${result.packageVersion}`);
   console.log(`路径：${result.artifactPath}`);
   console.log(`SHA512：${result.sha512}`);
   console.log("构建：Turbo publication:prepare 依赖的 CLI build");

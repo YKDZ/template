@@ -56,7 +56,8 @@
       "cache": false,
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
-      "persistent": false
+      "persistent": false,
+      "passThroughEnv": ["PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY"]
     },
     "prepack": {
       "dependsOn": [],

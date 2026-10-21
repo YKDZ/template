@@ -150,11 +150,27 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
             };
           })()
         : undefined;
+      const scripts = {
+        ...(contribution.manifest.scripts as Record<string, string>),
+        ...(publicCandidate
+          ? {
+              "publication:readiness":
+                "pnpm --workspace-root exec node --conditions=source --experimental-strip-types scripts/npm-publication/generated/diagnose.ts",
+              "publication:prepare":
+                "pnpm --workspace-root exec node --conditions=source --experimental-strip-types scripts/npm-publication/generated/prepare.ts",
+              "publication:accept":
+                "pnpm --workspace-root exec node --conditions=source --experimental-strip-types scripts/npm-publication/generated/accept.ts",
+              "publication:consume":
+                "node --conditions=source --experimental-strip-types scripts/publication-consumer.ts",
+            }
+          : {}),
+      };
       return {
         ...contribution,
         manifest: {
           ...contribution.manifest,
           bin: { [commandName]: Object.values(bin)[0]! },
+          scripts,
           devDependencies,
           engines: {
             node: publicCandidate

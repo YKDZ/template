@@ -7,6 +7,7 @@ import type {
 import type { GeneratorPackageState } from "@ykdz/template-core/workspace-strategy";
 
 import type { PackageContribution } from "./package-contribution.ts";
+import type { ReferencePackage } from "./reference-package.ts";
 import type { RootResourceOperation } from "./shared-root-files.ts";
 import {
   copyPreparedWorkspaceResource,
@@ -18,7 +19,6 @@ const cliPublicationOwner =
   "工作区公开 CLI 发布能力 @ykdz/template-workspace#./cli-publication";
 
 const cliPublicationFiles = [
-  "assets/.pnpmfile.mjs",
   "publication/artifact.ts",
   "publication/changelog.ts",
   "publication/check-artifact.ts",
@@ -110,8 +110,14 @@ function publicCliCandidate(
 function publicationOperations(
   candidate: PublicCliCandidate | undefined,
   resources: PreparedWorkspaceResources,
+  referencePackage: ReferencePackage | undefined,
 ): (RootResourceOperation | SetExecutableOperation)[] {
   if (candidate === undefined) return [];
+  if (referencePackage === undefined) {
+    throw new Error(
+      "公开 CLI 候选需要由内容集合显式装配 @ykdz/reference-npm-publication#./template",
+    );
+  }
   const publication = candidate.contribution.foundation.npmPublication;
   if (
     publication?.commandIdentitySource === undefined ||
@@ -126,14 +132,18 @@ function publicationOperations(
     to: string,
   ): RootResourceOperation =>
     copyPreparedWorkspaceResource(resources, file, to, cliPublicationOwner);
+  referencePackage.prepare();
   return [
-    copy("assets/.pnpmfile.mjs", ".pnpmfile.mjs"),
+    ...referencePackage.operations("scripts/npm-publication"),
     ...cliPublicationFiles
       .filter((file) => file.startsWith("publication/"))
       .map((file) =>
         copy(
           file,
-          path.posix.join("scripts/npm-publication", path.posix.basename(file)),
+          path.posix.join(
+            "scripts/npm-publication-legacy",
+            path.posix.basename(file),
+          ),
         ),
       ),
     ...cliPublicationFiles
@@ -149,7 +159,7 @@ function publicationOperations(
       ),
     {
       kind: "writeJson",
-      to: "scripts/npm-publication/publication.config.json",
+      to: "scripts/npm-publication-legacy/publication.config.json",
       value: {
         packagePath: candidate.contribution.definition.path,
         packageDefinitionId: candidate.record.packageDefinitionId,
@@ -159,12 +169,12 @@ function publicationOperations(
     {
       kind: "copyFile",
       ...publication.commandIdentitySource,
-      to: "scripts/npm-publication/cli-command-identity.ts",
+      to: "scripts/npm-publication-legacy/cli-command-identity.ts",
     },
     {
       kind: "copyFile",
       ...publication.creationInputSource,
-      to: "scripts/npm-publication/cli-candidate-selection.ts",
+      to: "scripts/npm-publication-legacy/cli-candidate-selection.ts",
     },
     {
       kind: "setExecutable",
@@ -183,6 +193,7 @@ export function projectCliPublication(options: {
   readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
   readonly resources: PreparedWorkspaceResources;
+  readonly referencePackage: ReferencePackage | undefined;
 }): CliPublicationProjection {
   const selected = publicCliCandidate(options.packages, options.contributions);
   if (selected === undefined) {
@@ -197,9 +208,14 @@ export function projectCliPublication(options: {
       tsconfigInclude: [],
     };
   }
+  const filter = `'${selected.contribution.definition.name.replaceAll("'", "'\\''")}'`;
   return {
     candidate: selected.contribution,
-    operations: publicationOperations(selected, options.resources),
+    operations: publicationOperations(
+      selected,
+      options.resources,
+      options.referencePackage,
+    ),
     gitignoreFragments: [
       copyPreparedWorkspaceResource(
         options.resources,
@@ -208,23 +224,22 @@ export function projectCliPublication(options: {
         cliPublicationOwner,
       ),
     ],
-    imports: { "#npm-publication/*": "./scripts/npm-publication/*.ts" },
+    imports: {
+      "#npm-publication/*": "./scripts/npm-publication-legacy/*.ts",
+    },
     scripts: {
-      "publication:readiness":
-        "node --conditions=source scripts/npm-publication/check-readiness.ts",
-      "publication:artifact":
-        "node --conditions=source scripts/npm-publication/check-artifact.ts",
+      "publication:readiness": `pnpm --filter=${filter} run publication:readiness`,
+      "publication:artifact": `pnpm exec turbo run publication:prepare --filter=${filter}`,
     },
     devDependencies: {
       "@types/semver": "catalog:",
       "@types/spdx-expression-parse": "catalog:",
       semver: "catalog:",
       "spdx-expression-parse": "catalog:",
-      npm: "catalog:",
       tar: "catalog:",
       "validate-npm-package-name": "catalog:",
     },
-    tsconfigCompilerOptions: { allowJs: true, checkJs: true },
-    tsconfigInclude: [".pnpmfile.mjs"],
+    tsconfigCompilerOptions: {},
+    tsconfigInclude: [],
   };
 }

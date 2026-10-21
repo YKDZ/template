@@ -2,6 +2,17 @@
   "extends": ["//"],
   "tags": ["library"],
   "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": [],
+      "outputs": []
+    },
+    "build:template": {
+      "dependsOn": ["@ykdz/template-workspace#build"],
+      "inputs": [],
+      "outputs": ["template-dist/**"],
+      "tags": ["work:preparation"]
+    },
     "format:check": {
       "dependsOn": [],
       "tags": ["quality:light"],

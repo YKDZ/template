@@ -75,6 +75,7 @@ export type PreparedArtifact = {
   readonly packageRoot: string;
   readonly packageName: string;
   readonly packageVersion: string;
+  readonly artifactVersion: string;
   readonly artifactPath: string;
   readonly sha512: string;
   readonly pack: PublicationExecution;
@@ -91,6 +92,7 @@ export type AcceptedArtifact = {
   readonly kind: "accepted";
   readonly packageRoot: string;
   readonly packageName: string;
+  readonly artifactVersion: string;
   readonly artifactPath: string;
   readonly sha512: string;
   readonly installation: PublicationExecution;
@@ -259,7 +261,7 @@ async function verifyArtifactIdentity(options: {
   readonly artifactPath: string;
   readonly packageName: string;
   readonly packageVersion: string;
-}): Promise<void> {
+}): Promise<string> {
   const manifest = await packedManifest(options.artifactPath);
   const packedVersion = parseSemver(options.packageVersion)?.version;
   if (
@@ -270,6 +272,7 @@ async function verifyArtifactIdentity(options: {
       `npm tgz 身份与目标不一致：目标 ${options.packageName}@${options.packageVersion}；制品 ${String(manifest.name)}@${String(manifest.version)}。npm pack 会移除版本 build metadata；其余 name、prerelease 和版本坐标必须匹配。修正目标 package.json 或打包 adapter。`,
     );
   }
+  return manifest.version as string;
 }
 
 /** 检查 npm 目标本身需要的身份、版本与包自有消费验收命令。 */
@@ -408,7 +411,7 @@ export async function prepareArtifact(options: {
       `打包命令没有生成普通 tgz 文件：${artifactPath}。检查目标包的 pack/prepack 生命周期及其输出位置。`,
     );
   }
-  await verifyArtifactIdentity({
+  const artifactVersion = await verifyArtifactIdentity({
     artifactPath,
     packageName: inspection.packageName,
     packageVersion: inspection.packageVersion,
@@ -439,7 +442,12 @@ export async function prepareArtifact(options: {
           command: execution.command,
           arguments: execution.arguments,
         },
-        artifact: { path: path.basename(artifactPath), sha512 },
+        artifact: {
+          path: path.basename(artifactPath),
+          name: inspection.packageName,
+          version: artifactVersion,
+          sha512,
+        },
       },
       null,
       2,
@@ -450,6 +458,7 @@ export async function prepareArtifact(options: {
     packageRoot: inspection.packageRoot,
     packageName: inspection.packageName,
     packageVersion: inspection.packageVersion,
+    artifactVersion,
     artifactPath,
     sha512,
     pack: execution,
@@ -469,7 +478,7 @@ export async function acceptArtifact(options: {
   if (!(await regularFile(artifactPath))) {
     throw new Error(`待验收原始 tgz 不存在或不是普通文件：${artifactPath}`);
   }
-  await verifyArtifactIdentity({
+  const artifactVersion = await verifyArtifactIdentity({
     artifactPath,
     packageName: inspection.packageName,
     packageVersion: inspection.packageVersion,
@@ -525,6 +534,7 @@ export async function acceptArtifact(options: {
       kind: "accepted",
       packageRoot: inspection.packageRoot,
       packageName: inspection.packageName,
+      artifactVersion,
       artifactPath,
       sha512,
       installation,

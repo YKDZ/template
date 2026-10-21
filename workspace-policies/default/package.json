@@ -121,7 +121,6 @@
     "lint": "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
     "sync:policy-snapshot": "node scripts/sync-snapshot.ts src/workspace-policy-snapshot.ts",
-    "sync:npm-publication-resources": "node scripts/sync-npm-publication-resources.ts",
     "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec 'test/**/*.light.test.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
     "sync:release-toolchain-snapshot": "node scripts/sync-snapshot.ts src/release-toolchain-snapshot.ts"
@@ -140,7 +139,6 @@
     "@types/node": "catalog:",
     "@types/semver": "catalog:",
     "@types/spdx-expression-parse": "catalog:",
-    "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-ts-cli": "link:../../references/ts-cli",
     "@ykdz/reference-typescript-config": "workspace:*",
     "oxfmt": "catalog:",
