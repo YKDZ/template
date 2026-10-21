@@ -81,6 +81,27 @@
       "outputs": ["template-dist/**"],
       "persistent": false
     },
+    "database:prepare:dev": {
+      "tags": ["work:preparation"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "database:prepare:e2e": {
+      "tags": ["work:preparation"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "database:prepare:test": {
+      "tags": ["work:preparation"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
     "check:author-planning-roles": {
       "cache": false,
       "outputs": [],

@@ -670,6 +670,7 @@ function projectOperations(options: {
   readonly blueprint: ProjectBlueprint;
   readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
+
   readonly presetProjectContributions: readonly (readonly DefaultWorkspaceProjectContribution[])[];
   readonly sharedRootContributions: readonly SharedRootContribution[];
 }): WorkspaceProjection<DefaultWorkspaceOwnerFacts> {

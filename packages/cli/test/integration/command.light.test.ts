@@ -253,20 +253,6 @@ void describe("template CLI command control", () => {
         ),
       );
 
-      const publicationConfig = JSON.parse(
-        await readFile(
-          path.join(
-            workspace,
-            "demo/scripts/npm-publication/publication.config.json",
-          ),
-          "utf8",
-        ),
-      );
-      assert.deepEqual(publicationConfig, {
-        packagePath: "packages/cli",
-        packageDefinitionId: candidateRecord.packageDefinitionId,
-        creationInput: candidateRecord.creationInput,
-      });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

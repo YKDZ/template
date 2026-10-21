@@ -149,7 +149,28 @@ export type AcceptedArtifact = {
   readonly sha512: string;
   readonly installation: PublicationExecution;
   readonly consumption: PublicationExecution;
+  readonly artifacts: readonly AcceptedArtifactTarget[];
   readonly receiptPath?: string;
+};
+
+export type AcceptedArtifactTarget = {
+  readonly packageRoot: string;
+  readonly packageName: string;
+  readonly artifactVersion: string;
+  readonly artifactPath: string;
+  readonly sha512: string;
+  readonly consumption: PublicationExecution;
+  readonly receiptPath?: string;
+};
+
+export type AdditionalArtifactTarget = {
+  readonly packageRoot: string;
+  readonly artifactPath: string;
+};
+
+export type PreparedArtifactBatchTarget = {
+  readonly packageRoot: string;
+  readonly artifactDirectory: string;
 };
 
 export type AcceptArtifactResult =
@@ -157,6 +178,10 @@ export type AcceptArtifactResult =
   | {
       readonly kind: "blocked";
       readonly inspection: Extract<PublicationInspection, { kind: "blocked" }>;
+      readonly inspections?: readonly Extract<
+        PublicationInspection,
+        { kind: "blocked" }
+      >[];
     };
 
 export type PackAdapter = (options: {
@@ -258,6 +283,87 @@ async function execute(
       { cause: error },
     );
   }
+}
+
+type NativeNpmInstallFailure = {
+  readonly code: string | undefined;
+  readonly message: string;
+};
+
+function nativeNpmInstallFailure(error: unknown): NativeNpmInstallFailure {
+  const cause =
+    error instanceof Error ? objectValue(error.cause) : objectValue(error);
+  const stdout = typeof cause?.stdout === "string" ? cause.stdout : "";
+  const stderr = typeof cause?.stderr === "string" ? cause.stderr : "";
+  let parsed: Record<string, unknown> | undefined;
+  try {
+    parsed = objectValue(JSON.parse(stdout));
+  } catch {
+    parsed = undefined;
+  }
+  const nativeError = objectValue(parsed?.error);
+  const code =
+    typeof nativeError?.code === "string" ? nativeError.code : undefined;
+  const summary =
+    typeof nativeError?.summary === "string" ? nativeError.summary : "";
+  const detail =
+    typeof nativeError?.detail === "string" ? nativeError.detail : "";
+  return {
+    code,
+    message: [summary, detail, stderr, stdout]
+      .filter((part) => part.length > 0)
+      .join("\n"),
+  };
+}
+
+function missingPackedDependencies(
+  failure: NativeNpmInstallFailure,
+  targets: readonly {
+    readonly inspection: Extract<PublicationInspection, { kind: "ready" }>;
+    readonly packedManifest: PublicationManifest;
+  }[],
+): readonly string[] {
+  if (!new Set(["ENOTCACHED", "E404", "ETARGET"]).has(failure.code ?? "")) {
+    return [];
+  }
+  const diagnostic = failure.message.toLowerCase();
+  const matches: string[] = [];
+  for (const target of targets) {
+    const dependencies = objectValue(target.packedManifest.dependencies);
+    if (dependencies === undefined) continue;
+    for (const [name, range] of Object.entries(dependencies)) {
+      if (typeof range !== "string") continue;
+      const packageName = name.toLowerCase();
+      const encodedName = name.replaceAll("/", "%2f").toLowerCase();
+      if (
+        diagnostic.includes(packageName) ||
+        diagnostic.includes(encodedName) ||
+        diagnostic.includes(encodeURIComponent(name).toLowerCase())
+      ) {
+        matches.push(
+          `目标 ${target.inspection.packageName} 声明了依赖 ${name}@${range}`,
+        );
+      }
+    }
+  }
+  return matches;
+}
+
+function batchInstallFailureMessage(
+  error: unknown,
+  targets: readonly {
+    readonly inspection: Extract<PublicationInspection, { kind: "ready" }>;
+    readonly packedManifest: PublicationManifest;
+  }[],
+): string {
+  const failure = nativeNpmInstallFailure(error);
+  const missing = missingPackedDependencies(failure, targets);
+  const nativeMessage = error instanceof Error ? error.message : String(error);
+  if (missing.length === 0) return nativeMessage;
+  return [
+    `批次 npm 安装无法从 registry 或本地缓存取得所需依赖（${failure.code}）：${missing.join("；")}。请把对应依赖目标显式加入本次 --filter 选择，并确保版本满足已声明范围，然后重试。`,
+    nativeMessage,
+  ].join("\n");
 }
 
 function archiveFromPackOutput(stdout: string): string | undefined {
@@ -750,25 +856,63 @@ export async function prepareArtifact(options: {
   };
 }
 
-/** 正常安装原始 tgz，再运行目标清单声明的消费验收命令。 */
+/** 一次正常安装整批原始 tgz，再运行每个目标包自有的消费验收命令。 */
 export async function acceptArtifact(options: {
   readonly packageRoot: string;
   readonly artifactPath: string;
+  readonly additionalArtifacts?: readonly AdditionalArtifactTarget[];
   readonly env?: NodeJS.ProcessEnv;
 }): Promise<AcceptArtifactResult> {
-  const inspection = await inspectTarget(options);
-  if (inspection.kind === "blocked") return { kind: "blocked", inspection };
-
-  const artifactPath = path.resolve(options.artifactPath);
-  if (!(await regularFile(artifactPath))) {
-    throw new Error(`待验收原始 tgz 不存在或不是普通文件：${artifactPath}`);
+  const targets: readonly AdditionalArtifactTarget[] = [
+    { packageRoot: options.packageRoot, artifactPath: options.artifactPath },
+    ...(options.additionalArtifacts ?? []),
+  ];
+  const inspectedTargets = await Promise.all(
+    targets.map(async (target) => ({
+      target,
+      inspection: await inspectTarget({ packageRoot: target.packageRoot }),
+    })),
+  );
+  const blockedInspections = inspectedTargets.flatMap(({ inspection }) =>
+    inspection.kind === "blocked" ? [inspection] : [],
+  );
+  const firstBlocked = blockedInspections[0];
+  if (firstBlocked !== undefined) {
+    return {
+      kind: "blocked",
+      inspection: firstBlocked,
+      inspections: blockedInspections,
+    };
   }
-  const artifactVersion = await verifyArtifactIdentity({
-    artifactPath,
-    packageName: inspection.packageName,
-    packageVersion: inspection.packageVersion,
-  });
-  const sha512 = await digestFile(artifactPath);
+
+  const verifiedTargets = await Promise.all(
+    inspectedTargets.map(async ({ target, inspection }) => {
+      if (inspection.kind !== "ready") {
+        throw new Error("批量目标检查状态在验收期间发生变化。");
+      }
+      const artifactPath = path.resolve(target.artifactPath);
+      if (!(await regularFile(artifactPath))) {
+        throw new Error(`待验收原始 tgz 不存在或不是普通文件：${artifactPath}`);
+      }
+      const artifactVersion = await verifyArtifactIdentity({
+        artifactPath,
+        packageName: inspection.packageName,
+        packageVersion: inspection.packageVersion,
+      });
+      const packedManifest = await verifiedPackedManifest({
+        artifactPath,
+        packageName: inspection.packageName,
+        packageVersion: inspection.packageVersion,
+      });
+      return {
+        inspection,
+        artifactPath,
+        artifactVersion,
+        packedManifest,
+        sha512: await digestFile(artifactPath),
+      };
+    }),
+  );
   const { mkdtemp } = await import("node:fs/promises");
   const consumerRoot = await mkdtemp(
     path.join(tmpdir(), "npm-publication-consumer-"),
@@ -780,58 +924,83 @@ export async function acceptArtifact(options: {
       path.join(consumerRoot, packageManifestName),
       `${JSON.stringify({ private: true }, null, 2)}\n`,
     );
-    const installation = await execute(
-      "npm",
-      [
-        "install",
-        "--no-audit",
-        "--no-fund",
-        "--foreground-scripts",
-        artifactPath,
-      ],
-      {
-        cwd: consumerRoot,
-        env,
-        operation: `${inspection.packageName} 原始 tgz 正常安装`,
-      },
-    );
-    const consumption = await execute(
-      "npm",
-      ["run", "--silent", consumerScriptName],
-      {
-        cwd: inspection.packageRoot,
-        env: {
-          ...env,
-          NPM_PUBLICATION_ARTIFACT_PATH: artifactPath,
-          NPM_PUBLICATION_CONSUMER_ROOT: consumerRoot,
-          NPM_PUBLICATION_PACKAGE_NAME: inspection.packageName,
+    let installation: PublicationExecution;
+    try {
+      installation = await execute(
+        "npm",
+        [
+          "install",
+          "--no-audit",
+          "--no-fund",
+          "--json",
+          "--foreground-scripts",
+          ...verifiedTargets.map((target) => target.artifactPath),
+        ],
+        {
+          cwd: consumerRoot,
+          env,
+          operation: `${verifiedTargets.map((target) => target.inspection.packageName).join("、")} 批内原始 tgz 正常安装`,
         },
-        operation: `${inspection.packageName} 包自有消费验收`,
-      },
-    );
-    const acceptedSha512 = await digestFile(artifactPath);
-    if (acceptedSha512 !== sha512) {
-      throw new Error(
-        `消费验收期间原始 tgz 字节发生变化：验收前 ${sha512}，验收后 ${acceptedSha512}。`,
+      );
+    } catch (error) {
+      throw new Error(batchInstallFailureMessage(error, verifiedTargets), {
+        cause: error,
+      });
+    }
+
+    const consumptions: PublicationExecution[] = [];
+    for (const target of verifiedTargets) {
+      consumptions.push(
+        await execute("npm", ["run", "--silent", consumerScriptName], {
+          cwd: target.inspection.packageRoot,
+          env: {
+            ...env,
+            NPM_PUBLICATION_ARTIFACT_PATH: target.artifactPath,
+            NPM_PUBLICATION_CONSUMER_ROOT: consumerRoot,
+            NPM_PUBLICATION_PACKAGE_NAME: target.inspection.packageName,
+          },
+          operation: `${target.inspection.packageName} 包自有消费验收`,
+        }),
       );
     }
-    const receiptPath = await recordAcceptance({
-      artifactPath,
-      packageName: inspection.packageName,
-      packageVersion: inspection.packageVersion,
-      artifactVersion,
-      sha512,
-    });
+
+    for (const target of verifiedTargets) {
+      const acceptedSha512 = await digestFile(target.artifactPath);
+      if (acceptedSha512 !== target.sha512) {
+        throw new Error(
+          `消费验收期间原始 tgz 字节发生变化：${target.artifactPath}；验收前 ${target.sha512}，验收后 ${acceptedSha512}。`,
+        );
+      }
+    }
+
+    const artifacts: AcceptedArtifactTarget[] = [];
+    for (const [index, target] of verifiedTargets.entries()) {
+      const receiptPath = await recordAcceptance({
+        artifactPath: target.artifactPath,
+        packageName: target.inspection.packageName,
+        packageVersion: target.inspection.packageVersion,
+        artifactVersion: target.artifactVersion,
+        sha512: target.sha512,
+      });
+      artifacts.push({
+        packageRoot: target.inspection.packageRoot,
+        packageName: target.inspection.packageName,
+        artifactVersion: target.artifactVersion,
+        artifactPath: target.artifactPath,
+        sha512: target.sha512,
+        consumption: consumptions[index]!,
+        ...(receiptPath === undefined ? {} : { receiptPath }),
+      });
+    }
+    const primary = artifacts[0];
+    if (primary === undefined) {
+      throw new Error("npm 制品验收至少需要一个目标。");
+    }
     return {
       kind: "accepted",
-      packageRoot: inspection.packageRoot,
-      packageName: inspection.packageName,
-      artifactVersion,
-      artifactPath,
-      sha512,
+      ...primary,
       installation,
-      consumption,
-      ...(receiptPath === undefined ? {} : { receiptPath }),
+      artifacts,
     };
   } finally {
     await rm(consumerRoot, { recursive: true, force: true });
@@ -882,4 +1051,50 @@ export async function recordNpmPublicationAttempt(options: {
       { cause: error },
     );
   }
+}
+
+/** 从 pnpm 已选目标的原始准备回执接入同一条整批安装验收链。 */
+export async function acceptPreparedArtifacts(options: {
+  readonly targets: readonly PreparedArtifactBatchTarget[];
+  readonly env?: NodeJS.ProcessEnv;
+}): Promise<AcceptArtifactResult> {
+  if (options.targets.length === 0) {
+    throw new Error("npm 制品整批验收至少需要一个 pnpm 选中目标。");
+  }
+  const preparedTargets = await Promise.all(
+    options.targets.map(async (target) => ({
+      target,
+      prepared: await readPreparedArtifact(target),
+    })),
+  );
+  const blocked = preparedTargets.flatMap(({ prepared }) =>
+    prepared.kind === "blocked" ? [prepared.inspection] : [],
+  );
+  const firstBlocked = blocked[0];
+  if (firstBlocked !== undefined) {
+    return {
+      kind: "blocked",
+      inspection: firstBlocked,
+      inspections: blocked,
+    };
+  }
+  const ready = preparedTargets.map(({ target, prepared }) => {
+    if (prepared.kind !== "prepared") {
+      throw new Error("整批原件检查状态在验收期间发生变化。");
+    }
+    return {
+      packageRoot: target.packageRoot,
+      artifactPath: prepared.artifactPath,
+    };
+  });
+  const first = ready[0];
+  if (first === undefined) {
+    throw new Error("npm 制品整批验收至少需要一个目标。");
+  }
+  return await acceptArtifact({
+    packageRoot: first.packageRoot,
+    artifactPath: first.artifactPath,
+    additionalArtifacts: ready.slice(1),
+    ...(options.env === undefined ? {} : { env: options.env }),
+  });
 }
