@@ -33,6 +33,7 @@ const loadedContent = await loadContentSource({
     "@ykdz/reference-vue-shared/template",
     "@ykdz/reference-ts-lib/template",
     "@ykdz/reference-tooling-config/template",
+    "@ykdz/reference-npm-publication/template",
     "@ykdz/preset-vike-app/template",
   ],
   prepareReferenceDefinition(definition) {
@@ -66,6 +67,14 @@ const content = [
   vueShared,
   library,
   configuration,
+  contentIndex.resolve(
+    {
+      namespace: "ykdz",
+      packageName: "@ykdz/reference-npm-publication",
+      exportPath: "./template",
+    },
+    "reference",
+  ),
   preset,
 ];
 const unsupportedPresetDefinition = {
@@ -232,6 +241,7 @@ void describe("Vike 应用公开预设", () => {
     );
     const databaseManifest = await readJson(databaseManifestPath);
     const databaseScripts = databaseManifest.scripts as Record<string, unknown>;
+    const resetScript = databaseScripts["db:reset"];
     delete databaseScripts["db:reset"];
     await writeFile(
       databaseManifestPath,
@@ -260,6 +270,50 @@ void describe("Vike 应用公开预设", () => {
     assert.strictEqual(
       await snapshotTree(targetRoot),
       beforeInvalidDatabaseAdd,
+    );
+
+    assert.strictEqual(added.status, "success");
+    if (added.status !== "success") return;
+    const guide = added.blueprint.packages.find(
+      (item) => item.path === "packages/guide",
+    )!;
+    const invalidConfiguration = await createGenerator({
+      content,
+      strategy: createDefaultWorkspaceStrategy(),
+    }).configure({
+      repositoryRoot: targetRoot,
+      packageDefinitionId: guide.packageDefinitionId,
+      configuration: { publication: true },
+    });
+    assert.strictEqual(invalidConfiguration.status, "operation-failure");
+    if (invalidConfiguration.status === "operation-failure") {
+      assert.match(
+        invalidConfiguration.error.message,
+        /Vike 数据准备要求 @demo\/db 的 scripts\.db:reset 与来源包保持一致/u,
+      );
+    }
+    assert.strictEqual(
+      await snapshotTree(targetRoot),
+      beforeInvalidDatabaseAdd,
+    );
+
+    databaseScripts["db:reset"] = resetScript;
+    await writeFile(
+      databaseManifestPath,
+      JSON.stringify(databaseManifest, null, 2) + "\n",
+    );
+    const configured = await createGenerator({
+      content,
+      strategy: createDefaultWorkspaceStrategy(),
+    }).configure({
+      repositoryRoot: targetRoot,
+      packageDefinitionId: guide.packageDefinitionId,
+      configuration: { publication: true },
+    });
+    assert.strictEqual(
+      configured.status,
+      "success",
+      JSON.stringify(configured),
     );
 
     const rootManifestAfter = await readJson(rootManifestPath);

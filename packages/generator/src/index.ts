@@ -819,6 +819,29 @@ export function createGenerator<
     return [...selections.values()];
   }
 
+  async function validatePresetUpdate(
+    targetRoot: string,
+    context: Context,
+    contributions: readonly Contribution[],
+    nodeInstances: GeneratorNodeInstances,
+    presetSelections: readonly ContentIdentity[],
+  ): Promise<void> {
+    for (const selection of presetSelections) {
+      const presetMember = presetsByIdentity.get(presetSelectionKey(selection));
+      if (presetMember === undefined) {
+        throw new Error(
+          `生成记录所选预设不可用：${contentIdentityLabel(selection)}`,
+        );
+      }
+      await presetMember.definition.validateUpdate?.({
+        targetRoot,
+        context,
+        contributions,
+        nodeInstances,
+      });
+    }
+  }
+
   function computePresetProjectContributions(
     context: Context,
     contributions: readonly Contribution[],
@@ -1524,6 +1547,13 @@ export function createGenerator<
         }
       };
       try {
+        await validatePresetUpdate(
+          repositoryRoot,
+          context,
+          existingContributions,
+          currentNodeInstances,
+          record.presetSelections,
+        );
         const currentPresetProjectContributions =
           computePresetProjectContributions(
             context,
@@ -1788,17 +1818,25 @@ export function createGenerator<
           : { creationInput: target.creationInput }),
       });
       const beforeNodes = nodesFromRecords(packageStates);
+      const beforeContributions = persistedContributions(
+        beforeNodes,
+        context,
+        packageStates,
+        currentNodeInstances,
+      );
+      await validatePresetUpdate(
+        repositoryRoot,
+        context,
+        beforeContributions,
+        currentNodeInstances,
+        record.presetSelections,
+      );
       const before = project(
         context,
         state,
         blueprint,
         packageStates,
-        persistedContributions(
-          beforeNodes,
-          context,
-          packageStates,
-          currentNodeInstances,
-        ),
+        beforeContributions,
         record.nodeInstances,
         record.presetSelections,
       );
