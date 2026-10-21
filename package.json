@@ -24,9 +24,9 @@
     "test": "node --conditions=source --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec 'test/**/*.light.test.ts'",
     "test:integration": "node --conditions=source scripts/run-root-integration.ts",
     "test:e2e:cli": "node scripts/check-cli-source-and-distribution.ts",
-    "database:prepare:dev": "DATABASE_PROFILE=dev pnpm --filter @ykdz/reference-vike-migrations run db:push && DATABASE_PROFILE=dev pnpm --filter @ykdz/reference-vike-db run db:seed:example",
-    "database:prepare:e2e": "DATABASE_PROFILE=e2e pnpm --filter @ykdz/reference-vike-db run db:reset && DATABASE_PROFILE=e2e pnpm --filter @ykdz/reference-vike-migrations run db:push && DATABASE_PROFILE=e2e pnpm --filter @ykdz/reference-vike-db run db:seed:example",
-    "database:prepare:test": "DATABASE_PROFILE=test pnpm --filter @ykdz/reference-vike-db run db:reset && DATABASE_PROFILE=test pnpm --filter @ykdz/reference-vike-migrations run db:push && DATABASE_PROFILE=test pnpm --filter @ykdz/reference-vike-db run db:seed:example",
+    "database:prepare:dev": "pnpm --filter @ykdz/preset-vike-app run database:prepare:dev",
+    "database:prepare:e2e": "pnpm --filter @ykdz/preset-vike-app run database:prepare:e2e",
+    "database:prepare:test": "pnpm --filter @ykdz/preset-vike-app run database:prepare:test",
     "toolchain:prepare": "cargo --version",
     "sync": "pnpm run sync:workspace-policy && pnpm run sync:repository"
   },

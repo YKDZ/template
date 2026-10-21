@@ -873,6 +873,27 @@ void describe("原生内容制品安装链", () => {
         [preset.identity.packageName],
       );
       assert.ok(result.initialized.packagePaths.length > 0);
+      if (preset.alias === "vike-app") {
+        const deployment = JSON.parse(
+          await readFile(path.join(targetRoot, "deployment.json"), "utf8"),
+        ) as {
+          readonly application: {
+            readonly name: string;
+            readonly path: string;
+          };
+          readonly database: { readonly name: string; readonly path: string };
+          readonly migrations: { readonly name: string; readonly path: string };
+        };
+        for (const definition of Object.values(deployment)) {
+          const generatedManifest = JSON.parse(
+            await readFile(
+              path.join(targetRoot, definition.path, "package.json"),
+              "utf8",
+            ),
+          ) as { readonly name: string };
+          assert.equal(generatedManifest.name, definition.name);
+        }
+      }
       const closure = await auditInstalledClosure(consumerRoot, [
         ...authorRoots,
         workspaceRoot,

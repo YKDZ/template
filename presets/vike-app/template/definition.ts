@@ -8,12 +8,15 @@ import {
 } from "@ykdz/template-core/preset-definition";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import { defineNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
-import { dockerEngineEnvironmentNeed } from "@ykdz/template-workspace/default-environment";
 import type { GenerationContext } from "@ykdz/template-workspace/generation-context";
 import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
-import type { ProjectRequirement } from "@ykdz/template-workspace/project-requirements";
+import type { SharedRootContribution } from "@ykdz/template-workspace/shared-root-files";
 
 import presetPackage from "../package.json" with { type: "json" };
+import {
+  projectVikeDeploymentContribution,
+  vikeDeploymentResources,
+} from "./deployment.ts";
 
 const owner = presetOwnerFromManifest(presetPackage, "./template");
 
@@ -46,33 +49,29 @@ export const preset = defineNativeContentArtifact(
     nodes,
     owner,
     project({
+      context,
+      contributions,
       nodeInstances,
     }: PresetProjectOptions<GenerationContext, PackageContribution>) {
       const application = requireNode(nodeInstances, "web");
       const databasePackage = requireNode(nodeInstances, "database");
       const migrationPackage = requireNode(nodeInstances, "migrations");
-      const requirements: ProjectRequirement[] = [
-        {
-          kind: "sqlite-database-preparation",
-          web: application,
-          database: databasePackage,
-          migrations: migrationPackage,
-        },
-        {
-          kind: "application-container-with-database-migrations",
+      const deployment: SharedRootContribution =
+        projectVikeDeploymentContribution({
+          context,
+          contributions,
           application,
           database: databasePackage,
           migrations: migrationPackage,
-          environmentNeeds: [dockerEngineEnvironmentNeed()],
-        },
-      ];
-      return requirements;
+        });
+      return [deployment];
     },
   }),
   {
     manifest: presetPackage,
     resourceRoot: new URL("../", import.meta.url),
     exportPath: "./template",
+    resources: vikeDeploymentResources,
     executionDependencies: [
       "@ykdz/template-workspace",
       "@ykdz/template-workspace-authoring",

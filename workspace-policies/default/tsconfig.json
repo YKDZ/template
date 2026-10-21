@@ -12,7 +12,6 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "scripts/**/*.ts",
-    "resources/deployment/**/*.ts",
     "*.config.ts"
   ]
 }

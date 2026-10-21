@@ -1,0 +1,398 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
+import type { NativeContentArtifactResource } from "@ykdz/template-workspace-authoring/content-artifact";
+import {
+  dockerEngineEnvironmentNeed,
+  shellCheckEnvironmentNeed,
+  type CheckEnvironmentNeed,
+  type DeploymentEnvironmentNeed,
+} from "@ykdz/template-workspace/default-environment";
+import type { GenerationContext } from "@ykdz/template-workspace/generation-context";
+import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
+import type { DependencyMaintenancePolicy } from "@ykdz/template-workspace/project-requirements";
+import type {
+  RootResourceOperation,
+  SharedRootContribution,
+} from "@ykdz/template-workspace/shared-root-files";
+
+const deploymentDirectory = fileURLToPath(
+  new URL("../resources/deployment/", import.meta.url),
+);
+const checkerPath = fileURLToPath(
+  new URL("../scripts/check-standalone-deployment.ts", import.meta.url),
+);
+
+function packageResource(
+  resourcePath: string,
+  filePath: string,
+  mode = 0o644,
+): NativeContentArtifactResource {
+  return {
+    path: resourcePath,
+    source: createTemplateSourceHandle(filePath),
+    mode,
+  };
+}
+
+export const vikeDeploymentResources = [
+  packageResource(
+    "resources/deployment/Dockerfile",
+    path.join(deploymentDirectory, "Dockerfile"),
+  ),
+  packageResource(
+    "resources/deployment/container.dockerignore",
+    path.join(deploymentDirectory, "container.dockerignore"),
+  ),
+  packageResource(
+    "resources/deployment/scripts/container-entrypoint.sh",
+    path.join(deploymentDirectory, "scripts/container-entrypoint.sh"),
+    0o755,
+  ),
+  packageResource("scripts/check-standalone-deployment.ts", checkerPath),
+] as const satisfies readonly NativeContentArtifactResource[];
+
+const rootFiles = {
+  dockerfile: vikeDeploymentResources[0],
+  dockerIgnore: vikeDeploymentResources[1],
+  containerEntrypoint: vikeDeploymentResources[2],
+  checker: vikeDeploymentResources[3],
+} as const;
+
+function copyResource(
+  resource: NativeContentArtifactResource,
+  to: string,
+): RootResourceOperation {
+  return {
+    kind: "copyFile",
+    from: ".",
+    to,
+    source: resource.source,
+    overwrite: true,
+  };
+}
+
+function packageScript(
+  profile: "dev" | "test" | "e2e",
+  definition: PackageDefinition,
+  script: string,
+): string {
+  return `DATABASE_PROFILE=${profile} pnpm --filter ${definition.name} run ${script}`;
+}
+
+function preparationScripts(options: {
+  readonly application: PackageDefinition;
+  readonly database: PackageDefinition;
+  readonly migrations: PackageDefinition;
+}): Readonly<Record<string, string>> {
+  const { application, database, migrations } = options;
+  return {
+    "database:prepare:dev": [
+      packageScript("dev", migrations, "db:push"),
+      packageScript("dev", database, "db:seed:example"),
+    ].join(" && "),
+    "database:prepare:test": [
+      packageScript("test", database, "db:reset"),
+      packageScript("test", migrations, "db:push"),
+      packageScript("test", database, "db:seed:example"),
+    ].join(" && "),
+    "database:prepare:e2e": [
+      packageScript("e2e", database, "db:reset"),
+      packageScript("e2e", migrations, "db:push"),
+      packageScript("e2e", database, "db:seed:example"),
+    ].join(" && "),
+    dev: `pnpm run database:prepare:dev && turbo watch dev --filter=${application.name}`,
+  };
+}
+
+function requiredTaskScripts(options: {
+  readonly application: PackageDefinition;
+  readonly database: PackageDefinition;
+  readonly migrations: PackageDefinition;
+}): readonly {
+  readonly definition: PackageDefinition;
+  readonly names: readonly string[];
+}[] {
+  return [
+    {
+      definition: options.database,
+      names: ["build", "db:reset", "db:seed:example", "test"],
+    },
+    { definition: options.migrations, names: ["db:push", "typecheck"] },
+    {
+      definition: options.application,
+      names: ["build", "dev", "typecheck", "test:e2e"],
+    },
+  ];
+}
+
+function packageManifest(
+  targetRoot: string,
+  definition: PackageDefinition,
+  contribution: PackageContribution,
+): Record<string, unknown> | undefined {
+  const packageManifestPath = path.join(
+    targetRoot,
+    definition.path,
+    "package.json",
+  );
+  if (!existsSync(packageManifestPath)) return undefined;
+
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(packageManifestPath, "utf8")) as unknown;
+  } catch (cause) {
+    throw new Error(
+      `Vike 预设无法读取 ${definition.path}/package.json：${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause },
+    );
+  }
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    (value as Record<string, unknown>).name !== definition.name
+  ) {
+    throw new Error(
+      `Vike 预设的实际包身份与实例不匹配：${definition.name} (${definition.path})`,
+    );
+  }
+  const expected = contribution.manifest;
+  if (expected.name !== definition.name) {
+    throw new Error(`Vike 预设来源包身份不匹配：${definition.name}`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function scriptValue(manifest: Record<string, unknown>, name: string): unknown {
+  const scripts = manifest.scripts;
+  return typeof scripts === "object" &&
+    scripts !== null &&
+    !Array.isArray(scripts)
+    ? (scripts as Record<string, unknown>)[name]
+    : undefined;
+}
+
+function assertPreparedPackageTruth(options: {
+  readonly context: GenerationContext;
+  readonly contributions: readonly PackageContribution[];
+  readonly packages: readonly {
+    readonly definition: PackageDefinition;
+    readonly names: readonly string[];
+  }[];
+}): void {
+  const sourceByPath = new Map(
+    options.contributions.map((contribution) => [
+      contribution.definition.path,
+      contribution,
+    ]),
+  );
+  const existing: {
+    readonly definition: PackageDefinition;
+    readonly contribution: PackageContribution;
+    readonly manifest: Record<string, unknown>;
+  }[] = [];
+  for (const { definition } of options.packages) {
+    const contribution = sourceByPath.get(definition.path);
+    if (
+      contribution === undefined ||
+      contribution.definition.name !== definition.name
+    ) {
+      throw new Error(
+        `Vike 预设缺少实际包来源：${definition.name} (${definition.path})`,
+      );
+    }
+    const manifest = packageManifest(
+      options.context.targetDir,
+      definition,
+      contribution,
+    );
+    if (manifest !== undefined) {
+      existing.push({ definition, contribution, manifest });
+    }
+  }
+  if (existing.length === 0) return;
+  if (existing.length !== options.packages.length) {
+    const missing = options.packages
+      .filter(
+        ({ definition }) =>
+          !existing.some((item) => item.definition.path === definition.path),
+      )
+      .map(({ definition }) => definition.path);
+    throw new Error(`Vike 预设找不到实际包清单：${missing.join(", ")}`);
+  }
+  for (const expectedPackage of options.packages) {
+    const actual = existing.find(
+      (item) => item.definition.path === expectedPackage.definition.path,
+    );
+    const contribution = sourceByPath.get(expectedPackage.definition.path)!;
+    if (actual === undefined) continue;
+    for (const name of expectedPackage.names) {
+      const expected = scriptValue(contribution.manifest, name);
+      const received = scriptValue(actual.manifest, name);
+      if (typeof expected !== "string" || received !== expected) {
+        throw new Error(
+          `Vike 数据准备要求 ${expectedPackage.definition.name} 的 scripts.${name} 与来源包保持一致`,
+        );
+      }
+    }
+  }
+}
+
+function assertVikePackageRoles(options: {
+  readonly application: PackageDefinition;
+  readonly database: PackageDefinition;
+  readonly migrations: PackageDefinition;
+}): void {
+  if (options.application.role !== "runtime-service") {
+    throw new Error("Vike 应用部署要求应用包具有 runtime-service 角色");
+  }
+  if (
+    options.database.role !== "shared-library" ||
+    options.migrations.role !== "shared-library"
+  ) {
+    throw new Error("Vike 应用部署要求数据库和迁移包具有 shared-library 角色");
+  }
+  if (
+    new Set([
+      options.application.name,
+      options.database.name,
+      options.migrations.name,
+    ]).size !== 3 ||
+    new Set([
+      options.application.path,
+      options.database.path,
+      options.migrations.path,
+    ]).size !== 3
+  ) {
+    throw new Error("Vike 应用部署要求应用、数据库和迁移包是不同实例");
+  }
+}
+
+function deploymentTask(
+  application: PackageDefinition,
+  database: PackageDefinition,
+  migrations: PackageDefinition,
+) {
+  return {
+    cache: false,
+    dependsOn: [
+      `${application.name}#build`,
+      `${database.name}#build`,
+      `${migrations.name}#build`,
+    ],
+    tags: ["quality:heavy"],
+  };
+}
+
+export function projectVikeDeploymentContribution(options: {
+  readonly context: GenerationContext;
+  readonly contributions: readonly PackageContribution[];
+  readonly application: PackageDefinition;
+  readonly database: PackageDefinition;
+  readonly migrations: PackageDefinition;
+}): SharedRootContribution {
+  const { application, database, migrations } = options;
+  assertVikePackageRoles({ application, database, migrations });
+  assertPreparedPackageTruth({
+    context: options.context,
+    contributions: options.contributions,
+    packages: requiredTaskScripts({ application, database, migrations }),
+  });
+
+  const checkEnvironmentNeeds: readonly CheckEnvironmentNeed[] = [
+    shellCheckEnvironmentNeed({
+      kind: "workspace-orchestration",
+      path: ".",
+    }),
+  ];
+  const deploymentEnvironmentNeeds: readonly DeploymentEnvironmentNeed[] = [
+    dockerEngineEnvironmentNeed(),
+  ];
+  const dependencyMaintenance: DependencyMaintenancePolicy = {
+    ecosystems: ["docker"],
+    extraDirectories: { docker: ["/"] },
+    interval: "weekly",
+  };
+
+  return {
+    kind: "shared-root-files",
+    source: "@ykdz/preset-vike-app/template",
+    manifest: {
+      scripts: {
+        ...preparationScripts({ application, database, migrations }),
+        deployment:
+          "node --conditions=source scripts/check-standalone-deployment.ts",
+      },
+    },
+    turboTasks: {
+      "//#database:prepare:dev": {
+        cache: false,
+        tags: ["work:preparation"],
+      },
+      "//#database:prepare:e2e": {
+        cache: false,
+        tags: ["work:preparation"],
+      },
+      "//#database:prepare:test": {
+        cache: false,
+        tags: ["work:preparation"],
+      },
+      "//#deployment": deploymentTask(application, database, migrations),
+    },
+    ciJob: { name: "Full Check", timeoutMinutes: 45 },
+    ciSteps: [
+      {
+        before: "run-heavy-check",
+        steps: [
+          {
+            id: "prepare-deployment",
+            name: "Set up Docker Buildx",
+            uses: "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1",
+          },
+        ],
+      },
+    ],
+    environmentNeeds: {
+      check: checkEnvironmentNeeds,
+      deployment: deploymentEnvironmentNeeds,
+    },
+    dependencyMaintenance,
+    resources: [
+      { operation: copyResource(rootFiles.dockerfile, "Dockerfile") },
+      {
+        operation: copyResource(rootFiles.dockerIgnore, ".dockerignore"),
+      },
+      {
+        operation: copyResource(
+          rootFiles.checker,
+          "scripts/check-standalone-deployment.ts",
+        ),
+      },
+      {
+        operation: copyResource(
+          rootFiles.containerEntrypoint,
+          "scripts/container-entrypoint.sh",
+        ),
+        executable: true,
+      },
+      {
+        operation: {
+          kind: "writeJson",
+          to: "deployment.json",
+          value: {
+            application: {
+              name: application.name,
+              path: application.path,
+            },
+            database: { name: database.name, path: database.path },
+            migrations: { name: migrations.name, path: migrations.path },
+          },
+        },
+      },
+    ],
+  };
+}
