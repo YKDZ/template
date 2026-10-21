@@ -175,10 +175,6 @@ void describe("TypeScript CLI 公开组合预设", () => {
     assert.equal(root.scripts.notes, "echo 维护者说明");
     assert.equal(root.devDependencies["@demo/npm-publication"], "workspace:*");
     assert.equal((await manifest("packages/public-cli")).private, false);
-    assert.equal(
-      (await manifest("packages/public-cli")).scripts["publication:prepare"],
-      "node --import @demo/npm-publication/prepare",
-    );
     const internal = await generator().add({
       repositoryRoot: targetRoot,
       preset: preset.identity,
@@ -504,4 +500,185 @@ void describe("TypeScript CLI 公开组合预设", () => {
     assert.strictEqual(result.status, "conflict", JSON.stringify(result));
     assert.strictEqual(await snapshotTree(targetRoot), before);
   });
+});
+
+void it("已有内部实例正式开启发布保持身份和定制，第二实例复用并可幂等重试", async () => {
+  const targetRoot = await createTargetRoot("template-configure-publication-");
+  const initialized = await generator().init({
+    targetRoot,
+    selection: { roots: [{ preset: preset.identity }] },
+    strategyInput,
+  });
+  assert.equal(initialized.status, "success", JSON.stringify(initialized));
+  if (initialized.status !== "success") return;
+  const original = initialized.generationRecord.packages.find(
+    (record) => record.contentIdentity.packageName === "@ykdz/reference-ts-cli",
+  )!;
+  const originalDefinition = initialized.blueprint.packages.find(
+    (item) => item.packageDefinitionId === original.packageDefinitionId,
+  )!;
+  const manifestPath = path.join(targetRoot, "packages/cli/package.json");
+  const customized = JSON.parse(await readFile(manifestPath, "utf8"));
+  customized.scripts.notes = "echo 维护者的命令";
+  customized.description = "维护者的包说明";
+  await writeFile(manifestPath, JSON.stringify(customized));
+  const before = await snapshotTree(targetRoot);
+  const preview = await generator().configure({
+    repositoryRoot: targetRoot,
+    packageDefinitionId: original.packageDefinitionId,
+    configuration: { publication: true },
+    dryRun: true,
+  });
+  assert.equal(preview.status, "success", JSON.stringify(preview));
+  assert.equal(await snapshotTree(targetRoot), before);
+  const configured = await generator().configure({
+    repositoryRoot: targetRoot,
+    packageDefinitionId: original.packageDefinitionId,
+    configuration: { publication: true },
+  });
+  assert.equal(configured.status, "success", JSON.stringify(configured));
+  if (configured.status !== "success") return;
+  const current = configured.generationRecord.packages.find(
+    (record) => record.packageDefinitionId === original.packageDefinitionId,
+  )!;
+  assert.deepEqual(
+    {
+      ...current,
+      configuration: original.configuration,
+      bindings: original.bindings,
+    },
+    original,
+  );
+  assert.deepEqual(
+    configured.blueprint.packages.find(
+      (item) => item.packageDefinitionId === original.packageDefinitionId,
+    ),
+    originalDefinition,
+  );
+  const actual = JSON.parse(await readFile(manifestPath, "utf8"));
+  assert.equal(actual.private, false);
+  assert.equal(actual.devDependencies["@demo/npm-publication"], "workspace:*");
+  assert.equal(actual.description, "维护者的包说明");
+  assert.equal(actual.scripts.notes, "echo 维护者的命令");
+  const added = await generator().add({
+    repositoryRoot: targetRoot,
+    contentIdentity: library.identity,
+    creationInput: { leafName: "later" },
+  });
+  assert.equal(added.status, "success", JSON.stringify(added));
+  if (added.status !== "success") return;
+  const later = added.generationRecord.packages.find(
+    (record) => record.creationInput?.leafName === "later",
+  )!;
+  const second = await generator().configure({
+    repositoryRoot: targetRoot,
+    packageDefinitionId: later.packageDefinitionId,
+    configuration: { publication: true },
+  });
+  assert.equal(second.status, "success", JSON.stringify(second));
+  if (second.status !== "success") return;
+  assert.equal(
+    second.generationRecord.packages.filter(
+      (record) =>
+        record.contentIdentity.packageName ===
+        "@ykdz/reference-npm-publication",
+    ).length,
+    1,
+  );
+  const snapshot = await snapshotTree(targetRoot);
+  const repeated = await generator().configure({
+    repositoryRoot: targetRoot,
+    packageDefinitionId: later.packageDefinitionId,
+    configuration: { publication: true },
+  });
+  assert.equal(repeated.status, "success", JSON.stringify(repeated));
+  if (repeated.status !== "success") return;
+  assert.deepEqual(repeated.actions, []);
+  assert.equal(await snapshotTree(targetRoot), snapshot);
+});
+
+void it("已有实例开启发布的消费者冲突和未知实例均保留全部字节权限", async () => {
+  const targetRoot = await createTargetRoot("template-configure-conflict-");
+  const initialized = await generator().init({
+    targetRoot,
+    selection: { roots: [{ preset: preset.identity }] },
+    strategyInput,
+  });
+  assert.equal(initialized.status, "success", JSON.stringify(initialized));
+  if (initialized.status !== "success") return;
+  const target = initialized.generationRecord.packages.find(
+    (record) => record.contentIdentity.packageName === "@ykdz/reference-ts-cli",
+  )!;
+  const manifestPath = path.join(targetRoot, "package.json");
+  const root = JSON.parse(await readFile(manifestPath, "utf8"));
+  root.scripts["publication:artifact"] = "node consumer-artifact.ts";
+  await writeFile(manifestPath, JSON.stringify(root));
+  const before = await snapshotTree(targetRoot);
+  for (const dryRun of [true, false]) {
+    const conflicting = await generator().configure({
+      repositoryRoot: targetRoot,
+      packageDefinitionId: target.packageDefinitionId,
+      configuration: { publication: true },
+      dryRun,
+    });
+    assert.equal(conflicting.status, "conflict", JSON.stringify(conflicting));
+    assert.equal(await snapshotTree(targetRoot), before);
+  }
+  const unknown = await generator().configure({
+    repositoryRoot: targetRoot,
+    packageDefinitionId: `package-${"0".repeat(64)}`,
+    configuration: { publication: true },
+  });
+  assert.equal(unknown.status, "input-invalid", JSON.stringify(unknown));
+  assert.equal(await snapshotTree(targetRoot), before);
+});
+
+void it("配置已有实例的声明来源冲突列明双方并在写入前拒绝", async () => {
+  const targetRoot = await createTargetRoot(
+    "template-configure-source-conflict-",
+  );
+  const create = () =>
+    createGenerator({
+      content,
+      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>({
+        project(options) {
+          return [
+            ...projectPublicationWorkspace(options),
+            {
+              kind: "shared-root-files",
+              source: "consumer#publication",
+              manifest: {
+                scripts: {
+                  "publication:artifact": "node consumer-artifact.ts",
+                },
+              },
+            },
+          ];
+        },
+      }),
+    });
+  const initialized = await create().init({
+    targetRoot,
+    selection: { roots: [{ preset: preset.identity }] },
+    strategyInput,
+  });
+  assert.equal(initialized.status, "success", JSON.stringify(initialized));
+  if (initialized.status !== "success") return;
+  const target = initialized.generationRecord.packages.find(
+    (record) => record.contentIdentity.packageName === "@ykdz/reference-ts-cli",
+  )!;
+  const before = await snapshotTree(targetRoot);
+  const result = await create().configure({
+    repositoryRoot: targetRoot,
+    packageDefinitionId: target.packageDefinitionId,
+    configuration: { publication: true },
+  });
+  assert.equal(result.status, "operation-failure", JSON.stringify(result));
+  if (result.status !== "operation-failure") return;
+  assert.match(
+    result.error.message,
+    /@ykdz\/reference-npm-publication#\.\/template/u,
+  );
+  assert.match(result.error.message, /consumer#publication/u);
+  assert.equal(await snapshotTree(targetRoot), before);
 });

@@ -140,3 +140,23 @@ export const packageAdditionInputSchema = standardSchema(
   ),
   ["raw_check"],
 );
+
+/** 本轮配置入口只显式开启发布，不扩展卸载或其他配置操作。 */
+export const packageConfigurationInputSchema = standardSchema(
+  v.pipe(
+    v.object({
+      path: v.pipe(
+        v.string(),
+        v.nonEmpty(),
+        v.description("蓝图中已登记的包路径。"),
+      ),
+      publication: v.optional(v.boolean(), false),
+      dryRun: v.optional(v.boolean(), false),
+    }),
+    v.rawCheck(({ dataset, addIssue }) => {
+      if (dataset.typed && !dataset.value.publication)
+        addIssue({ message: "请通过 --publication 明确开启发布。" });
+    }),
+  ),
+  ["raw_check"],
+);

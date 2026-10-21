@@ -3,6 +3,7 @@ import path from "node:path";
 
 import {
   validateProjectBlueprint,
+  assertProjectBlueprint,
   type ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
 import {
@@ -51,6 +52,29 @@ export type AddPackageCommandOptions = {
   readonly linkFrom: readonly string[];
   readonly dryRun: boolean;
 };
+
+export type ConfigurePackageCommandOptions = {
+  readonly path: string;
+  readonly dryRun: boolean;
+};
+
+export type PackageConfigurationCommandResult =
+  | Exclude<
+      PackageAdditionCommandResult,
+      { readonly status: "usage-error" } | { readonly status: "success" }
+    >
+  | {
+      readonly status: "success";
+      readonly packageDefinitionId: string;
+      readonly dryRun: boolean;
+      readonly actions: readonly ProjectProjectionAction[];
+    }
+  | {
+      readonly status: "usage-error";
+      readonly issues: readonly {
+        readonly code: "UNKNOWN_GENERATED_INSTANCE";
+      }[];
+    };
 
 type ResolvedInitialization = {
   readonly preset: string;
@@ -468,13 +492,16 @@ export async function runInit(
   };
 }
 
-function packageAdditionOperationFailure(
+function packageUpdateOperationFailure(
   phase: "metadata" | "planning" | "render" | "reconciliation",
   diagnostic?: { readonly message: string; readonly suggestion: string },
   message?: string,
-): PackageAdditionCommandResult {
+  fallbackMessage = "添加 Package 时发生操作失败。",
+): Extract<
+  PackageAdditionCommandResult,
+  { readonly status: "operation-failure" }
+> {
   const mappedPhase = phase === "render" ? "reconciliation" : phase;
-  const fallbackMessage = "添加 Package 时发生操作失败。";
   return {
     status: "operation-failure",
     phase: mappedPhase,
@@ -518,7 +545,7 @@ export async function runAddPackage(
     dryRun: options.dryRun,
   });
   if (result.status === "operation-failure") {
-    return packageAdditionOperationFailure(
+    return packageUpdateOperationFailure(
       result.phase,
       result.error.diagnostic,
       result.error.message,
@@ -545,7 +572,7 @@ export async function runAddPackage(
       result.ownerConflict !== undefined &&
       missingLinkConflict === undefined
     ) {
-      return packageAdditionOperationFailure("planning");
+      return packageUpdateOperationFailure("planning");
     }
     return {
       status: "conflict",
@@ -563,6 +590,71 @@ export async function runAddPackage(
   return {
     status: "success",
     dryRun: options.dryRun,
+    actions: result.actions,
+  };
+}
+
+/** 只按正式蓝图选择已有实例；不从原生目录推断内容来源。 */
+export async function runConfigurePackage(
+  options: ConfigurePackageCommandOptions,
+  runtime: ApplicationRuntime,
+): Promise<PackageConfigurationCommandResult> {
+  let packageDefinitionId: ProjectBlueprint["packages"][number]["packageDefinitionId"];
+  try {
+    const blueprint = assertProjectBlueprint(
+      JSON.parse(
+        await readFile(
+          path.join(runtime.cwd, ".template/blueprint.json"),
+          "utf8",
+        ),
+      ),
+    );
+    const definition = blueprint.packages.find(
+      (item) => item.path === options.path,
+    );
+    if (definition === undefined)
+      return {
+        status: "usage-error",
+        issues: [{ code: "UNKNOWN_GENERATED_INSTANCE" }],
+      };
+    packageDefinitionId = definition.packageDefinitionId;
+  } catch (error) {
+    return packageUpdateOperationFailure(
+      "metadata",
+      undefined,
+      error instanceof Error ? error.message : String(error),
+      "读取已有包配置时发生操作失败。",
+    );
+  }
+  const result = await cliGenerator.configure({
+    repositoryRoot: runtime.cwd,
+    packageDefinitionId,
+    configuration: { publication: true },
+    dryRun: options.dryRun,
+  });
+  if (result.status === "operation-failure")
+    return packageUpdateOperationFailure(
+      result.phase,
+      result.error.diagnostic,
+      result.error.message,
+      "配置已有包时发生操作失败。",
+    );
+  if (result.status === "input-invalid")
+    return {
+      status: "usage-error",
+      issues: [{ code: "UNKNOWN_GENERATED_INSTANCE" }],
+    };
+  if (result.status === "conflict")
+    return {
+      status: "conflict",
+      dryRun: options.dryRun,
+      actions: [],
+      conflicts: result.conflicts.map(packageAdditionConflict),
+    };
+  return {
+    status: "success",
+    packageDefinitionId,
+    dryRun: result.dryRun,
     actions: result.actions,
   };
 }

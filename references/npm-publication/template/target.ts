@@ -72,6 +72,8 @@ export function projectPublicationTarget(options: {
     delete scripts["publication:consume"];
     delete scripts["publication:remote:npm"];
     delete scripts["publication:remote:release"];
+    delete scripts["publication:remote:npm"];
+    delete scripts["publication:remote:release"];
   }
   return {
     ...contribution,
