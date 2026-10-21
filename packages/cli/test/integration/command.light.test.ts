@@ -1385,3 +1385,83 @@ void describe("template CLI command control", () => {
     assert.deepEqual(await workspaceByteSnapshot(target), before);
   });
 });
+
+void it("正式配置命令保持已登记实例身份，未知原生包拒绝接管并可安全重试", async () => {
+  const workspace = await mkdtemp(
+    path.join(tmpdir(), "template-cli-configure-"),
+  );
+  try {
+    const initialized = testRuntime(["init", "demo", "--preset", "ts-cli"]);
+    assert.equal(
+      await runCli({ ...initialized.runtime, cwd: workspace }),
+      0,
+      initialized.stderr(),
+    );
+    const repositoryRoot = path.join(workspace, "demo");
+    const recordPath = path.join(repositoryRoot, ".template/generation.json");
+    const before = JSON.parse(await readFile(recordPath, "utf8"));
+    const original = before.packages.find(
+      (record: { contentIdentity: { packageName: string } }) =>
+        record.contentIdentity.packageName === "@ykdz/reference-ts-cli",
+    );
+    await mkdir(path.join(repositoryRoot, "packages/native"));
+    await writeFile(
+      path.join(repositoryRoot, "packages/native/package.json"),
+      JSON.stringify({ name: "@demo/native", private: true }),
+    );
+    const snapshot = await workspaceByteSnapshot(repositoryRoot);
+    const unknown = testRuntime([
+      "configure",
+      "package",
+      "--path",
+      "packages/native",
+      "--publication",
+    ]);
+    assert.equal(await runCli({ ...unknown.runtime, cwd: repositoryRoot }), 1);
+    assert.equal(JSON.parse(unknown.stderr()).variant, "unknownInstance");
+    assert.deepEqual(await workspaceByteSnapshot(repositoryRoot), snapshot);
+    const configured = testRuntime([
+      "configure",
+      "package",
+      "--path",
+      "packages/cli",
+      "--publication",
+    ]);
+    assert.equal(
+      await runCli({ ...configured.runtime, cwd: repositoryRoot }),
+      0,
+      configured.stderr(),
+    );
+    const result = JSON.parse(configured.stdout());
+    assert.equal(result.variant, "configured");
+    assert.equal(result.data.packageDefinitionId, original.packageDefinitionId);
+    const after = JSON.parse(await readFile(recordPath, "utf8"));
+    const actual = after.packages.find(
+      (record: { packageDefinitionId: string }) =>
+        record.packageDefinitionId === original.packageDefinitionId,
+    );
+    assert.deepEqual(
+      {
+        ...actual,
+        configuration: original.configuration,
+        bindings: original.bindings,
+      },
+      original,
+    );
+    const repeated = testRuntime([
+      "configure",
+      "package",
+      "--path",
+      "packages/cli",
+      "--publication",
+    ]);
+    assert.equal(
+      await runCli({ ...repeated.runtime, cwd: repositoryRoot }),
+      0,
+      repeated.stderr(),
+    );
+    assert.equal(JSON.parse(repeated.stdout()).variant, "unchanged");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});

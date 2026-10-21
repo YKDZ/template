@@ -184,7 +184,7 @@ export type WorkspaceStrategy<
     /** 实际登记且已解析的参考内容，键为规范三元组编码。 */
     readonly contentByIdentity: ReadonlyMap<string, Content>;
   }): { readonly context: Context; readonly state: StrategyState };
-  prepareAddition(options: {
+  prepareUpdate(options: {
     readonly targetRoot: string;
     readonly state: StrategyState;
     readonly content: Content;
