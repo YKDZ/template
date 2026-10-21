@@ -661,6 +661,7 @@ function projectOperations(options: {
   readonly blueprint: ProjectBlueprint;
   readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
+  /** 默认 CLI 内容集合显式装配的共享发布参考包。 */
   readonly cliPublicationReference: ReferencePackage | undefined;
   readonly presetProjectContributions: readonly (readonly DefaultWorkspaceProjectContribution[])[];
   readonly sharedRootContributions: readonly SharedRootContribution[];

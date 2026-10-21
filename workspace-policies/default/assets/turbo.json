@@ -68,7 +68,10 @@
       "dependsOn": [],
       "inputs": [],
       "outputs": [],
-      "passThroughEnv": ["PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY"],
+      "passThroughEnv": [
+        "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
+        "PUBLICATION_BATCH_TARGET_COUNT"
+      ],
       "tags": ["work:preparation"]
     },
     "//#toolchain:prepare": {

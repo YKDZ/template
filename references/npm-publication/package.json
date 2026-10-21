@@ -10,6 +10,16 @@
       "types": "./scripts/publication.ts",
       "default": "./scripts/publication.ts"
     },
+    "./prepare": {
+      "source": "./scripts/generated/prepare.ts",
+      "types": "./scripts/generated/prepare.ts",
+      "default": "./scripts/generated/prepare.ts"
+    },
+    "./artifact": {
+      "source": "./scripts/generated/artifact.ts",
+      "types": "./scripts/generated/artifact.ts",
+      "default": "./scripts/generated/artifact.ts"
+    },
     "./configuration": "./scripts/configuration.ts",
     "./remote-context": "./scripts/remote-context.ts",
     "./publish": "./scripts/publish.ts",
