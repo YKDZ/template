@@ -126,7 +126,7 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
     if (firstInitialized.status !== "success") {
       throw new Error("初始化应成功");
     }
-    assert.strictEqual(firstInitialized.generationRecord.schemaVersion, 3);
+    assert.strictEqual(firstInitialized.generationRecord.schemaVersion, 4);
     assert.strictEqual(
       firstInitialized.generationRecord.strategyIdentity,
       "test-policy:first",
@@ -145,6 +145,7 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
     assert.strictEqual(initialGuide.createdBy, "initialization");
     assert.strictEqual(initialGlossary.createdBy, "shared-dependency");
     assert.strictEqual(initialGuide.creationInput, null);
+    assert.strictEqual(initialGuide.configuration, null);
     assert.strictEqual(
       initialGuide.bindings[glossaryIdentityKey],
       initialGlossary.packageDefinitionId,
@@ -441,12 +442,12 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
 
   void it("拒绝旧版本和缺失持久事实的记录且所有add模式零写入", async () => {
     const targetRoot = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-generator-schema3-")),
+      await mkdtemp(path.join(tmpdir(), "template-generator-schema4-")),
       "project",
     );
     const generator = createDocumentationEngine({
-      policyId: "test-policy:schema3",
-      author: "schema3测试",
+      policyId: "test-policy:schema4",
+      author: "schema4测试",
     });
     const initialized = await generator.init({
       targetRoot,
@@ -467,7 +468,7 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
     const cloneRecord = () =>
       JSON.parse(JSON.stringify(validRecord)) as Record<string, unknown>;
     const cases = [
-      ...([1, 2] as const).map((schemaVersion) => ({
+      ...([1, 2, 3] as const).map((schemaVersion) => ({
         label: `schema${schemaVersion}`,
         record: {
           schemaVersion,
@@ -489,7 +490,7 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
           delete record.strategyState;
           return record;
         })(),
-        message: /schema3 结构/u,
+        message: /schema4 结构/u,
       },
       {
         label: "creationInput",
@@ -499,7 +500,17 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
           delete packages[0]!.creationInput;
           return record;
         })(),
-        message: /schema3 结构/u,
+        message: /schema4 结构/u,
+      },
+      {
+        label: "configuration",
+        record: (() => {
+          const record = cloneRecord();
+          delete (record.packages as Record<string, unknown>[])[0]!
+            .configuration;
+          return record;
+        })(),
+        message: /schema4 结构/u,
       },
       {
         label: "nodeInstances",
@@ -668,4 +679,74 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
       assert.strictEqual(await pathExists(targetRoot), false);
     }
   });
+});
+
+void it("现行配置在新建、fresh add恢复和共享依赖回放中保持同一条件决定", async () => {
+  const targetRoot = path.join(
+    await mkdtemp(path.join(tmpdir(), "template-config-")),
+    "project",
+  );
+  const engine = () =>
+    createDocumentationEngine({
+      policyId: "configured-docs",
+      author: "配置作者",
+      configurableGlossary: true,
+    });
+  const initialized = await engine().init({
+    targetRoot,
+    selection: {
+      roots: [
+        {
+          nodeIdentity: "guide",
+          contentIdentity: guideIdentity,
+          configuration: { glossary: false },
+        },
+      ],
+    },
+    strategyInput: { collection: "north", edition: "draft" },
+  });
+  assert.equal(initialized.status, "success", JSON.stringify(initialized));
+  if (initialized.status !== "success") return;
+  assert.equal(initialized.generationRecord.packages.length, 1);
+  assert.deepEqual(initialized.generationRecord.packages[0]!.configuration, {
+    glossary: false,
+  });
+  const added = await engine().add({
+    repositoryRoot: targetRoot,
+    contentIdentity: guideIdentity,
+    creationInput: { leafName: "appendix" },
+    configuration: { glossary: true },
+  });
+  assert.equal(added.status, "success", JSON.stringify(added));
+  if (added.status !== "success") return;
+  assert.equal(added.generationRecord.packages.length, 3);
+  const internal = await engine().add({
+    repositoryRoot: targetRoot,
+    contentIdentity: guideIdentity,
+    creationInput: { leafName: "notes" },
+  });
+  assert.equal(internal.status, "success", JSON.stringify(internal));
+  if (internal.status !== "success") return;
+  assert.equal(internal.generationRecord.packages.length, 4);
+  assert.equal(
+    internal.generationRecord.packages.filter(
+      (record) =>
+        contentIdentityKey(record.contentIdentity) === glossaryIdentityKey,
+    ).length,
+    1,
+  );
+  const notes = internal.generationRecord.packages.find(
+    (record) => record.creationInput?.leafName === "notes",
+  )!;
+  assert.deepEqual(notes.configuration, { glossary: false });
+  assert.deepEqual(notes.bindings, {});
+  const before = await snapshotTree(targetRoot);
+  const conflicting = await engine().add({
+    repositoryRoot: targetRoot,
+    contentIdentity: guideIdentity,
+    creationInput: { leafName: "notes" },
+    configuration: { glossary: true },
+  });
+  assert.equal(conflicting.status, "conflict", JSON.stringify(conflicting));
+  assert.equal(await snapshotTree(targetRoot), before);
 });

@@ -407,12 +407,15 @@ function defaultContext(
 
 function nativeDependencyNames(
   content: DefaultReferenceContent<PackageCreationInput>,
+  configuration: unknown,
+  creationInput?: PackageCreationInput,
 ): readonly string[] {
   const reference = content.definition;
   const targetDependencies = new Set(
-    reference.dependencyUses
-      .filter((dependency) => dependency.purposes.includes("target"))
-      .map((dependency) => dependency.name),
+    reference.targetDependencyNames({
+      configuration,
+      ...(creationInput === undefined ? {} : { creationInput }),
+    }),
   );
   return [
     ...new Set(
@@ -444,38 +447,42 @@ function nativeDependencyIdentities(
     string,
     DefaultReferenceContent<PackageCreationInput>
   >,
+  configuration: unknown,
+  creationInput?: PackageCreationInput,
 ): readonly ContentIdentity[] {
   const reference = content.definition;
-  return nativeDependencyNames(content).map((nativeName) => {
-    let resolved: string;
-    try {
-      resolved = new URL(reference.resolve(`${nativeName}/template`)).href;
-    } catch (error) {
-      throw new Error(
-        `内容${contentIdentityLabel(content.identity)}无法解析必要模板依赖${nativeName}：${error instanceof Error ? error.message : String(error)}`,
+  return nativeDependencyNames(content, configuration, creationInput).map(
+    (nativeName) => {
+      let resolved: string;
+      try {
+        resolved = new URL(reference.resolve(`${nativeName}/template`)).href;
+      } catch (error) {
+        throw new Error(
+          `内容${contentIdentityLabel(content.identity)}无法解析必要模板依赖${nativeName}：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const matchingSources = [...contentByIdentity.values()].filter(
+        (candidate) => candidate.source.moduleURL === resolved,
       );
-    }
-    const matchingSources = [...contentByIdentity.values()].filter(
-      (candidate) => candidate.source.moduleURL === resolved,
-    );
-    const sameNamespace = matchingSources.filter(
-      (candidate) =>
-        candidate.identity.namespace === content.identity.namespace,
-    );
-    const providers =
-      sameNamespace.length > 0 ? sameNamespace : matchingSources;
-    if (providers.length === 0) {
-      throw new Error(
-        `内容${contentIdentityLabel(content.identity)}的必要模板依赖未登记：${nativeName}`,
+      const sameNamespace = matchingSources.filter(
+        (candidate) =>
+          candidate.identity.namespace === content.identity.namespace,
       );
-    }
-    if (providers.length > 1) {
-      throw new Error(
-        `内容${contentIdentityLabel(content.identity)}的必要模板依赖来源歧义：${nativeName}`,
-      );
-    }
-    return providers[0]!.identity;
-  });
+      const providers =
+        sameNamespace.length > 0 ? sameNamespace : matchingSources;
+      if (providers.length === 0) {
+        throw new Error(
+          `内容${contentIdentityLabel(content.identity)}的必要模板依赖未登记：${nativeName}`,
+        );
+      }
+      if (providers.length > 1) {
+        throw new Error(
+          `内容${contentIdentityLabel(content.identity)}的必要模板依赖来源歧义：${nativeName}`,
+        );
+      }
+      return providers[0]!.identity;
+    },
+  );
 }
 
 /** 从实际选择与策略依赖解释中读取配置拥有者提供的默认身份。 */
@@ -498,9 +505,17 @@ export function selectedWorkspaceConfigurationIdentity(options: {
   >();
   const visit = (
     content: DefaultReferenceContent<PackageCreationInput> | undefined,
+    configurationInput?: unknown,
+    creationInput?: PackageCreationInput,
   ): void => {
     if (content === undefined) return;
-    const key = contentIdentityKey(content.identity);
+    const configuration =
+      content.definition.normalizeConfiguration?.(configurationInput) ?? null;
+    const key = JSON.stringify([
+      contentIdentityKey(content.identity),
+      configuration,
+      creationInput,
+    ]);
     if (visited.has(key)) return;
     visited.add(key);
     if (content.definition.workspaceConfiguration !== undefined) {
@@ -509,6 +524,8 @@ export function selectedWorkspaceConfigurationIdentity(options: {
     for (const identity of nativeDependencyIdentities(
       content,
       options.contentByIdentity,
+      configuration,
+      creationInput,
     )) {
       visit(options.contentByIdentity.get(contentIdentityKey(identity)));
     }
@@ -517,6 +534,8 @@ export function selectedWorkspaceConfigurationIdentity(options: {
     if (isContentIdentity(root.contentIdentity)) {
       visit(
         options.contentByIdentity.get(contentIdentityKey(root.contentIdentity)),
+        root.configuration,
+        root.creationInput,
       );
     }
   }
@@ -1278,6 +1297,8 @@ export function createDefaultWorkspaceStrategy<
       state,
       content,
       contentByIdentity,
+      configuration,
+      creationInput,
       packages,
       nodeInstances,
     }) {
@@ -1340,6 +1361,7 @@ export function createDefaultWorkspaceStrategy<
           definition: packageRecord.definition,
           bindings: nativeBindings(contentByIdentity, providerDefinitions),
           createdBy: packageRecord.createdBy,
+          configuration: packageRecord.configuration,
           nodeInstances,
           ...(packageRecord.creationInput === null
             ? {}
@@ -1356,6 +1378,8 @@ export function createDefaultWorkspaceStrategy<
       for (const identity of nativeDependencyIdentities(
         content,
         contentByIdentity,
+        configuration,
+        creationInput,
       )) {
         const provider = contentByIdentity.get(contentIdentityKey(identity));
         const existing = packages.filter(
@@ -1574,8 +1598,13 @@ export function createDefaultWorkspaceStrategy<
       }
       return value as DefaultWorkspaceState;
     },
-    dependencies({ content, contentByIdentity }) {
-      return nativeDependencyIdentities(content, contentByIdentity);
+    dependencies({ content, contentByIdentity, configuration, creationInput }) {
+      return nativeDependencyIdentities(
+        content,
+        contentByIdentity,
+        configuration,
+        creationInput,
+      );
     },
     bindings({ contentByIdentity, providers }) {
       return nativeBindings(contentByIdentity, providers);

@@ -130,7 +130,7 @@ void describe("init toolchain snapshot consumption", () => {
           readonly toolchain: Record<string, unknown>;
         };
       };
-      assert.equal(generationRecord.schemaVersion, 3);
+      assert.equal(generationRecord.schemaVersion, 4);
       assert.deepEqual(generationRecord, output.generationRecord);
       assert.deepEqual(generationRecord.strategyState.toolchain, {
         nodeLtsMajor: snapshotNodeMajor,

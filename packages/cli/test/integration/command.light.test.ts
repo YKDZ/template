@@ -146,7 +146,7 @@ void describe("template CLI command control", () => {
     assert.equal(output.stderr(), "");
   });
 
-  void it("公开 CLI 候选完整序列化 schema3 生成记录", async () => {
+  void it("公开 CLI 候选完整序列化 schema4 生成记录", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-cli-generation-record-"),
     );
@@ -211,7 +211,7 @@ void describe("template CLI command control", () => {
         ),
       );
       assert.deepEqual(generationRecord, persistedRecord);
-      assert.equal(generationRecord.schemaVersion, 3);
+      assert.equal(generationRecord.schemaVersion, 4);
       assert.equal(generationRecord.strategyIdentity, "default");
       assert.equal(generationRecord.strategyState.repositoryName, "demo");
       assert.equal(generationRecord.strategyState.defaultPackageScope, "acme");

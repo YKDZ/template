@@ -36,6 +36,11 @@ export function workspaceConfigurationIdentityForPreset(
   const selection = Object.entries(preset.definition.nodes).map(
     ([nodeIdentity, node]): GeneratorSelectionRoot => ({
       nodeIdentity,
+      ...(node.layout === undefined ? {} : { layout: node.layout }),
+      configuration: node.configuration?.init,
+      ...(node.creationInput?.init === undefined
+        ? {}
+        : { creationInput: node.creationInput.init }),
       contentIdentity: referenceIndex.resolve(
         { alias: node.reference.alias, namespace: preset.identity.namespace },
         "reference",

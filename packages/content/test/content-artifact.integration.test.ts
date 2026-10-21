@@ -1333,6 +1333,8 @@ void describe("原生内容制品安装链", () => {
     const entries = references.map((member) => {
       const dependencies = strategy.dependencies({
         content: member,
+        configuration:
+          member.definition.normalizeConfiguration?.(undefined) ?? null,
         contentByIdentity,
       });
       return {
@@ -1370,7 +1372,12 @@ void describe("原生内容制品安装链", () => {
     );
     assert.ok(
       strategy
-        .dependencies({ content: vueHonoWeb, contentByIdentity })
+        .dependencies({
+          content: vueHonoWeb,
+          contentByIdentity,
+          configuration:
+            vueHonoWeb.definition.normalizeConfiguration?.(undefined) ?? null,
+        })
         .some(
           (identity) =>
             contentIdentityKey(identity) ===
@@ -1380,7 +1387,12 @@ void describe("原生内容制品安装链", () => {
     );
     assert.ok(
       strategy
-        .dependencies({ content: vikeWeb, contentByIdentity })
+        .dependencies({
+          content: vikeWeb,
+          contentByIdentity,
+          configuration:
+            vikeWeb.definition.normalizeConfiguration?.(undefined) ?? null,
+        })
         .some(
           (identity) =>
             contentIdentityKey(identity) ===
@@ -1390,7 +1402,13 @@ void describe("原生内容制品安装链", () => {
     );
     assert.ok(
       strategy
-        .dependencies({ content: vikeMigrations, contentByIdentity })
+        .dependencies({
+          content: vikeMigrations,
+          contentByIdentity,
+          configuration:
+            vikeMigrations.definition.normalizeConfiguration?.(undefined) ??
+            null,
+        })
         .some(
           (identity) =>
             contentIdentityKey(identity) ===
@@ -1558,7 +1576,7 @@ void describe("原生内容制品安装链", () => {
         '  if (initialized.status !== "success") process.exit(2);',
         "  const entryRecord = initialized.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(entry.identity));",
         "  assert.ok(entryRecord, `generation record missing ${entry.identity.packageName}`);",
-        "  for (const dependencyIdentity of createDefaultWorkspaceStrategy().dependencies({ content: contentByIdentity.get(contentIdentityKey(entry.identity)), contentByIdentity })) {",
+        "  for (const dependencyIdentity of createDefaultWorkspaceStrategy().dependencies({ content: contentByIdentity.get(contentIdentityKey(entry.identity)), contentByIdentity, configuration: contentByIdentity.get(contentIdentityKey(entry.identity)).definition.normalizeConfiguration?.(undefined) ?? null })) {",
         "    const providerRecord = initialized.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(dependencyIdentity));",
         "    assert.ok(providerRecord, `binding provider missing ${dependencyIdentity.packageName}`);",
         "    assert.equal(entryRecord.bindings[contentIdentityKey(dependencyIdentity)], providerRecord.packageDefinitionId, `invalid binding ${entry.identity.packageName} -> ${dependencyIdentity.packageName}`);",

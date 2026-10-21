@@ -78,6 +78,7 @@ export function createDocumentationEngine(options: {
   readonly policyId: string;
   readonly author: string;
   readonly includeGlossary?: boolean;
+  readonly configurableGlossary?: boolean;
   readonly invalidProjection?: "duplicate" | "unallocated";
 }) {
   const glossary: DocumentationContent = {
@@ -124,9 +125,23 @@ export function createDocumentationEngine(options: {
       defaultLeafName: "overview",
       defaultPath: "docs/overview",
       role: "documentation",
-      contribute({ context, definition, bindings }) {
+      normalizeConfiguration(input) {
+        if (!options.configurableGlossary) return null;
+        if (input === undefined) return { glossary: false };
+        if (!isRecord(input) || typeof input.glossary !== "boolean")
+          throw new Error("指南配置必须声明glossary布尔值");
+        return { glossary: input.glossary };
+      },
+      contribute({ context, definition, bindings, configuration }) {
         const glossaryDefinition = bindings?.get(glossaryIdentityKey);
-        if (glossaryDefinition === undefined) {
+        if (
+          glossaryDefinition === undefined &&
+          !(
+            options.configurableGlossary &&
+            isRecord(configuration) &&
+            configuration.glossary === false
+          )
+        ) {
           throw new Error("文档内容缺少术语表绑定");
         }
         return {
@@ -135,7 +150,7 @@ export function createDocumentationEngine(options: {
             {
               kind: "writeText",
               to: `${definition.path}/README.md`,
-              text: `${context.collection}/${context.edition} by ${options.author}: ${definition.name} uses ${glossaryDefinition.path}\n`,
+              text: `${context.collection}/${context.edition} by ${options.author}: ${definition.name} uses ${glossaryDefinition?.path ?? "no glossary"}\n`,
             },
           ],
         };
@@ -169,8 +184,13 @@ export function createDocumentationEngine(options: {
       return { targetRoot, ...state };
     },
     parseState: parseDocumentationState,
-    dependencies({ content: selected }) {
-      return contentIdentityKey(selected.identity) === guideIdentityKey
+    dependencies({ content: selected, configuration }) {
+      return contentIdentityKey(selected.identity) === guideIdentityKey &&
+        !(
+          options.configurableGlossary &&
+          isRecord(configuration) &&
+          configuration.glossary === false
+        )
         ? [glossaryIdentity]
         : [];
     },
