@@ -1761,6 +1761,7 @@ async function external() {
     const interactiveEnvironment = isolatedEnvironment(isolation);
     await runDirectOidcPublication({
       repositoryRoot: root,
+      packageRoot,
       artifactDirectory: artifactRoot,
       environment: interactiveEnvironment,
       credentialMode: "interactive",
@@ -1781,7 +1782,7 @@ async function external() {
       "RELEASE " +
         accepted.packageName +
         "@" +
-        accepted.artifactVersion +
+        accepted.packageVersion +
         " " +
         accepted.integrity +
         " TO " +
@@ -1789,13 +1790,14 @@ async function external() {
         " " +
         accepted.packageName +
         "@" +
-        accepted.artifactVersion +
+        accepted.packageVersion +
         " AT " +
         accepted.sourceSha,
       "github-release-confirmation-required",
     );
     await runImmutableGithubRelease({
       repositoryRoot: root,
+      packageRoot,
       artifactDirectory: artifactRoot,
       environment: process.env,
       run: setupRemoteCommand,

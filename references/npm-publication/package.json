@@ -26,6 +26,10 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
+    "publication:remote:mark-attempt": "node --conditions=source --experimental-strip-types scripts/mark-attempt.ts",
+    "publication:remote:restore-attempt": "node --conditions=source --experimental-strip-types scripts/restore-attempt.ts",
+    "publication:remote:publish": "node --conditions=source --experimental-strip-types scripts/publish.ts",
+    "publication:remote:release": "node --conditions=source --experimental-strip-types scripts/release.ts",
     "test:integration": "node --conditions=source --experimental-strip-types --test --test-timeout=300000 --test-reporter=spec 'scripts/**/*.integration.test.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },

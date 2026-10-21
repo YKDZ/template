@@ -41,6 +41,8 @@ export type AcceptedRemoteArtifact = {
   readonly npmPublicationAttempt?: {
     readonly artifactSha512: string;
     readonly distTag: string;
+    readonly workflowRunId?: string;
+    readonly workflowRunAttempt?: number;
   };
   readonly releaseNotes: string;
 };
@@ -201,13 +203,13 @@ function packageRelativePath(
 ): string {
   const relative = path.relative(repositoryRoot, packageRoot);
   if (
-    relative.length === 0 ||
     relative === ".." ||
     relative.startsWith(`..${path.sep}`) ||
     path.isAbsolute(relative)
   ) {
     throw new Error("发布包路径必须位于 Git 仓库内。 ");
   }
+  if (relative.length === 0) return "";
   return relative.split(path.sep).join("/");
 }
 
@@ -243,14 +245,20 @@ export async function readAcceptedRemoteArtifact(options: {
     sourceFile({
       repositoryRoot: options.repositoryRoot,
       sourceSha,
-      relativePath: `${relativePackage}/package.json`,
+      relativePath:
+        relativePackage.length === 0
+          ? "package.json"
+          : `${relativePackage}/package.json`,
       run,
       environment,
     }),
     sourceFile({
       repositoryRoot: options.repositoryRoot,
       sourceSha,
-      relativePath: `${relativePackage}/CHANGELOG.md`,
+      relativePath:
+        relativePackage.length === 0
+          ? "CHANGELOG.md"
+          : `${relativePackage}/CHANGELOG.md`,
       run,
       environment,
     }),

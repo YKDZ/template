@@ -16,7 +16,11 @@ import { describe, it } from "node:test";
 
 import { PublicationFailure } from "./failure.ts";
 import { acceptArtifact, prepareArtifact } from "./publication.ts";
-import { runDirectOidcPublication } from "./publish.ts";
+import {
+  markNpmPublicationAttempt,
+  restoreNpmPublicationAttempt,
+  runDirectOidcPublication,
+} from "./publish.ts";
 import { runImmutableGithubRelease } from "./release.ts";
 import {
   assertRemotePreparation,
@@ -52,12 +56,17 @@ function git(repositoryRoot: string, ...arguments_: string[]): string {
   }).trim();
 }
 
-async function createCandidate(version: string): Promise<Candidate> {
+async function createCandidate(
+  version: string,
+  targetAtRepositoryRoot = false,
+): Promise<Candidate> {
   const workspace = await mkdtemp(
     path.join(tmpdir(), "npm-remote-publication-"),
   );
   const repositoryRoot = path.join(workspace, "repository");
-  const packageRoot = path.join(repositoryRoot, "packages/cli");
+  const packageRoot = targetAtRepositoryRoot
+    ? repositoryRoot
+    : path.join(repositoryRoot, "packages/cli");
   const artifactDirectory = path.join(workspace, "artifacts");
   const remotePath = path.join(workspace, "origin.git");
   await mkdir(packageRoot, { recursive: true });
@@ -286,7 +295,7 @@ function githubAdapter(candidate: Candidate): {
     | undefined;
   let artifactSource = candidate.artifactPath;
   let checksumSource: string | undefined;
-  const tag = `${candidate.packageName}@${candidate.artifactVersion}`;
+  const tag = `${candidate.packageName}@${candidate.packageVersion}`;
   const annotation = `npm artifact SHA-512: ${candidate.sha512}`;
   const tagObjectSha = "0123456789abcdef0123456789abcdef01234567";
   const tagObjectPath = `repos/${repository}/git/tags/`;
@@ -464,22 +473,33 @@ void describe("单包远端发布与原件续办", () => {
         `Original release notes for ${candidate.packageVersion}.`,
       );
 
+      const publicationEnvironment = {
+        PATH: process.env.PATH,
+        GITHUB_ACTIONS: "true",
+        GITHUB_EVENT_NAME: "workflow_dispatch",
+        GITHUB_DEFAULT_BRANCH: "main",
+        GITHUB_REF: "refs/heads/main",
+        GITHUB_SHA: candidate.sourceSha,
+        GITHUB_REPOSITORY: repository,
+        GITHUB_RUN_ID: "234567",
+        GITHUB_RUN_ATTEMPT: "1",
+        ACTIONS_ID_TOKEN_REQUEST_URL: "https://actions.invalid/oidc",
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: "controlled-token",
+        PUBLICATION_DIST_TAG: "beta",
+      };
+      await markNpmPublicationAttempt({
+        repositoryRoot: candidate.repositoryRoot,
+        packageRoot: candidate.packageRoot,
+        artifactDirectory: candidate.artifactDirectory,
+        environment: publicationEnvironment,
+        run: defaultRemoteCommand,
+      });
       const registry = registryAdapter(candidate);
       await runDirectOidcPublication({
         repositoryRoot: candidate.repositoryRoot,
+        packageRoot: candidate.packageRoot,
         artifactDirectory: candidate.artifactDirectory,
-        environment: {
-          PATH: process.env.PATH,
-          GITHUB_ACTIONS: "true",
-          GITHUB_EVENT_NAME: "workflow_dispatch",
-          GITHUB_DEFAULT_BRANCH: "main",
-          GITHUB_REF: "refs/heads/main",
-          GITHUB_SHA: candidate.sourceSha,
-          GITHUB_REPOSITORY: repository,
-          ACTIONS_ID_TOKEN_REQUEST_URL: "https://actions.invalid/oidc",
-          ACTIONS_ID_TOKEN_REQUEST_TOKEN: "controlled-token",
-          PUBLICATION_DIST_TAG: "beta",
-        },
+        environment: publicationEnvironment,
         run: registry.run,
       });
       assert.equal(registry.publishes.length, 1);
@@ -518,19 +538,9 @@ void describe("单包远端发布与原件续办", () => {
 
       await runDirectOidcPublication({
         repositoryRoot: candidate.repositoryRoot,
+        packageRoot: candidate.packageRoot,
         artifactDirectory: candidate.artifactDirectory,
-        environment: {
-          PATH: process.env.PATH,
-          GITHUB_ACTIONS: "true",
-          GITHUB_EVENT_NAME: "workflow_dispatch",
-          GITHUB_DEFAULT_BRANCH: "main",
-          GITHUB_REF: "refs/heads/main",
-          GITHUB_SHA: candidate.sourceSha,
-          GITHUB_REPOSITORY: repository,
-          ACTIONS_ID_TOKEN_REQUEST_URL: "https://actions.invalid/oidc",
-          ACTIONS_ID_TOKEN_REQUEST_TOKEN: "controlled-token",
-          PUBLICATION_DIST_TAG: "beta",
-        },
+        environment: publicationEnvironment,
         run: registry.run,
       });
       assert.equal(registry.publishes.length, 1);
@@ -551,6 +561,7 @@ void describe("单包远端发布与原件续办", () => {
       const registry = registryAdapter(stable);
       await runDirectOidcPublication({
         repositoryRoot: stable.repositoryRoot,
+        packageRoot: stable.packageRoot,
         artifactDirectory: stable.artifactDirectory,
         credentialMode: "interactive",
         environment: { PATH: process.env.PATH },
@@ -569,6 +580,7 @@ void describe("单包远端发布与原件续办", () => {
       await assert.rejects(
         runDirectOidcPublication({
           repositoryRoot: prerelease.repositoryRoot,
+          packageRoot: prerelease.packageRoot,
           artifactDirectory: prerelease.artifactDirectory,
           credentialMode: "interactive",
           environment: { PATH: process.env.PATH },
@@ -586,12 +598,61 @@ void describe("单包远端发布与原件续办", () => {
     }
   });
 
+  void it("按 npm tag 语义接受大小写与下划线并拒绝版本范围和空格", async () => {
+    for (const distTag of ["RC", "_beta"]) {
+      const candidate = await createCandidate("1.2.3");
+      try {
+        const registry = registryAdapter(candidate);
+        await runDirectOidcPublication({
+          repositoryRoot: candidate.repositoryRoot,
+          packageRoot: candidate.packageRoot,
+          artifactDirectory: candidate.artifactDirectory,
+          credentialMode: "interactive",
+          distTag,
+          environment: { PATH: process.env.PATH },
+          run: registry.run,
+        });
+        assert.equal(registry.publishes.length, 1);
+        assert.ok(registry.publishes[0]?.includes(`--tag=${distTag}`));
+      } finally {
+        await candidate.dispose();
+      }
+    }
+
+    const candidate = await createCandidate("1.2.3");
+    try {
+      for (const distTag of ["1.2.3", "bad tag"]) {
+        const registry = registryAdapter(candidate);
+        await assert.rejects(
+          runDirectOidcPublication({
+            repositoryRoot: candidate.repositoryRoot,
+            packageRoot: candidate.packageRoot,
+            artifactDirectory: candidate.artifactDirectory,
+            credentialMode: "interactive",
+            distTag,
+            environment: { PATH: process.env.PATH },
+            run: registry.run,
+          }),
+          publicationFailure("dist-tag-invalid"),
+        );
+        assert.equal(registry.publishes.length, 0);
+        assert.equal(
+          registry.calls.filter((call) => call.command === "pnpm").length,
+          0,
+        );
+      }
+    } finally {
+      await candidate.dispose();
+    }
+  });
+
   void it("远端失败或可见性延迟后不盲目重传", async () => {
     const failed = await createCandidate("1.2.3-beta.1");
     try {
       const registry = registryAdapter(failed, { publishExitCode: 1 });
       const options = {
         repositoryRoot: failed.repositoryRoot,
+        packageRoot: failed.packageRoot,
         artifactDirectory: failed.artifactDirectory,
         credentialMode: "interactive" as const,
         distTag: "beta",
@@ -616,6 +677,7 @@ void describe("单包远端发布与原件续办", () => {
       const registry = registryAdapter(delayed, { visibleAfterPublish: false });
       const options = {
         repositoryRoot: delayed.repositoryRoot,
+        packageRoot: delayed.packageRoot,
         artifactDirectory: delayed.artifactDirectory,
         credentialMode: "interactive" as const,
         distTag: "beta",
@@ -636,6 +698,120 @@ void describe("单包远端发布与原件续办", () => {
     }
   });
 
+  void it("同一 Actions run 首轮可上传，重跑从 marker receipt 阻止盲目重发", async () => {
+    const candidate = await createCandidate("1.2.3-beta.1");
+    try {
+      const originalReceiptPath = path.join(
+        candidate.artifactDirectory,
+        "publication-preparation.json",
+      );
+      const originalReceipt = await readFile(originalReceiptPath, "utf8");
+      const firstAttemptEnvironment = {
+        PATH: process.env.PATH,
+        GITHUB_ACTIONS: "true",
+        GITHUB_EVENT_NAME: "workflow_dispatch",
+        GITHUB_DEFAULT_BRANCH: "main",
+        GITHUB_REF: "refs/heads/main",
+        GITHUB_SHA: candidate.sourceSha,
+        GITHUB_REPOSITORY: repository,
+        GITHUB_RUN_ID: "123456",
+        GITHUB_RUN_ATTEMPT: "1",
+        PUBLICATION_DIST_TAG: "beta",
+      };
+      await markNpmPublicationAttempt({
+        repositoryRoot: candidate.repositoryRoot,
+        packageRoot: candidate.packageRoot,
+        artifactDirectory: candidate.artifactDirectory,
+        environment: firstAttemptEnvironment,
+        run: defaultRemoteCommand,
+      });
+      const markerReceipt = path.join(
+        candidate.workspace,
+        "run-artifact",
+        "publication-preparation.json",
+      );
+      await mkdir(path.dirname(markerReceipt), { recursive: true });
+      await copyFile(originalReceiptPath, markerReceipt);
+
+      const registry = registryAdapter(candidate, {
+        visibleAfterPublish: false,
+      });
+      await assert.rejects(
+        runDirectOidcPublication({
+          repositoryRoot: candidate.repositoryRoot,
+          packageRoot: candidate.packageRoot,
+          artifactDirectory: candidate.artifactDirectory,
+          credentialMode: "interactive",
+          environment: firstAttemptEnvironment,
+          run: registry.run,
+        }),
+        publicationFailure("publish-wait-incomplete"),
+      );
+      assert.equal(registry.publishes.length, 1);
+
+      await writeFile(originalReceiptPath, originalReceipt);
+      const rerunEnvironment = {
+        ...firstAttemptEnvironment,
+        GITHUB_RUN_ATTEMPT: "2",
+      };
+      const restoreRun: RemoteCommandRunner = async (
+        command,
+        arguments_,
+        request,
+      ) => {
+        if (command === "gh" && arguments_[0] === "api") {
+          return response(
+            0,
+            JSON.stringify({
+              artifacts: [
+                { name: "npm-publication-attempt-123456", expired: false },
+              ],
+            }),
+          );
+        }
+        if (command === "gh" && arguments_[0] === "run") {
+          const directoryArgument = arguments_.find((argument) =>
+            argument.startsWith("--dir="),
+          );
+          const directory = directoryArgument?.slice("--dir=".length);
+          if (directory === undefined) {
+            return response(1, "", "attempt download directory is missing");
+          }
+          await copyFile(
+            markerReceipt,
+            path.join(directory, "publication-preparation.json"),
+          );
+          return response(0);
+        }
+        return await defaultRemoteCommand(command, arguments_, request);
+      };
+      assert.equal(
+        await restoreNpmPublicationAttempt({
+          repositoryRoot: candidate.repositoryRoot,
+          packageRoot: candidate.packageRoot,
+          artifactDirectory: candidate.artifactDirectory,
+          environment: rerunEnvironment,
+          run: restoreRun,
+        }),
+        true,
+      );
+      await assert.rejects(
+        runDirectOidcPublication({
+          repositoryRoot: candidate.repositoryRoot,
+          packageRoot: candidate.packageRoot,
+          artifactDirectory: candidate.artifactDirectory,
+          credentialMode: "interactive",
+          environment: rerunEnvironment,
+          run: registry.run,
+        }),
+        publicationFailure("publish-resume-ambiguous"),
+      );
+      assert.equal(registry.publishes.length, 1);
+    } finally {
+      await candidate.dispose();
+    }
+  });
+
   void it("拒绝远端字节或渠道冲突且不上传", async () => {
     const candidate = await createCandidate("1.2.3-beta.1");
     try {
@@ -645,6 +821,7 @@ void describe("单包远端发布与原件续办", () => {
       await assert.rejects(
         runDirectOidcPublication({
           repositoryRoot: candidate.repositoryRoot,
+          packageRoot: candidate.packageRoot,
           artifactDirectory: candidate.artifactDirectory,
           credentialMode: "interactive",
           distTag: "beta",
@@ -663,6 +840,7 @@ void describe("单包远端发布与原件续办", () => {
       await assert.rejects(
         runDirectOidcPublication({
           repositoryRoot: candidate.repositoryRoot,
+          packageRoot: candidate.packageRoot,
           artifactDirectory: candidate.artifactDirectory,
           credentialMode: "interactive",
           distTag: "beta",
@@ -686,6 +864,7 @@ void describe("单包远端发布与原件续办", () => {
       await assert.rejects(
         runDirectOidcPublication({
           repositoryRoot: candidate.repositoryRoot,
+          packageRoot: candidate.packageRoot,
           artifactDirectory: candidate.artifactDirectory,
           credentialMode: "interactive",
           distTag: "beta",
@@ -703,6 +882,7 @@ void describe("单包远端发布与原件续办", () => {
       await assert.rejects(
         runDirectOidcPublication({
           repositoryRoot: candidate.repositoryRoot,
+          packageRoot: candidate.packageRoot,
           artifactDirectory: candidate.artifactDirectory,
           credentialMode: "interactive",
           distTag: "beta",
@@ -717,12 +897,13 @@ void describe("单包远端发布与原件续办", () => {
     }
   });
 
-  void it("以完整包名@版本发布同一原件并核对不可变 GitHub Release", async () => {
-    const candidate = await createCandidate("1.2.3-beta.1");
+  void it("以完整 manifest 版本创建 GitHub Release 并核对同一原件", async () => {
+    const candidate = await createCandidate("1.2.3-beta.1+build.2");
     try {
       const github = githubAdapter(candidate);
       await runImmutableGithubRelease({
         repositoryRoot: candidate.repositoryRoot,
+        packageRoot: candidate.packageRoot,
         artifactDirectory: candidate.artifactDirectory,
         environment: {
           PATH: process.env.PATH,
@@ -730,7 +911,7 @@ void describe("单包远端发布与原件续办", () => {
         },
         run: github.run,
       });
-      const tag = `${candidate.packageName}@${candidate.artifactVersion}`;
+      const tag = `${candidate.packageName}@${candidate.packageVersion}`;
       const createRelease = github.writes.find(
         (arguments_) =>
           arguments_[0] === "release" && arguments_[1] === "create",
@@ -755,6 +936,39 @@ void describe("单包远端发布与原件续办", () => {
     }
   });
 
+  void it("允许 Git 仓库根本身作为普通 npm 发布目标", async () => {
+    const candidate = await createCandidate("1.2.3", true);
+    try {
+      const github = githubAdapter(candidate);
+      await runImmutableGithubRelease({
+        repositoryRoot: candidate.repositoryRoot,
+        packageRoot: candidate.packageRoot,
+        artifactDirectory: candidate.artifactDirectory,
+        environment: {
+          PATH: process.env.PATH,
+          GITHUB_REPOSITORY: repository,
+        },
+        run: github.run,
+      });
+      assert.ok(
+        github.calls.some(
+          (call) =>
+            call.command === "git" &&
+            call.arguments.includes(`${candidate.sourceSha}:package.json`),
+        ),
+      );
+      assert.ok(
+        github.calls.some(
+          (call) =>
+            call.command === "git" &&
+            call.arguments.includes(`${candidate.sourceSha}:CHANGELOG.md`),
+        ),
+      );
+    } finally {
+      await candidate.dispose();
+    }
+  });
+
   void it("GitHub 查询失败、已有标签冲突和原件缺失均停止在写入之前", async () => {
     const candidate = await createCandidate("1.2.3");
     try {
@@ -770,6 +984,7 @@ void describe("单包远端发布与原件续办", () => {
       await assert.rejects(
         runImmutableGithubRelease({
           repositoryRoot: candidate.repositoryRoot,
+          packageRoot: candidate.packageRoot,
           artifactDirectory: candidate.artifactDirectory,
           environment: {
             PATH: process.env.PATH,
@@ -805,7 +1020,7 @@ void describe("单包远端发布与原件续办", () => {
           return response(
             0,
             JSON.stringify({
-              tag: `${candidate.packageName}@${candidate.artifactVersion}`,
+              tag: `${candidate.packageName}@${candidate.packageVersion}`,
               message: "different accepted artifact",
               object: {
                 type: "commit",
@@ -818,6 +1033,7 @@ void describe("单包远端发布与原件续办", () => {
       await assert.rejects(
         runImmutableGithubRelease({
           repositoryRoot: candidate.repositoryRoot,
+          packageRoot: candidate.packageRoot,
           artifactDirectory: candidate.artifactDirectory,
           environment: {
             PATH: process.env.PATH,
@@ -840,6 +1056,7 @@ void describe("单包远端发布与原件续办", () => {
       await assert.rejects(
         runDirectOidcPublication({
           repositoryRoot: candidate.repositoryRoot,
+          packageRoot: candidate.packageRoot,
           artifactDirectory: candidate.artifactDirectory,
           credentialMode: "interactive",
           environment: { PATH: process.env.PATH },

@@ -5,7 +5,6 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { publicationPackagePath as packagePath } from "./configuration.ts";
 import { PublicationFailure } from "./failure.ts";
 import {
   readAcceptedRemoteArtifact,
@@ -52,6 +51,7 @@ type RemoteRelease = {
 
 export type ImmutableGithubReleaseOptions = {
   readonly repositoryRoot: string;
+  readonly packageRoot: string;
   readonly artifactDirectory: string;
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly run?: RemoteCommandRunner;
@@ -521,15 +521,15 @@ async function publishDraft(options: {
 
 async function acceptedArtifact(options: {
   readonly repositoryRoot: string;
+  readonly packageRoot: string;
   readonly artifactDirectory: string;
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly run: RemoteCommandRunner;
 }): Promise<AcceptedReleaseArtifact> {
   try {
-    const packageRoot = path.join(options.repositoryRoot, packagePath);
     return await readAcceptedRemoteArtifact({
       repositoryRoot: options.repositoryRoot,
-      packageRoot,
+      packageRoot: path.resolve(options.packageRoot),
       artifactDirectory: options.artifactDirectory,
       ...(options.environment.GITHUB_REPOSITORY === undefined
         ? {}
@@ -582,12 +582,13 @@ export async function runImmutableGithubRelease(
   const run = options.run ?? defaultRun;
   const artifact = await acceptedArtifact({
     repositoryRoot: options.repositoryRoot,
+    packageRoot: options.packageRoot,
     artifactDirectory: options.artifactDirectory,
     environment: options.environment,
     run,
   });
   const context = releaseContext(options.environment, artifact);
-  const tag = `${artifact.packageName}@${artifact.artifactVersion}`;
+  const tag = `${artifact.packageName}@${artifact.packageVersion}`;
   const annotation = `npm artifact SHA-512: ${artifact.sha512}`;
   const temporaryDirectory = await mkdtemp(
     path.join(tmpdir(), "npm-github-release-"),
@@ -744,9 +745,12 @@ export async function runImmutableGithubRelease(
 if (import.meta.main) {
   try {
     const artifactDirectory = process.env.PUBLICATION_ARTIFACT_DIRECTORY;
+    const packageRoot = process.env.PUBLICATION_PACKAGE_ROOT;
     if (
       artifactDirectory === undefined ||
-      !path.isAbsolute(artifactDirectory)
+      !path.isAbsolute(artifactDirectory) ||
+      packageRoot === undefined ||
+      !path.isAbsolute(packageRoot)
     ) {
       throw new PublicationFailure(
         "release-artifact-invalid",
@@ -754,7 +758,10 @@ if (import.meta.main) {
       );
     }
     await runImmutableGithubRelease({
-      repositoryRoot: process.cwd(),
+      repositoryRoot: path.resolve(
+        process.env.PUBLICATION_REPOSITORY_ROOT ?? process.cwd(),
+      ),
+      packageRoot,
       artifactDirectory,
       environment: process.env,
     });
