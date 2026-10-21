@@ -41,6 +41,7 @@ type PublicationOwnerApi = {
     readonly run: RemoteCommandRunner;
   }) => Promise<void>;
   readonly defaultRemoteCommand: RemoteCommandRunner;
+  readonly isValidPublicationDistTag: (value: string) => Promise<boolean>;
 };
 
 async function publicationOwnerApi(
@@ -48,9 +49,10 @@ async function publicationOwnerApi(
 ): Promise<PublicationOwnerApi> {
   const toolName =
     environment.PUBLICATION_TOOL_NAME ?? "@ykdz/reference-npm-publication";
-  const [accepted, remote] = await Promise.all([
+  const [accepted, remote, publish] = await Promise.all([
     import(`${toolName}/accepted-artifacts`),
     import(`${toolName}/remote-context`),
+    import(`${toolName}/publish`),
   ]);
   return {
     ...(accepted as unknown as Pick<
@@ -60,6 +62,10 @@ async function publicationOwnerApi(
     ...(remote as unknown as Pick<
       PublicationOwnerApi,
       "assertRemotePreparation" | "defaultRemoteCommand"
+    >),
+    ...(publish as unknown as Pick<
+      PublicationOwnerApi,
+      "isValidPublicationDistTag"
     >),
   };
 }
@@ -178,20 +184,17 @@ function isPrerelease(version: string): boolean {
   return version.split("+", 1)[0]!.includes("-");
 }
 
-function validPrereleaseTag(value: string): boolean {
-  return /^[a-z0-9][a-z0-9._-]*$/u.test(value) && value !== "latest";
-}
-
 async function releaseTags(options: {
   readonly artifacts: readonly AcceptedPublicationArtifact[];
   readonly prompt: FirstReleasePrompt;
+  readonly isValidPublicationDistTag: PublicationOwnerApi["isValidPublicationDistTag"];
 }): Promise<Map<string, string>> {
   const tags = new Map<string, string>();
   for (const artifact of options.artifacts) {
     if (!isPrerelease(artifact.artifactVersion)) continue;
     const message = `${artifact.packageName}@${artifact.artifactVersion} 的 npm dist-tag（不可用 latest）：`;
     const tag = (await options.prompt(message)).trim();
-    if (!validPrereleaseTag(tag)) {
+    if (!(await options.isValidPublicationDistTag(tag))) {
       throw new Error(
         `预发布目标必须选择有效的非 latest dist-tag：${artifact.packageName}`,
       );
@@ -347,7 +350,11 @@ export async function runPublicationSetup(
     );
   }
 
-  const tags = await releaseTags({ artifacts, prompt });
+  const tags = await releaseTags({
+    artifacts,
+    prompt,
+    isValidPublicationDistTag: owner.isValidPublicationDistTag,
+  });
   write("即将使用以下已验收原件进行外部发布：");
   for (const artifact of artifacts) {
     write(
