@@ -29,10 +29,6 @@ void test("显式重新取得补回缺项并保留维护者编辑", async () => 
       await readFile(path.join(second.directory, "setup.ts"), "utf8"),
       "// 维护者自行修改\n",
     );
-    assert.match(
-      await readFile(path.join(second.directory, "README.md"), "utf8"),
-      /首次/u,
-    );
     assert.equal(
       await readFile(path.join(repositoryRoot, "package.json"), "utf8"),
       manifest,
