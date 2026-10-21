@@ -12,7 +12,7 @@ import {
 import {
   assertPackageContribution,
   type PackageContribution,
-} from "@ykdz/template-workspace-authoring/package-contribution";
+} from "@ykdz/template-workspace/package-contribution";
 import {
   prepareProjectGithubTemplates,
   projectCheckWorkflow,

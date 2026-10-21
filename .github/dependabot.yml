@@ -28,15 +28,15 @@ updates:
   - package-ecosystem: github-actions
     directories:
       - /
-      - /packages/workspace/assets/github
-      - /packages/workspace/publication
+      - /workspace-policies/default/assets/github
+      - /workspace-policies/default/resources/cli-publication
     schedule:
       interval: weekly
   - package-ecosystem: docker
     directories:
       - /.devcontainer
       - /packages/environment/assets
-      - /packages/workspace/deployment
+      - /workspace-policies/default/resources/deployment
     schedule:
       interval: weekly
     ignore:

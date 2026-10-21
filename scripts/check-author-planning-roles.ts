@@ -39,7 +39,7 @@ const publicPlanningContracts = [
     role: "preset" as const,
   },
   {
-    module: "@ykdz/template-workspace-authoring/reference-package",
+    module: "@ykdz/template-workspace/reference-package",
     names: new Set(["defineReferencePackage", "ReferencePackage"]),
     role: "reference" as const,
   },

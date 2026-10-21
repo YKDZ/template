@@ -74,7 +74,7 @@
         "@ykdz/reference-vue-shared#build",
         "@ykdz/template-core#build",
         "@ykdz/template-environment#build",
-        "@ykdz/template-workspace-authoring#build"
+        "@ykdz/template-workspace#build"
       ],
       "outputs": ["template-dist/**"],
       "tags": ["quality:light"]
@@ -85,7 +85,7 @@
         "@ykdz/reference-vue-shared#build",
         "@ykdz/template-core#build",
         "@ykdz/template-environment#build",
-        "@ykdz/template-workspace-authoring#build"
+        "@ykdz/template-workspace#build"
       ],
       "outputs": [],
       "tags": ["quality:light"]

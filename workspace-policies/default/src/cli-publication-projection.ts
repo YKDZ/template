@@ -1,13 +1,13 @@
 import path from "node:path";
 
 import type {
-  RenderOperation,
+  SetExecutableOperation,
   WriteTextFromFragmentsOperation,
 } from "@ykdz/template-core/renderer";
 import type { GeneratorPackageState } from "@ykdz/template-core/workspace-strategy";
-import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 
-import type { WorkspaceRootInsertion } from "./root-projection.ts";
+import type { PackageContribution } from "./package-contribution.ts";
+import type { RootResourceOperation } from "./shared-root-files.ts";
 import {
   copyPreparedWorkspaceResource,
   prepareWorkspaceResources,
@@ -47,11 +47,14 @@ export function prepareCliPublicationResources(): PreparedWorkspaceResources {
 
 export type CliPublicationProjection = {
   readonly candidate: PackageContribution | undefined;
-  readonly operations: readonly RenderOperation[];
+  readonly operations: readonly (
+    | RootResourceOperation
+    | SetExecutableOperation
+  )[];
   readonly gitignoreFragments: WriteTextFromFragmentsOperation["fragments"];
   readonly imports: Readonly<Record<string, string>> | undefined;
-  readonly scriptInsertions: readonly WorkspaceRootInsertion[];
-  readonly dependencyInsertions: readonly WorkspaceRootInsertion[];
+  readonly scripts: Readonly<Record<string, string>>;
+  readonly devDependencies: Readonly<Record<string, string>>;
   readonly tsconfigCompilerOptions: Readonly<Record<string, unknown>>;
   readonly tsconfigInclude: readonly string[];
 };
@@ -107,7 +110,7 @@ function publicCliCandidate(
 function publicationOperations(
   candidate: PublicCliCandidate | undefined,
   resources: PreparedWorkspaceResources,
-): RenderOperation[] {
+): (RootResourceOperation | SetExecutableOperation)[] {
   if (candidate === undefined) return [];
   const publication = candidate.contribution.foundation.npmPublication;
   if (
@@ -121,7 +124,7 @@ function publicationOperations(
   const copy = (
     file: (typeof cliPublicationFiles)[number],
     to: string,
-  ): RenderOperation =>
+  ): RootResourceOperation =>
     copyPreparedWorkspaceResource(resources, file, to, cliPublicationOwner);
   return [
     copy("assets/.pnpmfile.mjs", ".pnpmfile.mjs"),
@@ -188,8 +191,8 @@ export function projectCliPublication(options: {
       operations: [],
       gitignoreFragments: [],
       imports: undefined,
-      scriptInsertions: [],
-      dependencyInsertions: [],
+      scripts: {},
+      devDependencies: {},
       tsconfigCompilerOptions: {},
       tsconfigInclude: [],
     };
@@ -206,35 +209,20 @@ export function projectCliPublication(options: {
       ),
     ],
     imports: { "#npm-publication/*": "./scripts/npm-publication/*.ts" },
-    scriptInsertions: [
-      {
-        before: "fix",
-        values: {
-          "publication:readiness":
-            "node --conditions=source scripts/npm-publication/check-readiness.ts",
-          "publication:artifact":
-            "node --conditions=source scripts/npm-publication/check-artifact.ts",
-        },
-      },
-    ],
-    dependencyInsertions: [
-      {
-        before: "oxfmt",
-        values: {
-          "@types/semver": "catalog:",
-          "@types/spdx-expression-parse": "catalog:",
-        },
-      },
-      {
-        before: "turbo",
-        values: {
-          semver: "catalog:",
-          "spdx-expression-parse": "catalog:",
-          npm: "catalog:",
-          tar: "catalog:",
-        },
-      },
-    ],
+    scripts: {
+      "publication:readiness":
+        "node --conditions=source scripts/npm-publication/check-readiness.ts",
+      "publication:artifact":
+        "node --conditions=source scripts/npm-publication/check-artifact.ts",
+    },
+    devDependencies: {
+      "@types/semver": "catalog:",
+      "@types/spdx-expression-parse": "catalog:",
+      semver: "catalog:",
+      "spdx-expression-parse": "catalog:",
+      npm: "catalog:",
+      tar: "catalog:",
+    },
     tsconfigCompilerOptions: { allowJs: true, checkJs: true },
     tsconfigInclude: [".pnpmfile.mjs"],
   };

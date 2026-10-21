@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 
-import type { DeploymentCheckRequirement } from "@ykdz/template-workspace-authoring/project-requirements";
+import type { DeploymentCheckRequirement } from "@ykdz/template-workspace/project-requirements";
 
 import type { SuccessfulScenarioResult } from "../../../generated-content.ts";
 import {

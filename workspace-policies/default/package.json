@@ -82,6 +82,36 @@
       "source": "./src/rust-toolchain-facts.ts",
       "types": "./dist/rust-toolchain-facts.d.ts",
       "default": "./dist/rust-toolchain-facts.js"
+    },
+    "./shared-root-files": {
+      "source": "./src/shared-root-files.ts",
+      "types": "./dist/shared-root-files.d.ts",
+      "default": "./dist/shared-root-files.js"
+    },
+    "./generation-context": {
+      "source": "./src/generation-context.ts",
+      "types": "./dist/generation-context.d.ts",
+      "default": "./dist/generation-context.js"
+    },
+    "./package-contribution": {
+      "source": "./src/package-contribution.ts",
+      "types": "./dist/package-contribution.d.ts",
+      "default": "./dist/package-contribution.js"
+    },
+    "./project-requirements": {
+      "source": "./src/project-requirements.ts",
+      "types": "./dist/project-requirements.d.ts",
+      "default": "./dist/project-requirements.js"
+    },
+    "./default-package-role": {
+      "source": "./src/default-package-role.ts",
+      "types": "./dist/default-package-role.d.ts",
+      "default": "./dist/default-package-role.js"
+    },
+    "./reference-package": {
+      "source": "./src/reference-package.ts",
+      "types": "./dist/reference-package.d.ts",
+      "default": "./dist/reference-package.js"
     }
   },
   "scripts": {
@@ -91,14 +121,17 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
-    "sync:policy-snapshot": "node scripts/sync-policy-snapshot.ts",
+    "sync:policy-snapshot": "node scripts/sync-snapshot.ts src/workspace-policy-snapshot.ts",
     "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec 'test/**/*.light.test.ts'",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "sync:release-toolchain-snapshot": "node scripts/sync-snapshot.ts src/release-toolchain-snapshot.ts"
   },
   "dependencies": {
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*",
+    "ignore": "catalog:",
+    "jsonc-parser": "catalog:",
     "smol-toml": "catalog:",
     "yaml": "catalog:"
   },

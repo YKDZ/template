@@ -80,7 +80,7 @@ export function readOwnerValue(): string {
         writeFile(
           preparationEntry,
           `import { readFileSync } from "node:fs";
-import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
+import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 export const referencePackage = defineReferencePackage({
   packageName: "@fixture/preparation-owner",
@@ -473,7 +473,7 @@ export function loadComputedModule(): void {
       await writeFile(
         entryFile,
         `import ownerManifest from "./package.json" with { type: "json" };
-import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
+import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 export const referencePackage = defineReferencePackage({
   packageName: ownerManifest.name,
