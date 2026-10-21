@@ -439,6 +439,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config

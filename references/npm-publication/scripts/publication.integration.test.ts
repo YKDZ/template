@@ -10,7 +10,7 @@ import {
   prepareArtifact,
   readAcceptedArtifact,
   readPreparedArtifact,
-} from "./publication.ts";
+} from "@ykdz/reference-npm-publication";
 
 async function makePackage(root: string): Promise<void> {
   await writeFile(
@@ -133,8 +133,8 @@ async function sha512(filePath: string): Promise<string> {
     .digest("hex");
 }
 
-void describe("shared npm artifact preparation", () => {
-  void it("packs and normally installs an ordinary package before its own consumer command", async () => {
+void describe("共享 npm 制品准备", () => {
+  void it("打包并正常安装普通包后运行其自有消费命令", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "npm-publication-contract-"),
     );
@@ -243,7 +243,7 @@ void describe("shared npm artifact preparation", () => {
     }
   });
 
-  void it("reports target-owned configuration gaps and propagates consumer failure", async () => {
+  void it("报告目标配置缺口并传递消费失败", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "npm-publication-failure-"),
     );

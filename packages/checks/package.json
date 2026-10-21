@@ -47,6 +47,7 @@
   "devDependencies": {
     "@devcontainers/cli": "catalog:",
     "@types/node": "catalog:",
+    "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-tooling-config": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

@@ -11,8 +11,7 @@
   ],
   "type": "module",
   "imports": {
-    "#npm-publication/*": "./scripts/npm-publication/*.ts",
-    "#shared-publication": "@ykdz/reference-npm-publication"
+    "#npm-publication/*": "./scripts/npm-publication/*.ts"
   },
   "exports": {
     "./dependency-catalog": {

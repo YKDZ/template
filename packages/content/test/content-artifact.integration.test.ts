@@ -39,6 +39,14 @@ import { execa } from "execa";
 import { createAuthoredContentFixture } from "../test-support/authored-content-fixture.ts";
 
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
+const cliPublicationReference = templateContent.find(
+  (member) =>
+    member.kind === "reference" &&
+    member.identity.packageName === "@ykdz/reference-npm-publication",
+);
+if (cliPublicationReference?.kind !== "reference") {
+  throw new Error("内容集合缺少 npm 发布参考包");
+}
 const temporaryRoots: string[] = [];
 const preparedCollections: PreparedContentCollection[] = [];
 const authoredFixtures: Awaited<
@@ -739,8 +747,13 @@ void describe("原生内容制品安装链", () => {
           exportName: "defineReferencePackage",
         },
         content: templateContent,
-        roots: [preset],
-        strategy: createDefaultWorkspaceStrategy(),
+        roots:
+          preset.alias === "ts-cli"
+            ? [preset, cliPublicationReference]
+            : [preset],
+        strategy: createDefaultWorkspaceStrategy({
+          cliPublicationReference: cliPublicationReference.definition,
+        }),
         workspaceRoot,
         root: await temporaryRoot(`preset-${preset.alias}-`),
         sdkArchives,
@@ -803,11 +816,14 @@ void describe("原生内容制品安装链", () => {
           'import { createGenerator } from "@ykdz/template-generator";',
           'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
           'import { templateContent } from "@ykdz/template-content";',
+          'const cliPublicationReference = templateContent.find((member) => member.kind === "reference" && member.identity.packageName === "@ykdz/reference-npm-publication");',
+          'const strategy = createDefaultWorkspaceStrategy({ cliPublicationReference: cliPublicationReference?.kind === "reference" ? cliPublicationReference.definition : undefined });',
           'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
           'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
           'const preset = templateContent.find((member) => member.kind === "preset" && member.alias === process.argv[4]);',
           "assert.ok(preset);",
-          "const generator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+          'if (preset.alias === "ts-cli") assert.equal(cliPublicationReference?.kind, "reference");',
+          "const generator = createGenerator({ content: templateContent, strategy });",
           "const initialized = await generator.init({ targetRoot: process.argv[2], selection: { roots: [{ preset: preset.identity }] }, strategyInput: { repositoryName: `installed-${preset.alias}`, defaultPackageScope: `installed-${preset.alias}`, todo: false } });",
           'assert.equal(initialized.status, "success", JSON.stringify(initialized));',
           'if (initialized.status !== "success") process.exit(2);',
@@ -1031,6 +1047,8 @@ void describe("原生内容制品安装链", () => {
           'import { createGenerator } from "@ykdz/template-generator";',
           'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
           `import { templateContent } from "${replayPrepared.collection.name}";`,
+          'const cliPublicationReference = templateContent.find((candidate) => candidate.kind === "reference" && candidate.identity.packageName === "@ykdz/reference-npm-publication");',
+          'const strategy = createDefaultWorkspaceStrategy({ cliPublicationReference: cliPublicationReference?.kind === "reference" ? cliPublicationReference.definition : undefined });',
           "const targetRoot = process.argv[2];",
           'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
           'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
@@ -1038,7 +1056,7 @@ void describe("原生内容制品安装链", () => {
           'const member = templateContent.find((candidate) => candidate.kind === "reference" && candidate.identity.packageName === process.argv[5]);',
           "assert.ok(member);",
           "const creationInput = JSON.parse(process.argv[6]);",
-          "const generator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+          "const generator = createGenerator({ content: templateContent, strategy });",
           "const addition = await generator.add({ repositoryRoot: targetRoot, contentIdentity: member.identity, creationInput });",
           'assert.equal(addition.status, "success", JSON.stringify(addition));',
           'if (addition.status !== "success") process.exit(3);',
@@ -1320,12 +1338,12 @@ void describe("原生内容制品安装链", () => {
     }
   });
 
-  void it("全部十一个参考入口按声明绑定原生根并安装生成", async () => {
+  void it("全部十二个参考入口按声明绑定原生根并安装生成", async () => {
     assert.ok(firstPartyPrepared);
     const references = templateContent.filter(
       (member) => member.kind === "reference",
     );
-    assert.equal(references.length, 11);
+    assert.equal(references.length, 12);
     const contentByIdentity = new Map(
       references.map((member) => [contentIdentityKey(member.identity), member]),
     );
@@ -1420,7 +1438,7 @@ void describe("原生内容制品安装链", () => {
         .sort(),
       references.map((member) => contentIdentityKey(member.identity)).sort(),
     );
-    assert.equal(prepared.owners.length, 11);
+    assert.equal(prepared.owners.length, 12);
     const vueSharedOwner = prepared.owners.find(
       (owner) =>
         owner.member.identity.packageName === "@ykdz/reference-vue-shared",
@@ -1547,7 +1565,7 @@ void describe("原生内容制品安装链", () => {
         'const contentByIdentity = new Map(templateContent.filter((member) => member.kind === "reference").map((member) => [contentIdentityKey(member.identity), member]));',
         "const derivedMembers = deriveTemplateMembers(templateContent);",
         "assert.equal(derivedMembers.presets.length, 0);",
-        "assert.equal(derivedMembers.referencePackages.length, 11);",
+        "assert.equal(derivedMembers.referencePackages.length, 12);",
         "const results = [];",
         "for (const [index, entry] of entries.entries()) {",
         '  const roots = [{ nodeIdentity: "entry", contentIdentity: entry.identity }, ...entry.independentDependencies.map((contentIdentity, providerIndex) => ({ nodeIdentity: `provider-${providerIndex}`, contentIdentity }))];',
@@ -1641,7 +1659,7 @@ void describe("原生内容制品安装链", () => {
         readonly error: string;
       };
     };
-    assert.equal(result.results.length, 11);
+    assert.equal(result.results.length, 12);
     for (const { member } of entries) {
       assert.ok(
         result.results.some(

@@ -17,6 +17,10 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import {
+  inspectTarget as inspectPublicationTarget,
+  readAcceptedArtifact,
+} from "@ykdz/reference-npm-publication";
 import parseSpdxExpression from "spdx-expression-parse";
 
 import { publicationPackagePath as packagePath } from "#npm-publication/configuration";
@@ -25,10 +29,6 @@ import {
   readPackageReleaseNotes,
   type AcceptedRemoteArtifact,
 } from "#npm-publication/remote-context";
-import {
-  inspectTarget as inspectPublicationTarget,
-  readAcceptedArtifact,
-} from "#shared-publication";
 
 type JsonObject = Record<string, unknown>;
 
