@@ -29,7 +29,7 @@ export const generationRecordSchema = v.strictObject({
         v.regex(/^package-[a-f0-9]{64}$/),
       ),
       creationInput: v.nullable(v.unknown()),
-      configuration: v.nonOptional(v.nullable(v.unknown())),
+      configuration: v.nullable(v.unknown()),
       bindings: v.record(v.string(), v.string()),
     }),
   ),
@@ -49,6 +49,15 @@ export function parseGenerationRecordStructure<
     throw new Error(
       `不支持的生成记录 schema ${String(value.schemaVersion)}；当前只支持 schema4`,
     );
+  }
+  if (
+    isRecord(value) &&
+    Array.isArray(value.packages) &&
+    value.packages.some(
+      (entry) => isRecord(entry) && !Object.hasOwn(entry, "configuration"),
+    )
+  ) {
+    throw new Error("生成记录不符合 schema4 结构：缺少实例现行配置");
   }
   const parsed = v.safeParse(generationRecordSchema, value);
   if (!parsed.success) {

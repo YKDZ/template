@@ -19,6 +19,7 @@ import path from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { projectPublicationWorkspace } from "@ykdz/reference-npm-publication/template";
 import { templateContent } from "@ykdz/template-content";
 import {
   installContentCollection,
@@ -39,14 +40,6 @@ import { execa } from "execa";
 import { createAuthoredContentFixture } from "../test-support/authored-content-fixture.ts";
 
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
-const cliPublicationReference = templateContent.find(
-  (member) =>
-    member.kind === "reference" &&
-    member.identity.packageName === "@ykdz/reference-npm-publication",
-);
-if (cliPublicationReference?.kind !== "reference") {
-  throw new Error("内容集合缺少 npm 发布参考包");
-}
 const temporaryRoots: string[] = [];
 const preparedCollections: PreparedContentCollection[] = [];
 const authoredFixtures: Awaited<
@@ -747,12 +740,9 @@ void describe("原生内容制品安装链", () => {
           exportName: "defineReferencePackage",
         },
         content: templateContent,
-        roots:
-          preset.alias === "ts-cli"
-            ? [preset, cliPublicationReference]
-            : [preset],
+        roots: [preset],
         strategy: createDefaultWorkspaceStrategy({
-          cliPublicationReference: cliPublicationReference.definition,
+          project: projectPublicationWorkspace,
         }),
         workspaceRoot,
         root: await temporaryRoot(`preset-${preset.alias}-`),
@@ -816,13 +806,11 @@ void describe("原生内容制品安装链", () => {
           'import { createGenerator } from "@ykdz/template-generator";',
           'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
           'import { templateContent } from "@ykdz/template-content";',
-          'const cliPublicationReference = templateContent.find((member) => member.kind === "reference" && member.identity.packageName === "@ykdz/reference-npm-publication");',
-          'const strategy = createDefaultWorkspaceStrategy({ cliPublicationReference: cliPublicationReference?.kind === "reference" ? cliPublicationReference.definition : undefined });',
+          "const strategy = createDefaultWorkspaceStrategy();",
           'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
           'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
           'const preset = templateContent.find((member) => member.kind === "preset" && member.alias === process.argv[4]);',
           "assert.ok(preset);",
-          'if (preset.alias === "ts-cli") assert.equal(cliPublicationReference?.kind, "reference");',
           "const generator = createGenerator({ content: templateContent, strategy });",
           "const initialized = await generator.init({ targetRoot: process.argv[2], selection: { roots: [{ preset: preset.identity }] }, strategyInput: { repositoryName: `installed-${preset.alias}`, defaultPackageScope: `installed-${preset.alias}`, todo: false } });",
           'assert.equal(initialized.status, "success", JSON.stringify(initialized));',
@@ -1047,8 +1035,7 @@ void describe("原生内容制品安装链", () => {
           'import { createGenerator } from "@ykdz/template-generator";',
           'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
           `import { templateContent } from "${replayPrepared.collection.name}";`,
-          'const cliPublicationReference = templateContent.find((candidate) => candidate.kind === "reference" && candidate.identity.packageName === "@ykdz/reference-npm-publication");',
-          'const strategy = createDefaultWorkspaceStrategy({ cliPublicationReference: cliPublicationReference?.kind === "reference" ? cliPublicationReference.definition : undefined });',
+          "const strategy = createDefaultWorkspaceStrategy();",
           "const targetRoot = process.argv[2];",
           'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
           'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',

@@ -32,7 +32,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
     "build": "tsc -p tsconfig.build.json --pretty false",
     "test": "node --conditions=source --test --test-reporter=spec 'test/**/*.test.ts'",
-    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false"
+    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
+    "publication:consume": "node scripts/publication-consumer.ts",
+    "prepack": "pnpm run build"
   },
   "dependencies": {
     "@ykdz/template-core": "workspace:*",
@@ -40,6 +42,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",

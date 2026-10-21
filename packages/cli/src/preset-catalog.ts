@@ -1,3 +1,4 @@
+import { projectPublicationWorkspace } from "@ykdz/reference-npm-publication/template";
 import { deriveTemplateMembers, templateContent } from "@ykdz/template-content";
 import {
   contentIdentityKey,
@@ -22,16 +23,6 @@ export const cliPresets: readonly CliPreset[] = templateMembers.presets;
 const presetIndex = createContentIndex(cliPresets);
 const referencePackages = templateMembers.referencePackages;
 const referenceIndex = createContentIndex(referencePackages);
-const npmPublicationReference = referencePackages.find(
-  (member) =>
-    member.identity.packageName === "@ykdz/reference-npm-publication" &&
-    member.identity.exportPath === "./template",
-);
-if (npmPublicationReference === undefined) {
-  throw new Error(
-    "CLI 内容集合缺少 @ykdz/reference-npm-publication#./template",
-  );
-}
 
 export function presetByAlias(alias: string): CliPreset | undefined {
   if (!cliPresets.some((preset) => preset.alias === alias)) return undefined;
@@ -71,10 +62,8 @@ export function workspaceConfigurationIdentityForPreset(
 }
 
 export const cliWorkspaceStrategy = createDefaultWorkspaceStrategy<
-  DefaultWorkspaceCreationInput<
-    PackageCreationInput<"private" | "public-candidate">
-  >
->({ cliPublicationReference: npmPublicationReference.definition });
+  DefaultWorkspaceCreationInput<PackageCreationInput>
+>({ project: projectPublicationWorkspace });
 
 export const cliGenerator = createGenerator({
   content: templateContent,

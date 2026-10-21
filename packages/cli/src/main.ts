@@ -134,6 +134,11 @@ function createCliContract(runtime: CliRuntime) {
             longOption: "--scope",
             description: "有效 npm scope；省略时使用目标目录名",
           },
+          publication: {
+            kind: "flag",
+            longOption: "--publication",
+            description: "为此包接入共享 npm 发布工具",
+          },
           dryRun: {
             kind: "flag",
             longOption: "--dry-run",
@@ -159,9 +164,6 @@ function createCliContract(runtime: CliRuntime) {
                   ...initializationDetails(data),
                   "下一步",
                   ...data.nextSteps.map(({ display }) => display),
-                  ...(data.publicationSetup === null
-                    ? []
-                    : ["一次性 npm 发布设置", data.publicationSetup.command]),
                 ]),
             },
             planned: {
@@ -209,6 +211,7 @@ function createCliContract(runtime: CliRuntime) {
             {
               dir: input.dir,
               preset: input.preset,
+              publication: input.publication,
               dryRun: input.dryRun,
               todo: input.todo,
               ...(input.name === undefined ? {} : { name: input.name }),
@@ -286,6 +289,11 @@ function createCliContract(runtime: CliRuntime) {
             longOption: "--link-from",
             description:
               "消费包的两个安全路径段，不能使用保留工作区目录；可重复",
+          },
+          publication: {
+            kind: "flag",
+            longOption: "--publication",
+            description: "为此包接入共享 npm 发布工具",
           },
           dryRun: {
             kind: "flag",
@@ -415,6 +423,7 @@ function createCliContract(runtime: CliRuntime) {
           const result = await runAddPackage(
             {
               preset: input.preset,
+              publication: input.publication,
               name: input.name,
               linkFrom: input.linkFrom,
               dryRun: input.dryRun,

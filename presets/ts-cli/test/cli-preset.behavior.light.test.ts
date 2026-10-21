@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
 import {
   mkdir,
   mkdtemp,
@@ -13,11 +12,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 
+import { projectPublicationWorkspace } from "@ykdz/reference-npm-publication/template";
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
-import {
-  contentIdentityKey,
-  createContentIndex,
-} from "@ykdz/template-core/content-identity";
+import { createContentIndex } from "@ykdz/template-core/content-identity";
 import { createGenerator } from "@ykdz/template-generator";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
@@ -61,14 +58,6 @@ const rust = contentIndex.resolve(
   {
     namespace: "ykdz",
     packageName: "@ykdz/reference-rust-bin",
-    exportPath: "./template",
-  },
-  "reference",
-);
-const npmPublication = contentIndex.resolve(
-  {
-    namespace: "ykdz",
-    packageName: "@ykdz/reference-npm-publication",
     exportPath: "./template",
   },
   "reference",
@@ -139,7 +128,7 @@ function generator() {
   return createGenerator({
     content,
     strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>({
-      cliPublicationReference: npmPublication.definition,
+      project: projectPublicationWorkspace,
     }),
   });
 }
@@ -150,172 +139,119 @@ const strategyInput = {
 };
 
 void describe("TypeScript CLI 公开组合预设", () => {
-  void it("初始化发布候选并在真实加包回放后保留私有 CLI 原语义", async () => {
+  void it("默认 internal，显式发布按实例恢复并复用共享工具", async () => {
     const targetRoot = await createTargetRoot("template-ts-cli-preset-");
-    const generated = generator();
-    const initialized = await generated.init({
+    const initialized = await generator().init({
       targetRoot,
       selection: { roots: [{ preset: preset.identity }] },
       strategyInput,
     });
-
-    assert.strictEqual(
-      initialized.status,
-      "success",
-      JSON.stringify(initialized),
-    );
-    const publicationConfiguration = JSON.parse(
-      await readFile(
-        path.join(
-          targetRoot,
-          "scripts/npm-publication/publication.config.json",
+    assert.equal(initialized.status, "success", JSON.stringify(initialized));
+    const manifest = async (directory: string) =>
+      JSON.parse(
+        await readFile(
+          path.join(targetRoot, directory, "package.json"),
+          "utf8",
         ),
-        "utf8",
-      ),
-    ) as Record<string, unknown>;
-    assert.deepStrictEqual(publicationConfiguration, {
-      packagePath: "packages/cli",
+      );
+    assert.equal((await manifest("packages/cli")).private, true);
+    const published = await generator().add({
+      repositoryRoot: targetRoot,
+      preset: preset.identity,
+      configuration: { publication: true },
+      creationInput: {
+        leafName: "public-cli",
+        packagePath: "packages/public-cli",
+      },
     });
-    const publicationMode =
-      (
-        await stat(
-          path.join(targetRoot, "scripts/npm-publication-setup/setup.sh"),
-        )
-      ).mode & 0o111;
-    assert.strictEqual(publicationMode, 0o111);
-    const initialManifest = JSON.parse(
-      await readFile(
-        path.join(targetRoot, "packages/cli/package.json"),
-        "utf8",
-      ),
-    ) as {
-      readonly bin: Record<string, string>;
-      readonly scripts: Record<string, string>;
-      readonly engines: { readonly node: string };
-      readonly private?: boolean;
-      readonly version?: string;
-    };
-    assert.deepStrictEqual(initialManifest.bin, { cli: "./dist/cli.js" });
-    assert.strictEqual(initialManifest.private, false);
-    assert.strictEqual(initialManifest.version, "0.1.0");
-    assert.strictEqual(initialManifest.engines.node, "^24.21.0");
-    assert.match(
-      initialManifest.scripts["test:e2e"]!,
-      /source-journeys\.test\.ts/u,
+    assert.equal(published.status, "success", JSON.stringify(published));
+    const root = await manifest(".");
+    assert.equal(root.devDependencies["@demo/npm-publication"], "workspace:*");
+    assert.equal((await manifest("packages/public-cli")).private, false);
+    assert.equal(
+      (await manifest("packages/public-cli")).scripts["publication:prepare"],
+      "node --import @demo/npm-publication/prepare",
     );
-    assert.match(
-      initialManifest.scripts.postbuild!,
-      /chmodSync\('dist\/cli\.js', 0o755\)/u,
-    );
-    const candidateTurbo = JSON.parse(
-      await readFile(path.join(targetRoot, "packages/cli/turbo.json"), "utf8"),
-    ) as { readonly tasks: Record<string, { readonly dependsOn?: unknown }> };
-    assert.deepStrictEqual(candidateTurbo.tasks["test:e2e"]!.dependsOn, []);
-
-    const privateAdded = await generated.add({
+    const internal = await generator().add({
       repositoryRoot: targetRoot,
       preset: preset.identity,
       creationInput: {
-        leafName: "private-cli",
-        packagePath: "packages/private-cli",
+        leafName: "internal-cli",
+        packagePath: "packages/internal-cli",
       },
     });
-    assert.strictEqual(
-      privateAdded.status,
-      "success",
-      JSON.stringify(privateAdded),
+    assert.equal(internal.status, "success", JSON.stringify(internal));
+    assert.equal((await manifest("packages/internal-cli")).private, true);
+    assert.equal(
+      (await manifest("packages/internal-cli")).scripts["publication:prepare"],
+      undefined,
     );
-
-    const privateManifestPath = path.join(
-      targetRoot,
-      "packages/private-cli/package.json",
-    );
-    const privateManifest = JSON.parse(
-      await readFile(privateManifestPath, "utf8"),
-    ) as {
-      readonly bin: Record<string, string>;
-      readonly scripts: Record<string, string>;
-      readonly engines: { readonly node: string };
-    };
-    assert.deepStrictEqual(privateManifest.bin, {
-      "private-cli": "./dist/cli.js",
+    const second = await generator().add({
+      repositoryRoot: targetRoot,
+      contentIdentity: library.identity,
+      configuration: { publication: true },
+      creationInput: {
+        leafName: "public-lib",
+        packagePath: "packages/public-lib",
+      },
     });
-    assert.strictEqual(privateManifest.engines.node, ">=24");
-    assert.match(
-      privateManifest.scripts["test:e2e"]!,
-      /run-journeys\.test\.ts/u,
-    );
-    const privateTurbo = JSON.parse(
-      await readFile(
-        path.join(targetRoot, "packages/private-cli/turbo.json"),
-        "utf8",
-      ),
-    ) as { readonly tasks: Record<string, { readonly dependsOn?: unknown }> };
-    assert.deepStrictEqual(privateTurbo.tasks["test:e2e"]!.dependsOn, [
-      "build",
-    ]);
-    if (process.platform !== "win32") {
-      const privateDist = path.join(targetRoot, "packages/private-cli/dist");
-      await mkdir(privateDist, { recursive: true });
-      await writeFile(
-        path.join(privateDist, "cli.js"),
-        "#!/usr/bin/env node\n",
-      );
-      execSync(privateManifest.scripts.postbuild!, {
-        cwd: path.dirname(privateManifestPath),
-      });
-      assert.strictEqual(
-        (await stat(path.join(privateDist, "cli.js"))).mode & 0o111,
-        0o111,
-      );
-    }
+    assert.equal(second.status, "success", JSON.stringify(second));
     const records = JSON.parse(
       await readFile(
         path.join(targetRoot, ".template/generation.json"),
         "utf8",
       ),
-    ) as {
-      packages: {
-        contentIdentity: typeof cli.identity;
-        createdBy: string;
-        creationInput?: unknown;
-      }[];
-    };
-    assert.deepStrictEqual(
+    );
+    assert.equal(
+      records.packages.filter(
+        (record: { contentIdentity: typeof cli.identity }) =>
+          record.contentIdentity.packageName ===
+          "@ykdz/reference-npm-publication",
+      ).length,
+      1,
+    );
+    assert.deepEqual(
       records.packages
         .filter(
-          (record) =>
-            contentIdentityKey(record.contentIdentity) ===
-            contentIdentityKey(cli.identity),
+          (record: { contentIdentity: typeof cli.identity }) =>
+            record.contentIdentity.packageName === "@ykdz/reference-ts-cli",
         )
-        .map(({ createdBy, creationInput }) => ({ createdBy, creationInput })),
-      [
-        {
-          createdBy: "initialization",
-          creationInput: { variant: "public-candidate" },
-        },
-        {
-          createdBy: "addition",
-          creationInput: {
-            variant: "private",
-            leafName: "private-cli",
-            packagePath: "packages/private-cli",
-          },
-        },
-      ],
+        .map((record: { configuration: unknown }) => record.configuration),
+      [{ publication: false }, { publication: true }, { publication: false }],
     );
-    assert.strictEqual(
-      JSON.parse(
-        await readFile(
-          path.join(
-            targetRoot,
-            "scripts/npm-publication/publication.config.json",
-          ),
-          "utf8",
-        ),
-      ).packagePath,
-      "packages/cli",
+    assert.equal(
+      (await manifest(".")).devDependencies["@demo/npm-publication"],
+      "workspace:*",
     );
+  });
+
+  void it("发布共享根脚本与消费者冲突时拒绝整次加包", async () => {
+    const targetRoot = await createTargetRoot("template-publication-conflict-");
+    const initialized = await generator().init({
+      targetRoot,
+      selection: { roots: [{ preset: preset.identity }] },
+      strategyInput,
+    });
+    assert.equal(initialized.status, "success", JSON.stringify(initialized));
+    const manifestPath = path.join(targetRoot, "package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.scripts["publication:artifact"] = "node custom-publication.ts";
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    const before = await snapshotTree(targetRoot);
+    const result = await generator().add({
+      repositoryRoot: targetRoot,
+      preset: preset.identity,
+      configuration: { publication: true },
+      creationInput: { leafName: "public-cli" },
+    });
+    assert.equal(result.status, "conflict", JSON.stringify(result));
+    if (result.status !== "conflict") throw new Error("应拒绝冲突");
+    assert.ok(
+      result.conflicts.some(
+        (conflict) => conflict.location === "/scripts/publication:artifact",
+      ),
+    );
+    assert.equal(await snapshotTree(targetRoot), before);
   });
 
   void it("直接选择 CLI 原生参考包时仍按私有包处理", async () => {

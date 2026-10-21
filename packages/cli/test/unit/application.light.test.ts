@@ -21,52 +21,6 @@ function createRuntime(workspace: string): ApplicationRuntime {
   };
 }
 
-void describe("init publication setup handoff", () => {
-  void it("renders the one-time setup command only in the init terminal result", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-cli-init-"));
-    try {
-      const publicationSetupPreset = templatePresets.find(
-        (member) => member.identity.packageName === "@ykdz/preset-ts-cli",
-      )?.definition;
-      if (publicationSetupPreset === undefined)
-        throw new Error("Expected a Built-in Preset with publication setup");
-      const runtime = createRuntime(workspace);
-      const output = await runInit(
-        {
-          dir: "publication-setup-test",
-          preset: publicationSetupPreset.metadata.alias,
-          dryRun: false,
-          todo: true,
-        },
-        runtime,
-      );
-
-      assert.equal(output.status, "success");
-      if (output.status !== "success") throw new Error("Expected init success");
-      assert.deepEqual(output.publicationSetup, {
-        command: "./scripts/npm-publication-setup/setup.sh",
-      });
-      const preview = await runInit(
-        {
-          dir: "preview",
-          preset: publicationSetupPreset.metadata.alias,
-          dryRun: true,
-          todo: false,
-        },
-        runtime,
-      );
-      assert.equal(preview.status, "success");
-      if (preview.status !== "success")
-        throw new Error("Expected preview success");
-      assert.deepEqual(preview.publicationSetup, {
-        command: "./scripts/npm-publication-setup/setup.sh",
-      });
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
-});
-
 void describe("init toolchain snapshot consumption", () => {
   void it("writes the exact snapshot Node and pnpm to the private root", async () => {
     const workspace = await mkdtemp(

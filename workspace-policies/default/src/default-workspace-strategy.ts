@@ -29,10 +29,6 @@ import { projectDependencyMaintenancePolicy } from "./application-requirements.t
 import { composeCiDiagnosticArtifacts } from "./ci-diagnostic-artifact.ts";
 import type { CiDiagnosticArtifactDeclaration } from "./ci-diagnostic-artifact.ts";
 import {
-  prepareCliPublicationResources,
-  projectCliPublication,
-} from "./cli-publication-projection.ts";
-import {
   assertDefaultPackageDefinition,
   assertDefaultProjectBlueprint,
   validateDefaultPackagePath,
@@ -173,10 +169,6 @@ export type DefaultWorkspaceOwnerFacts = {
     >["probes"];
   };
   readonly dependencyMaintenance: DependencyMaintenancePolicy;
-  readonly publication: {
-    readonly candidate: { readonly name: string; readonly path: string } | null;
-    readonly setup: { readonly command: string } | null;
-  };
   readonly nextSteps: readonly NextStepInstruction[];
 };
 
@@ -219,7 +211,6 @@ type DefaultWorkspacePreparedResources = {
   readonly developmentContainer: ReturnType<
     typeof prepareBuiltInDevelopmentContainerResources
   >;
-  readonly cliPublication: PreparedWorkspaceResources;
   readonly workspaceFiles: PreparedWorkspaceResources;
   readonly projectLinkManifestTruth: ReadonlyMap<
     string,
@@ -242,7 +233,6 @@ function prepareDefaultWorkspaceResources(
     editorCustomizationDeclarations:
       prepareBuiltInEditorCustomizationDeclarations(),
     developmentContainer: prepareBuiltInDevelopmentContainerResources(),
-    cliPublication: prepareCliPublicationResources(),
     workspaceFiles: prepareWorkspaceResources(
       defaultWorkspaceFiles,
       defaultWorkspaceResourceOwner,
@@ -680,7 +670,6 @@ function projectOperations(options: {
   readonly blueprint: ProjectBlueprint;
   readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
-  readonly cliPublicationReference: ReferencePackage | undefined;
   readonly presetProjectContributions: readonly (readonly DefaultWorkspaceProjectContribution[])[];
   readonly sharedRootContributions: readonly SharedRootContribution[];
 }): WorkspaceProjection<DefaultWorkspaceOwnerFacts> {
@@ -702,11 +691,6 @@ function projectOperations(options: {
   const contributions = promoteInjectedProviderRuntimeDependencies({
     contributions: options.contributions,
     linkPlan,
-  });
-  const cliPublication = projectCliPublication({
-    contributions,
-    resources: prepared.cliPublication,
-    referencePackage: options.cliPublicationReference,
   });
   const rustProjection = projectRustTarget({
     context,
@@ -827,34 +811,6 @@ function projectOperations(options: {
               ? {}
               : { "toolchain:prepare": "cargo --version" },
         },
-      },
-      {
-        kind: "shared-root-files",
-        source: "@ykdz/template-workspace/cli-publication-projection",
-        manifest: {
-          ...(cliPublication.imports === undefined
-            ? {}
-            : { imports: cliPublication.imports }),
-          scripts: cliPublication.scripts,
-          devDependencies: cliPublication.devDependencies,
-        },
-        typescript: {
-          compilerOptions: cliPublication.tsconfigCompilerOptions,
-          include: cliPublication.tsconfigInclude,
-        },
-        gitignoreFragments: cliPublication.gitignoreFragments,
-        resources: cliPublication.operations
-          .filter((operation) => operation.kind !== "setExecutable")
-          .map((operation) => ({
-            operation,
-            ...(cliPublication.operations.some(
-              (candidate) =>
-                candidate.kind === "setExecutable" &&
-                candidate.path === operation.to,
-            )
-              ? { executable: true }
-              : {}),
-          })),
       },
       ...ownerSharedRootContributions,
     ],
@@ -1222,19 +1178,6 @@ function projectOperations(options: {
         probes: container.probes,
       },
       dependencyMaintenance,
-      publication: {
-        candidate:
-          cliPublication.candidate === undefined
-            ? null
-            : {
-                name: cliPublication.candidate.definition.name,
-                path: cliPublication.candidate.definition.path,
-              },
-        setup:
-          cliPublication.candidate === undefined
-            ? null
-            : { command: "./scripts/npm-publication-setup/setup.sh" },
-      },
       nextSteps,
     },
   };
@@ -1245,8 +1188,6 @@ export function createDefaultWorkspaceStrategy<
   CreationInput extends PackageCreationInput = DefaultWorkspaceCreationInput,
 >(
   options: {
-    /** 默认内容集合显式装配的共享发布参考包。 */
-    readonly cliPublicationReference?: ReferencePackage;
     readonly project?: (options: {
       readonly context: DefaultWorkspaceContext;
       readonly blueprint: ProjectBlueprint;
@@ -1631,7 +1572,6 @@ export function createDefaultWorkspaceStrategy<
     project(projectOptions) {
       return projectOperations({
         ...projectOptions,
-        cliPublicationReference: options.cliPublicationReference,
         sharedRootContributions: options.project?.(projectOptions) ?? [],
       });
     },

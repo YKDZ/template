@@ -66,6 +66,7 @@
   "dependencies": {
     "@valibot/to-json-schema": "catalog:",
     "@ykdz/cli-contract": "catalog:",
+    "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/template-content": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",

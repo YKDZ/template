@@ -6,7 +6,6 @@
     "dist",
     "assets",
     "scripts",
-    "publication-setup",
     "resources"
   ],
   "type": "module",

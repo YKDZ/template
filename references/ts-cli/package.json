@@ -15,11 +15,6 @@
       "types": "./template-dist/definition.d.ts",
       "default": "./template-dist/definition.js"
     },
-    "./creation-input": {
-      "source": "./template/authoring/creation-input.ts",
-      "types": "./template-dist/authoring/creation-input.d.ts",
-      "default": "./template-dist/authoring/creation-input.js"
-    },
     "./command-identity": {
       "source": "./src/publication/cli-command-identity.ts",
       "types": "./dist/publication/cli-command-identity.d.ts",
@@ -38,7 +33,8 @@
     "prepack": "pnpm exec turbo run build --filter=.",
     "test": "node --conditions=source --test --test-reporter=spec 'test/unit/**/*.test.ts' 'test/integration/**/*.test.ts'",
     "test:e2e": "node --conditions=source --test --test-timeout=180000 --test-reporter=spec 'test/e2e/run-journeys.test.ts'",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "publication:consume": "node scripts/publication-consumer.ts"
   },
   "dependencies": {
     "@valibot/to-json-schema": "catalog:",
@@ -47,6 +43,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-tooling-config": "link:../tooling-config",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",

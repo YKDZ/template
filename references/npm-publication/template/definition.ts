@@ -48,3 +48,12 @@ export const referencePackage = defineReferencePackage({
     },
   },
 });
+
+export { projectPublicationWorkspace } from "./workspace.ts";
+
+export {
+  normalizePublicationConfiguration,
+  publicationTargetDependencies,
+  projectPublicationTarget,
+  isPublicationEnabled,
+} from "./target.ts";
