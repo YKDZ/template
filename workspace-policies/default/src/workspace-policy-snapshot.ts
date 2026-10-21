@@ -27,8 +27,6 @@ export const dependencyCatalogSnapshot: Readonly<Record<string, string>> = {
   "@types/semver": "^7.7.1",
   "smol-toml": "^1.8.0",
   "toml-eslint-parser": "^1.0.3",
-  "spdx-expression-parse": "^5.0.0",
-  "@types/spdx-expression-parse": "^4.0.0",
   pinia: "^4.0.2",
   playwright: "1.64.0",
   srvx: "^1.0.0",
