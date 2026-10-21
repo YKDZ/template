@@ -1,5 +1,8 @@
 # One-time npm publication setup
 
+本目录不纳入 Git 跟踪。后续发布流程见同目录的
+[RELEASING.md](./RELEASING.md)；首次发布配置完成后，可统一删除本目录。
+
 Run `./scripts/npm-publication-setup/setup.sh` from the generated repository
 root. It is a one-time, direct setup interface with nine English line-oriented
 stages:

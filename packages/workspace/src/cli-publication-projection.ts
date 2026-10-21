@@ -1,6 +1,9 @@
 import path from "node:path";
 
-import type { RenderOperation } from "@ykdz/template-core/renderer";
+import type {
+  RenderOperation,
+  WriteTextFromFragmentsOperation,
+} from "@ykdz/template-core/renderer";
 import type { GeneratorPackageState } from "@ykdz/template-core/workspace-strategy";
 import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 
@@ -25,9 +28,10 @@ const cliPublicationFiles = [
   "publication/publish.ts",
   "publication/readiness.ts",
   "publication/release.ts",
-  "publication/RELEASING.md",
+  "resources/cli-publication/gitignore",
   "resources/cli-publication/release.yml",
   "publication-setup/README.md",
+  "publication-setup/RELEASING.md",
   "publication-setup/assets/CHANGELOG.md.template",
   "publication-setup/assets/LICENSE-APACHE-2.0.txt",
   "publication-setup/assets/LICENSE-MIT.txt",
@@ -44,6 +48,7 @@ export function prepareCliPublicationResources(): PreparedWorkspaceResources {
 export type CliPublicationProjection = {
   readonly candidate: PackageContribution | undefined;
   readonly operations: readonly RenderOperation[];
+  readonly gitignoreFragments: WriteTextFromFragmentsOperation["fragments"];
   readonly imports: Readonly<Record<string, string>> | undefined;
   readonly scriptInsertions: readonly WorkspaceRootInsertion[];
   readonly dependencyInsertions: readonly WorkspaceRootInsertion[];
@@ -121,12 +126,7 @@ function publicationOperations(
   return [
     copy("assets/.pnpmfile.mjs", ".pnpmfile.mjs"),
     ...cliPublicationFiles
-      .filter(
-        (file) =>
-          file.startsWith("publication/") &&
-          file !== "publication/RELEASING.md" &&
-          file !== "resources/cli-publication/release.yml",
-      )
+      .filter((file) => file.startsWith("publication/"))
       .map((file) =>
         copy(
           file,
@@ -144,7 +144,6 @@ function publicationOperations(
           ),
         ),
       ),
-    copy("publication/RELEASING.md", "RELEASING.md"),
     {
       kind: "writeJson",
       to: "scripts/npm-publication/publication.config.json",
@@ -187,6 +186,7 @@ export function projectCliPublication(options: {
     return {
       candidate: undefined,
       operations: [],
+      gitignoreFragments: [],
       imports: undefined,
       scriptInsertions: [],
       dependencyInsertions: [],
@@ -197,6 +197,14 @@ export function projectCliPublication(options: {
   return {
     candidate: selected.contribution,
     operations: publicationOperations(selected, options.resources),
+    gitignoreFragments: [
+      copyPreparedWorkspaceResource(
+        options.resources,
+        "resources/cli-publication/gitignore",
+        ".gitignore",
+        cliPublicationOwner,
+      ),
+    ],
     imports: { "#npm-publication/*": "./scripts/npm-publication/*.ts" },
     scriptInsertions: [
       {

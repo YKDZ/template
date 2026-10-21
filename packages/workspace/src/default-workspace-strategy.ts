@@ -12,7 +12,10 @@ import type {
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
 import type { ProjectProjectionReconciliation } from "@ykdz/template-core/project-projection";
-import type { RenderOperation } from "@ykdz/template-core/renderer";
+import type {
+  CopyFileOperation,
+  RenderOperation,
+} from "@ykdz/template-core/renderer";
 import type {
   GeneratorContent,
   GeneratorPackageState,
@@ -368,7 +371,7 @@ function workspaceResource(
   resources: PreparedWorkspaceResources,
   from: string,
   to: string,
-): RenderOperation {
+): CopyFileOperation {
   return copyPreparedWorkspaceResource(
     resources,
     `assets/${from}`,
@@ -1150,10 +1153,21 @@ function projectOperations(options: {
     { path: ".template/environment-needs.json", driver: "canonical" },
     { path: ".template/generation.json", driver: "canonical" },
   ];
+  const gitignore = workspaceResource(
+    prepared.workspaceFiles,
+    "gitignore",
+    ".gitignore",
+  );
   const defaultOperations: RenderOperation[] = [
     rootProjection.manifest,
     rootProjection.workspace,
-    workspaceResource(prepared.workspaceFiles, "gitignore", ".gitignore"),
+    cliPublication.gitignoreFragments.length === 0
+      ? gitignore
+      : {
+          kind: "writeTextFromFragments",
+          to: ".gitignore",
+          fragments: [gitignore, ...cliPublication.gitignoreFragments],
+        },
     workspaceResource(
       prepared.workspaceFiles,
       "agent-instructions.md",
