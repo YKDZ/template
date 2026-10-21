@@ -2,15 +2,26 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { SemVer } from "semver";
 
-import { publicationPackagePath } from "./configuration.ts";
 import { fail, PublicationFailure } from "./failure.ts";
-import { recordNpmPublicationAttempt } from "./publication.ts";
+import {
+  recordNpmPublicationAttempt,
+  recordNpmPublicationReady,
+} from "./publication.ts";
 import {
   readAcceptedRemoteArtifact,
   type RemoteCommandRunner,
@@ -24,6 +35,7 @@ const publishWaitTimeout = "120000";
 
 export type DirectPublicationOptions = {
   readonly repositoryRoot: string;
+  readonly packageRoot: string;
   readonly artifactDirectory: string;
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly credentialMode?: "oidc" | "interactive";
@@ -57,6 +69,7 @@ export function assertNoAmbientCredentials(
 
 type LockedSemver = {
   readonly valid: (value: string) => string | null;
+  readonly validRange: (value: string) => string | null;
   readonly parse: (value: string) => SemVer | null;
   readonly gt: (left: string, right: string) => boolean;
   readonly prerelease: (value: string) => readonly unknown[] | null;
@@ -225,8 +238,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function validateDistTag(value: string): boolean {
-  return /^[a-z0-9][a-z0-9._-]*$/u.test(value) && value !== "latest";
+function validateDistTag(value: string, semver: LockedSemver): boolean {
+  return (
+    value.length > 0 &&
+    encodeURIComponent(value) === value &&
+    semver.validRange(value) === null &&
+    value !== "latest"
+  );
+}
+
+/** 首发向导复用发布入口的原生 npm dist-tag 语义。 */
+export async function isValidPublicationDistTag(
+  value: string,
+): Promise<boolean> {
+  return validateDistTag(value, await loadLockedSemver());
 }
 
 function targetDistTag(options: {
@@ -237,7 +262,7 @@ function targetDistTag(options: {
   const prerelease = options.semver.prerelease(options.version) !== null;
   const tag = options.requested?.trim() ?? "";
   if (prerelease) {
-    if (!validateDistTag(tag)) {
+    if (!validateDistTag(tag, options.semver)) {
       fail(
         "prerelease-dist-tag-required",
         "prerelease publication requires an explicit non-latest dist-tag",
@@ -246,7 +271,7 @@ function targetDistTag(options: {
     return tag;
   }
   if (tag.length === 0 || tag === "latest") return "latest";
-  if (!validateDistTag(tag)) {
+  if (!validateDistTag(tag, options.semver)) {
     fail("dist-tag-invalid", "requested npm dist-tag is invalid");
   }
   return tag;
@@ -269,6 +294,305 @@ function workflowContext(
       "release-context-invalid",
       "remote publication must use the original default-branch workflow_dispatch commit",
     );
+  }
+}
+
+function workflowAttemptMatches(
+  environment: Readonly<Record<string, string | undefined>>,
+  attempt:
+    | {
+        readonly workflowRunId?: string;
+        readonly workflowRunAttempt?: number;
+      }
+    | undefined,
+): boolean {
+  return (
+    attempt?.workflowRunId !== undefined &&
+    attempt.workflowRunId === environment.GITHUB_RUN_ID &&
+    String(attempt.workflowRunAttempt) === environment.GITHUB_RUN_ATTEMPT
+  );
+}
+
+function workflowAttemptIdentity(
+  environment: Readonly<Record<string, string | undefined>>,
+): { readonly runId: string; readonly runAttempt: number } {
+  const runId = environment.GITHUB_RUN_ID;
+  const rawAttempt = environment.GITHUB_RUN_ATTEMPT;
+  const runAttempt = Number(rawAttempt);
+  if (
+    environment.GITHUB_ACTIONS !== "true" ||
+    runId === undefined ||
+    !/^\d+$/u.test(runId) ||
+    rawAttempt === undefined ||
+    !/^\d+$/u.test(rawAttempt) ||
+    !Number.isSafeInteger(runAttempt) ||
+    runAttempt < 1
+  ) {
+    fail(
+      "release-context-invalid",
+      "必须提供当前 GitHub 工作流的运行编号和尝试编号",
+    );
+  }
+  return { runId, runAttempt };
+}
+
+type PublicationAttemptOptions = Pick<
+  DirectPublicationOptions,
+  | "repositoryRoot"
+  | "packageRoot"
+  | "artifactDirectory"
+  | "environment"
+  | "distTag"
+  | "run"
+>;
+
+/** 在远端写入之前，把首次 Actions 尝试写入待上传的同一份原件回执。 */
+export async function markNpmPublicationAttempt(
+  options: PublicationAttemptOptions,
+): Promise<void> {
+  const identity = workflowAttemptIdentity(options.environment);
+  const runner = options.run ?? defaultRun;
+  const artifact = await readAcceptedRemoteArtifact({
+    repositoryRoot: options.repositoryRoot,
+    packageRoot: path.resolve(options.packageRoot),
+    artifactDirectory: options.artifactDirectory,
+    ...(options.environment.GITHUB_REPOSITORY === undefined
+      ? {}
+      : { githubRepository: options.environment.GITHUB_REPOSITORY }),
+    environment: options.environment,
+    run: runner,
+  });
+  workflowContext(options.environment, artifact);
+  const semver = await loadLockedSemver();
+  const canonicalVersion = semver.valid(artifact.artifactVersion);
+  if (canonicalVersion !== artifact.artifactVersion) {
+    fail("artifact-version-invalid", "packed version is not canonical semver");
+  }
+  const distTag = targetDistTag({
+    version: artifact.artifactVersion,
+    requested: options.distTag ?? options.environment.PUBLICATION_DIST_TAG,
+    semver,
+  });
+  await recordNpmPublicationAttempt({
+    packageRoot: path.resolve(options.packageRoot),
+    artifactDirectory: options.artifactDirectory,
+    distTag,
+    workflowRunId: identity.runId,
+    workflowRunAttempt: identity.runAttempt,
+  });
+}
+
+async function findReceiptFiles(directory: string): Promise<string[]> {
+  const files: string[] = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isFile() && entry.name === "publication-preparation.json") {
+      files.push(entryPath);
+    }
+    if (entry.isDirectory()) {
+      files.push(...(await findReceiptFiles(entryPath)));
+    }
+  }
+  return files;
+}
+
+/** 从同一 Actions run 的 marker artifact 恢复上次已经持久化的尝试事实。 */
+export async function restoreNpmPublicationAttempt(options: {
+  readonly repositoryRoot: string;
+  readonly packageRoot: string;
+  readonly artifactDirectory: string;
+  readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly run?: RemoteCommandRunner;
+}): Promise<boolean> {
+  const identity = workflowAttemptIdentity(options.environment);
+  const runner = options.run ?? defaultRun;
+  const accepted = await readAcceptedRemoteArtifact({
+    repositoryRoot: options.repositoryRoot,
+    packageRoot: path.resolve(options.packageRoot),
+    artifactDirectory: options.artifactDirectory,
+    ...(options.environment.GITHUB_REPOSITORY === undefined
+      ? {}
+      : { githubRepository: options.environment.GITHUB_REPOSITORY }),
+    environment: options.environment,
+    run: runner,
+  });
+  const repository =
+    options.environment.GITHUB_REPOSITORY ?? accepted.repository;
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository)) {
+    fail("release-context-invalid", "GitHub 仓库标识无效");
+  }
+  const markerName = `npm-publication-attempt-${identity.runId}`;
+  const env: NodeJS.ProcessEnv = { ...process.env, ...options.environment };
+  const listed = await runner(
+    "gh",
+    [
+      "api",
+      `repos/${repository}/actions/runs/${identity.runId}/artifacts?name=${markerName}`,
+    ],
+    { cwd: options.repositoryRoot, env },
+  );
+  if (listed.exitCode !== 0) {
+    fail(
+      "publication-attempt-marker-unavailable",
+      "无法读取本次工作流的制品记录",
+    );
+  }
+  const listing = parseJson(
+    listed.stdout,
+    "publication-attempt-marker-unavailable",
+  );
+  if (!isRecord(listing) || !Array.isArray(listing.artifacts)) {
+    fail("publication-attempt-marker-unavailable", "本次工作流的制品列表无效");
+  }
+  const matches = listing.artifacts.filter(
+    (item) => isRecord(item) && item.name === markerName,
+  );
+  if (matches.length === 0) {
+    if (identity.runAttempt > 1) {
+      fail(
+        "publication-attempt-marker-unavailable",
+        "续办时缺少原工作流上传尝试标记，已停止发布",
+      );
+    }
+    return false;
+  }
+  if (
+    matches.length !== 1 ||
+    !isRecord(matches[0]) ||
+    matches[0].expired === true
+  ) {
+    fail(
+      "publication-attempt-marker-unavailable",
+      "本次工作流的上传尝试标记不唯一或已过期",
+    );
+  }
+
+  const directory = await mkdtemp(
+    path.join(tmpdir(), "npm-publication-attempt-"),
+  ).catch(() =>
+    fail(
+      "publication-attempt-marker-unavailable",
+      "无法创建上传尝试标记临时目录",
+    ),
+  );
+  try {
+    const downloaded = await runner(
+      "gh",
+      [
+        "run",
+        "download",
+        identity.runId,
+        `--name=${markerName}`,
+        `--dir=${directory}`,
+      ],
+      { cwd: options.repositoryRoot, env },
+    );
+    if (downloaded.exitCode !== 0) {
+      fail(
+        "publication-attempt-marker-unavailable",
+        "无法下载本次工作流的上传尝试标记",
+      );
+    }
+    const markerPaths = await findReceiptFiles(directory);
+    if (markerPaths.length === 0) {
+      fail(
+        "publication-attempt-marker-unavailable",
+        "上传尝试标记中缺少原件回执",
+      );
+    }
+    const markerCandidates = await Promise.all(
+      markerPaths.map(async (markerPath) =>
+        parseJson(
+          await readFile(markerPath, "utf8"),
+          "publication-attempt-marker-invalid",
+        ),
+      ),
+    );
+    const matchingMarkers = markerCandidates.filter(
+      (candidate) =>
+        isRecord(candidate) &&
+        isRecord(candidate.target) &&
+        isRecord(candidate.artifact) &&
+        candidate.sourceSha === accepted.sourceSha &&
+        candidate.target.name === accepted.packageName &&
+        candidate.target.version === accepted.packageVersion &&
+        candidate.artifact.sha512 === accepted.sha512,
+    );
+    if (matchingMarkers.length !== 1) {
+      fail(
+        "publication-attempt-marker-invalid",
+        "上传尝试标记未唯一匹配当前原件",
+      );
+    }
+    const marker = matchingMarkers[0];
+    if (!isRecord(marker)) {
+      fail("publication-attempt-marker-invalid", "上传尝试标记回执无效");
+    }
+    const target = marker.target;
+    const artifact = marker.artifact;
+    const attempt = marker.npmPublicationAttempt;
+    const acceptance = marker.acceptance;
+    if (
+      !isRecord(target) ||
+      !isRecord(artifact) ||
+      !isRecord(attempt) ||
+      !isRecord(acceptance) ||
+      marker.sourceSha !== accepted.sourceSha ||
+      target.name !== accepted.packageName ||
+      target.version !== accepted.packageVersion ||
+      artifact.path !== path.basename(accepted.artifactPath) ||
+      artifact.name !== accepted.packageName ||
+      artifact.version !== accepted.artifactVersion ||
+      artifact.sha512 !== accepted.sha512 ||
+      attempt.artifactSha512 !== accepted.sha512 ||
+      attempt.workflowRunId !== identity.runId ||
+      typeof attempt.workflowRunAttempt !== "number" ||
+      attempt.workflowRunAttempt < 1 ||
+      attempt.workflowRunAttempt >= identity.runAttempt
+    ) {
+      fail(
+        "publication-attempt-marker-invalid",
+        "上传尝试标记与当前原件或工作流尝试不匹配",
+      );
+    }
+    const receiptPath = accepted.receiptPath;
+    const temporaryPath = `${receiptPath}.${process.pid}.restore`;
+    try {
+      await writeFile(temporaryPath, `${JSON.stringify(marker, null, 2)}\n`);
+      await rename(temporaryPath, receiptPath);
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+    const restored = await readAcceptedRemoteArtifact({
+      repositoryRoot: options.repositoryRoot,
+      packageRoot: path.resolve(options.packageRoot),
+      artifactDirectory: options.artifactDirectory,
+      ...(options.environment.GITHUB_REPOSITORY === undefined
+        ? {}
+        : { githubRepository: options.environment.GITHUB_REPOSITORY }),
+      environment: options.environment,
+      run: runner,
+    });
+    if (
+      restored.npmPublicationAttempt?.workflowRunId !== identity.runId ||
+      restored.npmPublicationAttempt.workflowRunAttempt !==
+        attempt.workflowRunAttempt
+    ) {
+      fail(
+        "publication-attempt-marker-invalid",
+        "恢复后的回执与上传尝试标记不一致",
+      );
+    }
+    return true;
+  } catch (error) {
+    if (error instanceof PublicationFailure) throw error;
+    fail(
+      "publication-attempt-marker-unavailable",
+      "无法恢复本次工作流的上传尝试标记",
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 }
 
@@ -326,7 +650,7 @@ export async function runDirectOidcPublication(
   const runner = options.run ?? defaultRun;
   const artifact = await readAcceptedRemoteArtifact({
     repositoryRoot: options.repositoryRoot,
-    packageRoot: path.join(options.repositoryRoot, publicationPackagePath),
+    packageRoot: path.resolve(options.packageRoot),
     artifactDirectory: options.artifactDirectory,
     ...(options.environment.GITHUB_REPOSITORY === undefined
       ? {}
@@ -385,9 +709,21 @@ export async function runDirectOidcPublication(
         );
       }
     } else if (artifact.npmPublicationAttempt !== undefined) {
+      if (
+        !workflowAttemptMatches(
+          options.environment,
+          artifact.npmPublicationAttempt,
+        )
+      ) {
+        fail(
+          "publish-resume-ambiguous",
+          "已验收回执记录了先前上传尝试，但 npm 尚未显示该精确版本",
+        );
+      }
+    } else if (options.environment.GITHUB_ACTIONS === "true") {
       fail(
-        "publish-resume-ambiguous",
-        "the accepted receipt records an earlier upload attempt but the exact version is not visible",
+        "publication-attempt-marker-required",
+        "发布已验收 tgz 前，必须先持久化本次工作流尝试标记",
       );
     }
 
@@ -418,6 +754,18 @@ export async function runDirectOidcPublication(
         repositoryRoot: options.repositoryRoot,
         env,
         run: runner,
+      });
+      if (artifact.npmPublicationAttempt === undefined) {
+        await recordNpmPublicationAttempt({
+          packageRoot: path.resolve(options.packageRoot),
+          artifactDirectory: options.artifactDirectory,
+          distTag,
+        });
+      }
+      await recordNpmPublicationReady({
+        packageRoot: path.resolve(options.packageRoot),
+        artifactDirectory: options.artifactDirectory,
+        sha512: artifact.sha512,
       });
       return;
     }
@@ -450,11 +798,13 @@ export async function runDirectOidcPublication(
       ...common,
       ...(credentialMode === "oidc" ? ["--provenance"] : []),
     ];
-    await recordNpmPublicationAttempt({
-      packageRoot: path.join(options.repositoryRoot, publicationPackagePath),
-      artifactDirectory: options.artifactDirectory,
-      distTag,
-    });
+    if (artifact.npmPublicationAttempt === undefined) {
+      await recordNpmPublicationAttempt({
+        packageRoot: path.resolve(options.packageRoot),
+        artifactDirectory: options.artifactDirectory,
+        distTag,
+      });
+    }
     const published = await runner("pnpm", publishArguments, {
       cwd: options.repositoryRoot,
       env,
@@ -514,41 +864,14 @@ export async function runDirectOidcPublication(
         "dist-tag does not identify the accepted version",
       );
     }
+    await recordNpmPublicationReady({
+      packageRoot: path.resolve(options.packageRoot),
+      artifactDirectory: options.artifactDirectory,
+      sha512: artifact.sha512,
+    });
   } finally {
     if (sessionRoot !== undefined) {
       await rm(sessionRoot, { recursive: true, force: true });
     }
-  }
-}
-
-if (import.meta.main) {
-  try {
-    const artifactDirectory = process.env.PUBLICATION_ARTIFACT_DIRECTORY;
-    if (
-      artifactDirectory === undefined ||
-      !path.isAbsolute(artifactDirectory)
-    ) {
-      throw new PublicationFailure(
-        "artifact-unavailable",
-        "PUBLICATION_ARTIFACT_DIRECTORY must be absolute",
-      );
-    }
-    await runDirectOidcPublication({
-      repositoryRoot: process.cwd(),
-      artifactDirectory,
-      environment: process.env,
-      ...(process.env.PUBLICATION_DIST_TAG === undefined
-        ? {}
-        : { distTag: process.env.PUBLICATION_DIST_TAG }),
-    });
-  } catch (error) {
-    if (!(error instanceof PublicationFailure)) throw error;
-    console.error(`ERROR ${error.code}`);
-    console.error("Observed: publication precondition was not accepted");
-    console.error("Expected: one accepted tgz and its original source commit");
-    console.error(
-      "Next action: inspect remote state before resuming the same artifact",
-    );
-    process.exitCode = 1;
   }
 }

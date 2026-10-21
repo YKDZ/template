@@ -275,6 +275,44 @@
       "outputs": [],
       "tags": ["quality:light"]
     },
+    "//#publication:setup": {
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "tags": ["work:lifecycle"]
+    },
+    "//#publication:artifact": {
+      "cache": false,
+      "tags": ["quality:conditional"]
+    },
+    "//#publication:remote:npm": {
+      "cache": false,
+      "tags": ["work:on-demand"]
+    },
+    "//#publication:remote:release": {
+      "cache": false,
+      "tags": ["work:on-demand"]
+    },
+    "//#publication:setup:format": {
+      "inputs": ["$TURBO_DEFAULT$", "scripts/npm-publication-setup/**"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "//#publication:setup:lint": {
+      "inputs": ["$TURBO_DEFAULT$", "scripts/npm-publication-setup/**"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "//#publication:setup:typecheck": {
+      "inputs": ["$TURBO_DEFAULT$", "scripts/npm-publication-setup/**"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "//#publication:setup:test": {
+      "inputs": ["$TURBO_DEFAULT$", "scripts/npm-publication-setup/**"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
     "//#sync:workspace-policy": {
       "cache": false,
       "tags": ["work:on-demand"]
@@ -309,8 +347,7 @@
     },
     "//#test:packed-publication": {
       "cache": false,
-      "tags": ["quality:heavy"],
-      "dependsOn": ["@ykdz/template#publication:prepare"],
+      "tags": ["quality:conditional"],
       "passThroughEnv": [
         "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
         "TEMPLATE_PUBLICATION_ARTIFACT_PATH",

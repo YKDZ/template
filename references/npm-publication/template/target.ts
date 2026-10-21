@@ -63,9 +63,17 @@ export function projectPublicationTarget(options: {
       );
     scripts["publication:prepare"] =
       `node --import ${tool.name}/prepare --eval ''`;
+    scripts["publication:remote:npm"] =
+      `node --import ${tool.name}/publish-target --eval '' --`;
+    scripts["publication:remote:release"] =
+      `node --import ${tool.name}/release-target --eval '' --`;
   } else {
     delete scripts["publication:prepare"];
     delete scripts["publication:consume"];
+    delete scripts["publication:remote:npm"];
+    delete scripts["publication:remote:release"];
+    delete scripts["publication:remote:npm"];
+    delete scripts["publication:remote:release"];
   }
   return {
     ...contribution,
@@ -110,6 +118,12 @@ export function projectPublicationTarget(options: {
             tags: ["quality:conditional"],
             cache: false,
           };
+          for (const task of [
+            "publication:remote:npm",
+            "publication:remote:release",
+          ]) {
+            tasks[task] = { tags: ["work:on-demand"], cache: false };
+          }
         }
         return { ...operation, value: { ...turbo, tasks } };
       }),

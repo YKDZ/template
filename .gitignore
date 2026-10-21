@@ -19,3 +19,4 @@ test-results/
 .verified-packed-publication/
 .cli-journey-diagnostics/
 .preset-behavior-diagnostics/
+scripts/npm-publication-setup/

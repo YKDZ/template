@@ -54,7 +54,6 @@
     "oxlint-tsgolint": "catalog:",
     "semver": "catalog:",
     "smol-toml": "catalog:",
-    "spdx-expression-parse": "catalog:",
     "turbo": "catalog:",
     "typescript": "catalog:",
     "typescript-7": "catalog:"

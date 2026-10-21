@@ -1,10 +1,14 @@
-name: Publish accepted npm artifact
+name: 发布已验收的 npm 原件
 
 on:
   workflow_dispatch:
     inputs:
+      targets:
+        description: 每行填写一个 pnpm 发布目标选择器
+        required: true
+        type: string
       dist_tag:
-        description: 预发布版本必填的 npm 非 latest 渠道；稳定版默认为 latest
+        description: 预发布版本必填非 latest 渠道；稳定版默认 latest
         required: false
         type: string
 
@@ -17,129 +21,174 @@ concurrency:
 
 jobs:
   verify:
-    name: Verify and accept original artifact
+    name: 验收全部原件
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
+      actions: read
       contents: read
+    outputs:
+      accepted_artifact: ${{ steps.accepted-name.outputs.name }}
     env:
       GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       PUBLICATION_SOURCE_SHA: ${{ github.sha }}
+      PUBLICATION_REPOSITORY_ROOT: ${{ github.workspace }}
+      PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: ${{ runner.temp }}/accepted-publication
+      PUBLICATION_TARGET_FILTERS: ${{ inputs.targets }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Require a default-branch manual dispatch
+      - name: 确认默认分支手动运行
         run: |
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$GITHUB_REF" = "refs/heads/$GITHUB_DEFAULT_BRANCH"
           test -n "$PUBLICATION_SOURCE_SHA"
-      - name: Check out the original source commit
+      - name: 检出原始源码提交
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
-      - name: Set up Node.js
+      - name: 配置 Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: package.json
-      - name: Set up pnpm
+      - name: 配置 pnpm
         uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
         with:
           cache: true
-      - name: Install dependencies
+      - name: 安装依赖
         run: pnpm install --frozen-lockfile
-      - name: Run full source checks once
+      - name: 恢复本次运行已验收原件
+        id: restore-accepted
+        run: pnpm run publication:remote:restore-accepted
+      - name: 检查源码
         run: |
-          node --conditions=source scripts/task-gates.ts check
-          node --conditions=source scripts/task-gates.ts check:heavy
-      - name: Prepare and accept one original tgz
-        run: pnpm run publication:remote:artifact
+          pnpm run check
+          pnpm run check:heavy
+      - name: 整批准备并验收原件
+        if: steps.restore-accepted.outputs.restored != 'true'
+        run: pnpm run publication:artifact
         env:
-          PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: ${{ runner.temp }}/accepted-publication
-          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          PUBLICATION_SOURCE_SHA: ${{ github.sha }}
-      - name: Upload accepted original tgz and receipt
+      - name: 记录原件集合名称
+        id: accepted-name
+        run: echo "name=verified-packed-publication-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+      - name: 上传已验收原件集合
+        if: steps.restore-accepted.outputs.restored != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: verified-packed-publication-${{ github.run_id }}
-          path: |
-            ${{ runner.temp }}/accepted-publication/*.tgz
-            ${{ runner.temp }}/accepted-publication/publication-preparation.json
+          path: ${{ runner.temp }}/accepted-publication/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
   publish:
-    name: Publish accepted tgz to public npm
+    name: 按依赖顺序发布到 npm
     needs: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     environment: npm
     permissions:
+      actions: read
       contents: read
       id-token: write
+    outputs:
+      results_artifact: ${{ steps.upload-results.outcome == 'success' && steps.results-name.outputs.name || '' }}
     env:
       GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      GH_TOKEN: ${{ github.token }}
       PUBLICATION_DIST_TAG: ${{ inputs.dist_tag }}
+      PUBLICATION_REPOSITORY_ROOT: ${{ github.workspace }}
+      PUBLICATION_ACCEPTED_ARTIFACTS_FILE: ${{ runner.temp }}/accepted-publication/publication-accepted-artifacts.json
     steps:
-      - name: Check out the original source commit
+      - name: 检出原始源码提交
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
-      - name: Set up Node.js
+      - name: 配置 Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: package.json
-      - name: Set up pnpm
+      - name: 配置 pnpm
         uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
         with:
           cache: true
-      - name: Install dependencies
+      - name: 安装依赖
         run: pnpm install --frozen-lockfile
-      - name: Download accepted original tgz and receipt
+      - name: 下载已验收原件集合
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: verified-packed-publication-${{ github.run_id }}
+          name: ${{ needs.verify.outputs.accepted_artifact }}
           path: ${{ runner.temp }}/accepted-publication
-      - name: Publish the accepted original tgz with pnpm OIDC
-        run: node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/publish.ts
-        env:
-          PUBLICATION_ARTIFACT_DIRECTORY: ${{ runner.temp }}/accepted-publication
+      - name: 恢复本次运行已持久化的上传尝试
+        id: restore-attempt
+        run: pnpm run publication:remote:restore-attempt
+      - name: 在原件回执中记录首次上传尝试
+        if: steps.restore-attempt.outputs.restored != 'true'
+        run: pnpm run publication:remote:mark-attempt
+      - name: 写入前持久化上传尝试
+        if: success() && steps.restore-attempt.outputs.restored != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-publication-attempt-${{ github.run_id }}
+          path: ${{ runner.temp }}/accepted-publication/**/publication-preparation.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+      - name: 按依赖顺序发布已验收原件
+        run: pnpm run publication:remote:npm
+      - name: 记录远端结果集合名称
+        id: results-name
+        if: always()
+        run: echo "name=npm-publication-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+      - name: 保存 npm 发布结果
+        id: upload-results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-publication-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/accepted-publication/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
   release:
-    name: Create immutable GitHub Release
-    needs: publish
+    name: 并行创建独立 GitHub Release
+    needs: [verify, publish]
+    if: always() && needs.publish.outputs.results_artifact != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
+      actions: read
       contents: write
     env:
       GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       GH_TOKEN: ${{ github.token }}
+      PUBLICATION_REPOSITORY_ROOT: ${{ github.workspace }}
+      PUBLICATION_ACCEPTED_ARTIFACTS_FILE: ${{ runner.temp }}/accepted-publication/publication-accepted-artifacts.json
     steps:
-      - name: Check out the original source commit
+      - name: 检出原始源码提交
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
-      - name: Set up Node.js
+      - name: 配置 Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: package.json
-      - name: Set up pnpm
+      - name: 配置 pnpm
         uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
         with:
           cache: true
-      - name: Install dependencies
+      - name: 安装依赖
         run: pnpm install --frozen-lockfile
-      - name: Download the same accepted original tgz and receipt
+      - name: 下载 npm 发布结果和同一原件
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: verified-packed-publication-${{ github.run_id }}
+          name: ${{ needs.publish.outputs.results_artifact }}
           path: ${{ runner.temp }}/accepted-publication
-      - name: Create and verify immutable GitHub Release
-        run: node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/release.ts
-        env:
-          PUBLICATION_ARTIFACT_DIRECTORY: ${{ runner.temp }}/accepted-publication
+      - name: 为已就绪目标并行创建 Release
+        run: pnpm run publication:remote:release

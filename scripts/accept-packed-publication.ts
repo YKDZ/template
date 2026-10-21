@@ -22,7 +22,17 @@ const outputDirectory =
 const stdout: string[] = [];
 const child = spawn(
   "pnpm",
-  ["--filter=@ykdz/template", "run", "publication:accept"],
+  [
+    "exec",
+    "node",
+    "--import",
+    "@ykdz/reference-npm-publication/artifact",
+    "--eval",
+    "",
+    "--",
+    "--filter",
+    "@ykdz/template",
+  ],
   {
     cwd: process.cwd(),
     env: process.env,
@@ -56,12 +66,16 @@ if (exitCode !== 0) {
   }
   const accepted = JSON.parse(
     reportLine.slice("NPM_PUBLICATION_ACCEPTED_JSON:".length),
-  ) as AcceptedArtifact;
+  ) as { readonly artifacts: readonly AcceptedArtifact[] };
+  if (accepted.artifacts.length !== 1) {
+    throw new Error("正式整批入口未返回唯一 CLI 原件。");
+  }
+  const artifact = accepted.artifacts[0]!;
   if (outputDirectory !== undefined && outputDirectory.length > 0) {
     const directory = path.resolve(outputDirectory);
     if (
-      path.dirname(path.resolve(accepted.artifactPath)) !== directory ||
-      path.resolve(accepted.receiptPath) !==
+      path.dirname(path.resolve(artifact.artifactPath)) !== directory ||
+      path.resolve(artifact.receiptPath) !==
         path.join(directory, "publication-preparation.json")
     ) {
       throw new Error(
@@ -70,8 +84,8 @@ if (exitCode !== 0) {
     }
   }
   console.log(
-    `根任务消费同一正式原件：${accepted.packageName}@${accepted.artifactVersion}`,
+    `根任务消费同一正式原件：${artifact.packageName}@${artifact.artifactVersion}`,
   );
-  console.log(`原件：${accepted.artifactPath}`);
-  console.log(`SHA512：${accepted.sha512}`);
+  console.log(`原件：${artifact.artifactPath}`);
+  console.log(`SHA512：${artifact.sha512}`);
 }

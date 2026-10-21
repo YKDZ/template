@@ -13,11 +13,20 @@ on:
         required: false
         type: boolean
         default: false
+      publication_targets:
+        description: 每行一个 pnpm 发布目标选择器
+        required: false
+        type: string
+        default: ""
     secrets:
       TURBO_TOKEN:
         required: false
       TURBO_REMOTE_CACHE_SIGNATURE_KEY:
         required: false
+    outputs:
+      accepted_artifact:
+        description: 已验收原件集合的 artifact 名称
+        value: ${{ jobs.check.outputs.accepted_artifact }}
 
 permissions:
   contents: read
@@ -31,6 +40,11 @@ jobs:
     name: 检查源码与独立能力
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      accepted_artifact: ${{ steps.accepted-name.outputs.name }}
     env:
       TEMPLATE_FIXTURE_EVIDENCE_DIR: ${{ github.workspace }}/.fixture-evidence
       TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
@@ -43,7 +57,11 @@ jobs:
       TEMPLATE_FIXTURE_CARGO_CACHE_DIR: ${{ github.workspace }}/.fixture-native-cache/cargo
       TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR: ${{ github.workspace }}/.cli-journey-diagnostics
       TEMPLATE_BUILTIN_PRESET_DIAGNOSTICS_DIR: ${{ github.workspace }}/.preset-behavior-diagnostics
-      TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR: ${{ inputs.publish_verified_candidate && format('{0}/.verified-packed-publication', github.workspace) || '' }}
+      GH_TOKEN: ${{ github.token }}
+      PUBLICATION_REPOSITORY_ROOT: ${{ github.workspace }}
+      PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: ${{ github.workspace }}/.verified-packed-publication
+      PUBLICATION_SOURCE_SHA: ${{ github.sha }}
+      PUBLICATION_TARGET_FILTERS: ${{ inputs.publication_targets }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -59,6 +77,11 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: 恢复本次运行已验收原件
+        id: restore-accepted
+        if: inputs.publish_verified_candidate
+        run: pnpm exec node --import @ykdz/reference-npm-publication/restore-accepted --eval '' --
 
       - name: Check package
         id: package-check
@@ -239,24 +262,23 @@ jobs:
           path: .fixture-evidence
           key: fixture-verification-evidence-${{ runner.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Prepare and accept the original publication tgz
-        if: success() && inputs.publish_verified_candidate
-        run: |
-          pnpm exec turbo run publication:prepare --filter=@ykdz/template
-          pnpm --filter @ykdz/template run publication:accept
+      - name: 整批准备并验收原件
+        if: success() && inputs.publish_verified_candidate && steps.restore-accepted.outputs.restored != 'true'
+        run: pnpm exec node --import @ykdz/reference-npm-publication/artifact --eval '' --
         env:
-          PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: ${{ github.workspace }}/.verified-packed-publication
-          PUBLICATION_SOURCE_SHA: ${{ github.sha }}
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
-      - name: Upload accepted original tgz and receipt
+      - name: 记录已验收原件集合名称
+        id: accepted-name
         if: success() && inputs.publish_verified_candidate
+        run: echo "name=verified-packed-publication-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: 上传已验收原件集合
+        if: success() && inputs.publish_verified_candidate && steps.restore-accepted.outputs.restored != 'true'
         uses: actions/upload-artifact@v7
         with:
           name: verified-packed-publication-${{ github.run_id }}
-          path: |
-            .verified-packed-publication/*.tgz
-            .verified-packed-publication/publication-preparation.json
+          path: .verified-packed-publication/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
