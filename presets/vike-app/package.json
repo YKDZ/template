@@ -3,7 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "files": [
-    "template-dist"
+    "template-dist",
+    "resources",
+    "scripts"
   ],
   "type": "module",
   "exports": {
@@ -16,6 +18,9 @@
   },
   "scripts": {
     "check:author-planning-roles": "pnpm --workspace-root run author-planning-roles:workspace -- --owner-directory \"$PWD\"",
+    "database:prepare:dev": "DATABASE_PROFILE=dev pnpm --filter @ykdz/reference-vike-migrations run db:push && DATABASE_PROFILE=dev pnpm --filter @ykdz/reference-vike-db run db:seed:example",
+    "database:prepare:e2e": "DATABASE_PROFILE=e2e pnpm --filter @ykdz/reference-vike-db run db:reset && DATABASE_PROFILE=e2e pnpm --filter @ykdz/reference-vike-migrations run db:push && DATABASE_PROFILE=e2e pnpm --filter @ykdz/reference-vike-db run db:seed:example",
+    "database:prepare:test": "DATABASE_PROFILE=test pnpm --filter @ykdz/reference-vike-db run db:reset && DATABASE_PROFILE=test pnpm --filter @ykdz/reference-vike-migrations run db:push && DATABASE_PROFILE=test pnpm --filter @ykdz/reference-vike-db run db:seed:example",
     "build": "pnpm run build:template",
     "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
     "format:check": "oxfmt --list-different .",

@@ -4,6 +4,10 @@ import type { GeneratedScenarioReceipt } from "./generated-content.ts";
 
 type WorkflowOracle = {
   readonly deployment: boolean;
+  readonly checkWorkflowJob: {
+    readonly name: string;
+    readonly timeoutMinutes: number;
+  };
   readonly diagnosticOwnerPaths: Readonly<
     Record<"playwright" | "vitest-browser", readonly string[]>
   >;
@@ -93,18 +97,12 @@ function workflowOracle(receipt: GeneratedScenarioReceipt): WorkflowOracle {
     diagnosticOwnerPaths[declaration.kind].add(ownerPath.path);
   }
 
-  const deployment =
-    ownerFacts(receipt).requirements.deploymentCheck !== undefined;
-  if (
-    deployment &&
-    !ownerFacts(receipt).requirements.deploymentCheck?.environmentNeeds.some(
-      (need) => need.kind === "docker-engine",
-    )
-  ) {
-    throw new Error("Deployment Check requires a Docker Environment Need");
-  }
+  const deployment = ownerFacts(receipt).environmentNeeds.deployment.some(
+    (need) => need.kind === "docker-engine",
+  );
   return {
     deployment,
+    checkWorkflowJob: ownerFacts(receipt).checkWorkflowJob,
     diagnosticOwnerPaths: {
       playwright: [...diagnosticOwnerPaths.playwright].toSorted(),
       "vitest-browser": [...diagnosticOwnerPaths["vitest-browser"]].toSorted(),
@@ -464,10 +462,6 @@ const workflowPolicy = {
     runner: "ubuntu-latest",
     timeoutMinutes: 30,
   },
-  deploymentJob: {
-    name: "Full Check",
-    timeoutMinutes: 45,
-  },
   actions: {
     checkout: {
       name: "Checkout source",
@@ -502,6 +496,7 @@ const workflowPolicy = {
     command: "node --conditions=source scripts/task-gates.ts check",
   },
   heavyCheckStep: {
+    id: "run-heavy-check",
     name: "Run Heavy Check",
     command: "node --conditions=source scripts/task-gates.ts check:heavy",
   },
@@ -716,15 +711,9 @@ function assertGeneratedCheckWorkflowContract(
     );
   }
   if (
-    job.name !==
-      (deployment
-        ? workflowPolicy.deploymentJob.name
-        : workflowPolicy.rootJob.name) ||
+    job.name !== oracle.checkWorkflowJob.name ||
     job["runs-on"] !== workflowPolicy.rootJob.runner ||
-    job["timeout-minutes"] !==
-      (deployment
-        ? workflowPolicy.deploymentJob.timeoutMinutes
-        : workflowPolicy.rootJob.timeoutMinutes)
+    job["timeout-minutes"] !== oracle.checkWorkflowJob.timeoutMinutes
   ) {
     throw new Error(`${receipt.scenario.id}: Check job identity is not stable`);
   }
@@ -780,7 +769,8 @@ function assertGeneratedCheckWorkflowContract(
   const heavyContract = workflowPolicy.heavyCheckStep;
   if (
     !isParsedObject(heavyCheck) ||
-    !hasExactKeys(heavyCheck, ["name", "run"]) ||
+    !hasExactKeys(heavyCheck, ["id", "name", "run"]) ||
+    heavyCheck.id !== heavyContract.id ||
     !isWorkflowStepName(heavyCheck.name) ||
     heavyCheck.run !== heavyContract.command
   ) {
@@ -897,14 +887,8 @@ function dependabotOracle(
   receipt: GeneratedScenarioReceipt,
 ): readonly DependabotUpdateOracle[] {
   const policy = ownerFacts(receipt).dependencyMaintenance;
-  const hasDeployment =
-    ownerFacts(receipt).requirements.deploymentCheck !== undefined;
   const ecosystems = [
-    ...new Set([
-      "devcontainers" as const,
-      ...policy.ecosystems,
-      ...(hasDeployment ? (["docker"] as const) : []),
-    ]),
+    ...new Set(["devcontainers" as const, ...policy.ecosystems]),
   ];
   return ecosystems.flatMap((ecosystem) => {
     const declaredDirectories = [
@@ -914,7 +898,6 @@ function dependabotOracle(
           ? []
           : [policy.directories[ecosystem]!]),
         ...(policy.extraDirectories?.[ecosystem] ?? []),
-        ...(ecosystem === "docker" && hasDeployment ? (["/"] as const) : []),
       ]),
     ];
     const directories: readonly `/${string}`[] =

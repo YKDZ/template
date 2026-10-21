@@ -8,6 +8,12 @@ import type {
 } from "@ykdz/template-core/renderer";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
 
+import type {
+  CheckEnvironmentNeed,
+  DeploymentEnvironmentNeed,
+} from "./environment-needs.ts";
+import type { DependencyMaintenancePolicy } from "./project-requirements.ts";
+
 export type RootResourceOperation = Extract<
   RenderOperation,
   {
@@ -43,6 +49,17 @@ export type SharedRootContribution = {
       readonly id: string;
     })[];
   }[];
+  /** 声明根检查作业的名称和超时；同一字段只允许等价来源。 */
+  readonly ciJob?: {
+    readonly name?: string;
+    readonly timeoutMinutes?: number;
+  };
+  /** 外层拥有者声明共享环境及依赖维护需求。 */
+  readonly environmentNeeds?: {
+    readonly check?: readonly CheckEnvironmentNeed[];
+    readonly deployment?: readonly DeploymentEnvironmentNeed[];
+  };
+  readonly dependencyMaintenance?: DependencyMaintenancePolicy;
   /** 外层拥有者的完整独占资源；禁止对共享文件或真实包范围打补丁。 */
   readonly resources?: readonly {
     readonly operation: RootResourceOperation;
@@ -132,6 +149,13 @@ export function composeSharedRootFiles(options: {
       ),
     ]),
   ];
+  const ciJob = composeEntries(
+    ".github/workflows/check.yml#/jobs/check",
+    declarations.map((declaration) => ({
+      source: declaration.source,
+      values: declaration.ciJob ?? {},
+    })),
+  ) as NonNullable<SharedRootContribution["ciJob"]>;
   const owners = new Map<string, string>();
   for (const declaration of declarations) {
     for (const resource of declaration.resources ?? []) {
@@ -175,6 +199,20 @@ export function composeSharedRootFiles(options: {
         ...insertion,
         source: declaration.source,
       })),
+    ),
+    ciJob,
+    environmentNeeds: {
+      check: declarations.flatMap(
+        (declaration) => declaration.environmentNeeds?.check ?? [],
+      ),
+      deployment: declarations.flatMap(
+        (declaration) => declaration.environmentNeeds?.deployment ?? [],
+      ),
+    },
+    dependencyMaintenance: declarations.flatMap((declaration) =>
+      declaration.dependencyMaintenance === undefined
+        ? []
+        : [declaration.dependencyMaintenance],
     ),
     operations: declarations.flatMap((declaration) =>
       (declaration.resources ?? []).flatMap((resource): RenderOperation[] => [

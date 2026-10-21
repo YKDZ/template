@@ -38,8 +38,9 @@ async function renderedPresetSource(
         repositoryName: preset.alias,
       });
       const hasDeploymentCheck =
-        receipt.result.projection.ownerFacts.requirements.deploymentCheck !==
-        undefined;
+        receipt.result.projection.ownerFacts.environmentNeeds.deployment.some(
+          (need) => need.kind === "docker-engine",
+        );
       if (hasDeploymentCheck !== ownsDeploymentCheck) continue;
       return {
         receipt,

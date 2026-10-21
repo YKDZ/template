@@ -14,10 +14,7 @@ import {
   type CiDiagnosticArtifactDeclaration,
 } from "./ci-diagnostic-artifact.ts";
 import type { EditorCustomizationCapability } from "./editor-customization.ts";
-import type {
-  CheckEnvironmentNeed,
-  DeploymentEnvironmentNeed,
-} from "./environment-needs.ts";
+import type { CheckEnvironmentNeed } from "./environment-needs.ts";
 import type {
   DependencyMaintenancePolicy,
   ProjectRequirement,
@@ -32,28 +29,6 @@ export type FoundationContribution = {
   readonly vueHonoJointE2e?: {
     readonly kind: "vue-hono-joint-e2e";
     readonly apiPackageName: string;
-  };
-  readonly databasePreparation?: {
-    readonly kind: "sqlite-database-preparation";
-    readonly migrationPackageName: string;
-    readonly consumers: readonly {
-      readonly kind: "application-dev" | "database-test" | "application-e2e";
-      readonly packageName: string;
-    }[];
-  };
-  /** 由 Foundation 投影的封闭式仓库部署能力。 */
-  readonly deploymentCheck?: {
-    readonly kind: "application-container-with-database-migrations";
-    readonly applicationPackageName: string;
-    readonly databasePackageName: string;
-    readonly migrationPackageName: string;
-    readonly environmentNeeds: readonly DeploymentEnvironmentNeed[];
-    readonly sources: {
-      readonly checker: FoundationTemplateAssetSource;
-      readonly controlScript: FoundationTemplateAssetSource;
-      readonly dockerfile: FoundationTemplateAssetSource;
-      readonly dockerIgnore: FoundationTemplateAssetSource;
-    };
   };
   /** 仅由协同根策略消费的封闭式发布能力。 */
   readonly npmPublication?: {

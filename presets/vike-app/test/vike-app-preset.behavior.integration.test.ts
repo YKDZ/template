@@ -37,8 +37,8 @@ assert.ok(preset);
 
 void describe("Vike 应用公开预设安装行为", () => {
   void it(
-    "在真实初始化、安装与构建后解析数据库默认和 source 导出",
-    { timeout: 300_000 },
+    "在真实生成仓库中准备数据、验收部署并解析数据库导出",
+    { timeout: 600_000 },
     async (testContext) => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-vike-db-export-integration-"),
@@ -66,6 +66,16 @@ void describe("Vike 应用公开预设安装行为", () => {
       );
 
       await execa("pnpm", ["install"], {
+        cwd: targetRoot,
+        cancelSignal: testContext.signal,
+      });
+      for (const profile of ["dev", "test", "e2e"] as const) {
+        await execa("pnpm", ["run", `database:prepare:${profile}`], {
+          cwd: targetRoot,
+          cancelSignal: testContext.signal,
+        });
+      }
+      await execa("pnpm", ["run", "deployment"], {
         cwd: targetRoot,
         cancelSignal: testContext.signal,
       });

@@ -28,27 +28,6 @@
     "//#check:heavy": {
       "tags": ["quality:entry"]
     },
-    "//#database:prepare:dev": {
-      "cache": false,
-      "tags": ["work:preparation"]
-    },
-    "//#database:prepare:e2e": {
-      "cache": false,
-      "tags": ["work:preparation"]
-    },
-    "//#database:prepare:test": {
-      "cache": false,
-      "tags": ["work:preparation"]
-    },
-    "//#deployment": {
-      "cache": false,
-      "dependsOn": [
-        "@ykdz/reference-vike-web#build",
-        "@ykdz/reference-vike-db#build",
-        "@ykdz/reference-vike-migrations#build"
-      ],
-      "tags": ["quality:heavy"]
-    },
     "//#dev": {
       "tags": ["work:development"]
     },
