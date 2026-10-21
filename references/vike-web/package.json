@@ -42,7 +42,7 @@
     "test": "vitest run --project=node --reporter=agent --silent=passed-only --passWithNoTests",
     "test:browser": "vitest run --project=browser --reporter=agent --silent=passed-only",
     "test:e2e": "DATABASE_PROFILE=e2e playwright test",
-    "typecheck": "node --conditions=source scripts/run-vue-tsc.ts --build --noEmit --pretty false",
+    "typecheck": "vue-tsc --build --noEmit --pretty false",
     "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
     "typecheck:template": "tsc -p tsconfig.template.json --noEmit --pretty false"
   },
@@ -77,7 +77,8 @@
     "typescript-7": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:",
-    "vitest-browser-vue": "catalog:"
+    "vitest-browser-vue": "catalog:",
+    "vue-tsc": "catalog:"
   },
   "engines": {
     "node": "24"
