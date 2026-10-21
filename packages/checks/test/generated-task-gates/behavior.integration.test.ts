@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
+import { projectPublicationWorkspace } from "@ykdz/reference-npm-publication/template";
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import { templateContent, templatePresets } from "@ykdz/template-content";
 import { createGenerator } from "@ykdz/template-generator";
@@ -24,17 +25,10 @@ function presetFor(packageName: string) {
 }
 
 function generator() {
-  const publicationReference = templateContent.find(
-    (member) =>
-      member.kind === "reference" &&
-      member.identity.packageName === "@ykdz/reference-npm-publication" &&
-      member.identity.exportPath === "./template",
-  );
-  assert.ok(publicationReference?.kind === "reference");
   return createGenerator({
     content: templateContent,
     strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>({
-      cliPublicationReference: publicationReference.definition,
+      project: projectPublicationWorkspace,
     }),
   });
 }

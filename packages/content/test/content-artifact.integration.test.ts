@@ -39,14 +39,6 @@ import { execa } from "execa";
 import { createAuthoredContentFixture } from "../test-support/authored-content-fixture.ts";
 
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
-const cliPublicationReference = templateContent.find(
-  (member) =>
-    member.kind === "reference" &&
-    member.identity.packageName === "@ykdz/reference-npm-publication",
-);
-if (cliPublicationReference?.kind !== "reference") {
-  throw new Error("内容集合缺少 npm 发布参考包");
-}
 const temporaryRoots: string[] = [];
 const preparedCollections: PreparedContentCollection[] = [];
 const authoredFixtures: Awaited<
@@ -368,7 +360,7 @@ void describe("原生内容制品安装链", () => {
       },
       content: templateContent,
       roots: [preset],
-      strategy: createDefaultWorkspaceStrategy(),
+
       workspaceRoot,
       root: buildRoot,
     });
@@ -379,6 +371,7 @@ void describe("原生内容制品安装链", () => {
       prepared.members.map((member) => member.identity.packageName).sort(),
       [
         "@ykdz/preset-ts-lib",
+        "@ykdz/reference-npm-publication",
         "@ykdz/reference-ts-lib",
         "@ykdz/reference-tooling-config",
       ].sort(),
@@ -747,13 +740,8 @@ void describe("原生内容制品安装链", () => {
           exportName: "defineReferencePackage",
         },
         content: templateContent,
-        roots:
-          preset.alias === "ts-cli"
-            ? [preset, cliPublicationReference]
-            : [preset],
-        strategy: createDefaultWorkspaceStrategy({
-          cliPublicationReference: cliPublicationReference.definition,
-        }),
+        roots: [preset],
+
         workspaceRoot,
         root: await temporaryRoot(`preset-${preset.alias}-`),
         sdkArchives,
@@ -816,13 +804,11 @@ void describe("原生内容制品安装链", () => {
           'import { createGenerator } from "@ykdz/template-generator";',
           'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
           'import { templateContent } from "@ykdz/template-content";',
-          'const cliPublicationReference = templateContent.find((member) => member.kind === "reference" && member.identity.packageName === "@ykdz/reference-npm-publication");',
-          'const strategy = createDefaultWorkspaceStrategy({ cliPublicationReference: cliPublicationReference?.kind === "reference" ? cliPublicationReference.definition : undefined });',
+          "const strategy = createDefaultWorkspaceStrategy();",
           'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
           'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
           'const preset = templateContent.find((member) => member.kind === "preset" && member.alias === process.argv[4]);',
           "assert.ok(preset);",
-          'if (preset.alias === "ts-cli") assert.equal(cliPublicationReference?.kind, "reference");',
           "const generator = createGenerator({ content: templateContent, strategy });",
           "const initialized = await generator.init({ targetRoot: process.argv[2], selection: { roots: [{ preset: preset.identity }] }, strategyInput: { repositoryName: `installed-${preset.alias}`, defaultPackageScope: `installed-${preset.alias}`, todo: false } });",
           'assert.equal(initialized.status, "success", JSON.stringify(initialized));',
@@ -975,7 +961,7 @@ void describe("原生内容制品安装链", () => {
           },
           content: templateContent,
           roots: [preset, replayMember],
-          strategy: createDefaultWorkspaceStrategy(),
+
           workspaceRoot,
           packageName: `@fixture/replay-${preset.alias}`,
           collectionVersion: prepared.collection.version,
@@ -1047,8 +1033,7 @@ void describe("原生内容制品安装链", () => {
           'import { createGenerator } from "@ykdz/template-generator";',
           'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
           `import { templateContent } from "${replayPrepared.collection.name}";`,
-          'const cliPublicationReference = templateContent.find((candidate) => candidate.kind === "reference" && candidate.identity.packageName === "@ykdz/reference-npm-publication");',
-          'const strategy = createDefaultWorkspaceStrategy({ cliPublicationReference: cliPublicationReference?.kind === "reference" ? cliPublicationReference.definition : undefined });',
+          "const strategy = createDefaultWorkspaceStrategy();",
           "const targetRoot = process.argv[2];",
           'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
           'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
@@ -1351,6 +1336,8 @@ void describe("原生内容制品安装链", () => {
     const entries = references.map((member) => {
       const dependencies = strategy.dependencies({
         content: member,
+        configuration:
+          member.definition.normalizeConfiguration?.(undefined) ?? null,
         contentByIdentity,
       });
       return {
@@ -1388,7 +1375,12 @@ void describe("原生内容制品安装链", () => {
     );
     assert.ok(
       strategy
-        .dependencies({ content: vueHonoWeb, contentByIdentity })
+        .dependencies({
+          content: vueHonoWeb,
+          contentByIdentity,
+          configuration:
+            vueHonoWeb.definition.normalizeConfiguration?.(undefined) ?? null,
+        })
         .some(
           (identity) =>
             contentIdentityKey(identity) ===
@@ -1398,7 +1390,12 @@ void describe("原生内容制品安装链", () => {
     );
     assert.ok(
       strategy
-        .dependencies({ content: vikeWeb, contentByIdentity })
+        .dependencies({
+          content: vikeWeb,
+          contentByIdentity,
+          configuration:
+            vikeWeb.definition.normalizeConfiguration?.(undefined) ?? null,
+        })
         .some(
           (identity) =>
             contentIdentityKey(identity) ===
@@ -1408,7 +1405,13 @@ void describe("原生内容制品安装链", () => {
     );
     assert.ok(
       strategy
-        .dependencies({ content: vikeMigrations, contentByIdentity })
+        .dependencies({
+          content: vikeMigrations,
+          contentByIdentity,
+          configuration:
+            vikeMigrations.definition.normalizeConfiguration?.(undefined) ??
+            null,
+        })
         .some(
           (identity) =>
             contentIdentityKey(identity) ===
@@ -1424,7 +1427,6 @@ void describe("原生内容制品安装链", () => {
       },
       content: templateContent,
       roots: references,
-      strategy,
       workspaceRoot,
       root: await temporaryRoot("reference-content-"),
       sdkArchives: firstPartyPrepared.sdkPackages,
@@ -1576,7 +1578,7 @@ void describe("原生内容制品安装链", () => {
         '  if (initialized.status !== "success") process.exit(2);',
         "  const entryRecord = initialized.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(entry.identity));",
         "  assert.ok(entryRecord, `generation record missing ${entry.identity.packageName}`);",
-        "  for (const dependencyIdentity of createDefaultWorkspaceStrategy().dependencies({ content: contentByIdentity.get(contentIdentityKey(entry.identity)), contentByIdentity })) {",
+        "  for (const dependencyIdentity of createDefaultWorkspaceStrategy().dependencies({ content: contentByIdentity.get(contentIdentityKey(entry.identity)), contentByIdentity, configuration: contentByIdentity.get(contentIdentityKey(entry.identity)).definition.normalizeConfiguration?.(undefined) ?? null })) {",
         "    const providerRecord = initialized.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(dependencyIdentity));",
         "    assert.ok(providerRecord, `binding provider missing ${dependencyIdentity.packageName}`);",
         "    assert.equal(entryRecord.bindings[contentIdentityKey(dependencyIdentity)], providerRecord.packageDefinitionId, `invalid binding ${entry.identity.packageName} -> ${dependencyIdentity.packageName}`);",
@@ -1942,7 +1944,7 @@ void describe("原生内容制品安装链", () => {
       },
       content: content as unknown as typeof templateContent,
       roots: [preset, addon] as unknown as typeof templateContent,
-      strategy: createDefaultWorkspaceStrategy(),
+
       workspaceRoot,
       packageName: "@fixture/authored-content",
       collectionVersion: collectionManifest.version,
@@ -2660,7 +2662,7 @@ void describe("原生内容制品安装链", () => {
       },
       content: members as unknown as typeof templateContent,
       roots: features as unknown as typeof templateContent,
-      strategy: createDefaultWorkspaceStrategy(),
+
       workspaceRoot,
       packageName: "@fixture/multi-source-content",
       collectionVersion: "1.0.0",

@@ -91,7 +91,6 @@ void it("任意内容集合仅携带显式执行闭包并交付未被初始化�
     prepared = await prepareContentCollection({
       content: [member],
       roots: [member],
-      strategy: { dependencies: () => [] },
       workspaceRoot,
       root: path.join(root, "prepared"),
       packageName: "@fixture/neutral-collection",

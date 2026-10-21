@@ -1,3 +1,4 @@
+import { projectPublicationWorkspace } from "@ykdz/reference-npm-publication/template";
 import { templateContent } from "@ykdz/template-content";
 import { resolveTemplateSource } from "@ykdz/template-core/renderer";
 import { createGenerator } from "@ykdz/template-generator";
@@ -14,6 +15,7 @@ export const sourceGeneratedScenarioRuntime: GeneratedScenarioRuntime = {
   content: templateContent,
   createGenerator,
   createDefaultWorkspaceStrategy,
+  projectPublicationWorkspace,
   resolveTemplateSource,
   canConsumeNodePackageNameImportForRole,
   canProvideSourceConditionPackageNameImportForRole,

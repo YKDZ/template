@@ -146,7 +146,7 @@ void describe("template CLI command control", () => {
     assert.equal(output.stderr(), "");
   });
 
-  void it("公开 CLI 候选完整序列化 schema3 生成记录", async () => {
+  void it("显式发布 CLI 完整序列化 schema4 现行配置", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-cli-generation-record-"),
     );
@@ -161,6 +161,7 @@ void describe("template CLI command control", () => {
         "demo",
         "--preset",
         cliPreset.definition.metadata.alias,
+        "--publication",
         "--scope",
         "acme",
       ]);
@@ -189,6 +190,7 @@ void describe("template CLI command control", () => {
               readonly packageDefinitionId: string;
               readonly createdBy: string;
               readonly creationInput: unknown;
+              readonly configuration: unknown;
               readonly bindings: Readonly<Record<string, string>>;
             }[];
             readonly nodeInstances: Readonly<Record<string, string>>;
@@ -211,7 +213,7 @@ void describe("template CLI command control", () => {
         ),
       );
       assert.deepEqual(generationRecord, persistedRecord);
-      assert.equal(generationRecord.schemaVersion, 3);
+      assert.equal(generationRecord.schemaVersion, 4);
       assert.equal(generationRecord.strategyIdentity, "default");
       assert.equal(generationRecord.strategyState.repositoryName, "demo");
       assert.equal(generationRecord.strategyState.defaultPackageScope, "acme");
@@ -240,7 +242,8 @@ void describe("template CLI command control", () => {
       );
       assert.ok(candidateRecord);
       assert.equal(candidateRecord.createdBy, "initialization");
-      assert.ok(candidateRecord.creationInput !== null);
+      assert.equal(candidateRecord.creationInput, null);
+      assert.deepEqual(candidateRecord.configuration, { publication: true });
       assert.ok(Object.keys(candidateRecord.bindings).length > 0);
       assert.ok(
         Object.values(candidateRecord.bindings).every((packageId) =>
@@ -249,21 +252,6 @@ void describe("template CLI command control", () => {
           ),
         ),
       );
-
-      const publicationConfig = JSON.parse(
-        await readFile(
-          path.join(
-            workspace,
-            "demo/scripts/npm-publication/publication.config.json",
-          ),
-          "utf8",
-        ),
-      );
-      assert.deepEqual(publicationConfig, {
-        packagePath: "packages/cli",
-        packageDefinitionId: candidateRecord.packageDefinitionId,
-        creationInput: candidateRecord.creationInput,
-      });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

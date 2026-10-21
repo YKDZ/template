@@ -935,7 +935,7 @@ const journey: CliJourney = {
       const generationRecord = JSON.parse(
         await readFile(path.join(project, ".template/generation.json"), "utf8"),
       );
-      assert.equal(generationRecord.schemaVersion, 3);
+      assert.equal(generationRecord.schemaVersion, 4);
       assert.ok(
         generationRecord.packages.some(
           (record: { readonly packageDefinitionId: string }) =>

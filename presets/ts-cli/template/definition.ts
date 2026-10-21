@@ -1,8 +1,4 @@
-import {
-  referencePackage,
-  tsCliPublicCandidateCreationInput,
-  type TsCliCreationInput,
-} from "@ykdz/reference-ts-cli/template";
+import { referencePackage } from "@ykdz/reference-ts-cli/template";
 import {
   definePreset,
   presetOwnerFromManifest,
@@ -23,10 +19,6 @@ export const preset = defineNativeContentArtifact(
     nodes: {
       cli: {
         reference: referencePackage,
-        creationInput: {
-          init: tsCliPublicCandidateCreationInput,
-          add: { variant: "private" } satisfies TsCliCreationInput,
-        },
       },
     },
   }),
