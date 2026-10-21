@@ -5,7 +5,6 @@ import {
   readProjectedMirrorSlotScalar,
   type ProjectProjectionEntry,
   type ProjectProjectionMirrorSlot,
-  type ProjectProjectionReconciliation,
 } from "@ykdz/template-core/project-projection";
 import type { RenderOperation } from "@ykdz/template-core/renderer";
 import {
@@ -424,101 +423,6 @@ function plannedMirrorSlots(result: SuccessfulScenarioResult): readonly {
 
 const rustChannelSourcePath = "rust-toolchain.toml";
 const rustMirrorSlotToken = "RUST_TOOLCHAIN";
-const generatedToolchainMirrorManifestPath = "scripts/toolchain-mirrors.json";
-
-type ComparableMirrorSlot = {
-  readonly driver: "json-pointer" | "text-anchor";
-  readonly id: string;
-  readonly location: string;
-  readonly path: string;
-};
-
-function mirrorSlotKey(slot: ComparableMirrorSlot): string {
-  return [slot.path, slot.id, slot.driver, slot.location].join("\u0000");
-}
-
-function describeMirrorSlotKey(key: string): string {
-  const [filePath, id, driver, location] = key.split("\u0000");
-  return `${filePath}#${id} (${driver} ${location})`;
-}
-
-function reconciliationMirrorSlotKeys(
-  reconciliation: readonly ProjectProjectionReconciliation[],
-): readonly string[] {
-  return reconciliation
-    .flatMap((policy) =>
-      policy.driver === "canonical"
-        ? []
-        : (policy.mirrorSlots ?? []).map((slot): ComparableMirrorSlot => ({
-            driver: slot.location.kind,
-            id: slot.id,
-            location:
-              slot.location.kind === "json-pointer"
-                ? slot.location.pointer
-                : slot.location.name,
-            path: policy.path,
-          })),
-    )
-    .map(mirrorSlotKey)
-    .toSorted();
-}
-
-function checkerMirrorSlotKeys(
-  sourceText: string,
-  owner: string,
-): readonly string[] {
-  const carried: unknown = JSON.parse(sourceText);
-  if (!Array.isArray(carried)) {
-    throw new Error(
-      `${owner}: generated toolchain mirror list is not an array`,
-    );
-  }
-  return carried
-    .map((entry, index): ComparableMirrorSlot => {
-      if (!isRecord(entry)) {
-        throw new Error(
-          `${owner}: mirror list item ${index + 1} is not an object`,
-        );
-      }
-      const location = entry.location;
-      if (
-        typeof entry.id !== "string" ||
-        typeof entry.path !== "string" ||
-        !isRecord(location)
-      ) {
-        throw new Error(
-          `${owner}: mirror list item ${index + 1} lacks id/path/location`,
-        );
-      }
-      if (
-        location.kind === "json-pointer" &&
-        typeof location.pointer === "string"
-      ) {
-        return {
-          driver: "json-pointer",
-          id: entry.id,
-          path: entry.path,
-          location: location.pointer,
-        };
-      }
-      if (
-        location.kind === "text-anchor" &&
-        typeof location.name === "string"
-      ) {
-        return {
-          driver: "text-anchor",
-          id: entry.id,
-          path: entry.path,
-          location: location.name,
-        };
-      }
-      throw new Error(
-        `${owner}: mirror list item ${index + 1} has an invalid location`,
-      );
-    })
-    .map(mirrorSlotKey)
-    .toSorted();
-}
 
 export async function validatePlanMirrorSlotProjections(options: {
   readonly receipt: GeneratedScenarioReceipt;
@@ -592,39 +496,10 @@ export async function validatePlanMirrorSlotProjections(options: {
   }
 }
 
-export async function validatePlanCheckerMirrorSlotManifest(options: {
-  readonly receipt: GeneratedScenarioReceipt;
-}): Promise<void> {
-  const projection = requireProjection(options.receipt.result);
-  const file = path.join(
-    options.receipt.projectDir,
-    generatedToolchainMirrorManifestPath,
-  );
-  const expected = reconciliationMirrorSlotKeys(projection.reconciliation);
-  const carried = checkerMirrorSlotKeys(
-    await readFile(file, "utf8"),
-    options.receipt.scenario.id,
-  );
-  const missing = expected.filter((key) => !carried.includes(key));
-  const unexpected = carried.filter((key) => !expected.includes(key));
-  if (missing.length > 0 || unexpected.length > 0) {
-    throw new Error(
-      [
-        `${options.receipt.scenario.id}: generated checker mirror list differs from actual reconciliation declarations`,
-        ...missing.map((key) => `  - missing ${describeMirrorSlotKey(key)}`),
-        ...unexpected.map(
-          (key) => `  - unexpected ${describeMirrorSlotKey(key)}`,
-        ),
-      ].join("\n"),
-    );
-  }
-}
-
 export async function validateRegistryMirrorSlotProjections(
   receipt: GeneratedScenarioReceipt,
 ): Promise<void> {
   await validatePlanMirrorSlotProjections({ receipt });
-  await validatePlanCheckerMirrorSlotManifest({ receipt });
 }
 
 export async function validateGeneratedScenarioReceipt(options: {

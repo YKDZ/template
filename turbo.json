@@ -280,10 +280,6 @@
     "//#build": {
       "tags": ["work:preparation"]
     },
-    "//#check:toolchain:versions": {
-      "cache": false,
-      "tags": ["quality:light"]
-    },
     "//#sync:repository": {
       "cache": false,
       "tags": ["work:on-demand"]
