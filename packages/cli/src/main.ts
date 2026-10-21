@@ -16,17 +16,20 @@ import {
   listPresetCatalog,
   runInit,
   runAddPackage,
+  runConfigurePackage,
   validateBlueprintFile,
   type ApplicationRuntime,
 } from "./application.ts";
 import {
   initializationInputSchema,
   packageAdditionInputSchema,
+  packageConfigurationInputSchema,
 } from "./input-schemas.ts";
 import { cliPresets } from "./preset-catalog.ts";
 import {
   initializationSchema,
   packageAdditionSchema,
+  packageConfigurationSchema,
   packageConflictSchema,
 } from "./result-schemas.ts";
 import { standardSchema } from "./standard-schema.ts";
@@ -456,6 +459,143 @@ function createCliContract(runtime: CliRuntime) {
             : result.actions.length === 0
               ? outcome.data.unchanged(data)
               : outcome.data.added(data);
+        },
+      }),
+      configure: {
+        kind: "commandGroup",
+        parent: "template",
+        name: "configure",
+        description: "修改已登记包的现行配置。",
+      },
+      ...define.command("configurePackage")({
+        kind: "command",
+        parent: "configure",
+        name: "package",
+        description: "为已登记的内部包开启发布。",
+        input: packageConfigurationInputSchema,
+        fields: {
+          path: {
+            kind: "valueOption",
+            longOption: "--path",
+            description: "已登记的包路径",
+          },
+          publication: {
+            kind: "flag",
+            longOption: "--publication",
+            description: "明确开启共享 npm 发布",
+          },
+          dryRun: {
+            kind: "flag",
+            longOption: "--dry-run",
+            description: "预览变更",
+          },
+        },
+        success: {
+          kind: "data",
+          variants: {
+            planned: {
+              description: "配置预览",
+              schema: packageConfigurationSchema,
+              exitCode: 0,
+              text: ({ actions }) =>
+                text.lines([
+                  "配置预览",
+                  ...actions.map(
+                    ({ path, action }) =>
+                      `${action === "create" ? "创建" : "更新"}: ${path}`,
+                  ),
+                ]),
+            },
+            configured: {
+              description: "已更新配置",
+              schema: packageConfigurationSchema,
+              exitCode: 0,
+              text: () => text.line("已更新包配置。"),
+            },
+            unchanged: {
+              description: "配置已满足",
+              schema: packageConfigurationSchema,
+              exitCode: 0,
+              text: () => text.line("配置已满足，无需变更。"),
+            },
+          },
+        },
+        failures: {
+          unknownInstance: {
+            description: "包未登记",
+            exitCode: 1,
+            schema: standardSchema(
+              v.object({
+                path: v.string(),
+                message: v.string(),
+                suggestion: v.string(),
+              }),
+            ),
+            text: ({ message, suggestion }) =>
+              text.lines([message, suggestion]),
+          },
+          operationFailed: {
+            description: "配置操作失败",
+            exitCode: 1,
+            schema: standardSchema(
+              v.object({
+                phase: v.string(),
+                error: v.object({
+                  message: v.string(),
+                  suggestion: v.string(),
+                }),
+              }),
+            ),
+            text: ({ error }) =>
+              text.lines([error.message, `建议: ${error.suggestion}`]),
+          },
+          conflict: {
+            description: "配置冲突，未写入变更",
+            exitCode: 1,
+            schema: packageConflictSchema,
+            text: ({ conflicts }) =>
+              text.lines([
+                "配置存在冲突，未写入变更。",
+                ...conflicts.flatMap((conflict) =>
+                  "kind" in conflict
+                    ? []
+                    : [
+                        `${conflict.path}${conflict.location === undefined ? "" : ` ${conflict.location}`}: ${conflict.reason}`,
+                      ],
+                ),
+              ]),
+          },
+        },
+        async handler({ input, dependencies, outcome }) {
+          const result = await runConfigurePackage(input, dependencies);
+          if (result.status === "usage-error")
+            return outcome.failure.unknownInstance({
+              path: input.path,
+              message: `包 ${input.path} 未登记，无法自动配置。`,
+              suggestion:
+                "请确认已有生成包的路径；原生包可以按共享发布工具的缺项诊断手工配置。",
+            });
+          if (result.status === "operation-failure")
+            return outcome.failure.operationFailed({
+              phase: result.phase,
+              error: result.error,
+            });
+          if (result.status === "conflict")
+            return outcome.failure.conflict({
+              dryRun: result.dryRun,
+              actions: [],
+              conflicts: [...result.conflicts],
+            });
+          const data = {
+            packageDefinitionId: result.packageDefinitionId,
+            dryRun: result.dryRun,
+            actions: [...result.actions],
+          };
+          return result.dryRun
+            ? outcome.data.planned(data)
+            : result.actions.length === 0
+              ? outcome.data.unchanged(data)
+              : outcome.data.configured(data);
         },
       }),
       blueprint: {

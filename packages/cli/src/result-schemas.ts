@@ -29,17 +29,20 @@ export const initializationSchema = standardSchema(
   }),
 );
 
-export const packageAdditionSchema = standardSchema(
-  v.object({
-    dryRun: v.boolean(),
-    actions: v.array(
-      v.object({
-        path: v.string(),
-        driver: v.picklist(["structured", "text", "canonical"]),
-        action: v.picklist(["create", "update"]),
-      }),
-    ),
-  }),
+const packageUpdateSchema = v.object({
+  dryRun: v.boolean(),
+  actions: v.array(
+    v.object({
+      path: v.string(),
+      driver: v.picklist(["structured", "text", "canonical"]),
+      action: v.picklist(["create", "update"]),
+    }),
+  ),
+});
+
+export const packageAdditionSchema = standardSchema(packageUpdateSchema);
+export const packageConfigurationSchema = standardSchema(
+  v.object({ ...packageUpdateSchema.entries, packageDefinitionId: v.string() }),
 );
 
 const packageIdentity = v.object({

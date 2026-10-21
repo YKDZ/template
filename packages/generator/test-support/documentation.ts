@@ -79,6 +79,7 @@ export function createDocumentationEngine(options: {
   readonly author: string;
   readonly includeGlossary?: boolean;
   readonly configurableGlossary?: boolean;
+  readonly glossaryUsesGuide?: boolean;
   readonly invalidProjection?: "duplicate" | "unallocated";
 }) {
   const glossary: DocumentationContent = {
@@ -180,11 +181,16 @@ export function createDocumentationEngine(options: {
       const state = { policyId: options.policyId, ...input };
       return { context: { targetRoot, ...state }, state };
     },
-    prepareAddition({ targetRoot, state }) {
+    prepareUpdate({ targetRoot, state }) {
       return { targetRoot, ...state };
     },
     parseState: parseDocumentationState,
     dependencies({ content: selected, configuration }) {
+      if (
+        options.glossaryUsesGuide &&
+        contentIdentityKey(selected.identity) === glossaryIdentityKey
+      )
+        return [guideIdentity];
       return contentIdentityKey(selected.identity) === guideIdentityKey &&
         !(
           options.configurableGlossary &&
