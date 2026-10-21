@@ -28,8 +28,6 @@ export type FoundationContribution = {
   /** 仅由协同根策略消费的封闭式发布能力。 */
   readonly npmPublication?: {
     readonly kind: "public-cli-candidate";
-    readonly commandIdentitySource: FoundationTemplateAssetSource;
-    readonly creationInputSource: FoundationTemplateAssetSource;
   };
   /** Foundation 必须安装并投影到协同根文件中的工具链。 */
   readonly toolchains: {

@@ -218,7 +218,7 @@ jobs:
           name: verified-packed-publication-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             .verified-packed-publication/*.tgz
-            .verified-packed-publication/SHA512SUMS
+            .verified-packed-publication/publication-preparation.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

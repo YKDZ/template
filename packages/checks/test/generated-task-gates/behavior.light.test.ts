@@ -13,9 +13,18 @@ async function initialize(
   targetRoot: string,
   preset: (typeof templatePresets)[number],
 ): Promise<void> {
+  const publicationReference = templateContent.find(
+    (member) =>
+      member.kind === "reference" &&
+      member.identity.packageName === "@ykdz/reference-npm-publication" &&
+      member.identity.exportPath === "./template",
+  );
+  assert.ok(publicationReference?.kind === "reference");
   const result = await createGenerator({
     content: templateContent,
-    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>({
+      cliPublicationReference: publicationReference.definition,
+    }),
   }).init({
     targetRoot,
     selection: { roots: [{ preset: preset.identity }] },

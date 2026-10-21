@@ -19,17 +19,16 @@ import path from "node:path";
 
 import parseSpdxExpression from "spdx-expression-parse";
 
-import {
-  verifyNpmPublicationArtifact,
-  type VerifiedPublicationArtifactReceipt,
-} from "#npm-publication/artifact";
-import { validateCliCommandName } from "#npm-publication/cli-command-identity";
 import { publicationPackagePath as packagePath } from "#npm-publication/configuration";
 import {
-  acceptDownloadedPublicationArtifact,
-  type AcceptedPublicationArtifact,
-} from "#npm-publication/handoff";
-import { inspectNpmPublicationReadiness } from "#npm-publication/readiness";
+  readAcceptedRemoteArtifact,
+  readPackageReleaseNotes,
+  type AcceptedRemoteArtifact,
+} from "#npm-publication/remote-context";
+import {
+  inspectTarget as inspectPublicationTarget,
+  readAcceptedArtifact,
+} from "#shared-publication";
 
 type JsonObject = Record<string, unknown>;
 
@@ -84,6 +83,9 @@ type RegistryExactArtifact = {
 type TrustExpectation = {
   readonly packageName: string;
   readonly repository: string;
+};
+type SetupAcceptedArtifact = AcceptedRemoteArtifact & {
+  readonly releaseNotes: string;
 };
 type TrustRecord =
   | {
@@ -212,18 +214,23 @@ async function status() {
   let publication;
   let statusExitCode = 0;
   try {
-    const result = await inspectNpmPublicationReadiness({
-      repositoryRoot: root,
-      packagePath,
-    });
+    const packageRoot = path.join(root, packagePath);
+    const manifest = JSON.parse(
+      readFileSync(path.join(packageRoot, "package.json"), "utf8"),
+    ) as Manifest;
+    const result = await inspectPublicationTarget({ packageRoot });
     if (result.kind === "ready") {
       readiness = "ready";
-      publication = result.publication;
+      publication = {
+        packageName: result.packageName,
+        version: result.packageVersion,
+        commandName: Object.keys(manifest.bin ?? {})[0] ?? null,
+        repository: manifest.repository ?? null,
+      };
+    } else if (manifest.private === true && manifest.version === undefined) {
+      readiness = "safe-unconfigured";
     } else {
-      readiness =
-        result.mode === "safe-unconfigured"
-          ? "safe-unconfigured"
-          : "public-intent-blocked";
+      readiness = "public-intent-blocked";
       blockers = result.blockers.map((item) => ({
         code: item.code,
         observed: oneLine(item.observed),
@@ -290,11 +297,7 @@ async function status() {
   }
   const prerequisiteBlocked =
     readiness === "unavailable" ||
-    blockers.some(
-      (blocker) =>
-        blocker.code.startsWith("local-template-metadata-") ||
-        blocker.code === "private-runtime-dependency",
-    );
+    blockers.some((blocker) => blocker.code === "publication-manifest-missing");
   const currentStage = prerequisiteBlocked
     ? {
         id: "check-prerequisites",
@@ -361,36 +364,27 @@ async function status() {
 }
 
 async function preflight() {
-  let readiness;
+  let manifest: Manifest;
+  let inspection;
   try {
-    readiness = await inspectNpmPublicationReadiness({
-      repositoryRoot: root,
-      packagePath,
-    });
+    const packageRoot = path.join(root, packagePath);
+    manifest = JSON.parse(
+      readFileSync(path.join(packageRoot, "package.json"), "utf8"),
+    ) as Manifest;
+    inspection = await inspectPublicationTarget({ packageRoot });
   } catch {
     stop(
       "readiness-unavailable",
-      "Ticket 08 readiness could not read local publication facts",
+      "无法读取当前发布目标的 package.json",
       "Readable local publication facts",
       "Correct the repository facts and retry.",
       5,
     );
   }
-  if (readiness.kind === "ready") return;
-  const nonConfigurationBlocker = readiness.blockers.find(
-    (item) =>
-      item.code.startsWith("local-template-metadata-") ||
-      item.code === "private-runtime-dependency",
-  );
-  if (nonConfigurationBlocker !== undefined)
-    stop(
-      nonConfigurationBlocker.code,
-      nonConfigurationBlocker.observed,
-      nonConfigurationBlocker.expected,
-      nonConfigurationBlocker.nextAction,
-    );
-  if (readiness.mode === "safe-unconfigured") return;
-  const blocker = readiness.blockers[0];
+  if (inspection.kind === "ready") return;
+  if (manifest.private === true && manifest.version === undefined) return;
+  const blocker = inspection.blockers[0];
+  if (blocker === undefined) throw new Error("共享发布诊断未返回阻断原因。");
   stop(blocker.code, blocker.observed, blocker.expected, blocker.nextAction);
 }
 
@@ -440,34 +434,20 @@ function remoteMatchesOwner() {
   process.exitCode = remoteMatchesPublicOwner(process.env.REMOTE_URL) ? 0 : 1;
 }
 
-function receiptLines(receipt: VerifiedPublicationArtifactReceipt): string[] {
-  const lines = [
-    `Package: ${oneLine(receipt.publication.packageName)}@${oneLine(receipt.publication.version)}`,
-    `Command: ${oneLine(receipt.publication.commandName)}`,
-    `Repository: ${oneLine(receipt.publication.repository)}`,
-    `Release date: ${oneLine(receipt.publication.releaseDate)}`,
-    `Release notes: ${oneLine(receipt.publication.releaseNotes)}`,
-    `Artifact: ${oneLine(receipt.artifact.file)} (${receipt.artifact.size} bytes)`,
-    `Integrity: ${oneLine(receipt.artifact.integrity)}`,
-    `Checksum: ${oneLine(receipt.artifact.checksumFile)}`,
-    `Packed manifest: ${oneLine(JSON.stringify(receipt.packedManifest))}`,
+function receiptLines(artifact: {
+  readonly packageName: string;
+  readonly packageVersion: string;
+  readonly artifactVersion: string;
+  readonly artifactPath: string;
+  readonly sha512: string;
+}): string[] {
+  return [
+    `Package: ${oneLine(artifact.packageName)}@${oneLine(artifact.packageVersion)}`,
+    `Archive version: ${oneLine(artifact.artifactVersion)}`,
+    `Artifact: ${oneLine(path.basename(artifact.artifactPath))}`,
+    `SHA512: ${oneLine(artifact.sha512)}`,
+    `ACCEPT ${oneLine(artifact.packageName)}@${oneLine(artifact.artifactVersion)} sha512-${Buffer.from(artifact.sha512, "hex").toString("base64")}`,
   ];
-  for (const file of receipt.files)
-    lines.push(
-      `File: ${oneLine(file.path)} mode ${file.mode} size ${file.size}`,
-    );
-  lines.push(
-    `Bin: ${oneLine(receipt.bin.path)} mode ${receipt.bin.mode}`,
-    `Bin shebang: ${oneLine(receipt.bin.shebang)}`,
-  );
-  for (const smoke of receipt.smokes)
-    lines.push(
-      `Smoke: ${oneLine(smoke.name)} args ${oneLine(JSON.stringify(smoke.args))} stdout ${oneLine(smoke.stdout)}`,
-    );
-  lines.push(
-    `ACCEPT ${oneLine(receipt.publication.packageName)}@${oneLine(receipt.publication.version)} ${oneLine(receipt.artifact.integrity)}`,
-  );
-  return lines;
 }
 
 async function artifact() {
@@ -485,35 +465,31 @@ async function artifact() {
     return;
   }
   try {
-    const result = await verifyNpmPublicationArtifact({
-      repositoryRoot: root,
-      packagePath,
-      outputDirectory,
+    execFileSync("pnpm", ["run", "publication:artifact"], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: outputDirectory,
+        TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR: outputDirectory,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    if (result.kind === "blocked") {
-      for (const blocker of result.readiness.blockers)
-        process.stdout.write(
-          `ERROR ${oneLine(blocker.code)}\nObserved: ${oneLine(blocker.observed)}\nExpected: ${oneLine(blocker.expected)}\nNext action: ${oneLine(blocker.nextAction)}\n`,
-        );
-      process.exitCode = 4;
-      return;
+    const result = await readAcceptedArtifact({
+      packageRoot: path.join(root, packagePath),
+      artifactDirectory: outputDirectory,
+    });
+    if (result.kind !== "prepared") {
+      throw new Error("正式共享发布目标尚未通过诊断。");
     }
-    if (result.kind === "failed") {
-      const { failure } = result;
-      process.stdout.write(
-        `ERROR ${oneLine(failure.code)}\nObserved: ${oneLine(failure.observed)}\nExpected: ${oneLine(failure.expected)}\nNext action: ${oneLine(failure.nextAction)}\n`,
-      );
-      process.exitCode = 5;
-      return;
-    }
-    process.stdout.write(`${receiptLines(result.receipt).join("\n")}\n`);
-  } catch {
+    process.stdout.write(`${receiptLines(result).join("\n")}\n`);
+  } catch (error) {
     reportFailure(
       new SetupFailure(
         "artifact-verification-failed",
-        "the Ticket 09 artifact verifier could not complete",
-        "a verified local publication artifact",
-        "Correct the local artifact failure and retry.",
+        error instanceof Error ? error.message : String(error),
+        "正式共享 publication:prepare 与 publication:accept 生成的同一份原件",
+        "修复报告中的目标配置或消费验收错误后重试。",
         5,
       ),
     );
@@ -704,17 +680,6 @@ async function configure() {
       2,
     );
   try {
-    validateCliCommandName(facts.command);
-  } catch {
-    stop(
-      "public-fact-invalid",
-      "invalid command name",
-      "符合命名格式的 CLI 命令名",
-      "Correct --bin and retry.",
-      2,
-    );
-  }
-  try {
     parseSpdxExpression(facts.license);
   } catch {
     stop(
@@ -873,15 +838,15 @@ async function configure() {
     });
     for (const [file, bytes] of target)
       writeFileSync(path.join(overlay, path.relative(root, file)), bytes);
-    const readiness = await inspectNpmPublicationReadiness({
-      repositoryRoot: overlay,
-      packagePath,
+    const plannedRoot = path.join(overlay, packagePath);
+    const planned = await inspectPublicationTarget({
+      packageRoot: plannedRoot,
     });
-    if (readiness.kind !== "ready")
+    if (planned.kind !== "ready")
       stop(
         "configuration-plan-blocked",
-        readiness.blockers[0]?.code ?? "blocked",
-        "Ticket 08 readiness",
+        planned.blockers[0]?.code ?? "blocked",
+        "共享发布目标的身份、版本和消费验收配置",
         "Correct the public facts and retry.",
       );
     for (const [file, bytes] of before)
@@ -906,22 +871,23 @@ async function configure() {
         renameSync(temporary, file);
         ownerTemporaryPaths.delete(temporary);
       }
-    const actualReadiness = await inspectNpmPublicationReadiness({
-      repositoryRoot: root,
-      packagePath,
-    });
+    const actualRoot = path.join(root, packagePath);
+    const actual = await inspectPublicationTarget({ packageRoot: actualRoot });
+    const actualManifest = JSON.parse(
+      readFileSync(path.join(actualRoot, "package.json"), "utf8"),
+    ) as Manifest;
     if (
-      actualReadiness.kind !== "ready" ||
-      actualReadiness.publication.packageName !== facts.name ||
-      actualReadiness.publication.commandName !== facts.command ||
-      actualReadiness.publication.repository !== `git+${facts.repository}.git`
+      actual.kind !== "ready" ||
+      actual.packageName !== facts.name ||
+      actualManifest.bin?.[facts.command] !== "./dist/cli.js" ||
+      canonicalGitHubRepository(actualManifest.repository) !== facts.repository
     )
       stop(
         "configuration-actual-readiness-blocked",
-        actualReadiness.kind === "ready"
+        actual.kind === "ready"
           ? "public identity did not match the applied plan"
-          : (actualReadiness.blockers[0]?.code ?? "blocked"),
-        "the Ticket 08 actual repository readiness result for this plan",
+          : (actual.blockers[0]?.code ?? "blocked"),
+        "与本次配置计划一致的共享发布目标",
         "Correct the owner facts through normal review and retry.",
       );
   } finally {
@@ -1168,7 +1134,6 @@ async function bootstrapClient(isolation: Isolation): Promise<NpmClient> {
       "pnpm",
       "install",
       "--frozen-lockfile",
-      "--ignore-scripts",
       `--registry=${publicRegistry}`,
       `--store-dir=${isolation.pnpmStore}`,
       `--config-dir=${isolation.pnpmConfig}`,
@@ -1432,7 +1397,7 @@ function repositoryNameFromReceipt(repository: unknown): string | null {
 async function exactRemoteArtifact(
   client: NpmClient,
   isolation: Isolation,
-  accepted: AcceptedPublicationArtifact,
+  accepted: AcceptedRemoteArtifact,
   packageName: string,
   metadata: JsonObject,
 ): Promise<RegistryExactArtifact> {
@@ -1443,7 +1408,7 @@ async function exactRemoteArtifact(
   const repository = isObject(metadata.repository)
     ? metadata.repository
     : undefined;
-  const expectedRepository = accepted.receipt.packedManifest.repository;
+  const expectedRepository = accepted.packedManifest.repository;
   const tags = strictJsonObject(
     await capturedNpm(client, isolation, [
       "view",
@@ -1462,7 +1427,7 @@ async function exactRemoteArtifact(
     repository.type !== expectedRepository.type ||
     repository.url !== expectedRepository.url ||
     repository.directory !== expectedRepository.directory ||
-    dist?.integrity !== accepted.receipt.artifact.integrity ||
+    dist?.integrity !== accepted.integrity ||
     tags.latest !== "1.0.0"
   )
     throw externalFailure(
@@ -1491,7 +1456,7 @@ async function exactRemoteArtifact(
     entries.length !== 1 ||
     entry === undefined ||
     !entry.isFile() ||
-    entry.name !== accepted.receipt.artifact.file
+    entry.name !== accepted.artifactName
   )
     throw externalFailure(
       "npm-remote-artifact-invalid",
@@ -1502,10 +1467,10 @@ async function exactRemoteArtifact(
     );
   const remotePath = path.join(download, entry.name);
   const remoteBytes = readFileSync(remotePath);
-  const localBytes = readFileSync(accepted.tgz);
+  const localBytes = readFileSync(accepted.artifactPath);
   if (
-    remoteBytes.byteLength !== accepted.receipt.artifact.size ||
-    sha512Integrity(remoteBytes) !== accepted.receipt.artifact.integrity ||
+    remoteBytes.byteLength !== accepted.size ||
+    sha512Integrity(remoteBytes) !== accepted.integrity ||
     !remoteBytes.equals(localBytes)
   )
     throw externalFailure(
@@ -2262,7 +2227,7 @@ async function githubWriteFailure(
   tag: string,
   sha: string,
   annotation: string,
-  accepted: AcceptedPublicationArtifact,
+  accepted: SetupAcceptedArtifact,
   downloads: string,
   observed: unknown,
   expected: unknown,
@@ -2313,32 +2278,7 @@ async function githubWriteFailure(
         else if (!release.immutable) publicFact = "nonimmutable";
         else if (!isGithubTimestamp(release.publishedAt))
           publicFact = "published-fact-invalid";
-        else {
-          publicFact = "exact-readback";
-          for (const arguments_ of [
-            ["release", "verify", tag, "--repo", repository],
-            [
-              "release",
-              "verify-asset",
-              tag,
-              accepted.tgz,
-              "--repo",
-              repository,
-            ],
-            [
-              "release",
-              "verify-asset",
-              tag,
-              accepted.checksum,
-              "--repo",
-              repository,
-            ],
-          ] as const)
-            if ((await capturedGh(arguments_)).status !== 0) {
-              publicFact = "attestation-invalid";
-              break;
-            }
-        }
+        else publicFact = "exact-readback";
       } catch {
         publicFact = "release-fact-invalid";
       }
@@ -2399,20 +2339,20 @@ async function githubWriteFailure(
 async function assertGithubRelease(
   repository: string,
   release: GithubRelease,
-  accepted: AcceptedPublicationArtifact,
+  accepted: SetupAcceptedArtifact,
   tag: string,
   draft: boolean,
   downloads: string,
 ): Promise<void> {
-  const checksum = readFileSync(accepted.checksum);
+  const checksum = Buffer.from(accepted.checksumContent);
   const expected = new Map([
-    [path.basename(accepted.tgz), accepted.receipt.artifact.size],
+    [accepted.artifactName, accepted.size],
     ["SHA512SUMS", checksum.byteLength],
   ]);
   if (
     release.tag !== tag ||
     release.title !== tag ||
-    release.body !== accepted.receipt.publication.releaseNotes ||
+    release.body !== accepted.releaseNotes ||
     release.draft !== draft ||
     release.prerelease ||
     release.assets.length !== 2 ||
@@ -2449,7 +2389,9 @@ async function assertGithubRelease(
       );
     const bytes = readFileSync(destination);
     const local =
-      asset.name === "SHA512SUMS" ? checksum : readFileSync(accepted.tgz);
+      asset.name === "SHA512SUMS"
+        ? checksum
+        : readFileSync(accepted.artifactPath);
     if (!bytes.equals(local))
       throw githubFailure(
         "github-release-asset-conflict",
@@ -2463,7 +2405,7 @@ async function assertGithubRelease(
 async function runGithubFirstRelease(options: {
   readonly isolation: Isolation;
   readonly client: NpmClient;
-  readonly accepted: AcceptedPublicationArtifact;
+  readonly accepted: SetupAcceptedArtifact;
   readonly repository: string;
   readonly sha: string;
   readonly branch: string;
@@ -2475,7 +2417,7 @@ async function runGithubFirstRelease(options: {
   const initialView = await classifyVersion(
     client,
     isolation,
-    accepted.receipt.publication.packageName,
+    accepted.packageName,
   );
   if (initialView.kind !== "present")
     throw githubFailure(
@@ -2487,12 +2429,12 @@ async function runGithubFirstRelease(options: {
     client,
     isolation,
     accepted,
-    accepted.receipt.publication.packageName,
+    accepted.packageName,
     initialView.value,
   );
-  const initialExactArtifact: AcceptedPublicationArtifact = {
+  const initialExactArtifact: SetupAcceptedArtifact = {
     ...accepted,
-    tgz: initialRegistryArtifact.tgz,
+    artifactPath: initialRegistryArtifact.tgz,
   };
   const tag = "v1.0.0";
   const annotation = `npm artifact SHA-512: ${accepted.sha512}`;
@@ -2524,6 +2466,8 @@ async function runGithubFirstRelease(options: {
   const downloads = mkdtempSync(
     path.join(isolation.root, "github-release-assets-"),
   );
+  const checksumPath = path.join(downloads, "SHA512SUMS");
+  writeFileSync(checksumPath, accepted.checksumContent);
   if (state === "ExactPublic") {
     if (immutable !== "enabled")
       throw githubFailure(
@@ -2539,31 +2483,6 @@ async function runGithubFirstRelease(options: {
       false,
       downloads,
     );
-    for (const arguments_ of [
-      ["release", "verify", tag, "--repo", repository],
-      [
-        "release",
-        "verify-asset",
-        tag,
-        initialExactArtifact.tgz,
-        "--repo",
-        repository,
-      ],
-      [
-        "release",
-        "verify-asset",
-        tag,
-        initialExactArtifact.checksum,
-        "--repo",
-        repository,
-      ],
-    ] as const)
-      if ((await capturedGh(arguments_)).status !== 0)
-        throw githubFailure(
-          "github-release-attestation-invalid",
-          "GitHub release attestation was not accepted",
-          "three successful GitHub release verification commands",
-        );
     return;
   }
   if (state === "ExactDraft")
@@ -2575,16 +2494,16 @@ async function runGithubFirstRelease(options: {
       true,
       downloads,
     );
-  const phrase = `RELEASE ${accepted.receipt.publication.packageName}@1.0.0 ${accepted.receipt.artifact.integrity} TO ${repository} ${tag} AT ${sha}`;
+  const phrase = `RELEASE ${accepted.packageName}@1.0.0 ${accepted.integrity} TO ${repository} ${tag} AT ${sha}`;
   process.stdout.write(
     `GitHub release preview: ${state}; immutable releases ${immutable}.\n`,
   );
   await readExactPhrase(phrase, "github-release-confirmation-required");
   // A confirmation authorizes one bounded attempt only. Re-observe every fact
   // before its first GitHub write and never repair a partial remote result.
-  const refreshed = await acceptDownloadedPublicationArtifact({
-    repositoryRoot: root,
-    packagePath,
+  const packageRoot = path.join(root, packagePath);
+  const refreshedBase = await readAcceptedRemoteArtifact({
+    packageRoot,
     artifactDirectory: process.env.ARTIFACT_ROOT!,
     githubRepository: repository,
   }).catch(() => {
@@ -2594,12 +2513,14 @@ async function runGithubFirstRelease(options: {
       "the accepted receipt-bound artifact",
     );
   });
-  if (
-    refreshed.tgz !== accepted.tgz ||
-    refreshed.checksum !== accepted.checksum ||
-    refreshed.sha512 !== accepted.sha512 ||
-    JSON.stringify(refreshed.receipt) !== JSON.stringify(accepted.receipt)
-  )
+  const refreshed: SetupAcceptedArtifact = {
+    ...refreshedBase,
+    releaseNotes: await readPackageReleaseNotes({
+      packageRoot,
+      packageVersion: refreshedBase.packageVersion,
+    }),
+  };
+  if (JSON.stringify(refreshed) !== JSON.stringify(accepted))
     throw githubFailure(
       "github-preimage-changed",
       "receipt, notes, checksum, or artifact identity changed after confirmation",
@@ -2609,19 +2530,19 @@ async function runGithubFirstRelease(options: {
     client,
     isolation,
     accepted,
-    accepted.receipt.publication.packageName,
+    accepted.packageName,
     strictJsonObject(
       await capturedNpm(client, isolation, [
         "view",
-        `${accepted.receipt.publication.packageName}@1.0.0`,
+        `${accepted.packageName}@1.0.0`,
         "--json",
       ]),
       "npm-registry-schema-unsupported",
     ),
   );
-  const exactArtifact: AcceptedPublicationArtifact = {
+  const exactArtifact: SetupAcceptedArtifact = {
     ...accepted,
-    tgz: registryArtifact.tgz,
+    artifactPath: registryArtifact.tgz,
   };
   await ensureGithubPreimage(repository, sha, branch);
   const recheckedGit = gitFacts();
@@ -2797,15 +2718,15 @@ async function runGithubFirstRelease(options: {
   }
   if (state === "Fresh" || state === "ExactTagOnly") {
     const notes = path.join(isolation.root, "github-release-notes.md");
-    writeFileSync(notes, accepted.receipt.publication.releaseNotes);
+    writeFileSync(notes, accepted.releaseNotes);
     if (
       (
         await capturedGh([
           "release",
           "create",
           tag,
-          exactArtifact.tgz,
-          exactArtifact.checksum,
+          exactArtifact.artifactPath,
+          checksumPath,
           "--draft",
           "--verify-tag",
           "--title",
@@ -2936,24 +2857,6 @@ async function runGithubFirstRelease(options: {
     false,
     downloads,
   );
-  for (const arguments_ of [
-    ["release", "verify", tag, "--repo", repository],
-    ["release", "verify-asset", tag, exactArtifact.tgz, "--repo", repository],
-    [
-      "release",
-      "verify-asset",
-      tag,
-      exactArtifact.checksum,
-      "--repo",
-      repository,
-    ],
-  ] as const)
-    if ((await capturedGh(arguments_)).status !== 0)
-      throw githubFailure(
-        "github-release-attestation-invalid",
-        "GitHub release attestation was not accepted",
-        "three successful GitHub release verification commands",
-      );
 }
 
 async function external() {
@@ -2978,13 +2881,14 @@ async function external() {
   try {
     requireExternalTty();
     rejectAmbientCredentials();
-    const readiness = await inspectNpmPublicationReadiness({
-      repositoryRoot: root,
-      packagePath,
-    });
+    const packageRoot = path.join(root, packagePath);
+    const manifest = JSON.parse(
+      readFileSync(path.join(packageRoot, "package.json"), "utf8"),
+    ) as Manifest;
+    const inspection = await inspectPublicationTarget({ packageRoot });
     const git = gitFacts();
     if (
-      readiness.kind !== "ready" ||
+      inspection.kind !== "ready" ||
       git.unavailable ||
       git.detached ||
       git.facts.workingTree !== "clean" ||
@@ -2999,9 +2903,7 @@ async function external() {
         "Restore the public handoff facts and rerun setup.",
         4,
       );
-    const repository = repositoryNameFromReceipt(
-      readiness.publication.repository,
-    );
+    const repository = repositoryNameFromReceipt(manifest.repository);
     if (repository === null)
       throw externalFailure(
         "identity-invalid",
@@ -3010,13 +2912,19 @@ async function external() {
         "Correct the reviewed package metadata and retry.",
         4,
       );
-    const accepted = await acceptDownloadedPublicationArtifact({
-      repositoryRoot: root,
-      packagePath,
+    const acceptedBase = await readAcceptedRemoteArtifact({
+      packageRoot,
       artifactDirectory: artifactRoot,
       githubRepository: repository,
     });
-    if (accepted.receipt.publication.version !== "1.0.0")
+    const accepted: SetupAcceptedArtifact = {
+      ...acceptedBase,
+      releaseNotes: await readPackageReleaseNotes({
+        packageRoot,
+        packageVersion: acceptedBase.packageVersion,
+      }),
+    };
+    if (accepted.artifactVersion !== "1.0.0")
       throw externalFailure(
         "identity-invalid",
         "accepted artifact is not version 1.0.0",
@@ -3078,7 +2986,7 @@ async function external() {
     const firstView = await classifyVersion(
       client,
       isolation,
-      accepted.receipt.publication.packageName,
+      accepted.packageName,
     );
     if (firstView.kind === "unknown")
       throw externalFailure(
@@ -3100,33 +3008,39 @@ async function external() {
       await assertCollaboratorWrite(
         client,
         isolation,
-        accepted.receipt.publication.packageName,
+        accepted.packageName,
         whoami,
       );
       await exactRemoteArtifact(
         client,
         isolation,
         accepted,
-        accepted.receipt.publication.packageName,
+        accepted.packageName,
         firstView.value,
       );
       process.stdout.write("OK npm-publish-resumed-exact\n");
     } else {
       process.stdout.write(
-        `Publish artifact: ${accepted.tgz}\nIntegrity: ${accepted.receipt.artifact.integrity}\nNo OIDC provenance is expected for this manual first publish.\n`,
+        `Publish artifact: ${accepted.artifactPath}\nIntegrity: ${accepted.integrity}\nNo OIDC provenance is expected for this manual first publish.\n`,
       );
       await readExactPhrase(
-        `PUBLISH ${accepted.receipt.publication.packageName}@1.0.0 ${accepted.receipt.artifact.integrity}`,
+        `PUBLISH ${accepted.packageName}@1.0.0 ${accepted.integrity}`,
       );
       throwIfSignalled();
-      let refreshed: AcceptedPublicationArtifact;
+      let refreshed: SetupAcceptedArtifact;
       try {
-        refreshed = await acceptDownloadedPublicationArtifact({
-          repositoryRoot: root,
-          packagePath,
+        const refreshedBase = await readAcceptedRemoteArtifact({
+          packageRoot: path.join(root, packagePath),
           artifactDirectory: artifactRoot,
           githubRepository: repository,
         });
+        refreshed = {
+          ...refreshedBase,
+          releaseNotes: await readPackageReleaseNotes({
+            packageRoot: path.join(root, packagePath),
+            packageVersion: refreshedBase.packageVersion,
+          }),
+        };
       } catch {
         throw externalFailure(
           "artifact-preimage-changed",
@@ -3136,11 +3050,7 @@ async function external() {
           4,
         );
       }
-      if (
-        refreshed.tgz !== accepted.tgz ||
-        refreshed.receipt.artifact.integrity !==
-          accepted.receipt.artifact.integrity
-      )
+      if (JSON.stringify(refreshed) !== JSON.stringify(accepted))
         throw externalFailure(
           "artifact-preimage-changed",
           "accepted artifact changed after confirmation",
@@ -3151,7 +3061,7 @@ async function external() {
       const race = await classifyVersion(
         client,
         isolation,
-        accepted.receipt.publication.packageName,
+        accepted.packageName,
       );
       if (race.kind !== "absent")
         throw externalFailure(
@@ -3169,7 +3079,7 @@ async function external() {
         );
       const published = await interactiveNpm(client, isolation, "npm-publish", [
         "publish",
-        accepted.tgz,
+        accepted.artifactPath,
         "--access=public",
         "--tag=latest",
       ]);
@@ -3177,7 +3087,7 @@ async function external() {
       const readback = await classifyVersion(
         client,
         isolation,
-        accepted.receipt.publication.packageName,
+        accepted.packageName,
       );
       if (published.signal || readback.kind !== "present")
         throw externalFailure(
@@ -3190,21 +3100,21 @@ async function external() {
       await assertCollaboratorWrite(
         client,
         isolation,
-        accepted.receipt.publication.packageName,
+        accepted.packageName,
         whoami,
       );
       await exactRemoteArtifact(
         client,
         isolation,
         accepted,
-        accepted.receipt.publication.packageName,
+        accepted.packageName,
         readback.value,
       );
       process.stdout.write("OK npm-published-exact\n");
     }
     process.stdout.write("STAGE 7/9 Configure trusted publishing\n");
     await configureTrust(client, isolation, {
-      packageName: accepted.receipt.publication.packageName,
+      packageName: accepted.packageName,
       repository,
     });
     process.stdout.write(

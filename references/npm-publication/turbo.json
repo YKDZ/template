@@ -1,0 +1,55 @@
+{
+  "extends": ["//"],
+  "tags": ["library"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": [],
+      "outputs": []
+    },
+    "build:template": {
+      "dependsOn": ["@ykdz/template-workspace#build"],
+      "inputs": [],
+      "outputs": ["template-dist/**"],
+      "tags": ["work:preparation"]
+    },
+    "format:check": {
+      "dependsOn": [],
+      "tags": ["quality:light"],
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": []
+    },
+    "format:write": {
+      "dependsOn": ["lint:fix"],
+      "cache": false,
+      "tags": ["work:repair"],
+      "inputs": [],
+      "outputs": []
+    },
+    "lint": {
+      "dependsOn": [],
+      "tags": ["quality:light"],
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": []
+    },
+    "lint:fix": {
+      "dependsOn": [],
+      "cache": false,
+      "tags": ["work:repair"],
+      "inputs": [],
+      "outputs": []
+    },
+    "test:integration": {
+      "dependsOn": [],
+      "tags": ["quality:heavy"],
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "tags": ["quality:light"],
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": []
+    }
+  }
+}

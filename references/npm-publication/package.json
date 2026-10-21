@@ -1,0 +1,46 @@
+{
+  "name": "@ykdz/reference-npm-publication",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./reference": "./package.json",
+    ".": {
+      "source": "./scripts/publication.ts",
+      "types": "./scripts/publication.ts",
+      "default": "./scripts/publication.ts"
+    },
+    "./template": {
+      "source": "./template/definition.ts",
+      "types": "./template-dist/definition.d.ts",
+      "default": "./template-dist/definition.js"
+    }
+  },
+  "scripts": {
+    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "test:integration": "node --conditions=source --experimental-strip-types --test --test-timeout=300000 --test-reporter=spec 'scripts/**/*.integration.test.ts'",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "semver": "catalog:",
+    "tar": "catalog:",
+    "validate-npm-package-name": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/semver": "catalog:",
+    "@ykdz/reference-tooling-config": "workspace:*",
+    "@ykdz/template-workspace": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  },
+  "engines": {
+    "node": "^24.21.0"
+  }
+}

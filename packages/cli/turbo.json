@@ -4,7 +4,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "tags": ["quality:light"],
+      "tags": ["work:preparation"],
       "cache": true,
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": ["dist/**"],
@@ -50,9 +50,21 @@
       "outputs": [],
       "persistent": false
     },
-    "pack:bundled": {
+    "publication:prepare": {
+      "dependsOn": ["build"],
+      "tags": ["work:preparation"],
+      "cache": false,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "persistent": false,
+      "passThroughEnv": [
+        "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
+        "TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR"
+      ]
+    },
+    "publication:verify": {
       "dependsOn": [],
-      "tags": ["work:release"],
+      "tags": ["work:preparation"],
       "cache": false,
       "inputs": [],
       "outputs": [],

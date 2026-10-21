@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { inspectPackageReleaseChangelog } from "@ykdz/template-workspace/publication/changelog";
+import { inspectPackageReleaseChangelog } from "@ykdz/template-workspace/npm-publication/changelog";
 
 const standardCategories = [
   "Added",

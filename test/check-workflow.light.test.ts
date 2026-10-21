@@ -390,8 +390,18 @@ void describe("Fixture Verification Evidence check workflow", () => {
         (step) =>
           step.name === "校验并发布已验证的归档" &&
           step.run?.includes(
-            'npm publish "$archive_path" --access public --provenance --ignore-scripts',
+            "pnpm --filter @ykdz/template --silent run publication:verify",
           ),
+      ),
+    );
+    assert.ok(
+      release.jobs.publish.steps.some(
+        (step) =>
+          step.name === "校验并发布已验证的归档" &&
+          step.run?.includes(
+            'npm publish "$archive_path" --access public --provenance',
+          ) &&
+          !step.run.includes("--ignore-scripts"),
       ),
     );
     assert.strictEqual(
@@ -415,7 +425,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
       uses: "actions/upload-artifact@v7",
       with: {
         name: "verified-packed-publication-${{ github.run_id }}-${{ github.run_attempt }}",
-        path: ".verified-packed-publication/*.tgz\n.verified-packed-publication/SHA512SUMS\n",
+        path: ".verified-packed-publication/*.tgz\n.verified-packed-publication/publication-preparation.json\n",
         "include-hidden-files": true,
         "if-no-files-found": "error",
         "retention-days": 7,
