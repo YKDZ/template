@@ -7,13 +7,14 @@ import {
   loadContentSource,
   type LoadedSourceMember,
 } from "@ykdz/template-generator/content-source";
-import type { ReferenceTemplateDependency } from "@ykdz/template-workspace-authoring/reference-package";
+import type { ReferenceTemplateDependency } from "@ykdz/template-workspace/reference-package";
 
 const sdkPackageEntries = {
   "@ykdz/template-core": "@ykdz/template-core/content-identity",
   "@ykdz/template-generator": "@ykdz/template-generator/content-source",
+  "@ykdz/template-workspace": "@ykdz/template-workspace/reference-package",
   "@ykdz/template-workspace-authoring":
-    "@ykdz/template-workspace-authoring/reference-package",
+    "@ykdz/template-workspace-authoring/content-artifact",
 } as const;
 
 function localSdkPackageRoots(): ReadonlyMap<string, string> {
@@ -69,7 +70,7 @@ function packageManifest(
   version = "1.0.0",
 ): Record<string, unknown> {
   const authoringVersion =
-    sdkVersions.get("@ykdz/template-workspace-authoring") ?? "workspace:*";
+    sdkVersions.get("@ykdz/template-workspace") ?? "workspace:*";
   return {
     name: packageName,
     version,
@@ -91,7 +92,7 @@ function packageManifest(
     dependencies,
     devDependencies: {
       ...devDependencies,
-      "@ykdz/template-workspace-authoring": authoringVersion,
+      "@ykdz/template-workspace": authoringVersion,
     },
   };
 }
@@ -134,7 +135,7 @@ function referenceDefinition(options: {
   return [
     ...(options.templatePrelude ?? []),
     "",
-    'import { defineReferencePackage, type ReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";',
+    'import { defineReferencePackage, type ReferencePackage } from "@ykdz/template-workspace/reference-package";',
     "",
     "export const referencePackage: ReferencePackage = defineReferencePackage({",
     `  packageName: ${JSON.stringify(options.packageName)},`,
@@ -149,7 +150,7 @@ function referenceDefinition(options: {
     `    dependencies: ${JSON.stringify(
       options.templateDependencies ?? [
         {
-          name: "@ykdz/template-workspace-authoring",
+          name: "@ykdz/template-workspace",
           purpose: "template-execution",
         },
       ],
@@ -266,7 +267,11 @@ async function writePresetPackage(options: {
           "@ykdz/template-core":
             options.sdkVersions.get("@ykdz/template-core") ?? "workspace:*",
         },
-        {},
+        {
+          "@ykdz/template-workspace-authoring":
+            options.sdkVersions.get("@ykdz/template-workspace-authoring") ??
+            "workspace:*",
+        },
         options.sdkVersions,
         options.version,
       ),
@@ -408,8 +413,8 @@ export async function createAuthoredContentFixture(
     "@fixture/preset": "workspace:*",
     "@ykdz/template-generator":
       sdkVersions.get("@ykdz/template-generator") ?? "workspace:*",
-    "@ykdz/template-workspace-authoring":
-      sdkVersions.get("@ykdz/template-workspace-authoring") ?? "workspace:*",
+    "@ykdz/template-workspace":
+      sdkVersions.get("@ykdz/template-workspace") ?? "workspace:*",
   };
   if (options.includeTheme !== false) {
     collectionDependencies["@fixture/typescript-config"] = "workspace:*";

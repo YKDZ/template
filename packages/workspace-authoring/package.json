@@ -7,45 +7,25 @@
   ],
   "type": "module",
   "exports": {
-    "./default-package-role": {
-      "source": "./src/default-package-role.ts",
-      "types": "./dist/default-package-role.d.ts",
-      "default": "./dist/default-package-role.js"
-    },
     "./package-name-projection": {
       "source": "./src/package-name-projection.ts",
       "types": "./dist/package-name-projection.d.ts",
       "default": "./dist/package-name-projection.js"
-    },
-    "./package-contribution": {
-      "source": "./src/package-contribution.ts",
-      "types": "./dist/package-contribution.d.ts",
-      "default": "./dist/package-contribution.js"
     },
     "./typescript-module-specifiers": {
       "source": "./src/typescript-module-specifiers.ts",
       "types": "./dist/typescript-module-specifiers.d.ts",
       "default": "./dist/typescript-module-specifiers.js"
     },
-    "./generation-context": {
-      "source": "./src/generation-context.ts",
-      "types": "./dist/generation-context.d.ts",
-      "default": "./dist/generation-context.js"
-    },
-    "./reference-package": {
-      "source": "./src/reference-package.ts",
-      "types": "./dist/reference-package.d.ts",
-      "default": "./dist/reference-package.js"
-    },
     "./content-artifact": {
       "source": "./src/content-artifact.ts",
       "types": "./dist/content-artifact.d.ts",
       "default": "./dist/content-artifact.js"
     },
-    "./project-requirements": {
-      "source": "./src/project-requirements.ts",
-      "types": "./dist/project-requirements.d.ts",
-      "default": "./dist/project-requirements.js"
+    "./resource-ignore-snapshot": {
+      "source": "./src/resource-ignore-snapshot.ts",
+      "types": "./dist/resource-ignore-snapshot.d.ts",
+      "default": "./dist/resource-ignore-snapshot.js"
     }
   },
   "scripts": {
@@ -58,9 +38,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
-    "@ykdz/template-environment": "workspace:*",
-    "ignore": "catalog:",
-    "jsonc-parser": "catalog:",
     "typescript": "catalog:public-cli-runtime"
   },
   "devDependencies": {

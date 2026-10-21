@@ -7,9 +7,9 @@ import type {
   PresetProjectOptions,
 } from "@ykdz/template-core/preset-definition";
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
-import type { GenerationContext } from "@ykdz/template-workspace-authoring/generation-context";
-import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
-import type { ReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
+import type { GenerationContext } from "@ykdz/template-workspace/generation-context";
+import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
+import type { ReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 type TemplatePresetDefinition = PresetDefinition<
   ReferencePackage,

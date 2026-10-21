@@ -82,54 +82,6 @@ function projectCli(file: string, contents: string, value: string): string {
   return replaceStrings(source, initializer, { node: value });
 }
 
-function projectSnapshot(
-  contents: string,
-  values: Readonly<Record<string, string>>,
-): string {
-  const diagnostics =
-    ts.transpileModule(contents, {
-      reportDiagnostics: true,
-      compilerOptions: { target: ts.ScriptTarget.Latest },
-    }).diagnostics ?? [];
-  if (
-    diagnostics.some(
-      (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
-    )
-  )
-    throw new Error(
-      "packages/workspace/src/release-toolchain-snapshot.ts: 无法解析静态快照语法",
-    );
-  const source = ts.createSourceFile(
-    "packages/workspace/src/release-toolchain-snapshot.ts",
-    contents,
-    ts.ScriptTarget.Latest,
-    true,
-  );
-  const declarations: ts.VariableDeclaration[] = [];
-  for (const statement of source.statements)
-    if (ts.isVariableStatement(statement))
-      for (const declaration of statement.declarationList.declarations)
-        if (
-          ts.isIdentifier(declaration.name) &&
-          declaration.name.text === "releaseToolchainSnapshot"
-        )
-          declarations.push(declaration);
-  const initializer = declarations[0]?.initializer;
-  if (
-    declarations.length !== 1 ||
-    initializer === undefined ||
-    !ts.isCallExpression(initializer) ||
-    initializer.expression.getText(source) !== "Object.freeze" ||
-    initializer.arguments.length !== 1
-  )
-    throw new Error(`${source.fileName}: 无法识别静态 Object.freeze 快照`);
-  const argument = initializer.arguments[0]!;
-  const object = ts.isAsExpression(argument) ? argument.expression : argument;
-  if (!ts.isObjectLiteralExpression(object))
-    throw new Error(`${source.fileName}: 无法识别静态快照字段`);
-  return replaceStrings(source, object, values);
-}
-
 async function replaceFile(file: string, contents: string): Promise<void> {
   const temporary = `${file}.repository-config-${process.pid}.tmp`;
   try {
@@ -151,7 +103,6 @@ export async function planRepositoryConfiguration(
   const partialFiles = [
     "packages/cli/package.json",
     "references/ts-cli/package.json",
-    "packages/workspace/src/release-toolchain-snapshot.ts",
     "references/rust-bin/template/rust-toolchain.toml",
   ];
   const contents = await Promise.all(
@@ -165,12 +116,7 @@ export async function planRepositoryConfiguration(
       .map((file, index) =>
         projectCli(file, contents[index]!, derived.cliNodeEngine),
       ),
-    projectSnapshot(contents[2]!, {
-      nodeVersion: declarations.rootNodeEngine.trim(),
-      packageManagerPin: declarations.packageManagerDeclaration.trim(),
-      rustVersion: declarations.rustToolchainChannel.trim(),
-    }),
-    projectTomlStringValues(contents[3]!, [
+    projectTomlStringValues(contents[2]!, [
       {
         path: ["toolchain", "channel"],
         value: declarations.rustToolchainChannel.trim(),

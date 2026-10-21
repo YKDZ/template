@@ -9,10 +9,11 @@ import {
   type ProjectBlueprint,
   type ProjectBlueprintDraft,
 } from "@ykdz/template-core/project-blueprint";
+
 import {
   defaultPackageRoles,
   isDefaultPackageRole,
-} from "@ykdz/template-workspace-authoring/default-package-role";
+} from "./default-package-role.ts";
 
 const defaultPackagePath = /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/u;
 const reservedWorkspaceCollections = new Set([

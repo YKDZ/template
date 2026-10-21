@@ -1748,7 +1748,7 @@ void describe("原生内容制品安装链", () => {
       ],
       featureTemplateDependencies: [
         {
-          name: "@ykdz/template-workspace-authoring",
+          name: "@ykdz/template-workspace",
           purpose: "template-execution",
         },
         { name: "typescript", purpose: "template-execution" },
@@ -1815,13 +1815,13 @@ void describe("原生内容制品安装链", () => {
         "feature",
         "node_modules",
         "@ykdz",
-        "template-workspace-authoring",
+        "template-workspace",
       ),
     );
     const workspaceCoreEntry = import.meta
       .resolve("@ykdz/template-core/renderer");
     const workspaceAuthoringEntry = import.meta
-      .resolve("@ykdz/template-workspace-authoring/reference-package");
+      .resolve("@ykdz/template-workspace/reference-package");
     const authoringRequire = createRequire(
       path.join(authoringSdkRoot, "dist", "reference-package.js"),
     );

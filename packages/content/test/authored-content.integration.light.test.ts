@@ -18,8 +18,8 @@ import {
   type ContentIdentity,
 } from "@ykdz/template-core/content-identity";
 import { createGenerator } from "@ykdz/template-generator";
-import type { ReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+import type { ReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 import {
   createAuthoredContentFixture,
@@ -292,7 +292,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       },
       featureTemplateDependencies: [
         {
-          name: "@ykdz/template-workspace-authoring",
+          name: "@ykdz/template-workspace",
           purpose: "template-execution",
         },
         { name: "@fixture/typescript-config", purpose: "target" },
@@ -341,8 +341,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     );
     assert.deepEqual(
       preparation.dependencyUses.find(
-        (dependency) =>
-          dependency.name === "@ykdz/template-workspace-authoring",
+        (dependency) => dependency.name === "@ykdz/template-workspace",
       )?.purposes,
       ["template-execution"],
     );
@@ -402,7 +401,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       assert.equal(
         Object.hasOwn(
           manifest.devDependencies ?? {},
-          "@ykdz/template-workspace-authoring",
+          "@ykdz/template-workspace",
         ),
         false,
       );

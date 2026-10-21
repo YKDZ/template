@@ -2,10 +2,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { type ProjectBlueprint } from "@ykdz/template-core/project-blueprint";
-import { isDefaultPackageRole } from "@ykdz/template-workspace-authoring/default-package-role";
-import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 
 import { assertDefaultProjectBlueprint } from "./default-package-identity.ts";
+import { isDefaultPackageRole } from "./default-package-role.ts";
+import type { PackageContribution } from "./package-contribution.ts";
 
 type PackageManifest = Readonly<Record<string, unknown>>;
 

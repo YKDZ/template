@@ -6,7 +6,7 @@ import type {
   PersistedPackageDefinition,
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
-import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
+import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
 import { planExplicitProjectLinks } from "@ykdz/template-workspace/project-linking";
 
 function contribution(

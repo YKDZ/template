@@ -2,8 +2,9 @@ import { readFileSync } from "node:fs";
 
 import { composeCiDiagnosticArtifacts } from "@ykdz/template-environment/ci-diagnostic-artifact";
 import type { DeploymentEnvironmentNeed } from "@ykdz/template-environment/module-graph";
-import type { DependencyMaintenancePolicy } from "@ykdz/template-workspace-authoring/project-requirements";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
+
+import type { DependencyMaintenancePolicy } from "./project-requirements.ts";
 
 export type ProjectCheckWorkflowDiagnosticOptions = {
   readonly packagePaths: readonly string[];

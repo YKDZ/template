@@ -18,8 +18,8 @@ import {
 } from "@ykdz/template-core/content-identity";
 import { createGenerator } from "@ykdz/template-generator";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
-import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 const content = await loadContentSource({
   namespace: "ykdz",
