@@ -5,8 +5,8 @@ import type {
   WriteTextFromFragmentsOperation,
 } from "@ykdz/template-core/renderer";
 import type { GeneratorPackageState } from "@ykdz/template-core/workspace-strategy";
-import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
 
+import type { PackageContribution } from "./package-contribution.ts";
 import type { RootResourceOperation } from "./shared-root-files.ts";
 import {
   copyPreparedWorkspaceResource,

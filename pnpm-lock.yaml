@@ -616,6 +616,9 @@ importers:
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../generator
+      '@ykdz/template-workspace':
+        specifier: workspace:*
+        version: link:../../workspace-policies/default
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../workspace-authoring
@@ -623,9 +626,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
-      '@ykdz/template-workspace':
-        specifier: workspace:*
-        version: link:../../workspace-policies/default
       execa:
         specifier: 'catalog:'
         version: 10.1.1
@@ -740,15 +740,6 @@ importers:
 
   packages/workspace-authoring:
     dependencies:
-      '@ykdz/template-environment':
-        specifier: workspace:*
-        version: link:../environment
-      ignore:
-        specifier: 'catalog:'
-        version: 7.0.12
-      jsonc-parser:
-        specifier: 'catalog:'
-        version: 3.3.1
       typescript:
         specifier: catalog:public-cli-runtime
         version: 6.0.3
@@ -1069,9 +1060,9 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
-      '@ykdz/template-workspace-authoring':
+      '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace-authoring
+        version: link:../../workspace-policies/default
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1099,9 +1090,9 @@ importers:
       '@ykdz/template-environment':
         specifier: workspace:*
         version: link:../../packages/environment
-      '@ykdz/template-workspace-authoring':
+      '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace-authoring
+        version: link:../../workspace-policies/default
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1139,9 +1130,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@ykdz/template-workspace-authoring':
+      '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace-authoring
+        version: link:../../workspace-policies/default
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1170,9 +1161,9 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
-      '@ykdz/template-workspace-authoring':
+      '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace-authoring
+        version: link:../../workspace-policies/default
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1219,9 +1210,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@ykdz/template-workspace-authoring':
+      '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace-authoring
+        version: link:../../workspace-policies/default
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1256,9 +1247,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@ykdz/template-workspace-authoring':
+      '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace-authoring
+        version: link:../../workspace-policies/default
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1326,9 +1317,9 @@ importers:
       '@ykdz/template-environment':
         specifier: workspace:*
         version: link:../../packages/environment
-      '@ykdz/template-workspace-authoring':
+      '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace-authoring
+        version: link:../../workspace-policies/default
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1402,9 +1393,9 @@ importers:
       '@ykdz/template-environment':
         specifier: workspace:*
         version: link:../../packages/environment
-      '@ykdz/template-workspace-authoring':
+      '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace-authoring
+        version: link:../../workspace-policies/default
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1472,9 +1463,9 @@ importers:
       '@ykdz/template-environment':
         specifier: workspace:*
         version: link:../../packages/environment
-      '@ykdz/template-workspace-authoring':
+      '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace-authoring
+        version: link:../../workspace-policies/default
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1548,9 +1539,9 @@ importers:
       '@ykdz/template-environment':
         specifier: workspace:*
         version: link:../../packages/environment
-      '@ykdz/template-workspace-authoring':
+      '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/workspace-authoring
+        version: link:../../workspace-policies/default
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1593,6 +1584,12 @@ importers:
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../../packages/workspace-authoring
+      ignore:
+        specifier: 'catalog:'
+        version: 7.0.12
+      jsonc-parser:
+        specifier: 'catalog:'
+        version: 3.3.1
       smol-toml:
         specifier: 'catalog:'
         version: 1.9.1

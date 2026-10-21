@@ -53,11 +53,11 @@
     "@ykdz/reference-vue-shared": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
+    "@ykdz/template-workspace": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@ykdz/template-workspace": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

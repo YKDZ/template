@@ -1,9 +1,8 @@
+import type { WorkspaceProjectRequirements } from "./application-requirements.ts";
 import type {
   DeploymentCheckRequirement,
   VueHonoJointE2eRequirement,
-} from "@ykdz/template-workspace-authoring/project-requirements";
-
-import type { WorkspaceProjectRequirements } from "./application-requirements.ts";
+} from "./project-requirements.ts";
 import type { RootResourceOperation } from "./shared-root-files.ts";
 import {
   copyPreparedWorkspaceResource,

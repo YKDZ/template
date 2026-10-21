@@ -87,6 +87,31 @@
       "source": "./src/shared-root-files.ts",
       "types": "./dist/shared-root-files.d.ts",
       "default": "./dist/shared-root-files.js"
+    },
+    "./generation-context": {
+      "source": "./src/generation-context.ts",
+      "types": "./dist/generation-context.d.ts",
+      "default": "./dist/generation-context.js"
+    },
+    "./package-contribution": {
+      "source": "./src/package-contribution.ts",
+      "types": "./dist/package-contribution.d.ts",
+      "default": "./dist/package-contribution.js"
+    },
+    "./project-requirements": {
+      "source": "./src/project-requirements.ts",
+      "types": "./dist/project-requirements.d.ts",
+      "default": "./dist/project-requirements.js"
+    },
+    "./default-package-role": {
+      "source": "./src/default-package-role.ts",
+      "types": "./dist/default-package-role.d.ts",
+      "default": "./dist/default-package-role.js"
+    },
+    "./reference-package": {
+      "source": "./src/reference-package.ts",
+      "types": "./dist/reference-package.d.ts",
+      "default": "./dist/reference-package.js"
     }
   },
   "scripts": {
@@ -105,6 +130,8 @@
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*",
+    "ignore": "catalog:",
+    "jsonc-parser": "catalog:",
     "smol-toml": "catalog:",
     "yaml": "catalog:"
   },

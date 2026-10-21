@@ -2,13 +2,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import type { CiDiagnosticArtifactDeclaration } from "@ykdz/template-environment/ci-diagnostic-artifact";
-import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
+
+import type { PackageContribution } from "./package-contribution.ts";
 import type {
   DatabasePreparationRequirement,
   DeploymentCheckRequirement,
   VueHonoJointE2eRequirement,
-} from "@ykdz/template-workspace-authoring/project-requirements";
-import type { DependencyMaintenancePolicy } from "@ykdz/template-workspace-authoring/project-requirements";
+} from "./project-requirements.ts";
+import type { DependencyMaintenancePolicy } from "./project-requirements.ts";
 
 type DependencyMaintenanceContribution = {
   readonly foundation: {

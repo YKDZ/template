@@ -39,16 +39,6 @@ import {
   playwrightBrowserAssetsEnvironmentNeed,
   shellCheckEnvironmentNeed,
 } from "@ykdz/template-environment/module-graph";
-import type { GenerationContext } from "@ykdz/template-workspace-authoring/generation-context";
-import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
-import type {
-  DatabasePreparationRequirement,
-  DependencyMaintenancePolicy,
-  DeploymentCheckRequirement,
-  ProjectRequirement,
-  VueHonoJointE2eRequirement,
-} from "@ykdz/template-workspace-authoring/project-requirements";
-import type { ReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 
 import {
   assertDatabasePreparationManifestTruth,
@@ -73,11 +63,13 @@ import {
   selectTemplateDependencyCatalogEntries,
 } from "./dependency-catalog.ts";
 import { browserTestDevelopmentContainerToolLayer } from "./development-container.ts";
+import type { GenerationContext } from "./generation-context.ts";
 import {
   assertReusablePackageExposure,
   readPackageAdditionVersionFacts,
   WorkspacePackageAdditionFailure,
 } from "./package-addition-facts.ts";
+import type { PackageContribution } from "./package-contribution.ts";
 import {
   prepareProjectGithubTemplates,
   projectCheckWorkflow,
@@ -93,6 +85,14 @@ import {
   canProvideSourceConditionPackageNameImportForRole,
   readProjectLinkManifestTruth,
 } from "./project-linking.ts";
+import type {
+  DatabasePreparationRequirement,
+  DependencyMaintenancePolicy,
+  DeploymentCheckRequirement,
+  ProjectRequirement,
+  VueHonoJointE2eRequirement,
+} from "./project-requirements.ts";
+import type { ReferencePackage } from "./reference-package.ts";
 import {
   assertExclusiveRootResources,
   composeSharedRootFiles,

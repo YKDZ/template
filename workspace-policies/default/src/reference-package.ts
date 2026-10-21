@@ -16,19 +16,19 @@ import type {
   GeneratorPackageCreatedBy,
   PackageCreationInput,
 } from "@ykdz/template-core/workspace-strategy";
-import ignore, { type Ignore } from "ignore";
-import { parse, type ParseError } from "jsonc-parser";
-
 import {
   prepareNativeContentArtifact,
   type PreparedNativeContentArtifact,
-} from "./content-artifact.ts";
+} from "@ykdz/template-workspace-authoring/content-artifact";
+import { mapPackageNamesInJson } from "@ykdz/template-workspace-authoring/package-name-projection";
+import { resourceIgnoreSnapshot } from "@ykdz/template-workspace-authoring/resource-ignore-snapshot";
+import { mapTypeScriptModuleSpecifiers } from "@ykdz/template-workspace-authoring/typescript-module-specifiers";
+import ignore, { type Ignore } from "ignore";
+import { parse, type ParseError } from "jsonc-parser";
+
 import type { DefaultPackageRole } from "./default-package-role.ts";
 import type { GenerationContext } from "./generation-context.ts";
 import type { PackageContribution } from "./package-contribution.ts";
-import { mapPackageNamesInJson } from "./package-name-projection.ts";
-import { resourceIgnoreSnapshot } from "./resource-ignore-snapshot.ts";
-import { mapTypeScriptModuleSpecifiers } from "./typescript-module-specifiers.ts";
 
 export type ReferencePackageManifest = Readonly<Record<string, unknown>> & {
   readonly name: string;
