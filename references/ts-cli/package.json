@@ -8,9 +8,6 @@
     "dist"
   ],
   "type": "module",
-  "imports": {
-    "#tooling/*": "@ykdz/reference-typescript-config/*"
-  },
   "exports": {
     "./reference": "./package.json",
     "./template": {
@@ -39,8 +36,8 @@
     "lint:fix": "oxlint --format=unix . --fix",
     "postbuild": "node -e \"if (process.platform !== 'win32') require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
     "prepack": "pnpm exec turbo run build --filter=.",
-    "test": "node --conditions=source --test --test-reporter=spec --test-reporter='#tooling/reporter' --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/unit/**/*.test.ts' 'test/integration/**/*.test.ts'",
-    "test:e2e": "node --conditions=source --test --test-timeout=180000 --test-reporter=spec --test-reporter='#tooling/reporter' --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/e2e/**/*.test.ts'",
+    "test": "node --conditions=source --test --test-reporter=spec 'test/unit/**/*.test.ts' 'test/integration/**/*.test.ts'",
+    "test:e2e": "node --conditions=source --test --test-timeout=180000 --test-reporter=spec 'test/e2e/**/*.test.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {

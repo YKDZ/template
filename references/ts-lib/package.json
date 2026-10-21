@@ -8,8 +8,7 @@
       "source": "./src/*.ts",
       "types": "./src/*.ts",
       "default": "./dist/*.js"
-    },
-    "#tooling/*": "@ykdz/reference-typescript-config/*"
+    }
   },
   "exports": {
     ".": {
@@ -32,7 +31,7 @@
     "lint:fix": "oxlint --format=unix . --fix",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
     "build": "tsc -p tsconfig.build.json --pretty false",
-    "test": "node --conditions=source --test --test-reporter=spec --test-reporter='#tooling/reporter' --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.test.ts'",
+    "test": "node --conditions=source --test --test-reporter=spec 'test/**/*.test.ts'",
     "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false"
   },
   "dependencies": {

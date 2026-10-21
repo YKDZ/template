@@ -20,9 +20,6 @@ const testArguments = [
   "--test-concurrency=1",
   "--test-timeout=1200000",
   "--test-reporter=spec",
-  "--test-reporter=@ykdz/reference-typescript-config/reporter",
-  "--test-reporter-destination=stdout",
-  "--test-reporter-destination=stderr",
   "scripts/packed-publication/*.integration.test.ts",
 ];
 

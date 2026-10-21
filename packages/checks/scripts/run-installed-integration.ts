@@ -30,9 +30,6 @@ const runnerArguments = [
   "--test-concurrency=1",
   "--test-timeout=300000",
   "--test-reporter=spec",
-  "--test-reporter=@ykdz/reference-typescript-config/reporter",
-  "--test-reporter-destination=stdout",
-  "--test-reporter-destination=stderr",
   ...forwardedArguments,
   "test/**/*.integration.test.ts",
 ];
