@@ -37,7 +37,8 @@
     "@ykdz/reference-vike-web": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
-    "@ykdz/template-workspace-authoring": "workspace:*"
+    "@ykdz/template-workspace-authoring": "workspace:*",
+    "yaml": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
