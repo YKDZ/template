@@ -22,7 +22,6 @@
     },
     "./publication/*": "./publication/*.ts",
     "./task-gates": "./scripts/task-gates.ts",
-    "./turbo-boundaries": "./scripts/run-turbo-boundaries.ts",
     "./project-github": {
       "source": "./src/project-github.ts",
       "types": "./dist/project-github.d.ts",

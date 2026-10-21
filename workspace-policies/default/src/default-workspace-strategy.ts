@@ -222,7 +222,6 @@ const defaultWorkspaceFiles = [
   "assets/gitignore",
   "assets/agent-instructions.md",
   "scripts/task-gates.ts",
-  "scripts/run-turbo-boundaries.ts",
 ] as const;
 
 type DefaultWorkspacePreparedResources = {
@@ -1228,11 +1227,6 @@ function projectOperations(options: {
       prepared.workspaceFiles,
       "scripts/task-gates.ts",
       "scripts/task-gates.ts",
-    ),
-    workspaceFile(
-      prepared.workspaceFiles,
-      "scripts/run-turbo-boundaries.ts",
-      "scripts/run-turbo-boundaries.ts",
     ),
     rootProjection.tsconfig,
     rootProjection.tsconfigConfig,
