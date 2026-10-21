@@ -75,6 +75,7 @@ export const preset = defineNativeContentArtifact(
     executionDependencies: [
       "@ykdz/template-workspace",
       "@ykdz/template-workspace-authoring",
+      "yaml",
     ],
   },
 );
