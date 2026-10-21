@@ -20,13 +20,15 @@ if (result.kind === "created") {
 }
 
 const setupPath = path.join(result.directory, "setup.ts");
+const setupArguments = process.argv.slice(1);
+if (setupArguments[0] === "--") setupArguments.shift();
 const child = spawn(
   process.execPath,
   [
     "--conditions=source",
     "--experimental-strip-types",
     setupPath,
-    ...process.argv.slice(1),
+    ...setupArguments,
   ],
   {
     cwd: process.cwd(),
