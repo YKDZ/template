@@ -61,7 +61,7 @@ export type PrepareNativeContentArtifactOptions = {
 
 export type DefineNativeContentArtifactOptions = Omit<
   PrepareNativeContentArtifactOptions,
-  "resources" | "dependencyPurposes"
+  "dependencyPurposes"
 > & {
   /** 仅列出package.json devDependencies中真正由模板入口执行的名称。 */
   readonly executionDependencies?: readonly string[];

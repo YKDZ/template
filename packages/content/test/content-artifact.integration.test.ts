@@ -354,6 +354,10 @@ void describe("原生内容制品安装链", () => {
     );
     assert.ok(preset);
     const prepared = await prepareContentCollection({
+      referencePreparation: {
+        specifier: "@ykdz/template-workspace/reference-package",
+        exportName: "defineReferencePackage",
+      },
       content: templateContent,
       roots: [preset],
       strategy: createDefaultWorkspaceStrategy(),
@@ -730,6 +734,10 @@ void describe("原生内容制品安装链", () => {
     for (const preset of presets) {
       assert.equal(preset.kind, "preset");
       const prepared = await prepareContentCollection({
+        referencePreparation: {
+          specifier: "@ykdz/template-workspace/reference-package",
+          exportName: "defineReferencePackage",
+        },
         content: templateContent,
         roots: [preset],
         strategy: createDefaultWorkspaceStrategy(),
@@ -924,6 +932,10 @@ void describe("原生内容制品安装链", () => {
       let replayConsumerRoot = consumerRoot;
       if (!alreadyPrepared) {
         replayPrepared = await prepareContentCollection({
+          referencePreparation: {
+            specifier: "@ykdz/template-workspace/reference-package",
+            exportName: "defineReferencePackage",
+          },
           content: templateContent,
           roots: [preset, replayMember],
           strategy: createDefaultWorkspaceStrategy(),
@@ -1367,6 +1379,10 @@ void describe("原生内容制品安装链", () => {
     );
 
     const prepared = await prepareContentCollection({
+      referencePreparation: {
+        specifier: "@ykdz/template-workspace/reference-package",
+        exportName: "defineReferencePackage",
+      },
       content: templateContent,
       roots: references,
       strategy,
@@ -1881,6 +1897,10 @@ void describe("原生内容制品安装链", () => {
     ) as { readonly version: string };
     const buildRoot = await temporaryRoot("preset-authored-content-");
     const prepared = await prepareContentCollection({
+      referencePreparation: {
+        specifier: "@ykdz/template-workspace/reference-package",
+        exportName: "defineReferencePackage",
+      },
       content: content as unknown as typeof templateContent,
       roots: [preset, addon] as unknown as typeof templateContent,
       strategy: createDefaultWorkspaceStrategy(),
@@ -2595,6 +2615,10 @@ void describe("原生内容制品安装链", () => {
       return feature;
     });
     const prepared = await prepareContentCollection({
+      referencePreparation: {
+        specifier: "@ykdz/template-workspace/reference-package",
+        exportName: "defineReferencePackage",
+      },
       content: members as unknown as typeof templateContent,
       roots: features as unknown as typeof templateContent,
       strategy: createDefaultWorkspaceStrategy(),
