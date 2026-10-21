@@ -31,6 +31,9 @@ type Target = {
   readonly version: string;
   readonly directory: string;
   readonly dependency?: string;
+  readonly missingRemoteScript?:
+    | "publication:remote:npm"
+    | "publication:remote:release";
 };
 
 type AcceptedArtifact = {
@@ -72,10 +75,18 @@ async function writeTarget(target: Target): Promise<void> {
         files: ["index.cjs", "consume.cjs"],
         scripts: {
           "publication:consume": "node consume.cjs",
-          "publication:remote:npm":
-            "node --import @ykdz/reference-npm-publication/publish-target --eval '' --",
-          "publication:remote:release":
-            "node --import @ykdz/reference-npm-publication/release-target --eval '' --",
+          ...(target.missingRemoteScript === "publication:remote:npm"
+            ? {}
+            : {
+                "publication:remote:npm":
+                  "node --import @ykdz/reference-npm-publication/publish-target --eval '' --",
+              }),
+          ...(target.missingRemoteScript === "publication:remote:release"
+            ? {}
+            : {
+                "publication:remote:release":
+                  "node --import @ykdz/reference-npm-publication/release-target --eval '' --",
+              }),
         },
         ...(target.dependency === undefined
           ? {}
@@ -111,7 +122,12 @@ async function writeTarget(target: Target): Promise<void> {
   );
 }
 
-async function makeWorkspace(root: string): Promise<{
+async function makeWorkspace(
+  root: string,
+  options: {
+    readonly missingRemoteScript?: Target["missingRemoteScript"];
+  } = {},
+): Promise<{
   readonly repositoryRoot: string;
   readonly sourceSha: string;
   readonly targets: readonly Target[];
@@ -136,8 +152,13 @@ async function makeWorkspace(root: string): Promise<{
       directory: path.join(packageRoot, "c"),
     },
   ];
+  const workspaceTargets = targets.map((target) =>
+    target.name === "@example/b" && options.missingRemoteScript !== undefined
+      ? { ...target, missingRemoteScript: options.missingRemoteScript }
+      : target,
+  );
   await mkdir(packageRoot, { recursive: true });
-  for (const target of targets) await writeTarget(target);
+  for (const target of workspaceTargets) await writeTarget(target);
   await writeFile(
     path.join(repositoryRoot, "package.json"),
     `${JSON.stringify(
@@ -187,7 +208,7 @@ async function makeWorkspace(root: string): Promise<{
   git(repositoryRoot, "commit", "-m", "accepted publication source");
   const sourceSha = git(repositoryRoot, "rev-parse", "HEAD");
   git(repositoryRoot, "push", "--set-upstream", "origin", "main");
-  return { repositoryRoot, sourceSha, targets };
+  return { repositoryRoot, sourceSha, targets: workspaceTargets };
 }
 
 async function prepareAndAccept(options: {
@@ -476,6 +497,85 @@ async function makeReleaseReadyArtifacts(options: {
 }
 
 void describe("已验收多包原件的原生远端调度", () => {
+  void it("已验收目标缺少阶段脚本时先诊断并禁止整批外写", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "npm-publication-missing-remote-script-"),
+    );
+    try {
+      for (const phase of ["npm", "release"] as const) {
+        const phaseRoot = path.join(workspace, phase);
+        const missingScript =
+          phase === "npm"
+            ? "publication:remote:npm"
+            : "publication:remote:release";
+        const { repositoryRoot, sourceSha, targets } = await makeWorkspace(
+          phaseRoot,
+          { missingRemoteScript: missingScript },
+        );
+        const artifactRoot = path.join(phaseRoot, "accepted");
+        await mkdir(artifactRoot, { recursive: true });
+        const artifacts = await prepareAndAccept({
+          repositoryRoot,
+          sourceSha,
+          targets: targets.slice(0, 2),
+          artifactRoot,
+        });
+        assert.deepEqual(
+          artifacts.map((artifact) => artifact.packageName),
+          ["@example/a", "@example/b"],
+        );
+
+        let acceptedListPath: string;
+        let command: "schedule-npm" | "schedule-release";
+        if (phase === "npm") {
+          acceptedListPath = await writeAcceptedList({
+            repositoryRoot,
+            artifactRoot,
+            artifacts,
+          });
+          command = "schedule-npm";
+        } else {
+          const releaseArtifactRoot = path.join(phaseRoot, "release-ready");
+          const releaseArtifacts = await makeReleaseReadyArtifacts({
+            artifactRoot: releaseArtifactRoot,
+            artifacts,
+          });
+          acceptedListPath = await writeAcceptedList({
+            repositoryRoot,
+            artifactRoot: releaseArtifactRoot,
+            artifacts: releaseArtifacts,
+          });
+          command = "schedule-release";
+        }
+
+        const adapter = await makeCommandAdapters({
+          root: path.join(phaseRoot, "control"),
+          acceptedListPath,
+        });
+        const result = await runOwnerCommand({
+          repositoryRoot,
+          command,
+          environment: adapter.environment,
+        });
+        assert.equal(result.exitCode, 1, result.stdout);
+        assert.ok(
+          result.stderr.includes(
+            path.join(targets[1]!.directory, "package.json"),
+          ),
+          result.stderr,
+        );
+        assert.ok(result.stderr.includes(`#/scripts/${missingScript}`));
+        assert.ok(
+          result.stderr.includes("处理方法：请在该目标 package.json"),
+          result.stderr,
+        );
+        assert.equal(await readFile(adapter.eventLog, "utf8"), "");
+      }
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   void it("npm 失败跳过依赖者但继续独立目标，Release 故障不受依赖顺序阻断", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "npm-publication-scheduler-"),
