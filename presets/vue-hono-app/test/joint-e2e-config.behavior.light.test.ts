@@ -1,75 +1,88 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 
-import ts from "typescript";
+import type { PlaywrightTestConfig } from "@playwright/test";
 
-const configurationPath = fileURLToPath(
-  new URL("../resources/joint-e2e/playwright.config.ts", import.meta.url),
+const configurationUrl = new URL(
+  "../resources/joint-e2e/playwright.config.ts",
+  import.meta.url,
 );
 
-function property(
-  object: ts.ObjectLiteralExpression,
-  name: string,
-): ts.Expression | undefined {
-  return object.properties.flatMap((member) => {
-    if (
-      !ts.isPropertyAssignment(member) ||
-      !ts.isIdentifier(member.name) ||
-      member.name.text !== name
-    ) {
-      return [];
-    }
-    return [member.initializer];
-  })[0];
+async function loadConfiguration(
+  caseName: string,
+): Promise<{ default: PlaywrightTestConfig }> {
+  return import(`${configurationUrl.href}?case=${caseName}`) as Promise<{
+    default: PlaywrightTestConfig;
+  }>;
 }
 
 void describe("Vue-Hono 联合浏览器验收配置", () => {
-  void it("保留浏览器失败诊断并读取所属预设提供的实际包身份", async () => {
-    const source = ts.createSourceFile(
-      configurationPath,
-      await readFile(configurationPath, "utf8"),
-      ts.ScriptTarget.Latest,
-      true,
-    );
-    let config: ts.ObjectLiteralExpression | undefined;
-    const visit = (node: ts.Node): void => {
-      if (
-        ts.isCallExpression(node) &&
-        ts.isIdentifier(node.expression) &&
-        node.expression.text === "defineConfig" &&
-        node.arguments[0] !== undefined &&
-        ts.isObjectLiteralExpression(node.arguments[0])
-      ) {
-        config = node.arguments[0];
-      }
-      ts.forEachChild(node, visit);
+  void it("用实际包身份启动 web/API 并保留浏览器失败诊断", async () => {
+    const previousEnvironment = {
+      api: process.env.PLAYWRIGHT_API_PACKAGE_NAME,
+      web: process.env.PLAYWRIGHT_WEB_PACKAGE_NAME,
     };
-    visit(source);
+    process.env.PLAYWRIGHT_API_PACKAGE_NAME = "@ykdz/reference-hono-api";
+    process.env.PLAYWRIGHT_WEB_PACKAGE_NAME = "@ykdz/reference-vue-hono-web";
 
-    assert.ok(config);
-    const use = property(config, "use");
-    assert.ok(use && ts.isObjectLiteralExpression(use));
-    const trace = property(use, "trace");
-    const reporter = property(config, "reporter");
-    assert.ok(trace && ts.isStringLiteral(trace));
-    assert.strictEqual(trace.text, "retain-on-failure");
-    assert.ok(reporter && ts.isArrayLiteralExpression(reporter));
-    assert.deepStrictEqual(
-      reporter.elements.map((entry) =>
-        ts.isArrayLiteralExpression(entry) &&
-        entry.elements[0] !== undefined &&
-        ts.isStringLiteral(entry.elements[0])
-          ? entry.elements[0].text
-          : undefined,
-      ),
-      ["list", "html"],
-    );
+    try {
+      const { default: config } = await loadConfiguration("with-identities");
+      const webServers = config.webServer;
+      assert.ok(Array.isArray(webServers));
 
-    const configText = await readFile(configurationPath, "utf8");
-    assert.match(configText, /PLAYWRIGHT_API_PACKAGE_NAME/u);
-    assert.match(configText, /PLAYWRIGHT_WEB_PACKAGE_NAME/u);
-    assert.match(configText, /joint-e2e\.json/u);
+      assert.deepStrictEqual(
+        webServers.map((server: { command: string }) => server.command),
+        [
+          "pnpm --filter @ykdz/reference-hono-api --fail-if-no-match run start",
+          "pnpm --filter @ykdz/reference-vue-hono-web --fail-if-no-match run preview --host 127.0.0.1 --strictPort",
+        ],
+      );
+      assert.strictEqual(config.use?.trace, "retain-on-failure");
+      const reporters = config.reporter;
+      assert.ok(Array.isArray(reporters));
+      assert.deepStrictEqual(
+        reporters.map((reporter) =>
+          Array.isArray(reporter) ? reporter[0] : reporter,
+        ),
+        ["list", "html"],
+      );
+    } finally {
+      if (previousEnvironment.api === undefined) {
+        delete process.env.PLAYWRIGHT_API_PACKAGE_NAME;
+      } else {
+        process.env.PLAYWRIGHT_API_PACKAGE_NAME = previousEnvironment.api;
+      }
+      if (previousEnvironment.web === undefined) {
+        delete process.env.PLAYWRIGHT_WEB_PACKAGE_NAME;
+      } else {
+        process.env.PLAYWRIGHT_WEB_PACKAGE_NAME = previousEnvironment.web;
+      }
+    }
+  });
+
+  void it("缺少实际 API/web 包身份时拒绝加载", async () => {
+    const previousEnvironment = {
+      api: process.env.PLAYWRIGHT_API_PACKAGE_NAME,
+      web: process.env.PLAYWRIGHT_WEB_PACKAGE_NAME,
+    };
+    delete process.env.PLAYWRIGHT_API_PACKAGE_NAME;
+    delete process.env.PLAYWRIGHT_WEB_PACKAGE_NAME;
+
+    try {
+      await assert.rejects(loadConfiguration("without-identities"), {
+        message: "Vue-Hono Playwright 配置缺少实际 API 与 web 包身份",
+      });
+    } finally {
+      if (previousEnvironment.api === undefined) {
+        delete process.env.PLAYWRIGHT_API_PACKAGE_NAME;
+      } else {
+        process.env.PLAYWRIGHT_API_PACKAGE_NAME = previousEnvironment.api;
+      }
+      if (previousEnvironment.web === undefined) {
+        delete process.env.PLAYWRIGHT_WEB_PACKAGE_NAME;
+      } else {
+        process.env.PLAYWRIGHT_WEB_PACKAGE_NAME = previousEnvironment.web;
+      }
+    }
   });
 });
