@@ -627,6 +627,30 @@ void describe("已验收多包原件的原生远端调度", () => {
           .every((call) => call.controlled === true),
         "所有 GitHub 命令都应由受控适配器响应",
       );
+
+      const dependentArtifact = artifacts.find(
+        (artifact) => artifact.packageName === "@example/b",
+      )!;
+      const originalBytes = await readFile(dependentArtifact.artifactPath);
+      const damagedAdapter = await makeCommandAdapters({
+        root: path.join(workspace, "damaged-control"),
+        acceptedListPath,
+      });
+      try {
+        await writeFile(
+          dependentArtifact.artifactPath,
+          Buffer.concat([originalBytes, Buffer.from([0])]),
+        );
+        const damagedResult = await runOwnerCommand({
+          repositoryRoot,
+          command: "schedule-npm",
+          environment: damagedAdapter.environment,
+        });
+        assert.equal(damagedResult.exitCode, 1);
+        assert.equal(await readFile(damagedAdapter.eventLog, "utf8"), "");
+      } finally {
+        await writeFile(dependentArtifact.artifactPath, originalBytes);
+      }
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

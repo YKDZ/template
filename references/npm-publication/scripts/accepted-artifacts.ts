@@ -16,6 +16,33 @@ export type AcceptedPublicationArtifact = {
   readonly sha512: string;
 };
 
+/** 远端批次写入前复核清单中的每份 tgz 与已验收回执。 */
+export async function validateAcceptedPublicationArtifacts(
+  artifacts: readonly AcceptedPublicationArtifact[],
+): Promise<void> {
+  await Promise.all(
+    artifacts.map(async (artifact) => {
+      const prepared = await readAcceptedArtifact({
+        packageRoot: artifact.packageRoot,
+        artifactPath: artifact.artifactPath,
+        preserveReceiptTarget: true,
+      });
+      if (
+        prepared.kind !== "prepared" ||
+        prepared.packageName !== artifact.packageName ||
+        prepared.artifactVersion !== artifact.artifactVersion ||
+        prepared.sha512 !== artifact.sha512 ||
+        path.resolve(prepared.receiptPath) !==
+          path.resolve(artifact.receiptPath)
+      ) {
+        throw new Error(
+          `已验收原件清单与 tgz 或回执不一致：${artifact.packageName}。`,
+        );
+      }
+    }),
+  );
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)

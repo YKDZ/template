@@ -2,7 +2,10 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import path from "node:path";
 
-import { readAcceptedPublicationArtifacts } from "./accepted-artifacts.ts";
+import {
+  readAcceptedPublicationArtifacts,
+  validateAcceptedPublicationArtifacts,
+} from "./accepted-artifacts.ts";
 
 const repositoryRoot = path.resolve(
   process.env.PUBLICATION_REPOSITORY_ROOT ?? process.cwd(),
@@ -11,6 +14,7 @@ const artifacts = await readAcceptedPublicationArtifacts({
   repositoryRoot,
   environment: process.env,
 });
+await validateAcceptedPublicationArtifacts(artifacts);
 const filters = artifacts.flatMap((artifact) => [
   "--filter",
   artifact.packageName,

@@ -807,6 +807,29 @@ void describe("单包远端发布与原件续办", () => {
         publicationFailure("publish-resume-ambiguous"),
       );
       assert.equal(registry.publishes.length, 1);
+
+      const publishCountBeforeMissingMarker = registry.publishes.length;
+      const missingMarkerRun: RemoteCommandRunner = async (
+        command,
+        arguments_,
+        request,
+      ) => {
+        if (command === "gh" && arguments_[0] === "api") {
+          return response(0, JSON.stringify({ artifacts: [] }));
+        }
+        return await defaultRemoteCommand(command, arguments_, request);
+      };
+      await assert.rejects(
+        restoreNpmPublicationAttempt({
+          repositoryRoot: candidate.repositoryRoot,
+          packageRoot: candidate.packageRoot,
+          artifactDirectory: candidate.artifactDirectory,
+          environment: rerunEnvironment,
+          run: missingMarkerRun,
+        }),
+        publicationFailure("publication-attempt-marker-unavailable"),
+      );
+      assert.equal(registry.publishes.length, publishCountBeforeMissingMarker);
     } finally {
       await candidate.dispose();
     }

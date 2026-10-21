@@ -3,7 +3,10 @@ import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { readAcceptedPublicationArtifacts } from "./accepted-artifacts.ts";
+import {
+  readAcceptedPublicationArtifacts,
+  validateAcceptedPublicationArtifacts,
+} from "./accepted-artifacts.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -31,6 +34,7 @@ for (const artifact of artifacts) {
 if (ready.length === 0) {
   process.stdout.write("没有 npm 已就绪的目标需要创建 GitHub Release。\n");
 } else {
+  await validateAcceptedPublicationArtifacts(ready);
   const filters = ready.flatMap((artifact) => [
     "--filter",
     artifact.packageName,

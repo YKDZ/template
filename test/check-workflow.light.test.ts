@@ -426,6 +426,34 @@ void describe("Fixture Verification Evidence check workflow", () => {
           "pnpm exec node --import @ykdz/reference-npm-publication/schedule-npm --eval '' --",
       ),
     );
+    const restoreAttempt = release.jobs.publish.steps.find(
+      (step) => step.id === "restore-attempt",
+    );
+    const markAttempt = release.jobs.publish.steps.find(
+      (step) => step.name === "在原件回执中记录首次上传尝试",
+    );
+    const publish = release.jobs.publish.steps.find(
+      (step) => step.name === "按依赖顺序发布已验收原件",
+    );
+    assert.strictEqual(
+      restoreAttempt?.run,
+      "pnpm exec node --import @ykdz/reference-npm-publication/restore-attempts --eval '' --",
+    );
+    assert.strictEqual(
+      markAttempt?.if,
+      "steps.restore-attempt.outputs.restored != 'true'",
+    );
+    assert.ok(
+      release.jobs.publish.steps.indexOf(restoreAttempt!) <
+        release.jobs.publish.steps.indexOf(markAttempt!) &&
+        release.jobs.publish.steps.indexOf(markAttempt!) <
+          release.jobs.publish.steps.indexOf(publish!),
+      "续办 marker 恢复失败时不能新建标记或调用远端调度",
+    );
+    assert.ok(
+      !publish?.if?.includes("always()"),
+      "marker 恢复失败时默认成功条件必须跳过远端调度",
+    );
     assert.strictEqual(
       release.jobs.publish.steps.find(
         (step) => step.name === "下载已验收原件集合",

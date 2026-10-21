@@ -247,6 +247,13 @@ function validateDistTag(value: string, semver: LockedSemver): boolean {
   );
 }
 
+/** 首发向导复用发布入口的原生 npm dist-tag 语义。 */
+export async function isValidPublicationDistTag(
+  value: string,
+): Promise<boolean> {
+  return validateDistTag(value, await loadLockedSemver());
+}
+
 function targetDistTag(options: {
   readonly version: string;
   readonly requested: string | undefined;
@@ -440,7 +447,15 @@ export async function restoreNpmPublicationAttempt(options: {
   const matches = listing.artifacts.filter(
     (item) => isRecord(item) && item.name === markerName,
   );
-  if (matches.length === 0) return false;
+  if (matches.length === 0) {
+    if (identity.runAttempt > 1) {
+      fail(
+        "publication-attempt-marker-unavailable",
+        "续办时缺少原工作流上传尝试标记，已停止发布",
+      );
+    }
+    return false;
+  }
   if (
     matches.length !== 1 ||
     !isRecord(matches[0]) ||
