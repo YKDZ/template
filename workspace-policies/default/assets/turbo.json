@@ -53,11 +53,19 @@
     },
     "//#publication:artifact": {
       "cache": false,
-      "tags": ["quality:conditional"]
+      "tags": ["work:preparation"]
     },
     "//#publication:readiness": {
       "cache": false,
-      "tags": ["work:release"]
+      "tags": ["work:on-demand"]
+    },
+    "//#publication:prepare": {
+      "cache": false,
+      "dependsOn": [],
+      "inputs": [],
+      "outputs": [],
+      "passThroughEnv": ["PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY"],
+      "tags": ["work:preparation"]
     },
     "//#toolchain:prepare": {
       "cache": false,

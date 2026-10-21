@@ -24,9 +24,18 @@ function presetFor(packageName: string) {
 }
 
 function generator() {
+  const publicationReference = templateContent.find(
+    (member) =>
+      member.kind === "reference" &&
+      member.identity.packageName === "@ykdz/reference-npm-publication" &&
+      member.identity.exportPath === "./template",
+  );
+  assert.ok(publicationReference?.kind === "reference");
   return createGenerator({
     content: templateContent,
-    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
+    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>({
+      cliPublicationReference: publicationReference.definition,
+    }),
   });
 }
 

@@ -15,7 +15,8 @@
       "dependsOn": ["^build"],
       "inputs": [],
       "outputs": ["dist/**"],
-      "tags": ["quality:light"]
+      "cache": false,
+      "tags": ["work:preparation"]
     },
     "format:check": {
       "inputs": [],
@@ -44,6 +45,24 @@
       "inputs": [],
       "outputs": [],
       "tags": ["work:lifecycle"]
+    },
+    "publication:accept": {
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "tags": ["work:preparation"]
+    },
+    "publication:consume": {
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "tags": ["work:preparation"]
+    },
+    "publication:readiness": {
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "tags": ["work:on-demand"]
     },
     "prepack": {
       "inputs": [],

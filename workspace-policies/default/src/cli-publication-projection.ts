@@ -4,9 +4,9 @@ import type {
   SetExecutableOperation,
   WriteTextFromFragmentsOperation,
 } from "@ykdz/template-core/renderer";
-import type { GeneratorPackageState } from "@ykdz/template-core/workspace-strategy";
 
 import type { PackageContribution } from "./package-contribution.ts";
+import type { ReferencePackage } from "./reference-package.ts";
 import type { RootResourceOperation } from "./shared-root-files.ts";
 import {
   copyPreparedWorkspaceResource,
@@ -18,27 +18,19 @@ const cliPublicationOwner =
   "工作区公开 CLI 发布能力 @ykdz/template-workspace#./cli-publication";
 
 const cliPublicationFiles = [
-  "assets/.pnpmfile.mjs",
-  "publication/artifact.ts",
-  "publication/changelog.ts",
-  "publication/check-artifact.ts",
-  "publication/check-readiness.ts",
-  "publication/configuration.ts",
-  "publication/handoff.ts",
-  "publication/publish.ts",
-  "publication/readiness.ts",
-  "publication/release.ts",
   "resources/cli-publication/gitignore",
-  "resources/cli-publication/release.yml",
   "publication-setup/README.md",
-  "publication-setup/RELEASING.md",
-  "publication-setup/assets/CHANGELOG.md.template",
-  "publication-setup/assets/LICENSE-APACHE-2.0.txt",
-  "publication-setup/assets/LICENSE-MIT.txt",
-  "publication-setup/assets/README.md.template",
-  "publication-setup/bridge.ts",
   "publication-setup/setup.sh",
 ] as const;
+
+// 根脚本目录由工作区根配置治理；包级配置和所属集成测试留在参考包验收中。
+const referencePackageOnlyResources = new Set([
+  "resources/release.yml",
+  "scripts/publication.integration.test.ts",
+  "tsconfig.json",
+  "turbo.json",
+  "turbo.jsonc",
+]);
 
 /** 工作区 CLI owner 在策略准备阶段检查其有限发布资源。 */
 export function prepareCliPublicationResources(): PreparedWorkspaceResources {
@@ -59,30 +51,13 @@ export type CliPublicationProjection = {
   readonly tsconfigInclude: readonly string[];
 };
 
-type PublicCliCandidate = {
-  readonly contribution: PackageContribution;
-  readonly record: GeneratorPackageState;
-};
-
 function publicCliCandidate(
-  packages: readonly GeneratorPackageState[],
   contributions: readonly PackageContribution[],
-): PublicCliCandidate | undefined {
-  const recordsByPackagePath = new Map(
-    packages.map((record) => [record.definition.path, record]),
-  );
+): PackageContribution | undefined {
   const candidates = contributions.filter(
     (contribution) =>
       contribution.foundation.npmPublication?.kind === "public-cli-candidate",
   );
-  for (const candidate of candidates) {
-    const record = recordsByPackagePath.get(candidate.definition.path);
-    if (record?.createdBy !== "initialization") {
-      throw new Error(
-        `公开 CLI 候选只能在初始化时选择：${candidate.definition.name}`,
-      );
-    }
-  }
   if (candidates.length > 1) {
     throw new Error(
       `工作区最多只能选择一个公开 CLI 候选：${candidates.map((candidate) => `${candidate.definition.name} 位于 ${candidate.definition.path}`).join("、")}`,
@@ -97,28 +72,18 @@ function publicCliCandidate(
       `公开 CLI 候选必须使用 cli-tool 包角色：${contribution.definition.name}`,
     );
   }
-  if (contribution === undefined) return undefined;
-  const record = recordsByPackagePath.get(contribution.definition.path);
-  if (record === undefined || record.creationInput === null) {
-    throw new Error(
-      `公开 CLI 候选缺少生成记录创建事实：${contribution.definition.name}`,
-    );
-  }
-  return { contribution, record };
+  return contribution;
 }
 
 function publicationOperations(
-  candidate: PublicCliCandidate | undefined,
+  candidate: PackageContribution | undefined,
   resources: PreparedWorkspaceResources,
+  referencePackage: ReferencePackage | undefined,
 ): (RootResourceOperation | SetExecutableOperation)[] {
   if (candidate === undefined) return [];
-  const publication = candidate.contribution.foundation.npmPublication;
-  if (
-    publication?.commandIdentitySource === undefined ||
-    publication.creationInputSource === undefined
-  ) {
+  if (referencePackage === undefined) {
     throw new Error(
-      `公开 CLI 候选 ${candidate.contribution.definition.name} 缺少所属发布资源事实`,
+      "公开 CLI 候选需要由内容集合显式装配 @ykdz/reference-npm-publication#./template",
     );
   }
   const copy = (
@@ -126,16 +91,17 @@ function publicationOperations(
     to: string,
   ): RootResourceOperation =>
     copyPreparedWorkspaceResource(resources, file, to, cliPublicationOwner);
-  return [
-    copy("assets/.pnpmfile.mjs", ".pnpmfile.mjs"),
-    ...cliPublicationFiles
-      .filter((file) => file.startsWith("publication/"))
-      .map((file) =>
-        copy(
-          file,
-          path.posix.join("scripts/npm-publication", path.posix.basename(file)),
+  referencePackage.prepare();
+  const scriptOperations = referencePackage
+    .operations("scripts/npm-publication")
+    .filter(
+      (operation) =>
+        !referencePackageOnlyResources.has(
+          path.posix.relative("scripts/npm-publication", operation.to),
         ),
-      ),
+    );
+  return [
+    ...scriptOperations,
     ...cliPublicationFiles
       .filter((file) => file.startsWith("publication-setup/"))
       .map((file) =>
@@ -151,40 +117,30 @@ function publicationOperations(
       kind: "writeJson",
       to: "scripts/npm-publication/publication.config.json",
       value: {
-        packagePath: candidate.contribution.definition.path,
-        packageDefinitionId: candidate.record.packageDefinitionId,
-        creationInput: candidate.record.creationInput,
+        packagePath: candidate.definition.path,
       },
-    },
-    {
-      kind: "copyFile",
-      ...publication.commandIdentitySource,
-      to: "scripts/npm-publication/cli-command-identity.ts",
-    },
-    {
-      kind: "copyFile",
-      ...publication.creationInputSource,
-      to: "scripts/npm-publication/cli-candidate-selection.ts",
     },
     {
       kind: "setExecutable",
       path: "scripts/npm-publication-setup/setup.sh",
       executable: true,
     },
-    copy(
-      "resources/cli-publication/release.yml",
-      ".github/workflows/release.yml",
-    ),
+    {
+      kind: "copyFile",
+      source: referencePackage.source("resources/release.yml"),
+      from: ".",
+      to: ".github/workflows/release.yml",
+    },
   ];
 }
 
 /** 默认策略拥有公开 TypeScript CLI 候选的根配置与发版工具投影。 */
 export function projectCliPublication(options: {
-  readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
   readonly resources: PreparedWorkspaceResources;
+  readonly referencePackage: ReferencePackage | undefined;
 }): CliPublicationProjection {
-  const selected = publicCliCandidate(options.packages, options.contributions);
+  const selected = publicCliCandidate(options.contributions);
   if (selected === undefined) {
     return {
       candidate: undefined,
@@ -197,9 +153,14 @@ export function projectCliPublication(options: {
       tsconfigInclude: [],
     };
   }
+  const filter = `'${selected.definition.name.replaceAll("'", "'\\''")}'`;
   return {
-    candidate: selected.contribution,
-    operations: publicationOperations(selected, options.resources),
+    candidate: selected,
+    operations: publicationOperations(
+      selected,
+      options.resources,
+      options.referencePackage,
+    ),
     gitignoreFragments: [
       copyPreparedWorkspaceResource(
         options.resources,
@@ -208,22 +169,16 @@ export function projectCliPublication(options: {
         cliPublicationOwner,
       ),
     ],
-    imports: { "#npm-publication/*": "./scripts/npm-publication/*.ts" },
+    imports: undefined,
     scripts: {
-      "publication:readiness":
-        "node --conditions=source scripts/npm-publication/check-readiness.ts",
-      "publication:artifact":
-        "node --conditions=source scripts/npm-publication/check-artifact.ts",
+      "publication:readiness": `pnpm --filter=${filter} run publication:readiness`,
+      "publication:prepare":
+        "pnpm --workspace-root exec node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/generated/prepare.ts",
+      "publication:artifact": `pnpm exec turbo run publication:prepare && pnpm --filter=${filter} run publication:accept`,
+      "publication:remote:artifact": `node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/generated/assert-source.ts && pnpm exec turbo run publication:prepare && pnpm --filter=${filter} run publication:accept`,
     },
-    devDependencies: {
-      "@types/semver": "catalog:",
-      "@types/spdx-expression-parse": "catalog:",
-      semver: "catalog:",
-      "spdx-expression-parse": "catalog:",
-      npm: "catalog:",
-      tar: "catalog:",
-    },
-    tsconfigCompilerOptions: { allowJs: true, checkJs: true },
-    tsconfigInclude: [".pnpmfile.mjs"],
+    devDependencies: {},
+    tsconfigCompilerOptions: {},
+    tsconfigInclude: [],
   };
 }

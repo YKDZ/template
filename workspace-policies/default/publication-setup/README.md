@@ -1,51 +1,11 @@
-# One-time npm publication setup
+# 首次 npm 发布
 
-本目录不纳入 Git 跟踪。后续发布流程见同目录的
-[RELEASING.md](./RELEASING.md)；首次发布配置完成后，可统一删除本目录。
+此目录只提供一次性首次发布向导。生成仓库的长期发布 workflow 与远端发布实现来自共享 `@ykdz/reference-npm-publication`。
 
-Run `./scripts/npm-publication-setup/setup.sh` from the generated repository
-root. It is a one-time, direct setup interface with nine English line-oriented
-stages:
+在生成仓库根目录运行 `./scripts/npm-publication-setup/setup.sh`。向导先确认公开包资料，再要求默认分支干净且与公共远端同步；随后通过正式准备、安装和消费验收得到唯一 tgz。发布说明取自目标包当前版本的 `CHANGELOG.md`。
 
-1. Check prerequisites
-2. Configure the public package
-3. Commit the publication configuration
-4. Verify the first release artifact
-5. Authenticate with npm
-6. Publish version 1.0.0
-7. Configure trusted publishing
-8. Create the first GitHub release
-9. Finish setup
+稳定版默认使用 npm `latest` 标签。预发布版本须通过 `--dist-tag <channel>` 显式提供非 `latest` 渠道。npm 上传后 pnpm 会等待准确版本可见，后续 GitHub Release 复用同一 tgz。
 
-Stages 1–4 prepare reviewed public package facts and verify one receipt-bound
-tgz on the clean, synchronized public default branch. After the exact Stage 4
-acceptance, the private setup bridge creates an isolated temporary npm session.
-It rejects ambient npm credentials and any repository `.npmrc`, uses the locked
-npm CLI through the workspace's Corepack pnpm, and performs web authentication
-directly in your terminal.
-The wizard never asks for or stores a password, OTP, recovery code, token, or
-generic `--yes` acceptance.
+远端步骤失败时，向导保留已验收目录并打印 `--resume-artifact <目录>` 续办命令；预发布续办还需保留 `--dist-tag <channel>`。续办读取原回执、tgz 和原提交，不重新准备制品。原件丢失或远端事实冲突时停止。
 
-Stage 6 either publishes the accepted absolute `1.0.0` tgz with public/latest
-settings, or resumes only when npm registry metadata and downloaded bytes are
-an exact match. Stage 7 creates or reads back exactly one GitHub trusted
-publisher for this repository's `release.yml`, with publish permission only.
-It does not configure an Environment or staged publishing. npm-owned
-interactive prompts are bracketed by stable `INTERACTIVE … BEGIN/END` lines.
-
-Stage 8 uses the current authenticated `gh` session for the reviewed public
-repository. It first classifies Immutable Releases, the annotated tag, the
-Release, and both asset bytes. Fresh, exact tag-only, exact draft, and exact
-immutable public facts are the only resumable states. A single exact phrase
-binds the package, accepted artifact, repository, tag, and commit before any
-GitHub write. The wizard never reads or stores a GitHub token, requests a
-permission refresh, deletes remote state, or repairs a partial Release.
-
-The setup directory keeps no progress state. Every rerun verifies Stage 4,
-logs in again, and derives resume facts from npm and GitHub. On every normal failure or
-interrupt after session creation it attempts same-session logout before removing
-only its owned temporary files; it never deletes this directory or the
-repository. `--status --json` remains a read-only local status query ending at
-Stage 4. Stage 9 completes only after immutable Release verification, logout,
-and owned cleanup; it then says that this one-time directory may be deleted
-manually. It never deletes itself.
+`./scripts/npm-publication-setup/setup.sh --status --json` 只读取本地状态，不会创建制品或访问发布服务。

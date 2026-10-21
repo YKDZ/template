@@ -9,7 +9,6 @@
   },
   "include": [
     "*.config.ts",
-    ".pnpmfile.mjs",
     "scripts/**/*.ts",
     "test/**/*.ts",
     "test-support/**/*.ts"

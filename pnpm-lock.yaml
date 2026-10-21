@@ -335,8 +335,6 @@ overrides:
   pinia>typescript: '-'
   vue>typescript: '-'
 
-pnpmfileChecksum: sha256-Pqjj5RWfBcB+NXMvWRViWF4TWyVyThis1u/blaNhZFw=
-
 importers:
 
   .:
@@ -347,6 +345,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:references/npm-publication
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:references/tooling-config
@@ -438,6 +439,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config
@@ -535,6 +539,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config
@@ -577,6 +584,9 @@ importers:
       '@ykdz/reference-hono-api':
         specifier: workspace:*
         version: link:../../references/hono-api
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
       '@ykdz/reference-rust-bin':
         specifier: workspace:*
         version: link:../../references/rust-bin
@@ -815,6 +825,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
       '@ykdz/reference-rust-bin':
         specifier: workspace:*
         version: link:../../references/rust-bin
@@ -1057,6 +1070,49 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
+      '@ykdz/template-workspace':
+        specifier: workspace:*
+        version: link:../../workspace-policies/default
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  references/npm-publication:
+    dependencies:
+      semver:
+        specifier: 'catalog:'
+        version: 7.8.5
+      spdx-expression-parse:
+        specifier: 'catalog:'
+        version: 5.0.0
+      tar:
+        specifier: 'catalog:'
+        version: 7.5.22
+      validate-npm-package-name:
+        specifier: 'catalog:'
+        version: 8.0.0
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@types/semver':
+        specifier: 'catalog:'
+        version: 7.8.0
+      '@types/spdx-expression-parse':
+        specifier: 'catalog:'
+        version: 4.0.0
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
@@ -1588,12 +1644,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
-      '@types/semver':
-        specifier: 'catalog:'
-        version: 7.8.0
-      '@types/spdx-expression-parse':
-        specifier: 'catalog:'
-        version: 4.0.0
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config
@@ -1609,15 +1659,6 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 7.0.2004
-      semver:
-        specifier: 'catalog:'
-        version: 7.8.5
-      spdx-expression-parse:
-        specifier: 'catalog:'
-        version: 5.0.0
-      tar:
-        specifier: 'catalog:'
-        version: 7.5.22
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2

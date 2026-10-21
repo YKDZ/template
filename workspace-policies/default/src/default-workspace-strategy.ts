@@ -680,6 +680,7 @@ function projectOperations(options: {
   readonly blueprint: ProjectBlueprint;
   readonly packages: readonly GeneratorPackageState[];
   readonly contributions: readonly PackageContribution[];
+  readonly cliPublicationReference: ReferencePackage | undefined;
   readonly presetProjectContributions: readonly (readonly DefaultWorkspaceProjectContribution[])[];
   readonly sharedRootContributions: readonly SharedRootContribution[];
 }): WorkspaceProjection<DefaultWorkspaceOwnerFacts> {
@@ -703,9 +704,9 @@ function projectOperations(options: {
     linkPlan,
   });
   const cliPublication = projectCliPublication({
-    packages: options.packages,
     contributions,
     resources: prepared.cliPublication,
+    referencePackage: options.cliPublicationReference,
   });
   const rustProjection = projectRustTarget({
     context,
@@ -738,7 +739,6 @@ function projectOperations(options: {
     "pnpm-workspace.yaml",
     "pnpm-lock.yaml",
     "*.config.ts",
-    ".pnpmfile.mjs",
     ".gitignore",
     ".dockerignore",
     "Dockerfile",
@@ -791,13 +791,13 @@ function projectOperations(options: {
   baseScripts["format:write"] =
     `oxfmt --write --no-error-on-unmatched-pattern ${rootAutomationPaths}`;
   baseScripts.lint =
-    "oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test";
+    "oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts scripts test";
   baseScripts["lint:fix"] =
-    "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test --fix";
+    "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts scripts test --fix";
   if (needsShellCheck) {
-    baseScripts.lint = `${rootShellcheckCommand}oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test`;
+    baseScripts.lint = `${rootShellcheckCommand}oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts scripts test`;
     baseScripts["lint:fix"] =
-      "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts test --fix";
+      "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts scripts test --fix";
   }
   const shared = composeSharedRootFiles({
     source: "@ykdz/template-workspace/default-workspace-strategy",
@@ -1245,6 +1245,8 @@ export function createDefaultWorkspaceStrategy<
   CreationInput extends PackageCreationInput = DefaultWorkspaceCreationInput,
 >(
   options: {
+    /** 默认内容集合显式装配的共享发布参考包。 */
+    readonly cliPublicationReference?: ReferencePackage;
     readonly project?: (options: {
       readonly context: DefaultWorkspaceContext;
       readonly blueprint: ProjectBlueprint;
@@ -1629,6 +1631,7 @@ export function createDefaultWorkspaceStrategy<
     project(projectOptions) {
       return projectOperations({
         ...projectOptions,
+        cliPublicationReference: options.cliPublicationReference,
         sharedRootContributions: options.project?.(projectOptions) ?? [],
       });
     },

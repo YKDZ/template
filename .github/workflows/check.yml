@@ -211,18 +211,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Upload Verified Packed Candidate
-        if: always() && inputs.publish_verified_candidate
-        uses: actions/upload-artifact@v7
-        with:
-          name: verified-packed-publication-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            .verified-packed-publication/*.tgz
-            .verified-packed-publication/SHA512SUMS
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-
       - name: Save BuildKit cache
         if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'
         uses: actions/cache/save@v6
@@ -250,3 +238,25 @@ jobs:
         with:
           path: .fixture-evidence
           key: fixture-verification-evidence-${{ runner.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Prepare and accept the original publication tgz
+        if: success() && inputs.publish_verified_candidate
+        run: |
+          pnpm exec turbo run publication:prepare --filter=@ykdz/template
+          pnpm --filter @ykdz/template run publication:accept
+        env:
+          PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: ${{ github.workspace }}/.verified-packed-publication
+          PUBLICATION_SOURCE_SHA: ${{ github.sha }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+      - name: Upload accepted original tgz and receipt
+        if: success() && inputs.publish_verified_candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: verified-packed-publication-${{ github.run_id }}
+          path: |
+            .verified-packed-publication/*.tgz
+            .verified-packed-publication/publication-preparation.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
