@@ -61,6 +61,78 @@ async function makePackage(root: string): Promise<void> {
   );
 }
 
+async function makeBatchPackage(
+  root: string,
+  options: {
+    readonly name: string;
+    readonly value: string;
+    readonly dependencies?: Readonly<Record<string, string>>;
+    readonly consumerExpectations?: Readonly<Record<string, string>>;
+  },
+): Promise<void> {
+  await writeFile(
+    path.join(root, "package.json"),
+    `${JSON.stringify(
+      {
+        name: options.name,
+        version: "1.0.0",
+        type: "module",
+        exports: "./index.mjs",
+        files: ["index.mjs", "lifecycle.mjs", "consume.mjs"],
+        scripts: {
+          prepack: "node lifecycle.mjs prepack",
+          postinstall: "node lifecycle.mjs postinstall",
+          "publication:consume": "node consume.mjs",
+        },
+        ...(options.dependencies === undefined
+          ? {}
+          : { dependencies: options.dependencies }),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await writeFile(
+    path.join(root, "index.mjs"),
+    `export const value = ${JSON.stringify(options.value)};\n`,
+  );
+  await writeFile(
+    path.join(root, "lifecycle.mjs"),
+    [
+      'import { appendFile } from "node:fs/promises";',
+      "const log = process.env.NPM_PUBLICATION_EVENT_LOG;",
+      `if (log) await appendFile(log, ${JSON.stringify(`${options.value}:`)} + process.argv[2] + "\\n");`,
+    ].join("\n"),
+  );
+  const expected = {
+    [options.name]: options.value,
+    ...options.consumerExpectations,
+  };
+  await writeFile(
+    path.join(root, "consume.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { createRequire } from "node:module";',
+      'import path from "node:path";',
+      'import { appendFile } from "node:fs/promises";',
+      "const consumer = process.env.NPM_PUBLICATION_CONSUMER_ROOT;",
+      "assert.ok(consumer);",
+      'const require = createRequire(path.join(consumer, "package.json"));',
+      `for (const [name, value] of Object.entries(${JSON.stringify(expected)})) {`,
+      "  assert.equal(require(name).value, value);",
+      "}",
+      `await appendFile(process.env.NPM_PUBLICATION_EVENT_LOG, ${JSON.stringify(`${options.value}:consume\n`)});`,
+    ].join("\n"),
+  );
+}
+
+async function sha512(filePath: string): Promise<string> {
+  const { createHash } = await import("node:crypto");
+  return createHash("sha512")
+    .update(await readFile(filePath))
+    .digest("hex");
+}
+
 void describe("shared npm artifact preparation", () => {
   void it("packs and normally installs an ordinary package before its own consumer command", async () => {
     const workspace = await mkdtemp(
@@ -259,6 +331,231 @@ void describe("shared npm artifact preparation", () => {
         ),
         originalDigest,
       );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  void it("一次正常安装并验收有依赖关系的整批 tgz", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "npm-publication-batch-"),
+    );
+    const baseRoot = path.join(workspace, "base");
+    const dependentRoot = path.join(workspace, "dependent");
+    const baseOutput = path.join(workspace, "artifacts", "base");
+    const dependentOutput = path.join(workspace, "artifacts", "dependent");
+    const eventLog = path.join(workspace, "lifecycle.log");
+    await mkdir(baseRoot, { recursive: true });
+    await mkdir(dependentRoot, { recursive: true });
+    await makeBatchPackage(baseRoot, {
+      name: "@example/batch-base",
+      value: "base",
+    });
+    await makeBatchPackage(dependentRoot, {
+      name: "@example/batch-dependent",
+      value: "dependent",
+      dependencies: { "@example/batch-base": "1.0.0" },
+      consumerExpectations: { "@example/batch-base": "base" },
+    });
+    const env = { ...process.env, NPM_PUBLICATION_EVENT_LOG: eventLog };
+
+    try {
+      const base = await prepareArtifact({
+        packageRoot: baseRoot,
+        outputDirectory: baseOutput,
+        env,
+      });
+      const dependent = await prepareArtifact({
+        packageRoot: dependentRoot,
+        outputDirectory: dependentOutput,
+        env,
+      });
+      assert.equal(base.kind, "prepared");
+      assert.equal(dependent.kind, "prepared");
+      if (base.kind !== "prepared" || dependent.kind !== "prepared") {
+        throw new Error("依赖批次制品准备失败");
+      }
+
+      const accepted = await acceptArtifact({
+        packageRoot: baseRoot,
+        artifactPath: base.artifactPath,
+        additionalArtifacts: [
+          { packageRoot: dependentRoot, artifactPath: dependent.artifactPath },
+        ],
+        env,
+      });
+      assert.equal(accepted.kind, "accepted");
+      if (accepted.kind !== "accepted") {
+        throw new Error("依赖批次制品消费验收失败");
+      }
+      assert.equal(accepted.installation.command, "npm");
+      assert.ok(accepted.installation.arguments.includes(base.artifactPath));
+      assert.ok(
+        accepted.installation.arguments.includes(dependent.artifactPath),
+      );
+      assert.deepEqual(
+        accepted.artifacts.map((artifact) => artifact.packageName),
+        ["@example/batch-base", "@example/batch-dependent"],
+      );
+      assert.deepEqual(
+        accepted.artifacts.map((artifact) => artifact.sha512),
+        [base.sha512, dependent.sha512],
+      );
+      assert.deepEqual(
+        await Promise.all([
+          sha512(base.artifactPath),
+          sha512(dependent.artifactPath),
+        ]),
+        [base.sha512, dependent.sha512],
+      );
+      for (const [packageRoot, artifactDirectory] of [
+        [baseRoot, baseOutput],
+        [dependentRoot, dependentOutput],
+      ] as const) {
+        const reread = await readAcceptedArtifact({
+          packageRoot,
+          artifactDirectory,
+        });
+        assert.equal(reread.kind, "prepared");
+        if (reread.kind !== "prepared") {
+          throw new Error("整批回执无法作为已验收原件读取");
+        }
+        assert.equal(reread.receipt.acceptance?.consumption, "passed");
+      }
+      const events = (await readFile(eventLog, "utf8")).trim().split("\n");
+      assert.deepEqual(
+        events.toSorted(),
+        [
+          "base:prepack",
+          "dependent:prepack",
+          "base:postinstall",
+          "dependent:postinstall",
+          "base:consume",
+          "dependent:consume",
+        ].toSorted(),
+      );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  void it("任一目标消费失败时不写入整批回执", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "npm-publication-batch-failure-"),
+    );
+    const baseRoot = path.join(workspace, "base");
+    const dependentRoot = path.join(workspace, "dependent");
+    const baseOutput = path.join(workspace, "artifacts", "base");
+    const dependentOutput = path.join(workspace, "artifacts", "dependent");
+    const eventLog = path.join(workspace, "lifecycle.log");
+    await mkdir(baseRoot, { recursive: true });
+    await mkdir(dependentRoot, { recursive: true });
+    await makeBatchPackage(baseRoot, {
+      name: "@example/failure-base",
+      value: "base",
+    });
+    await makeBatchPackage(dependentRoot, {
+      name: "@example/failure-dependent",
+      value: "dependent",
+      dependencies: { "@example/failure-base": "1.0.0" },
+      consumerExpectations: { "@example/failure-base": "base" },
+    });
+
+    try {
+      const base = await prepareArtifact({
+        packageRoot: baseRoot,
+        outputDirectory: baseOutput,
+      });
+      const dependent = await prepareArtifact({
+        packageRoot: dependentRoot,
+        outputDirectory: dependentOutput,
+      });
+      assert.equal(base.kind, "prepared");
+      assert.equal(dependent.kind, "prepared");
+      if (base.kind !== "prepared" || dependent.kind !== "prepared") {
+        throw new Error("依赖批次制品准备失败");
+      }
+      const manifestPath = path.join(dependentRoot, "package.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+        scripts: Record<string, string>;
+      };
+      manifest.scripts["publication:consume"] = 'node -e "process.exit(37)"';
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+      await assert.rejects(
+        acceptArtifact({
+          packageRoot: baseRoot,
+          artifactPath: base.artifactPath,
+          additionalArtifacts: [
+            {
+              packageRoot: dependentRoot,
+              artifactPath: dependent.artifactPath,
+            },
+          ],
+          env: { ...process.env, NPM_PUBLICATION_EVENT_LOG: eventLog },
+        }),
+        /退出状态 37/u,
+      );
+      assert.deepEqual(
+        await Promise.all([
+          sha512(base.artifactPath),
+          sha512(dependent.artifactPath),
+        ]),
+        [base.sha512, dependent.sha512],
+      );
+      for (const output of [baseOutput, dependentOutput]) {
+        const receipt = JSON.parse(
+          await readFile(
+            path.join(output, "publication-preparation.json"),
+            "utf8",
+          ),
+        ) as { readonly acceptance?: unknown };
+        assert.equal(receipt.acceptance, undefined);
+      }
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  void it("未发布且未选依赖安装失败时提示显式补选", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "npm-publication-batch-unselected-"),
+    );
+    const packageRoot = path.join(workspace, "package");
+    const outputDirectory = path.join(workspace, "artifacts");
+    await mkdir(packageRoot, { recursive: true });
+    await makeBatchPackage(packageRoot, {
+      name: "@example/unselected-consumer",
+      value: "consumer",
+      dependencies: { "@example/not-selected": "1.0.0" },
+    });
+
+    try {
+      const prepared = await prepareArtifact({
+        packageRoot,
+        outputDirectory,
+      });
+      assert.equal(prepared.kind, "prepared");
+      if (prepared.kind !== "prepared") {
+        throw new Error("未选依赖制品准备失败");
+      }
+
+      await assert.rejects(
+        acceptArtifact({
+          packageRoot,
+          artifactPath: prepared.artifactPath,
+          env: { npm_config_offline: "true" },
+        }),
+        /未纳入本批.*显式补选该目标/u,
+      );
+      assert.equal(await sha512(prepared.artifactPath), prepared.sha512);
+      const receipt = JSON.parse(
+        await readFile(
+          path.join(outputDirectory, "publication-preparation.json"),
+          "utf8",
+        ),
+      ) as { readonly acceptance?: unknown };
+      assert.equal(receipt.acceptance, undefined);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
