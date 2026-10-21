@@ -32,6 +32,15 @@ const referencePackageOnlyResources = new Set([
   "turbo.jsonc",
 ]);
 
+const publicationToolDependencies = {
+  "@types/semver": "catalog:",
+  "@types/spdx-expression-parse": "catalog:",
+  semver: "catalog:",
+  "spdx-expression-parse": "catalog:",
+  tar: "catalog:",
+  "validate-npm-package-name": "catalog:",
+} as const;
+
 /** 工作区 CLI owner 在策略准备阶段检查其有限发布资源。 */
 export function prepareCliPublicationResources(): PreparedWorkspaceResources {
   return prepareWorkspaceResources(cliPublicationFiles, cliPublicationOwner);
@@ -177,7 +186,7 @@ export function projectCliPublication(options: {
       "publication:artifact": `pnpm exec turbo run publication:prepare && pnpm --filter=${filter} run publication:accept`,
       "publication:remote:artifact": `node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/generated/assert-source.ts && pnpm exec turbo run publication:prepare && pnpm --filter=${filter} run publication:accept`,
     },
-    devDependencies: {},
+    devDependencies: publicationToolDependencies,
     tsconfigCompilerOptions: {},
     tsconfigInclude: [],
   };

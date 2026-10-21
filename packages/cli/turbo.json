@@ -42,6 +42,13 @@
       "outputs": [],
       "persistent": false
     },
+    "pack:bundled": {
+      "tags": ["work:preparation"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "tags": ["quality:light"],
@@ -63,6 +70,27 @@
         "PUBLICATION_SOURCE_SHA",
         "GITHUB_DEFAULT_BRANCH"
       ]
+    },
+    "publication:accept": {
+      "tags": ["work:preparation"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "publication:consume": {
+      "tags": ["work:preparation"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "publication:readiness": {
+      "tags": ["work:on-demand"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
     },
     "publication:verify": {
       "dependsOn": [],
