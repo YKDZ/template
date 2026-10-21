@@ -1,7 +1,5 @@
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 
-import type { DeploymentEnvironmentNeed } from "./environment-needs.ts";
-
 export type DependencyEcosystem =
   | "npm"
   | "cargo"
@@ -31,24 +29,4 @@ export type PackageLinkRequirement = {
   readonly provider: PackageDefinition;
 };
 
-/** Vike 数据准备只引用已解析的应用、数据库和迁移包实例。 */
-export type DatabasePreparationRequirement = {
-  readonly kind: "sqlite-database-preparation";
-  readonly web: PackageDefinition;
-  readonly database: PackageDefinition;
-  readonly migrations: PackageDefinition;
-};
-
-/** Vike 部署能力由工作区投影资源，并保留实际参与包与环境需求。 */
-export type DeploymentCheckRequirement = {
-  readonly kind: "application-container-with-database-migrations";
-  readonly application: PackageDefinition;
-  readonly database: PackageDefinition;
-  readonly migrations: PackageDefinition;
-  readonly environmentNeeds: readonly DeploymentEnvironmentNeed[];
-};
-
-export type ProjectRequirement =
-  | PackageLinkRequirement
-  | DatabasePreparationRequirement
-  | DeploymentCheckRequirement;
+export type ProjectRequirement = PackageLinkRequirement;

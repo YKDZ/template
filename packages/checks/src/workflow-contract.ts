@@ -4,6 +4,10 @@ import type { GeneratedScenarioReceipt } from "./generated-content.ts";
 
 type WorkflowOracle = {
   readonly deployment: boolean;
+  readonly checkWorkflowJob: {
+    readonly name: string;
+    readonly timeoutMinutes: number;
+  };
   readonly diagnosticOwnerPaths: Readonly<
     Record<"playwright" | "vitest-browser", readonly string[]>
   >;
@@ -93,18 +97,12 @@ function workflowOracle(receipt: GeneratedScenarioReceipt): WorkflowOracle {
     diagnosticOwnerPaths[declaration.kind].add(ownerPath.path);
   }
 
-  const deployment =
-    ownerFacts(receipt).requirements.deploymentCheck !== undefined;
-  if (
-    deployment &&
-    !ownerFacts(receipt).requirements.deploymentCheck?.environmentNeeds.some(
-      (need) => need.kind === "docker-engine",
-    )
-  ) {
-    throw new Error("Deployment Check requires a Docker Environment Need");
-  }
+  const deployment = ownerFacts(receipt).environmentNeeds.deployment.some(
+    (need) => need.kind === "docker-engine",
+  );
   return {
     deployment,
+    checkWorkflowJob: ownerFacts(receipt).checkWorkflowJob,
     diagnosticOwnerPaths: {
       playwright: [...diagnosticOwnerPaths.playwright].toSorted(),
       "vitest-browser": [...diagnosticOwnerPaths["vitest-browser"]].toSorted(),
@@ -121,6 +119,95 @@ export type ParsedWorkflow = {
 };
 
 type ParsedObject = Record<string, unknown>;
+
+type WorkflowActionContract = {
+  readonly name: string;
+  readonly action: string;
+  readonly with?: Readonly<ParsedObject>;
+};
+
+type WorkflowActionKey = "checkout" | "node" | "pnpm" | "buildx" | "upload";
+
+const workflowPolicy = {
+  generatedPath: ".github/workflows/check.yml",
+  name: "Check",
+  triggers: { pull_request: null, push: { branches: ["main"] } },
+  permissions: { contents: "read" },
+  concurrency: {
+    group: "${{ github.workflow }}-${{ github.ref }}",
+    "cancel-in-progress": true,
+  },
+  rootJob: {
+    id: "check",
+    name: "Root Check",
+    runner: "ubuntu-latest",
+    timeoutMinutes: 30,
+  },
+  actions: {
+    checkout: {
+      name: "Checkout source",
+      action: "actions/checkout",
+      with: { "persist-credentials": false, "fetch-depth": 1 },
+    },
+    node: {
+      name: "Set up Node.js",
+      action: "actions/setup-node",
+      with: { "node-version-file": "package.json" },
+    },
+    pnpm: {
+      name: "Set up pnpm",
+      action: "pnpm/action-setup",
+      with: { cache: true },
+    },
+    buildx: {
+      name: "Set up Docker Buildx",
+      action: "docker/setup-buildx-action",
+    },
+    upload: {
+      name: "Upload Root Check diagnostics",
+      action: "actions/upload-artifact",
+    },
+  } as Readonly<Record<WorkflowActionKey, WorkflowActionContract>>,
+  installStep: {
+    name: "Install dependencies",
+    command: "pnpm install --frozen-lockfile",
+  },
+  lightCheckStep: {
+    name: "Run Light Check",
+    command: "node --conditions=source scripts/task-gates.ts check",
+  },
+  heavyCheckStep: {
+    id: "run-heavy-check",
+    name: "Run Heavy Check",
+    command: "node --conditions=source scripts/task-gates.ts check:heavy",
+  },
+} as const;
+
+const rootActionKeys: readonly WorkflowActionKey[] = [
+  "checkout",
+  "node",
+  "pnpm",
+];
+
+function matchesAction(value: unknown, action: string): boolean {
+  return (
+    typeof value === "string" &&
+    value.startsWith(`${action}@`) &&
+    /^[a-f0-9]{40}$/u.test(value.slice(action.length + 1))
+  );
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    isParsedObject(item)
+      ? Object.fromEntries(
+          Object.entries(item).toSorted(([left], [right]) =>
+            left.localeCompare(right),
+          ),
+        )
+      : item,
+  );
+}
 
 function assertActionReferences(source: string): void {
   const document = parseDocument(source);
@@ -273,98 +360,6 @@ function isWorkflowStepName(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-type WorkflowActionContract = {
-  readonly name: string;
-  readonly action: string;
-  readonly with?: Readonly<ParsedObject>;
-};
-
-type WorkflowActionKey = "checkout" | "node" | "pnpm" | "buildx" | "upload";
-
-const workflowPolicy = {
-  generatedPath: ".github/workflows/check.yml",
-  name: "Check",
-  triggers: { pull_request: null, push: { branches: ["main"] } },
-  permissions: { contents: "read" },
-  concurrency: {
-    group: "${{ github.workflow }}-${{ github.ref }}",
-    "cancel-in-progress": true,
-  },
-  rootJob: {
-    id: "check",
-    name: "Root Check",
-    runner: "ubuntu-latest",
-    timeoutMinutes: 30,
-  },
-  deploymentJob: {
-    name: "Full Check",
-    timeoutMinutes: 45,
-  },
-  actions: {
-    checkout: {
-      name: "Checkout source",
-      action: "actions/checkout",
-      with: { "persist-credentials": false, "fetch-depth": 1 },
-    },
-    node: {
-      name: "Set up Node.js",
-      action: "actions/setup-node",
-      with: { "node-version-file": "package.json" },
-    },
-    pnpm: {
-      name: "Set up pnpm",
-      action: "pnpm/action-setup",
-      with: { cache: true },
-    },
-    buildx: {
-      name: "Set up Docker Buildx",
-      action: "docker/setup-buildx-action",
-    },
-    upload: {
-      name: "Upload Root Check diagnostics",
-      action: "actions/upload-artifact",
-    },
-  } as Readonly<Record<WorkflowActionKey, WorkflowActionContract>>,
-  installStep: {
-    name: "Install dependencies",
-    command: "pnpm install --frozen-lockfile",
-  },
-  lightCheckStep: {
-    name: "Run Light Check",
-    command: "node --conditions=source scripts/task-gates.ts check",
-  },
-  heavyCheckStep: {
-    name: "Run Heavy Check",
-    command: "node --conditions=source scripts/task-gates.ts check:heavy",
-  },
-} as const;
-
-const rootActionKeys: readonly WorkflowActionKey[] = [
-  "checkout",
-  "node",
-  "pnpm",
-];
-
-function matchesAction(value: unknown, action: string): boolean {
-  return (
-    typeof value === "string" &&
-    value.startsWith(`${action}@`) &&
-    /^[a-f0-9]{40}$/u.test(value.slice(action.length + 1))
-  );
-}
-
-function stableJson(value: unknown): string {
-  return JSON.stringify(value, (_key, item: unknown) =>
-    isParsedObject(item)
-      ? Object.fromEntries(
-          Object.entries(item).toSorted(([left], [right]) =>
-            left.localeCompare(right),
-          ),
-        )
-      : item,
-  );
-}
-
 function assertGeneratedCheckWorkflowContract(
   receipt: GeneratedScenarioReceipt,
   workflow: ParsedWorkflow,
@@ -397,15 +392,9 @@ function assertGeneratedCheckWorkflowContract(
     );
   }
   if (
-    job.name !==
-      (deployment
-        ? workflowPolicy.deploymentJob.name
-        : workflowPolicy.rootJob.name) ||
+    job.name !== oracle.checkWorkflowJob.name ||
     job["runs-on"] !== workflowPolicy.rootJob.runner ||
-    job["timeout-minutes"] !==
-      (deployment
-        ? workflowPolicy.deploymentJob.timeoutMinutes
-        : workflowPolicy.rootJob.timeoutMinutes)
+    job["timeout-minutes"] !== oracle.checkWorkflowJob.timeoutMinutes
   ) {
     throw new Error(`${receipt.scenario.id}: Check job identity is not stable`);
   }
@@ -461,7 +450,8 @@ function assertGeneratedCheckWorkflowContract(
   const heavyContract = workflowPolicy.heavyCheckStep;
   if (
     !isParsedObject(heavyCheck) ||
-    !hasExactKeys(heavyCheck, ["name", "run"]) ||
+    !hasExactKeys(heavyCheck, ["id", "name", "run"]) ||
+    heavyCheck.id !== heavyContract.id ||
     !isWorkflowStepName(heavyCheck.name) ||
     heavyCheck.run !== heavyContract.command
   ) {
@@ -578,14 +568,8 @@ function dependabotOracle(
   receipt: GeneratedScenarioReceipt,
 ): readonly DependabotUpdateOracle[] {
   const policy = ownerFacts(receipt).dependencyMaintenance;
-  const hasDeployment =
-    ownerFacts(receipt).requirements.deploymentCheck !== undefined;
   const ecosystems = [
-    ...new Set([
-      "devcontainers" as const,
-      ...policy.ecosystems,
-      ...(hasDeployment ? (["docker"] as const) : []),
-    ]),
+    ...new Set(["devcontainers" as const, ...policy.ecosystems]),
   ];
   return ecosystems.flatMap((ecosystem) => {
     const declaredDirectories = [
@@ -595,7 +579,6 @@ function dependabotOracle(
           ? []
           : [policy.directories[ecosystem]!]),
         ...(policy.extraDirectories?.[ecosystem] ?? []),
-        ...(ecosystem === "docker" && hasDeployment ? (["/"] as const) : []),
       ]),
     ];
     const directories: readonly `/${string}`[] =

@@ -487,7 +487,9 @@ for (const signal of forwardedSignals) {
 try {
   await deploymentPhase("standalone", "build", async () =>
     docker(
+      "buildx",
       "build",
+      "--load",
       "--file",
       "Dockerfile",
       "--target",
@@ -502,7 +504,9 @@ try {
   );
   await deploymentPhase("runtime", "build", async () =>
     docker(
+      "buildx",
       "build",
+      "--load",
       "--file",
       "Dockerfile",
       "--target",

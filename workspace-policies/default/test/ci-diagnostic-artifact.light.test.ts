@@ -4,8 +4,6 @@ import { describe, it } from "node:test";
 import {
   composeCiDiagnosticArtifacts,
   type CiDiagnosticArtifactDeclaration,
-  dockerEngineEnvironmentNeed,
-  type DeploymentEnvironmentNeed,
 } from "@ykdz/template-workspace/default-environment";
 import {
   assertPackageContribution,
@@ -132,30 +130,21 @@ void describe("CI 诊断产物合同", () => {
     }
   });
 
-  void it("部署工作流必须声明 Docker 环境需求", () => {
+  void it("工作流作业配置由通用根声明提供", () => {
     const packagePaths = ["apps/web"];
-    assert.throws(() =>
-      projectCheckWorkflow(
-        {
-          packagePaths,
-          deploymentCheck: {
-            environmentNeeds: [] as DeploymentEnvironmentNeed[],
-          },
-        },
-        checkWorkflowTemplate,
-      ),
-    );
     assert.match(
       projectCheckWorkflow(
         {
           packagePaths,
-          deploymentCheck: {
-            environmentNeeds: [dockerEngineEnvironmentNeed()],
-          },
+          job: { name: "Full Check", timeoutMinutes: 45 },
         },
         checkWorkflowTemplate,
       ),
-      /prepare-deployment/u,
+      /name: Full Check\n    runs-on: ubuntu-latest\n    timeout-minutes: 45/u,
+    );
+    assert.match(
+      projectCheckWorkflow({ packagePaths }, checkWorkflowTemplate),
+      /name: Root Check\n    runs-on: ubuntu-latest\n    timeout-minutes: 30/u,
     );
   });
 

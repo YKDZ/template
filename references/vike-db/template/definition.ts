@@ -1,5 +1,3 @@
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
-import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
 import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 export const referencePackage = defineReferencePackage({
@@ -40,20 +38,3 @@ export const referencePackage = defineReferencePackage({
   }),
   environmentNeeds: [],
 });
-
-/** 根拥有跨包准备顺序；真实依赖图无需反向依赖应用或迁移包。 */
-export function databasePreparation(options: {
-  readonly web: PackageDefinition;
-  readonly database: PackageDefinition;
-  readonly migrations: PackageDefinition;
-}): NonNullable<PackageContribution["foundation"]["databasePreparation"]> {
-  return {
-    kind: "sqlite-database-preparation",
-    migrationPackageName: options.migrations.name,
-    consumers: [
-      { kind: "application-dev", packageName: options.web.name },
-      { kind: "database-test", packageName: options.database.name },
-      { kind: "application-e2e", packageName: options.web.name },
-    ],
-  };
-}

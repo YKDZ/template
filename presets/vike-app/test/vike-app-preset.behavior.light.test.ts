@@ -113,6 +113,51 @@ async function snapshotTree(root: string): Promise<string> {
 }
 
 void describe("Vike 应用公开预设", () => {
+  void it("拒绝角色不匹配的应用部署实例", async (testContext) => {
+    const temporaryRoot = await mkdtemp(
+      path.join(tmpdir(), "template-vike-app-preset-role-"),
+    );
+    testContext.after(async () =>
+      rm(temporaryRoot, { recursive: true, force: true }),
+    );
+
+    assert.throws(
+      () =>
+        presetDefinition.project?.({
+          context: {
+            targetDir: path.join(temporaryRoot, "demo"),
+            repositoryName: "demo",
+            defaultPackageScope: "demo",
+            toolchain: {
+              nodeLtsMajor: "24",
+              nodeVersion: "24.21.0",
+              packageManagerPin: "pnpm@12.9.1",
+            },
+          },
+          contributions: [],
+          nodeInstances: new Map([
+            [
+              "web",
+              { name: "@demo/web", path: "apps/web", role: "shared-library" },
+            ],
+            [
+              "database",
+              { name: "@demo/db", path: "packages/db", role: "shared-library" },
+            ],
+            [
+              "migrations",
+              {
+                name: "@demo/db-migrations",
+                path: "packages/db-migrations",
+                role: "shared-library",
+              },
+            ],
+          ]),
+        }),
+      /Vike 应用部署要求应用包具有 runtime-service 角色/u,
+    );
+  });
+
   void it("初始化组合并在真实加包回放后保留数据库与部署投影", async (testContext) => {
     const temporaryRoot = await mkdtemp(
       path.join(tmpdir(), "template-vike-app-preset-"),
@@ -154,6 +199,15 @@ void describe("Vike 应用公开预设", () => {
           path: "packages/db-migrations",
         },
       },
+    );
+    const checkWorkflow = await readFile(
+      path.join(targetRoot, ".github/workflows/check.yml"),
+      "utf8",
+    );
+    assert.match(checkWorkflow, /name: Full Check/u);
+    assert.ok(
+      checkWorkflow.indexOf("id: prepare-deployment") <
+        checkWorkflow.indexOf("id: run-heavy-check"),
     );
     assert.strictEqual(
       (await stat(path.join(targetRoot, "scripts/container-entrypoint.sh")))
@@ -200,7 +254,7 @@ void describe("Vike 应用公开预设", () => {
     if (invalidDatabaseAdd.status === "operation-failure") {
       assert.match(
         invalidDatabaseAdd.error.message,
-        /Database Preparation requires exact @demo\/db script db:reset/u,
+        /Vike 数据准备要求 @demo\/db 的 scripts\.db:reset 与来源包保持一致/u,
       );
     }
     assert.strictEqual(
