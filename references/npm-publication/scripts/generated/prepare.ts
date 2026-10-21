@@ -1,13 +1,25 @@
 import { prepareArtifact } from "../publication.ts";
+import { assertRemotePreparation } from "../remote-context.ts";
 import { publicationTarget } from "./target.ts";
 
 const { packageRoot, outputDirectory } = await publicationTarget();
+const sourceSha = process.env.PUBLICATION_SOURCE_SHA;
+if (sourceSha !== undefined) {
+  const defaultBranch = process.env.GITHUB_DEFAULT_BRANCH;
+  if (defaultBranch === undefined) {
+    throw new Error("远端原件准备需要 GITHUB_DEFAULT_BRANCH。");
+  }
+  await assertRemotePreparation({
+    repositoryRoot: process.env.PUBLICATION_REPOSITORY_ROOT ?? process.cwd(),
+    sourceSha,
+    defaultBranch,
+    environment: process.env,
+  });
+}
 const result = await prepareArtifact({
   packageRoot,
   outputDirectory,
-  ...(process.env.PUBLICATION_SOURCE_SHA === undefined
-    ? {}
-    : { sourceSha: process.env.PUBLICATION_SOURCE_SHA }),
+  ...(sourceSha === undefined ? {} : { sourceSha }),
 });
 
 if (result.kind === "blocked") {

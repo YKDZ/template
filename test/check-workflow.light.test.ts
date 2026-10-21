@@ -27,18 +27,24 @@ type CheckWorkflow = {
       readonly inputs: Record<
         string,
         {
-          readonly default: boolean;
+          readonly default: boolean | string;
           readonly description: string;
           readonly required: boolean;
           readonly type: string;
         }
       >;
       readonly secrets: Record<string, { readonly required: boolean }>;
+      readonly outputs: Record<
+        string,
+        { readonly description: string; readonly value: string }
+      >;
     };
   };
   readonly jobs: {
     readonly check: {
       readonly env?: Record<string, string>;
+      readonly permissions?: Record<string, string>;
+      readonly outputs: { readonly accepted_artifact: string };
       readonly steps: readonly WorkflowStep[];
       readonly "timeout-minutes": number;
     };
@@ -53,14 +59,22 @@ async function checkWorkflow(): Promise<CheckWorkflow> {
 
 type ReleaseWorkflow = {
   readonly jobs: {
-    readonly check: {
+    readonly verify: {
       readonly name: string;
+      readonly permissions?: Record<string, string>;
       readonly secrets?: Record<string, string>;
       readonly uses: string;
       readonly with?: Record<string, unknown>;
     };
     readonly publish: {
       readonly needs: string;
+      readonly permissions: Record<string, string>;
+      readonly steps: readonly WorkflowStep[];
+    };
+    readonly release: {
+      readonly needs: readonly string[];
+      readonly permissions: Record<string, string>;
+      readonly if: string;
       readonly steps: readonly WorkflowStep[];
     };
   };
@@ -297,8 +311,12 @@ void describe("Fixture Verification Evidence check workflow", () => {
         "${{ github.workspace }}/.cli-journey-diagnostics",
       TEMPLATE_BUILTIN_PRESET_DIAGNOSTICS_DIR:
         "${{ github.workspace }}/.preset-behavior-diagnostics",
-      TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR:
-        "${{ inputs.publish_verified_candidate && format('{0}/.verified-packed-publication', github.workspace) || '' }}",
+      GH_TOKEN: "${{ github.token }}",
+      PUBLICATION_REPOSITORY_ROOT: "${{ github.workspace }}",
+      PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY:
+        "${{ github.workspace }}/.verified-packed-publication",
+      PUBLICATION_SOURCE_SHA: "${{ github.sha }}",
+      PUBLICATION_TARGET_FILTERS: "${{ inputs.publication_targets }}",
     });
 
     const scenarioCommands = new Set([
@@ -354,6 +372,18 @@ void describe("Fixture Verification Evidence check workflow", () => {
         type: "boolean",
         default: false,
       },
+      publication_targets: {
+        description: "每行一个 pnpm 发布目标选择器",
+        required: false,
+        type: "string",
+        default: "",
+      },
+    });
+    assert.deepStrictEqual(checkWorkflowDocument.on.workflow_call.outputs, {
+      accepted_artifact: {
+        description: "已验收原件集合的 artifact 名称",
+        value: "${{ jobs.check.outputs.accepted_artifact }}",
+      },
     });
     assert.strictEqual(packageCheck?.env, undefined);
     assert.strictEqual(
@@ -376,61 +406,89 @@ void describe("Fixture Verification Evidence check workflow", () => {
         },
       );
     }
-    assert.deepStrictEqual(release.jobs.check.secrets, {
+    assert.deepStrictEqual(release.jobs.verify.secrets, {
       TURBO_TOKEN: "${{ secrets.TURBO_TOKEN }}",
       TURBO_REMOTE_CACHE_SIGNATURE_KEY:
         "${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}",
     });
     assert.strictEqual(
-      release.jobs.check.with?.publish_verified_candidate,
+      release.jobs.verify.with?.publish_verified_candidate,
       true,
     );
-    assert.ok(
-      release.jobs.publish.steps.some(
-        (step) =>
-          step.name === "校验并发布已验证的归档" &&
-          step.run?.includes(
-            "pnpm --filter @ykdz/template --silent run publication:verify",
-          ),
-      ),
+    assert.strictEqual(
+      release.jobs.verify.with?.publication_targets,
+      "${{ inputs.targets }}",
     );
     assert.ok(
       release.jobs.publish.steps.some(
         (step) =>
-          step.name === "校验并发布已验证的归档" &&
-          step.run?.includes(
-            'npm publish "$archive_path" --access public --provenance',
-          ) &&
-          !step.run.includes("--ignore-scripts"),
+          step.run ===
+          "pnpm exec node --import @ykdz/reference-npm-publication/schedule-npm --eval '' --",
       ),
     );
     assert.strictEqual(
       release.jobs.publish.steps.find(
-        (step) => step.name === "下载已验证的 packed 候选",
+        (step) => step.name === "下载已验收原件集合",
       )?.with?.name,
-      "verified-packed-publication-${{ github.run_id }}-${{ github.run_attempt }}",
+      "${{ needs.verify.outputs.accepted_artifact }}",
     );
+    assert.deepStrictEqual(release.jobs.publish.permissions, {
+      actions: "read",
+      contents: "read",
+      "id-token": "write",
+    });
+    assert.deepStrictEqual(release.jobs.release.permissions, {
+      actions: "read",
+      contents: "write",
+    });
     assert.deepStrictEqual(turboConfig.remoteCache, { signature: true });
   });
 
   void it("uploads the packed candidate only when a release caller requires it", async () => {
     const workflow = await checkWorkflow();
     const upload = workflow.jobs.check.steps.find(
-      (step) => step.name === "Upload Verified Packed Candidate",
+      (step) => step.name === "上传已验收原件集合",
     );
 
     assert.deepStrictEqual(upload, {
-      name: "Upload Verified Packed Candidate",
-      if: "always() && inputs.publish_verified_candidate",
+      name: "上传已验收原件集合",
+      if: "success() && inputs.publish_verified_candidate && steps.restore-accepted.outputs.restored != 'true'",
       uses: "actions/upload-artifact@v7",
       with: {
-        name: "verified-packed-publication-${{ github.run_id }}-${{ github.run_attempt }}",
-        path: ".verified-packed-publication/*.tgz\n.verified-packed-publication/publication-preparation.json\n",
+        name: "verified-packed-publication-${{ github.run_id }}",
+        path: ".verified-packed-publication/",
         "include-hidden-files": true,
         "if-no-files-found": "error",
         "retention-days": 7,
       },
     });
+  });
+
+  void it("同一运行重跑时先恢复原件并跳过再次生产与上传", async () => {
+    const workflow = await checkWorkflow();
+    const steps = workflow.jobs.check.steps;
+    const restore = steps.find((step) => step.id === "restore-accepted");
+    const prepare = steps.find((step) => step.name === "整批准备并验收原件");
+    const upload = steps.find((step) => step.name === "上传已验收原件集合");
+
+    assert.strictEqual(
+      restore?.run,
+      "pnpm exec node --import @ykdz/reference-npm-publication/restore-accepted --eval '' --",
+    );
+    assert.strictEqual(restore?.if, "inputs.publish_verified_candidate");
+    assert.ok(
+      steps.indexOf(restore!) < steps.indexOf(prepare!),
+      "原件恢复必须先于候选生产",
+    );
+    assert.ok(
+      prepare?.if?.includes(
+        "steps.restore-accepted.outputs.restored != 'true'",
+      ),
+    );
+    assert.ok(
+      upload?.if?.includes("steps.restore-accepted.outputs.restored != 'true'"),
+    );
+    assert.strictEqual(workflow.jobs.check.permissions?.actions, "read");
   });
 
   void it("runs every later scenario stage and Evidence Health after an earlier gate fails", async () => {
@@ -689,17 +747,21 @@ void describe("Fixture Verification Evidence check workflow", () => {
       await readFile(".github/workflows/release.yml", "utf8"),
     ) as ReleaseWorkflow;
 
-    assert.deepStrictEqual(workflow.jobs.check, {
-      name: "Check package",
+    assert.deepStrictEqual(workflow.jobs.verify, {
+      name: "验收全部原件",
       uses: "./.github/workflows/check.yml",
-      with: { publish_verified_candidate: true },
+      permissions: { actions: "read", contents: "read" },
+      with: {
+        publish_verified_candidate: true,
+        publication_targets: "${{ inputs.targets }}",
+      },
       secrets: {
         TURBO_TOKEN: "${{ secrets.TURBO_TOKEN }}",
         TURBO_REMOTE_CACHE_SIGNATURE_KEY:
           "${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}",
       },
     });
-    assert.strictEqual(workflow.jobs.publish.needs, "check");
+    assert.strictEqual(workflow.jobs.publish.needs, "verify");
   });
 
   void it("keeps Release readiness tied to generated quality gates", async () => {
@@ -709,13 +771,14 @@ void describe("Fixture Verification Evidence check workflow", () => {
     ) as ReleaseWorkflow;
 
     assert.strictEqual(
-      release.jobs.check.uses,
+      release.jobs.verify.uses,
       "./.github/workflows/check.yml",
     );
-    assert.deepStrictEqual(release.jobs.check.with, {
+    assert.deepStrictEqual(release.jobs.verify.with, {
       publish_verified_candidate: true,
+      publication_targets: "${{ inputs.targets }}",
     });
-    assert.strictEqual(release.jobs.publish.needs, "check");
+    assert.strictEqual(release.jobs.publish.needs, "verify");
     assert.notStrictEqual(
       check.find(
         (step) =>

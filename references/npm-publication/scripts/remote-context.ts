@@ -43,6 +43,7 @@ export type AcceptedRemoteArtifact = {
     readonly distTag: string;
     readonly workflowRunId?: string;
     readonly workflowRunAttempt?: number;
+    readonly ready?: true;
   };
   readonly releaseNotes: string;
 };

@@ -277,10 +277,10 @@ const journey: CliJourney = {
     const cli = packageRecord(finalRecord, "@ykdz/reference-ts-cli");
     const configKey = contentIdentityKey(configuration.contentIdentity);
 
-    assert.equal(initialRecord.schemaVersion, 3);
+    assert.equal(initialRecord.schemaVersion, 4);
     assert.equal(initialRecord.strategyIdentity, "default");
     assert.equal(initialRecord.presetSelections.length, 0);
-    assert.equal(finalRecord.schemaVersion, 3);
+    assert.equal(finalRecord.schemaVersion, 4);
     assert.equal(finalRecord.strategyIdentity, initialRecord.strategyIdentity);
     assert.deepEqual(finalRecord.strategyState, initialRecord.strategyState);
     assert.equal(finalRecord.strategyState.repositoryName, "direct-references");

@@ -23,7 +23,7 @@
     "test:packed-publication": "node scripts/run-packed-publication-test.ts",
     "test": "node --conditions=source --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec 'test/**/*.light.test.ts'",
     "test:integration": "node --conditions=source scripts/run-root-integration.ts",
-    "test:e2e:cli": "node scripts/check-cli-source-and-distribution.ts",
+    "test:e2e:cli": "pnpm --filter @ykdz/template run test:e2e:resolution && pnpm --filter @ykdz/template run test:e2e:source",
     "database:prepare:dev": "pnpm --filter @ykdz/preset-vike-app run database:prepare:dev",
     "database:prepare:e2e": "pnpm --filter @ykdz/preset-vike-app run database:prepare:e2e",
     "database:prepare:test": "pnpm --filter @ykdz/preset-vike-app run database:prepare:test",

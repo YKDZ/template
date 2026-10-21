@@ -3,8 +3,12 @@ name: 发布已验收的 npm 原件
 on:
   workflow_dispatch:
     inputs:
+      targets:
+        description: 每行填写一个 pnpm 发布目标选择器
+        required: true
+        type: string
       dist_tag:
-        description: 预发布版本必填的 npm 非 latest 渠道；稳定版默认为 latest
+        description: 预发布版本必填非 latest 渠道；稳定版默认 latest
         required: false
         type: string
 
@@ -17,30 +21,36 @@ concurrency:
 
 jobs:
   verify:
-    name: 验收原始制品
+    name: 验收全部原件
     uses: ./.github/workflows/check.yml
+    permissions:
+      actions: read
+      contents: read
     with:
       publish_verified_candidate: true
+      publication_targets: ${{ inputs.targets }}
     secrets:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
 
   publish:
-    name: 发布已验收的 tgz
+    name: 按依赖顺序发布到 npm
     needs: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     environment: npm
     permissions:
       actions: read
       contents: read
       id-token: write
+    outputs:
+      results_artifact: ${{ steps.upload-results.outcome == 'success' && steps.results-name.outputs.name || '' }}
     env:
       GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       GH_TOKEN: ${{ github.token }}
       PUBLICATION_DIST_TAG: ${{ inputs.dist_tag }}
       PUBLICATION_REPOSITORY_ROOT: ${{ github.workspace }}
-      PUBLICATION_PACKAGE_ROOT: ${{ github.workspace }}/packages/cli
+      PUBLICATION_ACCEPTED_ARTIFACTS_FILE: ${{ runner.temp }}/accepted-publication/publication-accepted-artifacts.json
     steps:
       - name: 检出原始源码提交
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -58,47 +68,57 @@ jobs:
           cache: true
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
-      - name: 下载已验收的原始 tgz 和回执
+      - name: 下载已验收原件集合
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: verified-packed-publication-${{ github.run_id }}
+          name: ${{ needs.verify.outputs.accepted_artifact }}
           path: ${{ runner.temp }}/accepted-publication
-      - name: 恢复本次运行中已持久化的上传尝试
+      - name: 恢复本次运行已持久化的上传尝试
         id: restore-attempt
-        run: pnpm --filter @ykdz/reference-npm-publication run publication:remote:restore-attempt
-        env:
-          PUBLICATION_ARTIFACT_DIRECTORY: ${{ runner.temp }}/accepted-publication
-      - name: 在已验收回执中记录首次上传尝试
+        run: pnpm exec node --import @ykdz/reference-npm-publication/restore-attempts --eval '' --
+      - name: 在原件回执中记录首次上传尝试
         if: steps.restore-attempt.outputs.restored != 'true'
-        run: pnpm --filter @ykdz/reference-npm-publication run publication:remote:mark-attempt
-        env:
-          PUBLICATION_ARTIFACT_DIRECTORY: ${{ runner.temp }}/accepted-publication
-      - name: 在写入 npm 前持久化上传尝试
-        if: steps.restore-attempt.outputs.restored != 'true'
+        run: pnpm exec node --import @ykdz/reference-npm-publication/mark-attempts --eval '' --
+      - name: 写入前持久化上传尝试
+        if: success() && steps.restore-attempt.outputs.restored != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: npm-publication-attempt-${{ github.run_id }}
-          path: ${{ runner.temp }}/accepted-publication/publication-preparation.json
+          path: ${{ runner.temp }}/accepted-publication/**/publication-preparation.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-      - name: 使用 pnpm OIDC 发布已验收的原始 tgz
-        run: pnpm --filter @ykdz/reference-npm-publication run publication:remote:publish
-        env:
-          PUBLICATION_ARTIFACT_DIRECTORY: ${{ runner.temp }}/accepted-publication
+      - name: 按依赖顺序发布已验收原件
+        run: pnpm exec node --import @ykdz/reference-npm-publication/schedule-npm --eval '' --
+      - name: 记录远端结果集合名称
+        id: results-name
+        if: always()
+        run: echo "name=npm-publication-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+      - name: 保存 npm 发布结果
+        id: upload-results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-publication-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/accepted-publication/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
   release:
-    name: 创建不可变 GitHub Release
-    needs: publish
+    name: 并行创建独立 GitHub Release
+    needs: [verify, publish]
+    if: always() && needs.publish.outputs.results_artifact != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
+      actions: read
       contents: write
     env:
       GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       GH_TOKEN: ${{ github.token }}
       PUBLICATION_REPOSITORY_ROOT: ${{ github.workspace }}
-      PUBLICATION_PACKAGE_ROOT: ${{ github.workspace }}/packages/cli
+      PUBLICATION_ACCEPTED_ARTIFACTS_FILE: ${{ runner.temp }}/accepted-publication/publication-accepted-artifacts.json
     steps:
       - name: 检出原始源码提交
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -116,12 +136,10 @@ jobs:
           cache: true
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
-      - name: 下载同一份已验收的原始 tgz 和回执
+      - name: 下载 npm 发布结果和同一原件
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: verified-packed-publication-${{ github.run_id }}
+          name: ${{ needs.publish.outputs.results_artifact }}
           path: ${{ runner.temp }}/accepted-publication
-      - name: 创建并核验不可变 GitHub Release
-        run: pnpm --filter @ykdz/reference-npm-publication run publication:remote:release
-        env:
-          PUBLICATION_ARTIFACT_DIRECTORY: ${{ runner.temp }}/accepted-publication
+      - name: 为已就绪目标并行创建 Release
+        run: pnpm exec node --import @ykdz/reference-npm-publication/schedule-release --eval '' --

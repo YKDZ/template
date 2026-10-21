@@ -72,13 +72,6 @@
         "PUBLICATION_BATCH_TARGET_COUNT"
       ]
     },
-    "publication:accept": {
-      "tags": ["work:preparation"],
-      "cache": false,
-      "inputs": [],
-      "outputs": [],
-      "persistent": false
-    },
     "publication:consume": {
       "tags": ["work:preparation"],
       "cache": false,
@@ -86,16 +79,15 @@
       "outputs": [],
       "persistent": false
     },
-    "publication:readiness": {
+    "publication:remote:npm": {
       "tags": ["work:on-demand"],
       "cache": false,
       "inputs": [],
       "outputs": [],
       "persistent": false
     },
-    "publication:verify": {
-      "dependsOn": [],
-      "tags": ["work:preparation"],
+    "publication:remote:release": {
+      "tags": ["work:on-demand"],
       "cache": false,
       "inputs": [],
       "outputs": [],

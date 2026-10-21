@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import {
   chmod,
+  copyFile,
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   symlink,
   writeFile,
@@ -22,6 +24,12 @@ import {
   readAcceptedArtifact,
   readPreparedArtifact,
 } from "@ykdz/reference-npm-publication";
+
+import { restoreAcceptedPublicationArtifacts } from "./accepted-artifacts.ts";
+import {
+  defaultRemoteCommand,
+  type RemoteCommandRunner,
+} from "./remote-context.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -386,6 +394,177 @@ void describe("共享 npm 制品准备", () => {
         "postinstall",
         "consume",
       ]);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  void it("同 run 重跑恢复原验收原件，不增加打包或消费次数", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "npm-publication-rerun-"),
+    );
+    const packageRoot = path.join(workspace, "package");
+    const originalDirectory = path.join(workspace, "original", "package");
+    const uploadedDirectory = path.join(workspace, "uploaded");
+    const restoredDirectory = path.join(workspace, "restored");
+    const eventLog = path.join(workspace, "lifecycle.log");
+    const sourceSha = "0123456789abcdef0123456789abcdef01234567";
+    const runId = "4242";
+    const artifactName = `verified-packed-publication-${runId}`;
+    let artifactExists = false;
+    await mkdir(packageRoot, { recursive: true });
+    await writeFile(
+      path.join(workspace, "package.json"),
+      '{"name":"@example/rerun-workspace","private":true}\n',
+    );
+    await writeFile(
+      path.join(workspace, "pnpm-workspace.yaml"),
+      "packages:\n  - package\n",
+    );
+    await makePackage(packageRoot);
+
+    const run: RemoteCommandRunner = async (command, arguments_, options) => {
+      if (command === "gh" && arguments_[0] === "api") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            artifacts: artifactExists
+              ? [{ name: artifactName, expired: false }]
+              : [],
+          }),
+          stderr: "",
+        };
+      }
+      if (command === "gh" && arguments_[0] === "run") {
+        const destination = arguments_
+          .find((argument) => argument.startsWith("--dir="))!
+          .slice("--dir=".length);
+        await mkdir(destination, { recursive: true });
+        await copyFile(
+          path.join(uploadedDirectory, "publication-accepted-artifacts.json"),
+          path.join(destination, "publication-accepted-artifacts.json"),
+        );
+        await mkdir(path.join(destination, "package"), { recursive: true });
+        for (const name of await readdir(originalDirectory)) {
+          await copyFile(
+            path.join(originalDirectory, name),
+            path.join(destination, "package", name),
+          );
+        }
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      return await defaultRemoteCommand(command, arguments_, options);
+    };
+    const baseOptions = {
+      repositoryRoot: workspace,
+      sourceSha,
+      filters: ["./package"],
+      runId,
+      githubRepository: "example/repository",
+      environment: {
+        GH_TOKEN: "controlled-token",
+        GITHUB_ACTIONS: "true",
+      },
+      run,
+    };
+
+    try {
+      const firstAttempt = await restoreAcceptedPublicationArtifacts({
+        ...baseOptions,
+        artifactDirectory: path.join(workspace, "first-attempt"),
+        runAttempt: 1,
+      });
+      assert.equal(firstAttempt, false);
+
+      const prepared = await prepareArtifact({
+        packageRoot,
+        outputDirectory: originalDirectory,
+        sourceSha,
+        env: { NPM_PUBLICATION_EVENT_LOG: eventLog },
+      });
+      assert.equal(prepared.kind, "prepared");
+      if (prepared.kind !== "prepared") {
+        throw new Error("共享制品准备被阻断");
+      }
+      const accepted = await acceptArtifact({
+        packageRoot,
+        artifactPath: prepared.artifactPath,
+        env: { NPM_PUBLICATION_EVENT_LOG: eventLog },
+      });
+      assert.equal(accepted.kind, "accepted");
+
+      await mkdir(uploadedDirectory, { recursive: true });
+      await mkdir(path.join(uploadedDirectory, "package"), {
+        recursive: true,
+      });
+      for (const name of await readdir(originalDirectory)) {
+        await copyFile(
+          path.join(originalDirectory, name),
+          path.join(uploadedDirectory, "package", name),
+        );
+      }
+      await writeFile(
+        path.join(uploadedDirectory, "publication-accepted-artifacts.json"),
+        `${JSON.stringify(
+          {
+            artifacts: [
+              {
+                packageRoot: "package",
+                packageName: prepared.packageName,
+                artifactVersion: prepared.artifactVersion,
+                artifactPath: `package/${path.basename(prepared.artifactPath)}`,
+                receiptPath: "package/publication-preparation.json",
+                sha512: prepared.sha512,
+              },
+            ],
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      artifactExists = true;
+      const beforeRerun = await readFile(eventLog, "utf8");
+
+      const rerun = await restoreAcceptedPublicationArtifacts({
+        ...baseOptions,
+        artifactDirectory: restoredDirectory,
+        runAttempt: 2,
+      });
+      assert.equal(rerun, true);
+      const restored = await readAcceptedArtifact({
+        packageRoot,
+        artifactDirectory: path.join(restoredDirectory, "package"),
+        preserveReceiptTarget: true,
+      });
+      assert.equal(restored.kind, "prepared");
+      if (restored.kind !== "prepared") {
+        throw new Error("恢复后的已验收原件读取被阻断");
+      }
+      assert.equal(restored.receipt.sourceSha, sourceSha);
+      assert.equal(restored.sha512, prepared.sha512);
+      assert.equal(await readFile(eventLog, "utf8"), beforeRerun);
+      assert.deepEqual(beforeRerun.trim().split("\n"), [
+        "prepack",
+        "postinstall",
+        "consume",
+      ]);
+
+      await assert.rejects(
+        restoreAcceptedPublicationArtifacts({
+          ...baseOptions,
+          artifactDirectory: path.join(workspace, "lost-attempt"),
+          runAttempt: 3,
+          run: async (command, arguments_, options) =>
+            command === "gh" && arguments_[0] === "api"
+              ? {
+                  exitCode: 0,
+                  stdout: JSON.stringify({ artifacts: [] }),
+                  stderr: "",
+                }
+              : await defaultRemoteCommand(command, arguments_, options),
+        }),
+        /原验收原件缺失或过期/u,
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -879,6 +1058,44 @@ void describe("共享 npm 制品准备", () => {
         ),
         report.artifacts.map((artifact) => artifact.sha512),
       );
+      const acceptedList = JSON.parse(
+        await readFile(
+          path.join(artifactRoot, "publication-accepted-artifacts.json"),
+          "utf8",
+        ),
+      ) as {
+        readonly artifacts: readonly {
+          readonly packageRoot: string;
+          readonly packageName: string;
+          readonly artifactVersion: string;
+          readonly artifactPath: string;
+          readonly receiptPath: string;
+          readonly sha512: string;
+        }[];
+      };
+      assert.deepEqual(
+        acceptedList.artifacts.map((artifact) => artifact.packageName),
+        report.artifacts.map((artifact) => artifact.packageName),
+      );
+      for (const acceptedArtifact of acceptedList.artifacts) {
+        const reportArtifact = report.artifacts.find(
+          (artifact) => artifact.packageName === acceptedArtifact.packageName,
+        );
+        assert.ok(reportArtifact);
+        assert.equal(
+          path.resolve(workspace, acceptedArtifact.packageRoot),
+          reportArtifact.packageRoot,
+        );
+        assert.equal(
+          path.resolve(artifactRoot, acceptedArtifact.artifactPath),
+          reportArtifact.artifactPath,
+        );
+        assert.equal(
+          path.resolve(artifactRoot, acceptedArtifact.receiptPath),
+          reportArtifact.receiptPath,
+        );
+        assert.equal(acceptedArtifact.sha512, reportArtifact.sha512);
+      }
       const events = (await readFile(eventLog, "utf8")).trim().split("\n");
       assert.deepEqual(
         events.toSorted(),

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
+import { inspectTaskGate } from "@ykdz/template-workspace/task-gates";
 import { execa } from "execa";
 import { parse } from "yaml";
 
@@ -439,7 +440,7 @@ void describe("Template Repository native task model", () => {
     assert.ok(tasks.includes("@ykdz/template-workspace#build"));
   });
 
-  void it("keeps source tests build-free and assigns full CLI journeys to the root", async () => {
+  void it("源码旅程不造候选，正式 tgz 负责 compiled CLI 消费", async () => {
     const directory = nativeTaskByName(await queryNativeTaskDirectory());
     const root = await readJson<Manifest>("package.json");
     const cli = await readJson<Manifest>("packages/cli/package.json");
@@ -449,7 +450,6 @@ void describe("Template Repository native task model", () => {
       "--filter=@ykdz/template",
     );
     assert.ok(source.tasks.every((task) => !task.taskId.endsWith("#build")));
-    assert.deepEqual(directory.get("//#test:e2e:cli")?.tags, ["quality:heavy"]);
     assert.deepEqual(directory.get("@ykdz/template#test:e2e:source")?.tags, [
       "quality:conditional",
     ]);
@@ -459,8 +459,35 @@ void describe("Template Repository native task model", () => {
     );
     assert.equal(
       root.scripts["test:e2e:cli"],
-      "node scripts/check-cli-source-and-distribution.ts",
+      "pnpm --filter @ykdz/template run test:e2e:resolution && pnpm --filter @ykdz/template run test:e2e:source",
     );
+    assert.deepEqual(directory.get("//#test:e2e:cli")?.tags, ["quality:heavy"]);
+    assert.deepEqual(directory.get("//#test:packed-publication")?.tags, [
+      "quality:conditional",
+    ]);
+    const gate = inspectTaskGate(
+      "check:heavy",
+      process.cwd(),
+      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts",
+    );
+    assert.ok(
+      !gate.diagnostics.some((diagnostic) =>
+        diagnostic.includes("//#test:packed-publication"),
+      ),
+    );
+    const heavyTasks = new Set(
+      gate.plans.flatMap((plan) => plan.tasks.map((task) => task.fullName)),
+    );
+    assert.ok(heavyTasks.has("//#test:e2e:cli"));
+    assert.ok(!heavyTasks.has("//#test:packed-publication"));
+
+    const cliJourney = await runTurboDryRun("test:e2e:cli");
+    const cliJourneyTaskIds = new Set(
+      cliJourney.tasks.map((task) => task.taskId),
+    );
+    assert.ok(cliJourneyTaskIds.has("//#test:e2e:cli"));
+    assert.ok(!cliJourneyTaskIds.has("@ykdz/template#build"));
+    assert.ok(!cliJourneyTaskIds.has("@ykdz/template#publication:prepare"));
     assert.ok(cli.scripts["test:e2e:source"]?.includes("--conditions=source"));
     assert.ok(
       !cli.scripts["test:e2e:distribution"]?.includes("--conditions=source"),

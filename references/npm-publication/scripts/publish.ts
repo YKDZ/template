@@ -18,7 +18,10 @@ import path from "node:path";
 import type { SemVer } from "semver";
 
 import { fail, PublicationFailure } from "./failure.ts";
-import { recordNpmPublicationAttempt } from "./publication.ts";
+import {
+  recordNpmPublicationAttempt,
+  recordNpmPublicationReady,
+} from "./publication.ts";
 import {
   readAcceptedRemoteArtifact,
   type RemoteCommandRunner,
@@ -372,18 +375,18 @@ export async function markNpmPublicationAttempt(
   });
 }
 
-async function findReceiptFile(directory: string): Promise<string | undefined> {
+async function findReceiptFiles(directory: string): Promise<string[]> {
+  const files: string[] = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const entryPath = path.join(directory, entry.name);
     if (entry.isFile() && entry.name === "publication-preparation.json") {
-      return entryPath;
+      files.push(entryPath);
     }
     if (entry.isDirectory()) {
-      const nested = await findReceiptFile(entryPath);
-      if (nested !== undefined) return nested;
+      files.push(...(await findReceiptFiles(entryPath)));
     }
   }
-  return undefined;
+  return files;
 }
 
 /** 从同一 Actions run 的 marker artifact 恢复上次已经持久化的尝试事实。 */
@@ -475,17 +478,38 @@ export async function restoreNpmPublicationAttempt(options: {
         "无法下载本次工作流的上传尝试标记",
       );
     }
-    const markerPath = await findReceiptFile(directory);
-    if (markerPath === undefined) {
+    const markerPaths = await findReceiptFiles(directory);
+    if (markerPaths.length === 0) {
       fail(
         "publication-attempt-marker-unavailable",
         "上传尝试标记中缺少原件回执",
       );
     }
-    const marker = parseJson(
-      await readFile(markerPath, "utf8"),
-      "publication-attempt-marker-invalid",
+    const markerCandidates = await Promise.all(
+      markerPaths.map(async (markerPath) =>
+        parseJson(
+          await readFile(markerPath, "utf8"),
+          "publication-attempt-marker-invalid",
+        ),
+      ),
     );
+    const matchingMarkers = markerCandidates.filter(
+      (candidate) =>
+        isRecord(candidate) &&
+        isRecord(candidate.target) &&
+        isRecord(candidate.artifact) &&
+        candidate.sourceSha === accepted.sourceSha &&
+        candidate.target.name === accepted.packageName &&
+        candidate.target.version === accepted.packageVersion &&
+        candidate.artifact.sha512 === accepted.sha512,
+    );
+    if (matchingMarkers.length !== 1) {
+      fail(
+        "publication-attempt-marker-invalid",
+        "上传尝试标记未唯一匹配当前原件",
+      );
+    }
+    const marker = matchingMarkers[0];
     if (!isRecord(marker)) {
       fail("publication-attempt-marker-invalid", "上传尝试标记回执无效");
     }
@@ -716,6 +740,18 @@ export async function runDirectOidcPublication(
         env,
         run: runner,
       });
+      if (artifact.npmPublicationAttempt === undefined) {
+        await recordNpmPublicationAttempt({
+          packageRoot: path.resolve(options.packageRoot),
+          artifactDirectory: options.artifactDirectory,
+          distTag,
+        });
+      }
+      await recordNpmPublicationReady({
+        packageRoot: path.resolve(options.packageRoot),
+        artifactDirectory: options.artifactDirectory,
+        sha512: artifact.sha512,
+      });
       return;
     }
 
@@ -813,45 +849,14 @@ export async function runDirectOidcPublication(
         "dist-tag does not identify the accepted version",
       );
     }
+    await recordNpmPublicationReady({
+      packageRoot: path.resolve(options.packageRoot),
+      artifactDirectory: options.artifactDirectory,
+      sha512: artifact.sha512,
+    });
   } finally {
     if (sessionRoot !== undefined) {
       await rm(sessionRoot, { recursive: true, force: true });
     }
-  }
-}
-
-if (import.meta.main) {
-  try {
-    const artifactDirectory = process.env.PUBLICATION_ARTIFACT_DIRECTORY;
-    const packageRoot = process.env.PUBLICATION_PACKAGE_ROOT;
-    if (
-      artifactDirectory === undefined ||
-      !path.isAbsolute(artifactDirectory) ||
-      packageRoot === undefined ||
-      !path.isAbsolute(packageRoot)
-    ) {
-      throw new PublicationFailure(
-        "artifact-unavailable",
-        "PUBLICATION_ARTIFACT_DIRECTORY must be absolute",
-      );
-    }
-    await runDirectOidcPublication({
-      repositoryRoot: path.resolve(
-        process.env.PUBLICATION_REPOSITORY_ROOT ?? process.cwd(),
-      ),
-      packageRoot,
-      artifactDirectory,
-      environment: process.env,
-      ...(process.env.PUBLICATION_DIST_TAG === undefined
-        ? {}
-        : { distTag: process.env.PUBLICATION_DIST_TAG }),
-    });
-  } catch (error) {
-    if (!(error instanceof PublicationFailure)) throw error;
-    console.error(`ERROR ${error.code}`);
-    console.error("已观察到：发布前置条件未通过");
-    console.error("预期结果：使用已验收的 tgz 和其原始源码提交");
-    console.error("下一步：检查远端状态，再续办同一份原件");
-    process.exitCode = 1;
   }
 }

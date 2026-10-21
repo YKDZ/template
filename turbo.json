@@ -309,8 +309,7 @@
     },
     "//#test:packed-publication": {
       "cache": false,
-      "tags": ["quality:heavy"],
-      "dependsOn": ["@ykdz/template#publication:prepare"],
+      "tags": ["quality:conditional"],
       "passThroughEnv": [
         "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
         "TEMPLATE_PUBLICATION_ARTIFACT_PATH",
