@@ -37,6 +37,7 @@ export const referencePackage = defineReferencePackage({
       contribution,
       configuration: input.configuration,
       bindings: input.bindings,
+      buildTask: "build",
     });
   },
   environmentNeeds: [],

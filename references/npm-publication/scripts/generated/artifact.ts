@@ -182,6 +182,9 @@ async function main(): Promise<void> {
   const prepareEnv = {
     ...env,
     PUBLICATION_BATCH_TARGET_COUNT: String(projects.length),
+    NPM_PUBLICATION_PREBUILT_TARGETS: JSON.stringify(
+      projects.map((project) => project.name),
+    ),
     ...(artifactOutputRoot === undefined
       ? {}
       : {

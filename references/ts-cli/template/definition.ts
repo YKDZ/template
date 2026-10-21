@@ -86,6 +86,7 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
       return projectPublicationTarget({
         configuration: input.configuration,
         bindings: input.bindings,
+        buildTask: "build",
         contribution: {
           ...contribution,
           manifest: {

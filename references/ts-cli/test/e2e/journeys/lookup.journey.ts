@@ -7,7 +7,7 @@ import type { CliJourney } from "../journey.ts";
 
 const journey: CliJourney = {
   name: "lookup",
-  modes: ["source", "distribution", "packed"],
+  modes: ["source", "packed"],
   async setup() {},
   commands() {
     return [

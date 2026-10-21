@@ -5,8 +5,9 @@
     "build": {
       "dependsOn": ["^build"],
       "inputs": [],
-      "outputs": [],
-      "tags": ["quality:light"]
+      "outputs": ["dist/**"],
+      "cache": false,
+      "tags": ["work:preparation"]
     },
     "format:check": {
       "inputs": [],
