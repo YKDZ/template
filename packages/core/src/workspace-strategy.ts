@@ -192,7 +192,7 @@ export type WorkspaceStrategy<
     readonly configuration: unknown;
     readonly packages: readonly GeneratorPackageState<CreationInput>[];
     readonly nodeInstances: GeneratorNodeInstances;
-    /** 本次加包原始输入由策略解释，生成器只透传。 */
+    /** 原始创建输入由策略解释；配置操作沿用实例事实。 */
     readonly creationInput?: CreationInput;
   }): Context | Promise<Context>;
   /**

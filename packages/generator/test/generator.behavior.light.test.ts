@@ -766,7 +766,16 @@ void it("正式配置已有指南保持实例并补齐共享依赖，重复请�
   const initialized = await engine().init({
     targetRoot,
     selection: {
-      roots: [{ nodeIdentity: "guide", contentIdentity: guideIdentity }],
+      roots: [
+        {
+          nodeIdentity: "guide",
+          contentIdentity: guideIdentity,
+          creationInput: {
+            leafName: "custom-guide",
+            packagePath: "docs/custom-guide",
+          },
+        },
+      ],
     },
     strategyInput: { collection: "north", edition: "draft" },
   });

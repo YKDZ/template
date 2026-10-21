@@ -1889,7 +1889,7 @@ export function createGenerator<
         actions: reconciliation.actions,
       };
     } catch (error) {
-      return fail("planning", error, options.strategy.diagnoseFailure?.(error));
+      return fail(phase, error, options.strategy.diagnoseFailure?.(error));
     }
   }
 
