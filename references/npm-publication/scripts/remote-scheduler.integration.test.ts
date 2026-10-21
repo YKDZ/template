@@ -566,7 +566,9 @@ void describe("已验收多包原件的原生远端调度", () => {
         );
         assert.ok(result.stderr.includes(`#/scripts/${missingScript}`));
         assert.ok(
-          result.stderr.includes("处理方法：请在该目标 package.json"),
+          result.stderr.includes(
+            "处理方法：请在该目标 package.json 的 scripts 中声明共享发布入口，然后使用当前已验收原件继续运行本阶段",
+          ),
           result.stderr,
         );
         assert.equal(await readFile(adapter.eventLog, "utf8"), "");

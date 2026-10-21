@@ -60,7 +60,7 @@ export async function validateRemotePublicationTargets(
         const script = scripts?.[scriptName];
         return typeof script === "string" && script.trim().length > 0
           ? undefined
-          : `- ${artifact.packageName}：${manifestPath}#/scripts/${scriptName} 缺失或为空。\n  处理方法：请在该目标 package.json 的 scripts 中声明共享发布入口后重新准备并验收原件。`;
+          : `- ${artifact.packageName}：${manifestPath}#/scripts/${scriptName} 缺失或为空。\n  处理方法：请在该目标 package.json 的 scripts 中声明共享发布入口，然后使用当前已验收原件继续运行本阶段。`;
       }),
     )
   ).filter((item): item is string => item !== undefined);
