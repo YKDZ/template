@@ -7,7 +7,6 @@
     "./base.json": "./base.json",
     "./oxlint": "./oxlint.config.ts",
     "./oxfmt": "./oxfmt.config.ts",
-    "./reporter": "./scripts/node-test-count-reporter.ts",
     "./reference": "./package.json",
     "./template": {
       "source": "./template/definition.ts",

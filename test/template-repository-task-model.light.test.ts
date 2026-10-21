@@ -245,9 +245,6 @@ void describe("Template Repository native task model", () => {
       scripts["test:packed-publication"],
       "node scripts/run-packed-publication-test.ts",
     );
-    assert.ok(
-      scripts.test?.includes("@ykdz/reference-typescript-config/reporter"),
-    );
     assert.match(scripts.test ?? "", /--test-concurrency=2/u);
 
     const cliManifest = await readJson<Manifest>("packages/cli/package.json");
