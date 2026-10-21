@@ -47,12 +47,15 @@ async function runNpmScheduler(
     "run",
     "publication:remote:npm",
   ];
+  const detachedSession =
+    credentialMode === "interactive" && process.platform !== "win32";
   const child = spawn("pnpm", arguments_, {
     cwd: repositoryRoot,
     env: environment,
     stdio: "inherit",
+    ...(detachedSession ? { detached: true } : {}),
   });
-  setActiveChild(child);
+  setActiveChild(child, detachedSession);
   try {
     const [exitCode] = await once(child, "close");
     return typeof exitCode === "number" ? exitCode : 1;

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import {
@@ -130,7 +130,8 @@ export type InteractiveNpmSessionCommandRunner = (
 ) => Promise<number>;
 
 export type InteractiveNpmSessionSetActiveChild = (
-  child: Pick<ChildProcess, "kill"> | undefined,
+  child: Pick<ChildProcess, "kill" | "pid"> | undefined,
+  detachedSession?: boolean,
 ) => void;
 
 export type InteractiveNpmSessionOptions = {
@@ -205,21 +206,70 @@ export async function runWithInteractiveNpmSession(
   options: InteractiveNpmSessionOptions,
 ): Promise<number> {
   await assertNoCheckoutNpmrc(options.repositoryRoot);
+  if (process.platform !== "win32") {
+    const probe = spawnSync("pkill", ["-0", "-s", String(process.pid)], {
+      env: { PATH: options.environment.PATH ?? "" },
+      stdio: "ignore",
+    });
+    if (
+      probe.error !== undefined ||
+      (probe.status !== 0 && probe.status !== 1)
+    ) {
+      throw new Error(
+        "POSIX 首次交互发布需要 procps 的 pkill（支持 -s）；请安装 procps 后重试。",
+        { cause: probe.error },
+      );
+    }
+  }
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
   type SessionSignal = (typeof signals)[number];
   let receivedSignal: SessionSignal | undefined;
-  let activeChild: Pick<ChildProcess, "kill"> | undefined;
-  const setActiveChild: InteractiveNpmSessionSetActiveChild = (child) => {
+  let activeChild: Pick<ChildProcess, "kill" | "pid"> | undefined;
+  let activeChildUsesDetachedSession = false;
+  let signalForwardFailure: unknown;
+  const stopActiveChild = (signal: SessionSignal): void => {
+    if (activeChild === undefined) return;
+    if (
+      activeChildUsesDetachedSession &&
+      process.platform !== "win32" &&
+      activeChild.pid !== undefined
+    ) {
+      const stopped = spawnSync(
+        "pkill",
+        ["-KILL", "-s", String(activeChild.pid)],
+        {
+          env: { PATH: options.environment.PATH ?? "" },
+          stdio: "ignore",
+        },
+      );
+      if (stopped.error !== undefined) {
+        signalForwardFailure ??= stopped.error;
+        activeChild.kill(signal);
+      } else if (stopped.status !== 0 && stopped.status !== 1) {
+        signalForwardFailure ??= new Error(
+          `pkill 无法停止交互发布进程会话（退出码 ${String(stopped.status)}）。`,
+        );
+        activeChild.kill(signal);
+      }
+      return;
+    }
+    activeChild.kill(signal);
+  };
+  const setActiveChild: InteractiveNpmSessionSetActiveChild = (
+    child,
+    detachedSession = false,
+  ) => {
     activeChild = child;
+    activeChildUsesDetachedSession = child !== undefined && detachedSession;
     if (child !== undefined && receivedSignal !== undefined) {
-      child.kill(receivedSignal);
+      stopActiveChild(receivedSignal);
     }
   };
   const signalListeners = new Map<SessionSignal, () => void>();
   for (const signal of signals) {
     const listener = (): void => {
       receivedSignal ??= signal;
-      activeChild?.kill(receivedSignal);
+      stopActiveChild(receivedSignal);
     };
     signalListeners.set(signal, listener);
     process.on(signal, listener);
@@ -296,6 +346,11 @@ export async function runWithInteractiveNpmSession(
     if (whoami !== 0) throw new Error("npm 登录状态核验失败。");
 
     result = await options.runNpmPhase(environment, setActiveChild);
+    if (signalForwardFailure !== undefined) {
+      throw new Error("无法停止交互发布的原生进程会话。", {
+        cause: signalForwardFailure,
+      });
+    }
   } catch (error) {
     failure = error;
   }
@@ -328,6 +383,11 @@ export async function runWithInteractiveNpmSession(
     }
   }
 
+  if (signalForwardFailure !== undefined) {
+    throw new Error("无法安全停止交互发布的原生进程会话。", {
+      cause: signalForwardFailure,
+    });
+  }
   if (receivedSignal !== undefined) {
     process.kill(process.pid, receivedSignal);
   }
