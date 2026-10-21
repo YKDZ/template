@@ -5,6 +5,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
   writeFile,
@@ -81,6 +82,48 @@ export type PreparedArtifact = {
   readonly pack: PublicationExecution;
 };
 
+export type PublicationPreparationReceipt = {
+  readonly schemaVersion: 1;
+  readonly target: {
+    readonly name: string;
+    readonly version: string;
+  };
+  readonly pack: {
+    readonly count: 1;
+    readonly command: string;
+    readonly arguments: readonly string[];
+  };
+  readonly artifact: {
+    readonly path: string;
+    readonly name: string;
+    readonly version: string;
+    readonly sha512: string;
+  };
+  readonly acceptance?: {
+    readonly packageName: string;
+    readonly artifactVersion: string;
+    readonly sha512: string;
+    readonly installation: "passed";
+    readonly consumption: "passed";
+  };
+};
+
+export type ReadPreparedArtifactResult =
+  | {
+      readonly kind: "prepared";
+      readonly receiptPath: string;
+      readonly artifactPath: string;
+      readonly packageName: string;
+      readonly packageVersion: string;
+      readonly artifactVersion: string;
+      readonly sha512: string;
+      readonly receipt: PublicationPreparationReceipt;
+    }
+  | {
+      readonly kind: "blocked";
+      readonly inspection: Extract<PublicationInspection, { kind: "blocked" }>;
+    };
+
 export type PrepareArtifactResult =
   | PreparedArtifact
   | {
@@ -97,6 +140,7 @@ export type AcceptedArtifact = {
   readonly sha512: string;
   readonly installation: PublicationExecution;
   readonly consumption: PublicationExecution;
+  readonly receiptPath?: string;
 };
 
 export type AcceptArtifactResult =
@@ -275,6 +319,158 @@ async function verifyArtifactIdentity(options: {
   return manifest.version as string;
 }
 
+async function recordAcceptance(options: {
+  readonly artifactPath: string;
+  readonly packageName: string;
+  readonly packageVersion: string;
+  readonly artifactVersion: string;
+  readonly sha512: string;
+}): Promise<string | undefined> {
+  const receiptPath = path.join(
+    path.dirname(options.artifactPath),
+    "publication-preparation.json",
+  );
+  if (!(await regularFile(receiptPath))) return undefined;
+
+  const parsed = objectValue(JSON.parse(await readFile(receiptPath, "utf8")));
+  const target = objectValue(parsed?.target);
+  const artifact = objectValue(parsed?.artifact);
+  if (
+    parsed === undefined ||
+    target?.name !== options.packageName ||
+    target.version !== options.packageVersion ||
+    artifact?.path !== path.basename(options.artifactPath) ||
+    artifact.name !== options.packageName ||
+    artifact.version !== options.artifactVersion ||
+    artifact.sha512 !== options.sha512
+  ) {
+    throw new Error(
+      `共享制品回执与已验收原件不一致：${receiptPath}。保留原始 receipt 与 tgz 一起续办，不能混用候选。`,
+    );
+  }
+
+  const temporaryPath = `${receiptPath}.${process.pid}.tmp`;
+  try {
+    await writeFile(
+      temporaryPath,
+      `${JSON.stringify(
+        {
+          ...parsed,
+          acceptance: {
+            packageName: options.packageName,
+            artifactVersion: options.artifactVersion,
+            sha512: options.sha512,
+            installation: "passed",
+            consumption: "passed",
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await rename(temporaryPath, receiptPath);
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw new Error(
+      `无法把共享消费验收结果写回原制品回执：${receiptPath}；${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  return receiptPath;
+}
+
+/** 重读共享准备回执，并核对其引用的原始 tgz 字节和实际 npm 身份。 */
+export async function readPreparedArtifact(options: {
+  readonly packageRoot: string;
+  readonly artifactDirectory?: string;
+  readonly artifactPath?: string;
+}): Promise<ReadPreparedArtifactResult> {
+  if (
+    (options.artifactDirectory === undefined) ===
+    (options.artifactPath === undefined)
+  ) {
+    throw new Error("读取共享原件必须且只能指定制品目录或原始 tgz 路径。");
+  }
+  const directory = path.resolve(
+    options.artifactDirectory ?? path.dirname(options.artifactPath!),
+  );
+  const receiptPath = path.join(directory, "publication-preparation.json");
+  const value = objectValue(JSON.parse(await readFile(receiptPath, "utf8")));
+  const target = objectValue(value?.target);
+  const pack = objectValue(value?.pack);
+  const artifact = objectValue(value?.artifact);
+  if (
+    value?.schemaVersion !== 1 ||
+    target === undefined ||
+    typeof target.name !== "string" ||
+    typeof target.version !== "string" ||
+    pack?.count !== 1 ||
+    typeof pack.command !== "string" ||
+    !Array.isArray(pack.arguments) ||
+    pack.arguments.some((argument) => typeof argument !== "string") ||
+    artifact === undefined ||
+    typeof artifact.path !== "string" ||
+    typeof artifact.name !== "string" ||
+    typeof artifact.version !== "string" ||
+    typeof artifact.sha512 !== "string"
+  ) {
+    throw new Error(`共享制品准备回执格式无效：${receiptPath}`);
+  }
+  const artifactPath = path.resolve(
+    options.artifactPath ?? path.join(directory, artifact.path),
+  );
+  if (
+    path.dirname(artifactPath) !== directory ||
+    path.basename(artifactPath) !== artifact.path
+  ) {
+    throw new Error(
+      `共享制品回执路径必须指向其目录中的原始 tgz：${artifact.path}`,
+    );
+  }
+  const inspection = await inspectTarget({ packageRoot: options.packageRoot });
+  if (inspection.kind === "blocked") {
+    return { kind: "blocked", inspection };
+  }
+  if (
+    target.name !== inspection.packageName ||
+    target.version !== inspection.packageVersion ||
+    artifact.name !== inspection.packageName
+  ) {
+    throw new Error(
+      `共享制品回执目标与当前包配置不一致：回执 ${target.name}@${target.version}，当前 ${inspection.packageName}@${inspection.packageVersion}。`,
+    );
+  }
+  if (!(await regularFile(artifactPath))) {
+    throw new Error(`共享制品回执引用的 tgz 不存在：${artifactPath}`);
+  }
+  const sha512 = await digestFile(artifactPath);
+  if (artifact.sha512 !== sha512) {
+    throw new Error(
+      `共享制品回执与原始 tgz 字节不一致：${artifactPath}。保留的原件已变化。`,
+    );
+  }
+  const artifactVersion = await verifyArtifactIdentity({
+    artifactPath,
+    packageName: inspection.packageName,
+    packageVersion: inspection.packageVersion,
+  });
+  if (artifact.version !== artifactVersion) {
+    throw new Error(
+      `共享制品回执与原始 tgz 身份不一致：${artifactPath}。保留的 npm 身份已变化。`,
+    );
+  }
+  return {
+    kind: "prepared",
+    receiptPath,
+    artifactPath,
+    packageName: inspection.packageName,
+    packageVersion: inspection.packageVersion,
+    artifactVersion,
+    sha512,
+    receipt: value as unknown as PublicationPreparationReceipt,
+  };
+}
+
 /** 检查 npm 目标本身需要的身份、版本与包自有消费验收命令。 */
 export async function inspectTarget(options: {
   readonly packageRoot: string;
@@ -433,7 +629,6 @@ export async function prepareArtifact(options: {
       {
         schemaVersion: 1,
         target: {
-          packageRoot: inspection.packageRoot,
           name: inspection.packageName,
           version: inspection.packageVersion,
         },
@@ -530,6 +725,13 @@ export async function acceptArtifact(options: {
         `消费验收期间原始 tgz 字节发生变化：验收前 ${sha512}，验收后 ${acceptedSha512}。`,
       );
     }
+    const receiptPath = await recordAcceptance({
+      artifactPath,
+      packageName: inspection.packageName,
+      packageVersion: inspection.packageVersion,
+      artifactVersion,
+      sha512,
+    });
     return {
       kind: "accepted",
       packageRoot: inspection.packageRoot,
@@ -539,6 +741,7 @@ export async function acceptArtifact(options: {
       sha512,
       installation,
       consumption,
+      ...(receiptPath === undefined ? {} : { receiptPath }),
     };
   } finally {
     await rm(consumerRoot, { recursive: true, force: true });

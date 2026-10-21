@@ -8,6 +8,7 @@ import {
   acceptArtifact,
   inspectTarget,
   prepareArtifact,
+  readPreparedArtifact,
 } from "./publication.ts";
 
 async function makePackage(root: string): Promise<void> {
@@ -108,6 +109,40 @@ void describe("shared npm artifact preparation", () => {
       if (accepted.kind !== "accepted") throw new Error("共享制品验收被阻断");
       assert.equal(accepted.sha512, prepared.sha512);
       assert.equal(accepted.artifactVersion, prepared.artifactVersion);
+      const receipt = JSON.parse(
+        await readFile(
+          path.join(outputDirectory, "publication-preparation.json"),
+          "utf8",
+        ),
+      ) as { readonly acceptance?: unknown };
+      assert.deepEqual(receipt.acceptance, {
+        packageName: prepared.packageName,
+        artifactVersion: prepared.artifactVersion,
+        sha512: prepared.sha512,
+        installation: "passed",
+        consumption: "passed",
+      });
+      const reread = await readPreparedArtifact({
+        packageRoot,
+        artifactDirectory: outputDirectory,
+      });
+      assert.equal(reread.kind, "prepared");
+      if (reread.kind !== "prepared") {
+        throw new Error("共享制品回执读取被阻断");
+      }
+      assert.equal(reread.artifactPath, prepared.artifactPath);
+      assert.equal(reread.packageVersion, "1.2.3-beta.1+build.2");
+      assert.equal(reread.artifactVersion, "1.2.3-beta.1");
+      assert.equal(reread.sha512, prepared.sha512);
+      assert.equal(reread.receipt.acceptance?.consumption, "passed");
+      await writeFile(prepared.artifactPath, "modified original bytes");
+      await assert.rejects(
+        readPreparedArtifact({
+          packageRoot,
+          artifactPath: prepared.artifactPath,
+        }),
+        /原件已变化/u,
+      );
       assert.deepEqual((await readFile(eventLog, "utf8")).trim().split("\n"), [
         "prepack",
         "postinstall",

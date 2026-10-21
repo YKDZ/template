@@ -1,8 +1,11 @@
 import { inspectTarget } from "../publication.ts";
 
-const packageRoot = process.env.INIT_CWD ?? process.cwd();
+const packageRoot = process.cwd();
 const result = await inspectTarget({ packageRoot });
-if (result.kind === "ready") {
+if (process.argv.includes("--json")) {
+  console.log(JSON.stringify(result));
+  if (result.kind === "blocked") process.exitCode = 1;
+} else if (result.kind === "ready") {
   console.log(
     `npm 发布目标已配置：${result.packageName}@${result.packageVersion}`,
   );

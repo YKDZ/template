@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { prepareArtifact } from "../publication.ts";
 
-const packageRoot = process.env.INIT_CWD ?? process.cwd();
+const packageRoot = process.cwd();
 const configuredDirectory = process.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY;
 const outputDirectory =
   configuredDirectory === undefined

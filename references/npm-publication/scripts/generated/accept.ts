@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { acceptArtifact } from "../publication.ts";
 
-const packageRoot = process.env.INIT_CWD ?? process.cwd();
+const packageRoot = process.cwd();
 const explicitArtifactPath = process.env.NPM_PUBLICATION_ARTIFACT_PATH;
 const outputDirectory = path.resolve(
   process.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY ??

@@ -4,7 +4,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-import { templateContent } from "@ykdz/template-content";
+import {
+  templateContent,
+  type TemplateReferencePackage,
+} from "@ykdz/template-content";
 import {
   prepareContentCollection,
   writeNativeArchiveOverrides,
@@ -45,6 +48,17 @@ const packageManifestPath = path.join(packageRoot, "package.json");
 const packageManifest = JSON.parse(
   await readFile(packageManifestPath, "utf8"),
 ) as PackageManifest;
+const npmPublicationReference = templateContent.find(
+  (member): member is TemplateReferencePackage =>
+    member.kind === "reference" &&
+    member.identity.packageName === "@ykdz/reference-npm-publication" &&
+    member.identity.exportPath === "./template",
+);
+if (npmPublicationReference === undefined) {
+  throw new Error(
+    "CLI 内容集合缺少共享发布参考包 @ykdz/reference-npm-publication#./template",
+  );
+}
 const temporaryRoot = await mkdtemp(path.join(tmpdir(), "template-cli-pack-"));
 let prepared: PreparedContentCollection | undefined;
 
@@ -154,7 +168,9 @@ try {
   prepared = await prepareContentCollection({
     content: templateContent,
     roots: templateContent,
-    strategy: createDefaultWorkspaceStrategy(),
+    strategy: createDefaultWorkspaceStrategy({
+      cliPublicationReference: npmPublicationReference.definition,
+    }),
     workspaceRoot: await workspaceRoot(),
     root: path.join(temporaryRoot, "content"),
   });
@@ -175,13 +191,7 @@ try {
 
   const install = await execa(
     "pnpm",
-    [
-      "--config.node-linker=hoisted",
-      "install",
-      "--prod",
-      "--ignore-scripts",
-      "--prefer-offline",
-    ],
+    ["--config.node-linker=hoisted", "install", "--prod", "--prefer-offline"],
     { reject: false, cwd: stage },
   );
   if (install.exitCode !== 0) {
