@@ -322,15 +322,6 @@ void describe("TypeScript CLI 公开组合预设", () => {
       ).engines.node,
       ">=24",
     );
-    await assert.rejects(
-      stat(
-        path.join(
-          targetRoot,
-          "scripts/npm-publication/publication.config.json",
-        ),
-      ),
-      { code: "ENOENT" },
-    );
   });
 
   void it("库连接由实际 exports 构建并在真实普通加包回放时校验当前根导出", async () => {

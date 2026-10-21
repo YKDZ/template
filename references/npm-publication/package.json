@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./reference": "./package.json",
+    "./accepted-artifacts": "./scripts/accepted-artifacts.ts",
     ".": {
       "source": "./scripts/publication.ts",
       "types": "./scripts/publication.ts",
@@ -14,6 +15,7 @@
     "./remote-context": "./scripts/remote-context.ts",
     "./publish": "./scripts/publish.ts",
     "./release": "./scripts/release.ts",
+    "./setup": "./scripts/setup/acquire-entry.ts",
     "./prepare": {
       "source": "./scripts/generated/prepare.ts",
       "types": "./scripts/generated/prepare.ts",
