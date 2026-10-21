@@ -14,6 +14,14 @@ minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
 minimumReleaseAgeExclude:
   - "@ykdz/template"
+  # Turbo 2.11.10 修复根任务直接运行 boundaries 时的递归误判；其平台包也须通过同一精确版本检查。
+  - "turbo@2.11.10"
+  - "@turbo/darwin-64@2.11.10"
+  - "@turbo/darwin-arm64@2.11.10"
+  - "@turbo/linux-64@2.11.10"
+  - "@turbo/linux-arm64@2.11.10"
+  - "@turbo/windows-64@2.11.10"
+  - "@turbo/windows-arm64@2.11.10"
 allowBuilds:
   esbuild: true
 catalog:
@@ -52,7 +60,7 @@ catalog:
   tailwindcss: ^4.3.3
   tar: ^7.5.22
   telefunc: ^0.2.22
-  turbo: 2.11.7
+  turbo: 2.11.10
   typescript: npm:@typescript/typescript6@^6.0.2
   typescript-7: npm:typescript@^7.0.2
   valibot: ^1.4.2

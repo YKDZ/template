@@ -232,10 +232,7 @@ void describe("Template Repository native task model", () => {
       scripts.build,
       "turbo run build --filter=!// --output-logs=errors-only --log-order=grouped",
     );
-    assert.strictEqual(
-      scripts.boundaries,
-      "node --conditions=source scripts/run-turbo-boundaries.ts",
-    );
+    assert.strictEqual(scripts.boundaries, "turbo boundaries");
     assert.match(scripts.test ?? "", /test\/\*\*\/\*\.light\.test\.ts/u);
     assert.strictEqual(
       scripts["test:integration"],
