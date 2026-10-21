@@ -62,6 +62,7 @@ export type PresetNode<
   readonly layout?: Layout;
   /** 按操作应用、并可由单次调用补充的原生创建输入。 */
   readonly creationInput?: Partial<Record<PresetOperation, CreationInput>>;
+  readonly configuration?: Partial<Record<PresetOperation, unknown>>;
 };
 
 type PresetNodeMap = Readonly<
@@ -71,6 +72,7 @@ type PresetNodeMap = Readonly<
       readonly reference: PresetReference;
       readonly layout?: unknown;
       readonly creationInput?: Partial<Record<PresetOperation, unknown>>;
+      readonly configuration?: Partial<Record<PresetOperation, unknown>>;
     }
   >
 >;

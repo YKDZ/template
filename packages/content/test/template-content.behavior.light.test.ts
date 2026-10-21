@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 
+import { projectPublicationWorkspace } from "@ykdz/reference-npm-publication/template";
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import {
   templateContent,
@@ -50,9 +51,6 @@ function requirePresetMember(packageName: string): TemplatePreset {
 
 const libraryMember = requireReferenceMember("@ykdz/reference-ts-lib");
 const tsCliMember = requireReferenceMember("@ykdz/reference-ts-cli");
-const npmPublicationMember = requireReferenceMember(
-  "@ykdz/reference-npm-publication",
-);
 const rustBinMember = requireReferenceMember("@ykdz/reference-rust-bin");
 const vueAppMember = requireReferenceMember("@ykdz/reference-vue-app");
 const library = libraryMember.definition;
@@ -66,7 +64,7 @@ function createContentTestStrategy<
   CreationInput extends PackageCreationInput = TsCliCreationInput,
 >() {
   return createDefaultWorkspaceStrategy<CreationInput>({
-    cliPublicationReference: npmPublicationMember.definition,
+    project: projectPublicationWorkspace,
   });
 }
 
@@ -303,10 +301,6 @@ void describe("公开模板内容集合", () => {
       todoOperation.text,
       await readFile(path.join(targetRoot, "TODO.md"), "utf8"),
     );
-    assert.deepStrictEqual(initialized.projection.ownerFacts?.publication, {
-      candidate: { name: "@demo/cli", path: "packages/cli" },
-      setup: { command: "./scripts/npm-publication-setup/setup.sh" },
-    });
     assert.strictEqual(
       initialized.projection.ownerFacts?.container.dockerfileText,
       await readFile(path.join(targetRoot, ".devcontainer/Dockerfile"), "utf8"),

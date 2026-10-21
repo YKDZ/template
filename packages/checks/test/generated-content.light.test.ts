@@ -52,9 +52,9 @@ void describe("唯一内容集合的真实生成检查场景", () => {
         }
         assert.strictEqual(
           receipt.initialization.generationRecord.schemaVersion,
-          3,
+          4,
         );
-        assert.strictEqual(receipt.result.generationRecord.schemaVersion, 3);
+        assert.strictEqual(receipt.result.generationRecord.schemaVersion, 4);
         await validateGeneratedScenarioReceipt({
           receipt,
           runtime: sourceGeneratedScenarioRuntime,

@@ -4,17 +4,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-import {
-  templateContent,
-  type TemplateReferencePackage,
-} from "@ykdz/template-content";
+import { templateContent } from "@ykdz/template-content";
 import {
   prepareContentCollection,
   writeNativeArchiveOverrides,
   type PackedArtifact,
   type PreparedContentCollection,
 } from "@ykdz/template-content/artifact-builder";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 import { execa } from "execa";
 
 type PackageManifest = {
@@ -48,17 +44,6 @@ const packageManifestPath = path.join(packageRoot, "package.json");
 const packageManifest = JSON.parse(
   await readFile(packageManifestPath, "utf8"),
 ) as PackageManifest;
-const npmPublicationReference = templateContent.find(
-  (member): member is TemplateReferencePackage =>
-    member.kind === "reference" &&
-    member.identity.packageName === "@ykdz/reference-npm-publication" &&
-    member.identity.exportPath === "./template",
-);
-if (npmPublicationReference === undefined) {
-  throw new Error(
-    "CLI 内容集合缺少共享发布参考包 @ykdz/reference-npm-publication#./template",
-  );
-}
 const temporaryRoot = await mkdtemp(path.join(tmpdir(), "template-cli-pack-"));
 let prepared: PreparedContentCollection | undefined;
 
@@ -171,9 +156,7 @@ try {
       specifier: "@ykdz/template-workspace/reference-package",
       exportName: "defineReferencePackage",
     },
-    strategy: createDefaultWorkspaceStrategy({
-      cliPublicationReference: npmPublicationReference.definition,
-    }),
+
     workspaceRoot: await workspaceRoot(),
     root: path.join(temporaryRoot, "content"),
   });

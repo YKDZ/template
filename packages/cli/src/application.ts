@@ -37,12 +37,14 @@ export type InitCommandOptions = {
   readonly preset: string;
   readonly dryRun: boolean;
   readonly todo: boolean;
+  readonly publication?: boolean;
   readonly name?: string;
   readonly path?: string;
   readonly scope?: string;
 };
 
 export type AddPackageCommandOptions = {
+  readonly publication?: boolean;
   readonly preset: string;
   readonly name: string;
   readonly path?: string;
@@ -70,7 +72,6 @@ export type InitCommandResult =
       readonly generationRecord: GenerationRecord;
       readonly toolchain: ReturnType<typeof toolchainReport>;
       readonly nextSteps: DefaultWorkspaceOwnerFacts["nextSteps"];
-      readonly publicationSetup: DefaultWorkspaceOwnerFacts["publication"]["setup"];
       readonly followUpDocument: {
         readonly enabled: boolean;
         readonly path?: string;
@@ -402,6 +403,9 @@ export async function runInit(
       roots: [
         {
           preset: preset.identity,
+          ...(options.publication
+            ? { configuration: { publication: true } }
+            : {}),
           ...(creationInput === undefined ? {} : { creationInput }),
         },
       ],
@@ -457,7 +461,6 @@ export async function runInit(
     generationRecord: result.generationRecord,
     toolchain: toolchainReport(),
     nextSteps: ownerFacts.nextSteps,
-    publicationSetup: ownerFacts.publication.setup,
     followUpDocument: {
       enabled: strategyState.todo,
       ...(strategyState.todo ? { path: "TODO.md" } : {}),
@@ -504,6 +507,7 @@ export async function runAddPackage(
   const result = await cliGenerator.add({
     repositoryRoot: runtime.cwd,
     preset: validation.preset.identity,
+    ...(options.publication ? { configuration: { publication: true } } : {}),
     creationInput: {
       leafName: options.name,
       ...(options.path === undefined ? {} : { packagePath: options.path }),

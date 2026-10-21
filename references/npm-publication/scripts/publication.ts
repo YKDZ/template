@@ -1007,52 +1007,6 @@ export async function acceptArtifact(options: {
   }
 }
 
-/** 从 pnpm 已选目标的原始准备回执接入同一条整批安装验收链。 */
-export async function acceptPreparedArtifacts(options: {
-  readonly targets: readonly PreparedArtifactBatchTarget[];
-  readonly env?: NodeJS.ProcessEnv;
-}): Promise<AcceptArtifactResult> {
-  if (options.targets.length === 0) {
-    throw new Error("npm 制品整批验收至少需要一个 pnpm 选中目标。");
-  }
-  const preparedTargets = await Promise.all(
-    options.targets.map(async (target) => ({
-      target,
-      prepared: await readPreparedArtifact(target),
-    })),
-  );
-  const blocked = preparedTargets.flatMap(({ prepared }) =>
-    prepared.kind === "blocked" ? [prepared.inspection] : [],
-  );
-  const firstBlocked = blocked[0];
-  if (firstBlocked !== undefined) {
-    return {
-      kind: "blocked",
-      inspection: firstBlocked,
-      inspections: blocked,
-    };
-  }
-  const ready = preparedTargets.map(({ target, prepared }) => {
-    if (prepared.kind !== "prepared") {
-      throw new Error("整批原件检查状态在验收期间发生变化。");
-    }
-    return {
-      packageRoot: target.packageRoot,
-      artifactPath: prepared.artifactPath,
-    };
-  });
-  const first = ready[0];
-  if (first === undefined) {
-    throw new Error("npm 制品整批验收至少需要一个目标。");
-  }
-  return await acceptArtifact({
-    packageRoot: first.packageRoot,
-    artifactPath: first.artifactPath,
-    additionalArtifacts: ready.slice(1),
-    ...(options.env === undefined ? {} : { env: options.env }),
-  });
-}
-
 /** 在首次外部 npm 上传之前把单次尝试写入同一 accepted receipt。 */
 export async function recordNpmPublicationAttempt(options: {
   readonly packageRoot: string;
@@ -1097,4 +1051,50 @@ export async function recordNpmPublicationAttempt(options: {
       { cause: error },
     );
   }
+}
+
+/** 从 pnpm 已选目标的原始准备回执接入同一条整批安装验收链。 */
+export async function acceptPreparedArtifacts(options: {
+  readonly targets: readonly PreparedArtifactBatchTarget[];
+  readonly env?: NodeJS.ProcessEnv;
+}): Promise<AcceptArtifactResult> {
+  if (options.targets.length === 0) {
+    throw new Error("npm 制品整批验收至少需要一个 pnpm 选中目标。");
+  }
+  const preparedTargets = await Promise.all(
+    options.targets.map(async (target) => ({
+      target,
+      prepared: await readPreparedArtifact(target),
+    })),
+  );
+  const blocked = preparedTargets.flatMap(({ prepared }) =>
+    prepared.kind === "blocked" ? [prepared.inspection] : [],
+  );
+  const firstBlocked = blocked[0];
+  if (firstBlocked !== undefined) {
+    return {
+      kind: "blocked",
+      inspection: firstBlocked,
+      inspections: blocked,
+    };
+  }
+  const ready = preparedTargets.map(({ target, prepared }) => {
+    if (prepared.kind !== "prepared") {
+      throw new Error("整批原件检查状态在验收期间发生变化。");
+    }
+    return {
+      packageRoot: target.packageRoot,
+      artifactPath: prepared.artifactPath,
+    };
+  });
+  const first = ready[0];
+  if (first === undefined) {
+    throw new Error("npm 制品整批验收至少需要一个目标。");
+  }
+  return await acceptArtifact({
+    packageRoot: first.packageRoot,
+    artifactPath: first.artifactPath,
+    additionalArtifacts: ready.slice(1),
+    ...(options.env === undefined ? {} : { env: options.env }),
+  });
 }

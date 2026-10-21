@@ -5,7 +5,8 @@
     "build:template": {
       "dependsOn": [
         "@ykdz/template-core#build",
-        "@ykdz/template-workspace#build"
+        "@ykdz/template-workspace#build",
+        "@ykdz/reference-npm-publication#build:template"
       ],
       "inputs": [],
       "outputs": ["template-dist/**"],
@@ -53,10 +54,8 @@
       "tags": ["work:preparation"]
     },
     "publication:consume": {
-      "cache": false,
-      "inputs": [],
-      "outputs": [],
-      "tags": ["work:preparation"]
+      "tags": ["quality:conditional"],
+      "cache": false
     },
     "publication:readiness": {
       "cache": false,

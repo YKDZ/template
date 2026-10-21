@@ -1,43 +1,13 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-type PublicationConfiguration = {
-  readonly packagePath?: unknown;
-};
-
 export async function publicationTarget(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<{
   readonly packageRoot: string;
   readonly outputDirectory: string;
 }> {
-  const workspaceRoot = path.resolve(process.cwd());
-  const configurationPath = path.join(
-    workspaceRoot,
-    "scripts/npm-publication/publication.config.json",
-  );
-  let packageRoot = workspaceRoot;
-  try {
-    const configuration = JSON.parse(
-      await readFile(configurationPath, "utf8"),
-    ) as PublicationConfiguration;
-    if (
-      typeof configuration.packagePath !== "string" ||
-      configuration.packagePath.length === 0
-    ) {
-      throw new Error(`共享发布目标配置缺少 packagePath：${configurationPath}`);
-    }
-    packageRoot = path.resolve(workspaceRoot, configuration.packagePath);
-  } catch (error) {
-    if (
-      typeof error !== "object" ||
-      error === null ||
-      !("code" in error) ||
-      error.code !== "ENOENT"
-    ) {
-      throw error;
-    }
-  }
+  const packageRoot = path.resolve(process.cwd());
   const outputOverride =
     env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY ??
     env.TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR;

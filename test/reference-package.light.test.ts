@@ -492,3 +492,63 @@ await test("模板执行数据必须来自所属准备资源且诊断保留owner
     /参考包 @author\/application\/\.\/template prepare 阶段失败：模板执行数据未包含在参考资源范围中：template\/missing-input\.ts/u,
   );
 });
+
+await test("实例条件依赖与原生清单投影共用有效目标集合，静态分发用途仍完整", async (context) => {
+  const setup = await fixture(
+    context,
+    { "src/index.ts": "export {};\n" },
+    { devDependencies: { "@author/tool": "workspace:*" } },
+  );
+  const reference = defineReferencePackage({
+    ...setup.options,
+    normalizeConfiguration(input) {
+      if (input === undefined) return { includeTool: false };
+      if (
+        typeof input !== "object" ||
+        input === null ||
+        !("includeTool" in input) ||
+        typeof input.includeTool !== "boolean"
+      )
+        throw new Error("无效的工具配置");
+      return { includeTool: input.includeTool };
+    },
+    targetDependencies: ({ configuration, dependencies }) =>
+      (configuration as { includeTool: boolean }).includeTool
+        ? dependencies
+        : [],
+  });
+  reference.prepare();
+  const provider = {
+    name: "@consumer/tool",
+    path: "packages/tool",
+    role: "shared-library" as const,
+  };
+  const bindings = new Map([["@author/tool", provider]]);
+  const disabled = reference.contribute({
+    ...setup.input,
+    bindings,
+    configuration: { includeTool: false },
+  });
+  assert.deepEqual(disabled.manifest.devDependencies, {});
+  const enabled = reference.contribute({
+    ...setup.input,
+    bindings,
+    configuration: { includeTool: true },
+  });
+  assert.deepEqual(enabled.manifest.devDependencies, {
+    "@consumer/tool": "workspace:*",
+  });
+  assert.deepEqual(
+    reference.targetDependencyNames({ configuration: { includeTool: false } }),
+    [],
+  );
+  assert.deepEqual(
+    reference.targetDependencyNames({ configuration: { includeTool: true } }),
+    ["@author/tool"],
+  );
+  assert.deepEqual(
+    reference.dependencyUses.find((use) => use.name === "@author/tool")
+      ?.purposes,
+    ["target"],
+  );
+});

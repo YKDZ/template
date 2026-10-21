@@ -1,6 +1,7 @@
 import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
+import { isPublicationEnabled } from "@ykdz/reference-npm-publication/template";
 import {
   readProjectedMirrorSlotScalar,
   type ProjectProjectionEntry,
@@ -341,8 +342,11 @@ export async function assertGeneratedManifestPublicationPolicy(options: {
   readonly projectDir: string;
   readonly scenarioId: string;
 }): Promise<void> {
-  const projection = requireProjection(options.result);
-  const candidate = projection.ownerFacts?.publication.candidate;
+  const enabled = new Set(
+    options.result.generationRecord.packages
+      .filter((record) => isPublicationEnabled(record.configuration))
+      .map((record) => record.packageDefinitionId),
+  );
   const rootManifest = JSON.parse(
     await readFile(path.join(options.projectDir, "package.json"), "utf8"),
   ) as Record<string, unknown>;
@@ -351,25 +355,12 @@ export async function assertGeneratedManifestPublicationPolicy(options: {
       `${options.scenarioId}：生成工作区根 package.json 必须保持 private:true`,
     );
   }
-  if (
-    candidate !== null &&
-    !options.result.blueprint.packages.some(
-      (definition) =>
-        definition.name === candidate.name &&
-        definition.path === candidate.path,
-    )
-  ) {
-    throw new Error(`${options.scenarioId}：公开候选必须对应一个已生成包`);
-  }
   for (const definition of options.result.blueprint.packages) {
     const manifestPath = `${definition.path}/package.json`;
     const manifest = JSON.parse(
       await readFile(path.join(options.projectDir, manifestPath), "utf8"),
     ) as Record<string, unknown>;
-    const isPublicCandidate =
-      candidate !== null &&
-      definition.name === candidate.name &&
-      definition.path === candidate.path;
+    const isPublicCandidate = enabled.has(definition.packageDefinitionId);
     if (
       isPublicCandidate ? manifest.private === true : manifest.private !== true
     ) {

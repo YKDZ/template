@@ -18,6 +18,7 @@ export const referencePackage = defineReferencePackage({
   ],
   template: {
     dependencies: [
+      { name: "@ykdz/template-core", purpose: "template-execution" },
       {
         name: "@ykdz/template-workspace",
         purpose: "template-execution",
@@ -60,3 +61,12 @@ export const referencePackage = defineReferencePackage({
     },
   },
 });
+
+export { projectPublicationWorkspace } from "./workspace.ts";
+
+export {
+  normalizePublicationConfiguration,
+  publicationTargetDependencies,
+  projectPublicationTarget,
+  isPublicationEnabled,
+} from "./target.ts";

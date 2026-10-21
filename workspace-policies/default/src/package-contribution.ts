@@ -25,10 +25,6 @@ export type FoundationContribution = {
   readonly workspaceConfiguration?: {
     readonly kind: "typescript-workspace-configuration";
   };
-  /** 仅由协同根策略消费的封闭式发布能力。 */
-  readonly npmPublication?: {
-    readonly kind: "public-cli-candidate";
-  };
   /** Foundation 必须安装并投影到协同根文件中的工具链。 */
   readonly toolchains: {
     readonly rust?: {

@@ -22,11 +22,6 @@ export type ChecksPreset = Extract<
   (typeof import("@ykdz/template-content").templateContent)[number],
   { readonly kind: "preset" }
 >;
-type ChecksReference = Extract<
-  (typeof import("@ykdz/template-content").templateContent)[number],
-  { readonly kind: "reference" }
->;
-
 export type GeneratedScenario = {
   readonly id: string;
   readonly label: string;
@@ -38,28 +33,12 @@ export type GeneratedScenario = {
 export type GeneratedScenarioRuntime = {
   readonly content: typeof import("@ykdz/template-content").templateContent;
   readonly createGenerator: typeof import("@ykdz/template-generator").createGenerator;
+  readonly projectPublicationWorkspace?: typeof import("@ykdz/reference-npm-publication/template").projectPublicationWorkspace;
   readonly createDefaultWorkspaceStrategy: typeof import("@ykdz/template-workspace/default-workspace-strategy").createDefaultWorkspaceStrategy;
   readonly resolveTemplateSource: typeof import("@ykdz/template-core/renderer").resolveTemplateSource;
   readonly canConsumeNodePackageNameImportForRole: typeof import("@ykdz/template-workspace/project-linking").canConsumeNodePackageNameImportForRole;
   readonly canProvideSourceConditionPackageNameImportForRole: typeof import("@ykdz/template-workspace/project-linking").canProvideSourceConditionPackageNameImportForRole;
 };
-
-function publicationReferenceFor(
-  runtime: GeneratedScenarioRuntime,
-): ChecksReference["definition"] {
-  const reference = runtime.content.find(
-    (member): member is ChecksReference =>
-      member.kind === "reference" &&
-      member.identity.packageName === "@ykdz/reference-npm-publication" &&
-      member.identity.exportPath === "./template",
-  );
-  if (reference === undefined) {
-    throw new Error(
-      "生成检查内容集合缺少 @ykdz/reference-npm-publication#./template",
-    );
-  }
-  return reference.definition;
-}
 
 type GeneratorSuccess = Extract<
   GeneratorResult<ChecksCreationInput, DefaultWorkspaceOwnerFacts>,
@@ -246,9 +225,11 @@ export async function materializeGeneratedScenario(options: {
   const generator = options.runtime.createGenerator({
     content: options.runtime.content,
     strategy:
-      options.runtime.createDefaultWorkspaceStrategy<ChecksCreationInput>({
-        cliPublicationReference: publicationReferenceFor(options.runtime),
-      }),
+      options.runtime.createDefaultWorkspaceStrategy<ChecksCreationInput>(
+        options.runtime.projectPublicationWorkspace === undefined
+          ? {}
+          : { project: options.runtime.projectPublicationWorkspace },
+      ),
   });
   const initialization = requireSuccess(
     await generator.init({

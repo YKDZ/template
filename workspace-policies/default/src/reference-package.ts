@@ -90,6 +90,7 @@ export type ReferenceContributionOptions<
   CreationInput extends PackageCreationInput = PackageCreationInput,
 > = {
   readonly context: GenerationContext;
+  readonly configuration?: unknown;
   readonly definition: PackageDefinition;
   readonly bindings?: ReadonlyMap<string, PackageDefinition>;
   /** 公开生成器传入的持久创建语义。 */
@@ -138,6 +139,11 @@ export type ReferencePackage<
   readonly templateDependencies: readonly ReferenceTemplateDependency[];
   /** prepare 后可供策略和贡献共同消费的用途归一化事实。 */
   readonly dependencyUses: readonly ReferenceDependencyUse[];
+  normalizeConfiguration?(input: unknown): unknown;
+  targetDependencyNames(options: {
+    readonly configuration: unknown;
+    readonly creationInput?: CreationInput;
+  }): readonly string[];
   prepare(): ReferencePackagePreparation<OwnerFacts>;
   /** 完成原生模板编译后，公开可供collection装配的所属制品句柄。 */
   prepareArtifact(): PreparedNativeContentArtifact;
@@ -263,6 +269,13 @@ export function defineReferencePackage<
     readonly executionData?: readonly string[];
   };
   readonly prepare?: (options: ReferencePackagePreparationInput) => OwnerFacts;
+  readonly normalizeConfiguration?: (input: unknown) => unknown;
+  /** 仅从原生声明的目标依赖全集中按实例配置选择。 */
+  readonly targetDependencies?: (options: {
+    readonly configuration: unknown;
+    readonly creationInput?: CreationInput;
+    readonly dependencies: readonly string[];
+  }) => readonly string[];
   readonly foundation: Contextual<
     PackageContribution["foundation"],
     CreationInput
@@ -317,6 +330,22 @@ export function defineReferencePackage<
       templateDependencies,
     );
     return normalizedDependencyUses;
+  };
+  const targetDependencyNames = (input: {
+    readonly configuration: unknown;
+    readonly creationInput?: CreationInput;
+  }): readonly string[] => {
+    const dependencies = dependencyUses()
+      .filter((dependency) => dependency.purposes.includes("target"))
+      .map((dependency) => dependency.name);
+    const selected =
+      options.targetDependencies?.({ ...input, dependencies }) ?? dependencies;
+    for (const name of selected)
+      if (!dependencies.includes(name))
+        throw new Error(
+          `参考包 ${options.packageName} 选择了未声明的目标依赖：${name}`,
+        );
+    return selected;
   };
   const defaultPath =
     options.defaultPath ?? `packages/${options.defaultLeafName}`;
@@ -577,6 +606,10 @@ export function defineReferencePackage<
     get dependencyUses() {
       return dependencyUses();
     },
+    ...(options.normalizeConfiguration === undefined
+      ? {}
+      : { normalizeConfiguration: options.normalizeConfiguration }),
+    targetDependencyNames,
     prepare,
     prepareArtifact() {
       const prepared = prepare();
@@ -623,6 +656,17 @@ export function defineReferencePackage<
       }
       const manifest = prepared.manifest;
       const bindings = input.bindings ?? new Map<string, PackageDefinition>();
+      const targetDependencies = new Set(
+        targetDependencyNames({
+          configuration:
+            input.configuration ??
+            options.normalizeConfiguration?.(undefined) ??
+            null,
+          ...(input.creationInput === undefined
+            ? {}
+            : { creationInput: input.creationInput }),
+        }),
+      );
       const names = new Map(
         [...bindings].map(([name, definition]) => [name, definition.name]),
       );
@@ -661,10 +705,11 @@ export function defineReferencePackage<
           ...(projected[field] as Record<string, string>),
         };
         for (const dependency of prepared.dependencyUses) {
-          if (!dependency.purposes.includes("target"))
-            delete dependencies[dependency.name];
+          if (!targetDependencies.has(dependency.name))
+            delete dependencies[names.get(dependency.name) ?? dependency.name];
         }
         for (const [nativeName, definition] of bindings) {
+          if (!targetDependencies.has(nativeName)) continue;
           const native = (manifest[field] as Record<string, string>)[
             nativeName
           ];

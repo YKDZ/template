@@ -1,7 +1,9 @@
-import path from "node:path";
-
+import {
+  normalizePublicationConfiguration,
+  publicationTargetDependencies,
+  projectPublicationTarget,
+} from "@ykdz/reference-npm-publication/template";
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
-import type { GenerationContext } from "@ykdz/template-workspace/generation-context";
 import { validateCliCommandName } from "@ykdz/template-workspace/package-contribution";
 import type { PackageLinkRequirement } from "@ykdz/template-workspace/project-requirements";
 import {
@@ -9,40 +11,10 @@ import {
   type ReferencePackage,
 } from "@ykdz/template-workspace/reference-package";
 
-import {
-  isTsCliPublicCandidateCreationInput,
-  tsCliPublicCandidateCreationInput,
-  type TsCliCreationVariant,
-} from "./authoring/creation-input.ts";
-
-export type { TsCliCreationVariant } from "./authoring/creation-input.ts";
-export type TsCliCreationInput = PackageCreationInput<TsCliCreationVariant> & {
-  /** 要连接的已选参考包节点；目标角色和来源条件由默认 workspace 策略校验。 */
+export type TsCliCreationInput = PackageCreationInput & {
+  /** 一次性连接意图不属于可变配置。 */
   readonly linkToNodeIdentity?: string;
 };
-export { tsCliPublicCandidateCreationInput };
-
-function publicationNodeEngine(
-  toolchain: GenerationContext["toolchain"],
-): string {
-  const nodeVersion = toolchain.nodeVersion;
-  if (nodeVersion === undefined) {
-    throw new Error(
-      "新建公开 ts-cli 发布候选要求 Generation Context 提供精确三段 toolchain.nodeVersion，实际缺失；不能从 nodeLtsMajor 猜 patch 派生公开 caret 范围。",
-    );
-  }
-  if (!/^\d+\.\d+\.\d+$/u.test(nodeVersion)) {
-    throw new Error(
-      `公开 ts-cli 发布候选要求 toolchain.nodeVersion 为精确三段 Node 版本，实际收到 ${JSON.stringify(nodeVersion)}。`,
-    );
-  }
-  if (nodeVersion.split(".")[0] !== toolchain.nodeLtsMajor) {
-    throw new Error(
-      `公开 ts-cli 发布候选的 toolchain.nodeVersion ${nodeVersion} 与 nodeLtsMajor ${toolchain.nodeLtsMajor} 大版本不一致。`,
-    );
-  }
-  return `^${nodeVersion}`;
-}
 
 export const referencePackage: ReferencePackage<TsCliCreationInput> =
   defineReferencePackage<TsCliCreationInput>({
@@ -56,15 +28,22 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
     defaultLeafName: "cli",
     role: "cli-tool",
     resources: ["."],
+    normalizeConfiguration: normalizePublicationConfiguration,
+    targetDependencies: publicationTargetDependencies,
     template: {
       dependencies: [
+        { name: "@ykdz/reference-npm-publication", purpose: "target" },
+        {
+          name: "@ykdz/reference-npm-publication",
+          purpose: "template-execution",
+        },
         { name: "@ykdz/template-core", purpose: "template-execution" },
         {
           name: "@ykdz/template-workspace",
           purpose: "template-execution",
         },
       ],
-      exports: ["./command-identity", "./creation-input"],
+      exports: ["./command-identity"],
       scripts: ["build:template", "check:author-planning-roles"],
       resources: ["template", "tsconfig.template.json"],
     },
@@ -81,24 +60,10 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
       const creationInput = input.creationInput as
         | TsCliCreationInput
         | undefined;
-      const publicCandidate =
-        input.createdBy === "initialization" &&
-        isTsCliPublicCandidateCreationInput(creationInput);
       const commandName = validateCliCommandName(
         input.definition.name.slice(input.definition.name.lastIndexOf("/") + 1),
       );
       const bin = contribution.manifest.bin as Readonly<Record<string, string>>;
-      const configuration = input.bindings?.get(
-        "@ykdz/reference-tooling-config",
-      );
-      const devDependencies = {
-        ...(contribution.manifest.devDependencies as Record<string, string>),
-      };
-      if (configuration !== undefined) {
-        devDependencies[configuration.name] = publicCandidate
-          ? `link:${path.posix.relative(input.definition.path, configuration.path)}`
-          : "workspace:*";
-      }
       let packageLinkRequirement: PackageLinkRequirement | undefined;
       if (creationInput?.linkToNodeIdentity !== undefined) {
         if (creationInput.linkToNodeIdentity.length === 0) {
@@ -118,75 +83,25 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
           provider,
         };
       }
-      const npmPublication = publicCandidate
-        ? { kind: "public-cli-candidate" as const }
-        : undefined;
-      const operations = publicCandidate
-        ? contribution.operations.map((operation) => {
-            if (
-              operation.kind !== "writeJson" ||
-              operation.to !== `${input.definition.path}/turbo.json`
-            ) {
-              return operation;
-            }
-            const turbo = operation.value as {
-              readonly tasks: Readonly<Record<string, unknown>>;
-            };
-            const testE2e = turbo.tasks["test:e2e"] as Record<string, unknown>;
-            return {
-              ...operation,
-              value: {
-                ...turbo,
-                tasks: {
-                  ...turbo.tasks,
-                  "test:e2e": { ...testE2e, dependsOn: [] },
-                },
-              },
-            };
-          })
-        : contribution.operations;
-      const scripts = {
-        ...(contribution.manifest.scripts as Record<string, string>),
-        ...(publicCandidate
-          ? {
-              "test:e2e":
-                "node --conditions=source --experimental-strip-types --test --test-timeout=180000 --test-reporter=spec test/e2e/source-journeys.test.ts",
-              "publication:readiness":
-                "pnpm --workspace-root exec node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/generated/diagnose.ts",
-              "publication:accept":
-                "pnpm --workspace-root exec node --conditions=source --experimental-strip-types scripts/npm-publication/scripts/generated/accept.ts",
-              "publication:consume":
-                "node --conditions=source --experimental-strip-types scripts/publication-consumer.ts",
-            }
-          : {}),
-      };
-      return {
-        ...contribution,
-        operations,
-        manifest: {
-          ...contribution.manifest,
-          ...(publicCandidate ? { private: false, version: "0.1.0" } : {}),
-          bin: { [commandName]: Object.values(bin)[0]! },
-          scripts,
-          devDependencies,
-          engines: {
-            node: publicCandidate
-              ? publicationNodeEngine(input.context.toolchain)
-              : `>=${input.context.toolchain.nodeLtsMajor}`,
+      return projectPublicationTarget({
+        configuration: input.configuration,
+        bindings: input.bindings,
+        contribution: {
+          ...contribution,
+          manifest: {
+            ...contribution.manifest,
+            bin: { [commandName]: Object.values(bin)[0]! },
+            engines: { node: `>=${input.context.toolchain.nodeLtsMajor}` },
           },
+          ...(packageLinkRequirement === undefined
+            ? {}
+            : {
+                projectRequirements: [
+                  ...(contribution.projectRequirements ?? []),
+                  packageLinkRequirement,
+                ],
+              }),
         },
-        foundation: {
-          ...contribution.foundation,
-          ...(npmPublication === undefined ? {} : { npmPublication }),
-        },
-        ...(packageLinkRequirement === undefined
-          ? {}
-          : {
-              projectRequirements: [
-                ...(contribution.projectRequirements ?? []),
-                packageLinkRequirement,
-              ],
-            }),
-      };
+      });
     },
   });
