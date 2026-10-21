@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,7 +11,6 @@ import {
   type CheckEnvironmentNeed,
   type DeploymentEnvironmentNeed,
 } from "@ykdz/template-workspace/default-environment";
-import type { GenerationContext } from "@ykdz/template-workspace/generation-context";
 import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
 import type { DependencyMaintenancePolicy } from "@ykdz/template-workspace/project-requirements";
 import type {
@@ -93,6 +92,9 @@ function readBuildxStep(): Readonly<Record<string, unknown>> & {
   };
 }
 
+// 装配时准备所属包的不可变原生资源；更新投影只复用事实，不再读盘。
+const buildxStep = readBuildxStep();
+
 function copyResource(
   resource: NativeContentArtifactResource,
   to: string,
@@ -164,13 +166,12 @@ function packageManifest(
   targetRoot: string,
   definition: PackageDefinition,
   contribution: PackageContribution,
-): Record<string, unknown> | undefined {
+): Record<string, unknown> {
   const packageManifestPath = path.join(
     targetRoot,
     definition.path,
     "package.json",
   );
-  if (!existsSync(packageManifestPath)) return undefined;
 
   let value: unknown;
   try {
@@ -207,66 +208,70 @@ function scriptValue(manifest: Record<string, unknown>, name: string): unknown {
     : undefined;
 }
 
-function assertPreparedPackageTruth(options: {
-  readonly context: GenerationContext;
+type RequiredPackage = {
+  readonly definition: PackageDefinition;
+  readonly names: readonly string[];
+};
+
+function assertPackageDeclarations(options: {
   readonly contributions: readonly PackageContribution[];
-  readonly packages: readonly {
-    readonly definition: PackageDefinition;
-    readonly names: readonly string[];
-  }[];
-}): void {
+  readonly packages: readonly RequiredPackage[];
+}): ReadonlyMap<string, PackageContribution> {
   const sourceByPath = new Map(
     options.contributions.map((contribution) => [
       contribution.definition.path,
       contribution,
     ]),
   );
-  const existing: {
-    readonly definition: PackageDefinition;
-    readonly contribution: PackageContribution;
-    readonly manifest: Record<string, unknown>;
-  }[] = [];
-  for (const { definition } of options.packages) {
+  for (const { definition, names } of options.packages) {
     const contribution = sourceByPath.get(definition.path);
     if (
       contribution === undefined ||
-      contribution.definition.name !== definition.name
+      contribution.definition.name !== definition.name ||
+      contribution.manifest.name !== definition.name
     ) {
       throw new Error(
         `Vike 预设缺少实际包来源：${definition.name} (${definition.path})`,
       );
     }
+    for (const name of names) {
+      if (typeof scriptValue(contribution.manifest, name) !== "string") {
+        throw new Error(
+          `Vike 数据准备要求 ${definition.name} 的来源声明 scripts.${name}`,
+        );
+      }
+    }
+  }
+  return sourceByPath;
+}
+
+/** 更新效果阶段保留数据库协作对当前包身份与任务命令的既有保证。 */
+export function validateVikePackageTruth(options: {
+  readonly targetRoot: string;
+  readonly contributions: readonly PackageContribution[];
+  readonly application: PackageDefinition;
+  readonly database: PackageDefinition;
+  readonly migrations: PackageDefinition;
+}): void {
+  assertVikePackageRoles(options);
+  const packages = requiredTaskScripts(options);
+  const sourceByPath = assertPackageDeclarations({
+    contributions: options.contributions,
+    packages,
+  });
+  for (const { definition, names } of packages) {
+    const contribution = sourceByPath.get(definition.path)!;
     const manifest = packageManifest(
-      options.context.targetDir,
+      options.targetRoot,
       definition,
       contribution,
     );
-    if (manifest !== undefined) {
-      existing.push({ definition, contribution, manifest });
-    }
-  }
-  if (existing.length === 0) return;
-  if (existing.length !== options.packages.length) {
-    const missing = options.packages
-      .filter(
-        ({ definition }) =>
-          !existing.some((item) => item.definition.path === definition.path),
-      )
-      .map(({ definition }) => definition.path);
-    throw new Error(`Vike 预设找不到实际包清单：${missing.join(", ")}`);
-  }
-  for (const expectedPackage of options.packages) {
-    const actual = existing.find(
-      (item) => item.definition.path === expectedPackage.definition.path,
-    );
-    const contribution = sourceByPath.get(expectedPackage.definition.path)!;
-    if (actual === undefined) continue;
-    for (const name of expectedPackage.names) {
-      const expected = scriptValue(contribution.manifest, name);
-      const received = scriptValue(actual.manifest, name);
-      if (typeof expected !== "string" || received !== expected) {
+    for (const name of names) {
+      if (
+        scriptValue(manifest, name) !== scriptValue(contribution.manifest, name)
+      ) {
         throw new Error(
-          `Vike 数据准备要求 ${expectedPackage.definition.name} 的 scripts.${name} 与来源包保持一致`,
+          `Vike 数据准备要求 ${definition.name} 的 scripts.${name} 与来源包保持一致`,
         );
       }
     }
@@ -320,7 +325,6 @@ function deploymentTask(
 }
 
 export function projectVikeDeploymentContribution(options: {
-  readonly context: GenerationContext;
   readonly contributions: readonly PackageContribution[];
   readonly application: PackageDefinition;
   readonly database: PackageDefinition;
@@ -328,8 +332,7 @@ export function projectVikeDeploymentContribution(options: {
 }): SharedRootContribution {
   const { application, database, migrations } = options;
   assertVikePackageRoles({ application, database, migrations });
-  assertPreparedPackageTruth({
-    context: options.context,
+  assertPackageDeclarations({
     contributions: options.contributions,
     packages: requiredTaskScripts({ application, database, migrations }),
   });
@@ -378,7 +381,7 @@ export function projectVikeDeploymentContribution(options: {
     ciSteps: [
       {
         before: "run-heavy-check",
-        steps: [readBuildxStep()],
+        steps: [buildxStep],
       },
     ],
     environmentNeeds: {
