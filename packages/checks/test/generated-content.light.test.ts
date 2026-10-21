@@ -68,7 +68,7 @@ void describe("唯一内容集合的真实生成检查场景", () => {
             "utf8",
           ),
         ) as { readonly schemaVersion: number };
-        assert.strictEqual(persistedRecord.schemaVersion, 3);
+        assert.strictEqual(persistedRecord.schemaVersion, 4);
         if (scenario.addition !== undefined) {
           const addition = receipt.result.generationRecord.packages.find(
             (record) => record.createdBy === "addition",

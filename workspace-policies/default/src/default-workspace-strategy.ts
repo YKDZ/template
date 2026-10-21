@@ -250,7 +250,7 @@ function preparedResourcesForContext(
 ): DefaultWorkspacePreparedResources {
   const prepared = preparedResourcesByContext.get(context);
   if (prepared === undefined) {
-    throw new Error("默认工作区策略缺少 initialize/prepareAddition 资源事实");
+    throw new Error("默认工作区策略缺少 initialize/prepareUpdate 资源事实");
   }
   return prepared;
 }
@@ -1236,7 +1236,7 @@ export function createDefaultWorkspaceStrategy<
       prepareDefaultWorkspaceResources(context, []);
       return { state, context };
     },
-    prepareAddition({
+    prepareUpdate({
       targetRoot,
       state,
       content,

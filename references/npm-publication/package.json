@@ -5,7 +5,6 @@
   "type": "module",
   "exports": {
     "./reference": "./package.json",
-    "./accepted-artifacts": "./scripts/accepted-artifacts.ts",
     ".": {
       "source": "./scripts/publication.ts",
       "types": "./scripts/publication.ts",
@@ -15,6 +14,14 @@
     "./remote-context": "./scripts/remote-context.ts",
     "./publish": "./scripts/publish.ts",
     "./release": "./scripts/release.ts",
+    "./accepted-artifacts": "./scripts/accepted-artifacts.ts",
+    "./restore-accepted": "./scripts/restore-accepted.ts",
+    "./mark-attempts": "./scripts/mark-attempts.ts",
+    "./restore-attempts": "./scripts/restore-attempts.ts",
+    "./publish-target": "./scripts/publish-target.ts",
+    "./release-target": "./scripts/release-target.ts",
+    "./schedule-npm": "./scripts/schedule-npm.ts",
+    "./schedule-release": "./scripts/schedule-release.ts",
     "./setup": "./scripts/setup/acquire-entry.ts",
     "./prepare": {
       "source": "./scripts/generated/prepare.ts",

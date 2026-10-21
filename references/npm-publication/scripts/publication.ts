@@ -91,6 +91,9 @@ export type PublicationPreparationReceipt = {
   readonly npmPublicationAttempt?: {
     readonly artifactSha512: string;
     readonly distTag: string;
+    readonly workflowRunId?: string;
+    readonly workflowRunAttempt?: number;
+    readonly ready?: true;
   };
   readonly target: {
     readonly name: string;
@@ -529,6 +532,10 @@ export async function readPreparedArtifact(options: {
   const pack = objectValue(value?.pack);
   const artifact = objectValue(value?.artifact);
   const npmPublicationAttempt = objectValue(value?.npmPublicationAttempt);
+  const hasWorkflowRunId =
+    typeof npmPublicationAttempt?.workflowRunId === "string";
+  const hasWorkflowRunAttempt =
+    typeof npmPublicationAttempt?.workflowRunAttempt === "number";
   if (
     value?.schemaVersion !== 1 ||
     target === undefined ||
@@ -549,7 +556,16 @@ export async function readPreparedArtifact(options: {
     (value.npmPublicationAttempt !== undefined &&
       (npmPublicationAttempt?.artifactSha512 !== artifact?.sha512 ||
         typeof npmPublicationAttempt?.distTag !== "string" ||
-        npmPublicationAttempt.distTag.length === 0))
+        npmPublicationAttempt.distTag.length === 0 ||
+        (npmPublicationAttempt.ready !== undefined &&
+          npmPublicationAttempt.ready !== true) ||
+        hasWorkflowRunId !== hasWorkflowRunAttempt ||
+        (hasWorkflowRunId &&
+          (!/^\d+$/u.test(npmPublicationAttempt.workflowRunId as string) ||
+            !Number.isSafeInteger(
+              npmPublicationAttempt.workflowRunAttempt as number,
+            ) ||
+            (npmPublicationAttempt.workflowRunAttempt as number) < 1))))
   ) {
     throw new Error(`共享制品准备回执格式无效：${receiptPath}`);
   }
@@ -1012,7 +1028,19 @@ export async function recordNpmPublicationAttempt(options: {
   readonly packageRoot: string;
   readonly artifactDirectory: string;
   readonly distTag: string;
+  readonly workflowRunId?: string;
+  readonly workflowRunAttempt?: number;
 }): Promise<void> {
+  if (
+    (options.workflowRunId === undefined) !==
+      (options.workflowRunAttempt === undefined) ||
+    (options.workflowRunId !== undefined &&
+      (!/^\d+$/u.test(options.workflowRunId) ||
+        !Number.isSafeInteger(options.workflowRunAttempt) ||
+        options.workflowRunAttempt! < 1))
+  ) {
+    throw new Error("工作流尝试信息必须包含有效的运行编号");
+  }
   const accepted = await readAcceptedArtifact({
     packageRoot: options.packageRoot,
     artifactDirectory: options.artifactDirectory,
@@ -1037,6 +1065,12 @@ export async function recordNpmPublicationAttempt(options: {
           npmPublicationAttempt: {
             artifactSha512: accepted.sha512,
             distTag: options.distTag,
+            ...(options.workflowRunId === undefined
+              ? {}
+              : {
+                  workflowRunId: options.workflowRunId,
+                  workflowRunAttempt: options.workflowRunAttempt,
+                }),
           },
         },
         null,
@@ -1048,6 +1082,48 @@ export async function recordNpmPublicationAttempt(options: {
     await rm(temporaryPath, { force: true }).catch(() => undefined);
     throw new Error(
       `无法在原件回执中记录 npm 上传尝试：${accepted.receiptPath}；${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+}
+
+/** 在同一回执记录已核验的 npm 就绪事实。 */
+export async function recordNpmPublicationReady(options: {
+  readonly packageRoot: string;
+  readonly artifactDirectory: string;
+  readonly sha512: string;
+}): Promise<void> {
+  const accepted = await readAcceptedArtifact({
+    packageRoot: options.packageRoot,
+    artifactDirectory: options.artifactDirectory,
+    preserveReceiptTarget: true,
+  });
+  if (accepted.kind !== "prepared" || accepted.sha512 !== options.sha512) {
+    throw new Error("npm 就绪状态与已验收原件不一致。");
+  }
+  const attempt = accepted.receipt.npmPublicationAttempt;
+  if (attempt === undefined || attempt.artifactSha512 !== accepted.sha512) {
+    throw new Error("npm 就绪状态要求回执先记录同一原件的上传尝试。");
+  }
+  if (attempt.ready === true) return;
+  const temporaryPath = `${accepted.receiptPath}.${process.pid}.tmp`;
+  try {
+    await writeFile(
+      temporaryPath,
+      `${JSON.stringify(
+        {
+          ...accepted.receipt,
+          npmPublicationAttempt: { ...attempt, ready: true },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await rename(temporaryPath, accepted.receiptPath);
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw new Error(
+      `无法在原件回执中记录 npm 就绪事实：${accepted.receiptPath}；${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
   }

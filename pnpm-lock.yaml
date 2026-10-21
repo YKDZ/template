@@ -1656,9 +1656,6 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config
-      '@ykdz/reference-ts-cli':
-        specifier: link:../../references/ts-cli
-        version: link:../../references/ts-cli
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0

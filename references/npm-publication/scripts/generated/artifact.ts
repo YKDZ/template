@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -53,6 +53,14 @@ function publicationFilters(arguments_: readonly string[]): string[] {
   return filters;
 }
 
+function environmentFilters(value: string | undefined): string[] {
+  if (value === undefined) return [];
+  return value
+    .split(/\r?\n/u)
+    .map((filter) => filter.trim())
+    .filter((filter) => filter.length > 0);
+}
+
 async function pnpm(
   arguments_: readonly string[],
   options: {
@@ -97,6 +105,23 @@ function workspaceSelector(workspaceRoot: string, packageRoot: string): string {
     : `./${relative.split(path.sep).join("/")}`;
 }
 
+function relativePathInside(
+  root: string,
+  target: string,
+  allowRoot = false,
+): string {
+  const relative = path.relative(root, target);
+  if (
+    (relative.length === 0 && !allowRoot) ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error(`发布制品路径不在其归档目录内：${target}`);
+  }
+  return relative.length === 0 ? "." : relative.split(path.sep).join("/");
+}
+
 async function defaultFilter(workspaceRoot: string): Promise<string> {
   const configured = await publicationTarget();
   const manifest = JSON.parse(
@@ -113,7 +138,10 @@ async function defaultFilter(workspaceRoot: string): Promise<string> {
 async function main(): Promise<void> {
   const workspaceRoot = path.resolve(process.cwd());
   const argumentOffset = process.execArgv.includes("--eval") ? 1 : 2;
-  const filters = publicationFilters(process.argv.slice(argumentOffset));
+  const filters = [
+    ...publicationFilters(process.argv.slice(argumentOffset)),
+    ...environmentFilters(process.env.PUBLICATION_TARGET_FILTERS),
+  ];
   const selectors =
     filters.length > 0 ? filters : [await defaultFilter(workspaceRoot)];
   const filterArguments = selectors.flatMap((filter) => ["--filter", filter]);
@@ -147,35 +175,35 @@ async function main(): Promise<void> {
   const outputRoot =
     process.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY ??
     process.env.TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR;
+  const artifactOutputRoot =
+    outputRoot === undefined
+      ? undefined
+      : path.resolve(workspaceRoot, outputRoot);
   const prepareEnv = {
     ...env,
     PUBLICATION_BATCH_TARGET_COUNT: String(projects.length),
-    ...(outputRoot === undefined
+    ...(artifactOutputRoot === undefined
       ? {}
       : {
-          PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: path.resolve(
-            workspaceRoot,
-            outputRoot,
-          ),
+          PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: artifactOutputRoot,
         }),
   };
   const preparedTargets: PreparedArtifactBatchTarget[] = [];
-  for (const project of projects) {
-    const prepared = await pnpm(
-      [
-        "exec",
-        "turbo",
-        "run",
-        "publication:prepare",
-        "--filter",
-        project.name,
-        "--output-logs=full",
-      ],
-      { cwd: workspaceRoot, env: prepareEnv },
-    );
-    process.stdout.write(prepared.stdout);
-    process.stderr.write(prepared.stderr);
+  const prepared = await pnpm(
+    [
+      "exec",
+      "turbo",
+      "run",
+      "publication:prepare",
+      ...projects.flatMap((project) => ["--filter", project.name]),
+      "--output-logs=full",
+    ],
+    { cwd: workspaceRoot, env: prepareEnv },
+  );
+  process.stdout.write(prepared.stdout);
+  process.stderr.write(prepared.stderr);
 
+  for (const project of projects) {
     process.chdir(project.path);
     try {
       const target = await publicationTarget(prepareEnv);
@@ -218,6 +246,36 @@ async function main(): Promise<void> {
       sha512: artifact.sha512,
     };
   });
+  if (artifactOutputRoot !== undefined) {
+    const portableArtifacts = artifacts.map((artifact) => ({
+      ...artifact,
+      packageRoot: relativePathInside(
+        workspaceRoot,
+        artifact.packageRoot,
+        true,
+      ),
+      artifactPath: relativePathInside(
+        artifactOutputRoot,
+        artifact.artifactPath,
+      ),
+      receiptPath: relativePathInside(artifactOutputRoot, artifact.receiptPath),
+    }));
+    const acceptedListPath = path.join(
+      artifactOutputRoot,
+      "publication-accepted-artifacts.json",
+    );
+    const temporaryPath = `${acceptedListPath}.${process.pid}.tmp`;
+    try {
+      await writeFile(
+        temporaryPath,
+        `${JSON.stringify({ artifacts: portableArtifacts }, null, 2)}\n`,
+      );
+      await rename(temporaryPath, acceptedListPath);
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  }
   console.log(`npm 制品整批本地验收通过：${artifacts.length} 个目标`);
   console.log(`NPM_PUBLICATION_ACCEPTED_JSON:${JSON.stringify({ artifacts })}`);
 }

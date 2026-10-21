@@ -127,7 +127,6 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
-    "@ykdz/reference-ts-cli": "link:../../references/ts-cli",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

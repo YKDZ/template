@@ -162,6 +162,12 @@ export type Generator<
     readonly strategyInput: Input;
     readonly dryRun?: boolean;
   }): Promise<GeneratorResult<CreationInput, OwnerFacts>>;
+  configure(options: {
+    readonly repositoryRoot: string;
+    readonly packageDefinitionId: PackageDefinitionId;
+    readonly configuration: unknown;
+    readonly dryRun?: boolean;
+  }): Promise<GeneratorResult<CreationInput, OwnerFacts>>;
   add(
     options: {
       readonly repositoryRoot: string;
@@ -690,7 +696,7 @@ export function createGenerator<
     );
   }
 
-  function addRecordNodes(
+  function nodesFromRecords(
     records: readonly GeneratorPackageState<CreationInput>[],
   ): PackageNode<Context, Contribution, CreationInput, Content>[] {
     return records.map((record) => {
@@ -699,6 +705,12 @@ export function createGenerator<
         definition: record.definition,
         createdBy: record.createdBy,
         configuration: record.configuration,
+        preparation: preparations.get(
+          requireContent(record.contentIdentity).definition,
+        ),
+        preparationComplete: preparedDefinitions.has(
+          requireContent(record.contentIdentity).definition,
+        ),
         ...(record.creationInput === null
           ? {}
           : { creationInput: record.creationInput }),
@@ -904,7 +916,7 @@ export function createGenerator<
     };
   }
 
-  function hydrateNewNodes(options_: {
+  function expandDependencies(options_: {
     readonly roots: readonly PackageNode<
       Context,
       Contribution,
@@ -932,7 +944,6 @@ export function createGenerator<
     ): void => {
       const identity = contentIdentityKey(node.content.identity);
       const key = identity + "\u0000" + node.definition.path;
-      if (node.record !== undefined) return;
       if (visiting.has(key)) {
         throw new Error(
           "显式内容依赖形成循环：" +
@@ -941,7 +952,7 @@ export function createGenerator<
       }
       if (expanded.has(key)) return;
       visiting.add(key);
-      newNodes.set(key, node);
+      if (node.record === undefined) newNodes.set(key, node);
       node.preparation = prepareContent(node.content);
       node.preparationComplete = true;
       const dependencies = options.strategy.dependencies({
@@ -959,13 +970,21 @@ export function createGenerator<
           (candidate) =>
             contentIdentityKey(candidate.content.identity) === dependencyKey,
         );
-        if (candidates.length > 1) {
+        const boundId = node.record?.bindings[dependencyKey];
+        const bound =
+          boundId === undefined
+            ? undefined
+            : candidates.find(
+                (candidate) =>
+                  candidate.record?.packageDefinitionId === boundId,
+              );
+        if (bound === undefined && candidates.length > 1) {
           throw new Error(
             "依赖内容有多个持久实例，无法唯一绑定：" +
               contentIdentityLabel(dependencyIdentity),
           );
         }
-        let provider = candidates[0];
+        let provider = bound ?? candidates[0];
         if (provider === undefined) {
           if (dependency.definition.instance !== "shared") {
             throw new Error(
@@ -1025,7 +1044,7 @@ export function createGenerator<
         throw new Error("显式初始化根路径重复：" + root.definition.path);
       }
       explicitByPath.add(root.definition.path);
-      newNodes.set(key, root);
+      if (root.record === undefined) newNodes.set(key, root);
     }
 
     for (const root of options_.roots) visit(root);
@@ -1051,7 +1070,7 @@ export function createGenerator<
         bindings: {},
       };
     }
-    for (const node of nodes) {
+    for (const node of new Set([...nodes, ...options_.roots])) {
       const bindings = Object.fromEntries(
         [...node.providers].map(([identity, provider]) => {
           if (provider.record === undefined) {
@@ -1170,7 +1189,7 @@ export function createGenerator<
           >(),
         };
       });
-      const nodes = hydrateNewNodes({
+      const nodes = expandDependencies({
         roots,
         existing: [],
         context: prepared.context,
@@ -1236,6 +1255,32 @@ export function createGenerator<
     }
   }
 
+  async function restoreRepository(repositoryRoot: string) {
+    const blueprintValue = JSON.parse(
+      await readFile(
+        path.join(repositoryRoot, ".template/blueprint.json"),
+        "utf8",
+      ),
+    ) as unknown;
+    const blueprint = assertProjectBlueprint(blueprintValue);
+    const record = parseGenerationRecord<CreationInput>(
+      JSON.parse(
+        await readFile(
+          path.join(repositoryRoot, ".template/generation.json"),
+          "utf8",
+        ),
+      ) as unknown,
+    );
+    if (record.strategyIdentity !== options.strategy.identity) {
+      throw new Error("目标仓库使用了不兼容的工作区策略");
+    }
+    const state = options.strategy.parseState(record.strategyState);
+    const packageStates = resolvePackageStates(record.packages, blueprint);
+    validateNodeInstances(packageStates, record.nodeInstances);
+    validatePresetSelections(record.presetSelections);
+    return { blueprint, record, state, packageStates };
+  }
+
   async function add(
     addOptions: {
       readonly repositoryRoot: string;
@@ -1264,28 +1309,8 @@ export function createGenerator<
       let packageStates: GeneratorPackageState<CreationInput>[];
       let state: State;
       try {
-        const blueprintValue = JSON.parse(
-          await readFile(
-            path.join(repositoryRoot, ".template/blueprint.json"),
-            "utf8",
-          ),
-        ) as unknown;
-        blueprint = assertProjectBlueprint(blueprintValue);
-        record = parseGenerationRecord<CreationInput>(
-          JSON.parse(
-            await readFile(
-              path.join(repositoryRoot, ".template/generation.json"),
-              "utf8",
-            ),
-          ) as unknown,
-        );
-        if (record.strategyIdentity !== options.strategy.identity) {
-          throw new Error("目标仓库使用了不兼容的工作区策略");
-        }
-        state = options.strategy.parseState(record.strategyState);
-        packageStates = resolvePackageStates(record.packages, blueprint);
-        validateNodeInstances(packageStates, record.nodeInstances);
-        validatePresetSelections(record.presetSelections);
+        ({ blueprint, record, state, packageStates } =
+          await restoreRepository(repositoryRoot));
       } catch (error) {
         return fail(
           "metadata",
@@ -1354,25 +1379,19 @@ export function createGenerator<
         addedPresetMember?.definition.project === undefined
           ? undefined
           : addedPreset;
-      const existingNodes = addRecordNodes(packageStates);
+      const existingNodes = nodesFromRecords(packageStates);
       const currentNodeInstances = resolveNodeInstances(
         packageStates,
         record.nodeInstances,
       );
       try {
-        for (const node of existingNodes) {
-          node.preparation = preparations.get(node.content.definition);
-          node.preparationComplete = preparedDefinitions.has(
-            node.content.definition,
-          );
-        }
         prepareContent(selected);
       } catch (error) {
         return fail("planning", error);
       }
       let context: Context;
       try {
-        context = await options.strategy.prepareAddition({
+        context = await options.strategy.prepareUpdate({
           targetRoot: repositoryRoot,
           state,
           content: selected,
@@ -1434,7 +1453,7 @@ export function createGenerator<
       const prepareAdditionNodes = (): NonNullable<typeof preparedAddition> => {
         if (preparedAddition !== undefined) return preparedAddition;
         try {
-          const nodes = hydrateNewNodes({
+          const nodes = expandDependencies({
             roots: [requested],
             existing: existingNodes,
             context,
@@ -1705,5 +1724,174 @@ export function createGenerator<
     }
   }
 
-  return { init, add };
+  async function configure(configureOptions: {
+    readonly repositoryRoot: string;
+    readonly packageDefinitionId: PackageDefinitionId;
+    readonly configuration: unknown;
+    readonly dryRun?: boolean;
+  }): Promise<GeneratorResult<CreationInput, OwnerFacts>> {
+    const repositoryRoot = path.resolve(configureOptions.repositoryRoot);
+    let restored: Awaited<ReturnType<typeof restoreRepository>>;
+    try {
+      restored = await restoreRepository(repositoryRoot);
+    } catch (error) {
+      return fail("metadata", error, options.strategy.diagnoseFailure?.(error));
+    }
+    const { blueprint, record, state, packageStates } = restored;
+    const target = packageStates.find(
+      (item) =>
+        item.packageDefinitionId === configureOptions.packageDefinitionId,
+    );
+    if (target === undefined)
+      return {
+        status: "input-invalid",
+        issues: [{ code: "UNKNOWN_GENERATED_INSTANCE" }],
+      };
+    try {
+      for (const item of packageStates)
+        prepareContent(requireContent(item.contentIdentity));
+      validateRequiredBindings(packageStates);
+    } catch (error) {
+      return fail("metadata", error, options.strategy.diagnoseFailure?.(error));
+    }
+    let phase: "planning" | "reconciliation" = "planning";
+    try {
+      const selected = requireContent(target.contentIdentity);
+      const configuration = normalizeConfiguration(
+        selected,
+        configureOptions.configuration,
+      );
+      if (isDeepStrictEqual(target.configuration, configuration)) {
+        return {
+          status: "success",
+          dryRun: configureOptions.dryRun ?? false,
+          blueprint,
+          generationRecord: record,
+          projection: null,
+          actions: [],
+        };
+      }
+      const currentNodeInstances = resolveNodeInstances(
+        packageStates,
+        record.nodeInstances,
+      );
+      const context = await options.strategy.prepareUpdate({
+        targetRoot: repositoryRoot,
+        state,
+        content: selected,
+        contentByIdentity,
+        configuration,
+        packages: packageStates,
+        nodeInstances: currentNodeInstances,
+        ...(target.creationInput === null
+          ? {}
+          : { creationInput: target.creationInput }),
+      });
+      const beforeNodes = nodesFromRecords(packageStates);
+      const before = project(
+        context,
+        state,
+        blueprint,
+        packageStates,
+        persistedContributions(
+          beforeNodes,
+          context,
+          packageStates,
+          currentNodeInstances,
+        ),
+        record.nodeInstances,
+        record.presetSelections,
+      );
+      const afterNodes = nodesFromRecords(
+        packageStates.map((item) =>
+          item.packageDefinitionId === target.packageDefinitionId
+            ? { ...item, configuration }
+            : item,
+        ),
+      );
+      const changed = afterNodes.find(
+        (node) =>
+          node.record?.packageDefinitionId === target.packageDefinitionId,
+      )!;
+      const additions = expandDependencies({
+        roots: [changed],
+        existing: afterNodes,
+        context,
+        occupiedIds: new Set(
+          record.packages.map((item) => item.packageDefinitionId),
+        ),
+      });
+      const allNodes = [...afterNodes, ...additions];
+      const afterBlueprint = assertProjectBlueprint({
+        ...blueprint,
+        packages: [
+          ...blueprint.packages,
+          ...additions.map((node) => node.definition),
+        ],
+      });
+      const afterPackages = resolvePackageStates(
+        allNodes.map((node) => node.record!),
+        afterBlueprint,
+      );
+      validateRequiredBindings(afterPackages);
+      const afterNodeInstances = resolveNodeInstances(
+        afterPackages,
+        record.nodeInstances,
+      );
+      const after = project(
+        context,
+        state,
+        afterBlueprint,
+        afterPackages,
+        persistedContributions(
+          allNodes,
+          context,
+          afterPackages,
+          afterNodeInstances,
+        ),
+        record.nodeInstances,
+        record.presetSelections,
+      );
+      phase = "reconciliation";
+      const reconciliation = await reconcileAndApplyProjectProjections({
+        targetRoot: repositoryRoot,
+        before: {
+          operations: before.operations,
+          reconciliation: before.reconciliation,
+        },
+        after: {
+          operations: after.operations,
+          reconciliation: after.reconciliation,
+        },
+        preconditions: additions.map((node) => ({
+          path: node.definition.path,
+          kind: "must-not-exist",
+          reason: "新共享依赖路径已存在：" + node.definition.path,
+        })),
+        ...(configureOptions.dryRun === undefined
+          ? {}
+          : { dryRun: configureOptions.dryRun }),
+      });
+      if (!reconciliation.ok)
+        return {
+          status: "conflict",
+          dryRun: configureOptions.dryRun ?? false,
+          reason: "目标工作区的现行内容与配置投影发生冲突。",
+          conflicts: reconciliation.conflicts,
+          actions: [],
+        };
+      return {
+        status: "success",
+        dryRun: configureOptions.dryRun ?? false,
+        blueprint: after.blueprint,
+        generationRecord: after.generationRecord,
+        projection: after,
+        actions: reconciliation.actions,
+      };
+    } catch (error) {
+      return fail(phase, error, options.strategy.diagnoseFailure?.(error));
+    }
+  }
+
+  return { init, add, configure };
 }

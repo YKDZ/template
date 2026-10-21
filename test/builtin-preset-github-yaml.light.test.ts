@@ -288,7 +288,7 @@ void describe("Built-in Preset GitHub YAML checker", () => {
     await expectWorkflowRejected(
       baseline,
       source.replace(
-        /(?<light>      - name: Run Light Check\n        run: node --conditions=source scripts\/task-gates\.ts check\n)(?<buildx>      - name: Set up Docker Buildx\n(?:        id: [^\n]+\n)?        uses: docker\/setup-buildx-action@[^\n]+\n)/u,
+        /(?<light>      - name: Run Light Check\n        run: node --conditions=source scripts\/task-gates\.ts check\n)(?<buildx>      - (?:id: [^\n]+\n        )?name: Set up Docker Buildx\n        uses: docker\/setup-buildx-action@[^\n]+\n)/u,
         "$2$1",
       ),
     );
