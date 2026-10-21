@@ -17,8 +17,7 @@
     "#/server/*": {
       "types": "./server/*.ts",
       "default": "./server/*.ts"
-    },
-    "#tooling/*": "@ykdz/reference-typescript-config/*"
+    }
   },
   "exports": {
     "./reference": "./package.json",

@@ -32,7 +32,7 @@ function generator() {
 
 void describe("生成任务公共入口", () => {
   void it(
-    "正式生成包按原生 glob 执行测试并拒绝空文件和空套件",
+    "正式生成包按原生 Node 测试执行并将失败传至根 check",
     { timeout: 180_000 },
     async () => {
       const workspace = await mkdtemp(
@@ -99,7 +99,9 @@ void describe("生成任务公共入口", () => {
           [
             'import assert from "node:assert/strict";',
             'import { test } from "node:test";',
-            'test("package addition uses native Node test", () => assert.strictEqual(2 + 2, 4));',
+            'void test("package addition uses native Node test", () => {',
+            "  assert.strictEqual(2 + 2, 4);",
+            "});",
             "",
           ].join("\n"),
         );
@@ -117,6 +119,18 @@ void describe("生成任务公共入口", () => {
           addedPackageRun.status,
           0,
           `${addedPackageRun.stdout}\n${addedPackageRun.stderr}`,
+        );
+        const passingRootRun = spawnSync("pnpm", ["run", "check:full"], {
+          cwd: targetRoot,
+          encoding: "utf8",
+          env: environment,
+          maxBuffer: 16 * 1024 * 1024,
+          timeout: 180_000,
+        });
+        assert.strictEqual(
+          passingRootRun.status,
+          0,
+          `${passingRootRun.stdout}\n${passingRootRun.stderr}`,
         );
 
         const packageRoot = path.join(targetRoot, "packages/lib");
@@ -146,7 +160,9 @@ void describe("生成任务公共入口", () => {
           [
             'import assert from "node:assert/strict";',
             'import { test } from "node:test";',
-            'test("newly added business case", () => assert.fail("expected failure"));',
+            'void test("newly added business case", () => {',
+            '  assert.fail("expected failure");',
+            "});",
             "",
           ].join("\n"),
         );
@@ -162,82 +178,27 @@ void describe("生成任务公共入口", () => {
         );
         assert.ok(addedFailure.stdout.includes("newly added business case"));
 
-        await writeFile(
-          addedTest,
-          [
-            'import assert from "node:assert/strict";',
-            'import { test } from "node:test";',
-            'test("newly added business case", () => assert.strictEqual(2 + 2, 4));',
-            "",
-          ].join("\n"),
-        );
-        const addedPass = run();
-        assert.strictEqual(
-          addedPass.status,
-          0,
-          `${addedPass.stdout}\n${addedPass.stderr}`,
-        );
-        await rm(addedTest);
-
-        const emptyTest = path.join(packageRoot, "test/empty.test.ts");
-        await writeFile(emptyTest, "");
-
-        const emptyFileRun = run();
-        assert.strictEqual(emptyFileRun.status, 1);
-        assert.ok(
-          emptyFileRun.stderr.includes("没有执行任何 Node 业务测试用例"),
-        );
-
-        await writeFile(
-          emptyTest,
-          [
-            'import { describe } from "node:test";',
-            'describe("empty suite", () => {});',
-            "",
-          ].join("\n"),
-        );
-        const emptySuiteRun = run();
-        assert.strictEqual(emptySuiteRun.status, 1);
-        assert.ok(
-          emptySuiteRun.stderr.includes("没有执行任何 Node 业务测试用例"),
-        );
-
-        await writeFile(
-          emptyTest,
-          [
-            'import { test } from "node:test";',
-            'test("skipped with reason", { skip: "external condition is absent" }, () => {});',
-            'test("marked todo", { todo: "not implemented" }, () => {});',
-            "",
-          ].join("\n"),
-        );
-        const notExecutedRun = run();
-        assert.strictEqual(notExecutedRun.status, 1);
-        assert.ok(
-          notExecutedRun.stderr.includes("没有执行任何 Node 业务测试用例"),
-        );
-
-        await writeFile(
-          emptyTest,
-          [
-            'import { test } from "node:test";',
-            'test("skipped", { skip: "waiting" }, () => {});',
-            'test("executed", () => {});',
-            "",
-          ].join("\n"),
-        );
-        assert.strictEqual(run().status, 0);
+        const rootFailure = spawnSync("pnpm", ["run", "check"], {
+          cwd: targetRoot,
+          encoding: "utf8",
+          env: environment,
+          maxBuffer: 16 * 1024 * 1024,
+          timeout: 180_000,
+        });
+        const rootOutput = `${rootFailure.stdout}\n${rootFailure.stderr}`;
+        assert.strictEqual(rootFailure.status, 1, rootOutput);
+        assert.ok(rootOutput.includes("newly added business case"), rootOutput);
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
     },
   );
   void it(
-    "原生 Cargo 构建警告不能冒充真实测试结果",
+    "正式生成 Rust 包直接运行 Cargo 并将失败传至根 check",
     { timeout: 180_000 },
     async () => {
       const workspace = await mkdtemp(
-        path.join(tmpdir(), "template-cargo-zero-tests-"),
+        path.join(tmpdir(), "template-rust-tests-"),
       );
       const targetRoot = path.join(workspace, "generated-rust");
       const preset = presetFor("@ykdz/preset-rust-bin");
@@ -257,77 +218,95 @@ void describe("生成任务公共入口", () => {
           "success",
           JSON.stringify(initialized),
         );
-        await writeFile(
-          path.join(targetRoot, "packages/app/src/main.rs"),
-          "fn main() {}\n",
-        );
-        await writeFile(
-          path.join(targetRoot, "packages/app/build.rs"),
-          'fn main() { println!("cargo:warning=test result: ok. 1 passed; 0 failed; 0 ignored;"); }\n',
-        );
-
-        const runCargoTests = () =>
+        await execa("pnpm", ["install"], {
+          cwd: targetRoot,
+          cancelSignal: installedIntegrationSignal(),
+        });
+        const cargoTarget = path.join(workspace, "cargo-target");
+        const environment = { ...process.env };
+        delete environment.NODE_TEST_CONTEXT;
+        environment.CARGO_TARGET_DIR = cargoTarget;
+        environment.CARGO_TERM_COLOR = "never";
+        const runCargoTests = (cwd: string) =>
           spawnSync("pnpm", ["run", "test"], {
-            cwd: path.join(targetRoot, "packages/app"),
+            cwd,
             encoding: "utf8",
-            env: {
-              ...process.env,
-              CARGO_TARGET_DIR: path.join(workspace, "cargo-target"),
-              CARGO_TERM_COLOR: "never",
-            },
+            env: environment,
+            maxBuffer: 16 * 1024 * 1024,
+            timeout: 180_000,
           });
-        const result = runCargoTests();
-        const output = `${result.stdout}\n${result.stderr}`;
-
-        assert.strictEqual(result.status, 1, output);
-        assert.ok(
-          output.includes("test result: ok. 0 passed; 0 failed; 0 ignored;"),
-        );
-        assert.ok(
-          output.includes("test result: ok. 1 passed; 0 failed; 0 ignored;"),
-        );
-        assert.ok(
-          result.stderr.includes(
-            "Cargo 未执行任何业务测试用例；请检查测试内容与 ignored 标记",
-          ),
-        );
-
+        const appRoot = path.join(targetRoot, "packages/app");
         await writeFile(
           path.join(targetRoot, "packages/app/src/main.rs"),
           [
-            "fn main() {}",
-            "#[test] fn business_passes() { assert_eq!(2 + 2, 4); }",
-            "#[test] #[ignore] fn business_is_ignored() {}",
+            "fn main() -> std::io::Result<()> {",
+            "    use std::io::Write;",
+            '    writeln!(std::io::stdout().lock(), "ready")',
+            "}",
+            "",
+            "#[test]",
+            "fn business_passes() {",
+            "    assert_eq!(2 + 2, 4);",
+            "}",
             "",
           ].join("\n"),
         );
-        const mixedResult = runCargoTests();
+        const passingResult = runCargoTests(appRoot);
         assert.strictEqual(
-          mixedResult.status,
+          passingResult.status,
           0,
-          `${mixedResult.stdout}\n${mixedResult.stderr}`,
+          `${passingResult.stdout}\n${passingResult.stderr}`,
         );
-        assert.ok(mixedResult.stdout.includes("1 passed; 0 failed; 1 ignored"));
+        assert.ok(
+          passingResult.stdout.includes("1 passed; 0 failed; 0 ignored"),
+        );
+        const passingRootResult = spawnSync("pnpm", ["run", "check:full"], {
+          cwd: targetRoot,
+          encoding: "utf8",
+          env: environment,
+          maxBuffer: 16 * 1024 * 1024,
+          timeout: 180_000,
+        });
+        assert.strictEqual(
+          passingRootResult.status,
+          0,
+          `${passingRootResult.stdout}\n${passingRootResult.stderr}`,
+        );
 
         await writeFile(
           path.join(targetRoot, "packages/app/src/main.rs"),
           [
-            "fn main() {}",
-            "#[test] fn business_fails() { assert_eq!(2, 3); }",
+            "fn main() -> std::io::Result<()> {",
+            "    use std::io::Write;",
+            '    writeln!(std::io::stdout().lock(), "ready")',
+            "}",
+            "",
+            "#[test]",
+            "fn business_fails() {",
+            "    assert_eq!(2, 3);",
+            "}",
             "",
           ].join("\n"),
         );
-        const failedResult = runCargoTests();
-        assert.strictEqual(
-          failedResult.status,
-          101,
-          `${failedResult.stdout}\n${failedResult.stderr}`,
-        );
+        const failedResult = runCargoTests(appRoot);
+        const failedOutput = `${failedResult.stdout}\n${failedResult.stderr}`;
+        assert.strictEqual(failedResult.status, 101, failedOutput);
         assert.ok(
-          `${failedResult.stdout}\n${failedResult.stderr}`.includes(
+          failedOutput.includes(
             "test result: FAILED. 0 passed; 1 failed; 0 ignored;",
           ),
         );
+
+        const rootFailure = spawnSync("pnpm", ["run", "check"], {
+          cwd: targetRoot,
+          encoding: "utf8",
+          env: environment,
+          maxBuffer: 16 * 1024 * 1024,
+          timeout: 180_000,
+        });
+        const rootOutput = `${rootFailure.stdout}\n${rootFailure.stderr}`;
+        assert.notStrictEqual(rootFailure.status, 0, rootOutput);
+        assert.ok(rootOutput.includes("business_fails"), rootOutput);
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }

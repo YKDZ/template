@@ -6,9 +6,6 @@
     "drizzle/migrations"
   ],
   "type": "module",
-  "imports": {
-    "#tooling/*": "@ykdz/reference-typescript-config/*"
-  },
   "exports": {
     "./reference": "./package.json",
     "./template": {
