@@ -47,21 +47,9 @@
       "outputs": [],
       "tags": ["work:lifecycle"]
     },
-    "publication:accept": {
-      "cache": false,
-      "inputs": [],
-      "outputs": [],
-      "tags": ["work:preparation"]
-    },
     "publication:consume": {
       "tags": ["quality:conditional"],
       "cache": false
-    },
-    "publication:readiness": {
-      "cache": false,
-      "inputs": [],
-      "outputs": [],
-      "tags": ["work:on-demand"]
     },
     "prepack": {
       "inputs": [],
