@@ -350,12 +350,12 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
-      '@ykdz/reference-ts-cli':
-        specifier: workspace:*
-        version: link:references/ts-cli
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:references/tooling-config
+      '@ykdz/reference-ts-cli':
+        specifier: workspace:*
+        version: link:references/ts-cli
       '@ykdz/template-checks':
         specifier: workspace:*
         version: link:packages/checks
@@ -583,15 +583,15 @@ importers:
       '@ykdz/reference-rust-bin':
         specifier: workspace:*
         version: link:../../references/rust-bin
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../../references/tooling-config
       '@ykdz/reference-ts-cli':
         specifier: workspace:*
         version: link:../../references/ts-cli
       '@ykdz/reference-ts-lib':
         specifier: workspace:*
         version: link:../../references/ts-lib
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../../references/tooling-config
       '@ykdz/reference-vike-db':
         specifier: workspace:*
         version: link:../../references/vike-db
@@ -693,9 +693,6 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
-      valibot:
-        specifier: 'catalog:'
-        version: 1.5.0(typescript@7.0.2)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -778,12 +775,12 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
-      '@ykdz/reference-ts-lib':
-        specifier: workspace:*
-        version: link:../../references/ts-lib
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../../packages/generator
@@ -824,12 +821,12 @@ importers:
       '@ykdz/reference-rust-bin':
         specifier: workspace:*
         version: link:../../references/rust-bin
-      '@ykdz/reference-ts-lib':
-        specifier: workspace:*
-        version: link:../../references/ts-lib
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../../packages/generator
@@ -909,9 +906,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@ykdz/template-environment':
+      '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../packages/environment
+        version: link:../../workspace-policies/default
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../../packages/workspace-authoring
@@ -919,21 +916,18 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
-      '@ykdz/reference-ts-lib':
-        specifier: workspace:*
-        version: link:../../references/ts-lib
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
       '@ykdz/reference-vue-shared':
         specifier: workspace:*
         version: link:../../references/vue-shared
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../../packages/generator
-      '@ykdz/template-workspace':
-        specifier: workspace:*
-        version: link:../../workspace-policies/default
       execa:
         specifier: 'catalog:'
         version: 10.1.1
@@ -962,12 +956,12 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
-      '@ykdz/reference-ts-lib':
-        specifier: workspace:*
-        version: link:../../references/ts-lib
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
       '@ykdz/reference-vue-shared':
         specifier: workspace:*
         version: link:../../references/vue-shared
@@ -1011,15 +1005,15 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../../references/tooling-config
       '@ykdz/reference-ts-cli':
         specifier: workspace:*
         version: link:../../references/ts-cli
       '@ykdz/reference-ts-lib':
         specifier: workspace:*
         version: link:../../references/ts-lib
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../../references/tooling-config
       '@ykdz/reference-vue-shared':
         specifier: workspace:*
         version: link:../../references/vue-shared
@@ -1087,9 +1081,6 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@ykdz/template-environment':
-        specifier: workspace:*
-        version: link:../../packages/environment
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../../workspace-policies/default
@@ -1105,6 +1096,24 @@ importers:
       smol-toml:
         specifier: 'catalog:'
         version: 1.9.1
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  references/tooling-config:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
@@ -1164,24 +1173,6 @@ importers:
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../../workspace-policies/default
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  references/tooling-config:
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1314,9 +1305,6 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@ykdz/template-environment':
-        specifier: workspace:*
-        version: link:../../packages/environment
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../../workspace-policies/default
@@ -1390,9 +1378,6 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
-      '@ykdz/template-environment':
-        specifier: workspace:*
-        version: link:../../packages/environment
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../../workspace-policies/default
@@ -1460,9 +1445,6 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
-      '@ykdz/template-environment':
-        specifier: workspace:*
-        version: link:../../packages/environment
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../../workspace-policies/default
@@ -1536,9 +1518,6 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
-      '@ykdz/template-environment':
-        specifier: workspace:*
-        version: link:../../packages/environment
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../../workspace-policies/default
@@ -1593,6 +1572,9 @@ importers:
       smol-toml:
         specifier: 'catalog:'
         version: 1.9.1
+      valibot:
+        specifier: 'catalog:'
+        version: 1.5.0(typescript@7.0.2)
       yaml:
         specifier: 'catalog:'
         version: 2.9.1
@@ -1609,12 +1591,12 @@ importers:
       '@types/spdx-expression-parse':
         specifier: 'catalog:'
         version: 4.0.0
-      '@ykdz/reference-ts-cli':
-        specifier: link:../../references/ts-cli
-        version: link:../../references/ts-cli
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config
+      '@ykdz/reference-ts-cli':
+        specifier: link:../../references/ts-cli
+        version: link:../../references/ts-cli
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0

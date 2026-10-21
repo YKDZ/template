@@ -1,4 +1,4 @@
-import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-environment/module-graph";
+import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-workspace/default-environment";
 import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 export const referencePackage = defineReferencePackage({
@@ -13,7 +13,6 @@ export const referencePackage = defineReferencePackage({
   template: {
     dependencies: [
       { name: "@ykdz/template-core", purpose: "template-execution" },
-      { name: "@ykdz/template-environment", purpose: "template-execution" },
       {
         name: "@ykdz/template-workspace",
         purpose: "template-execution",

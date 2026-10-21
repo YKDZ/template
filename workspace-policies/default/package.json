@@ -37,10 +37,10 @@
       "types": "./dist/vue-policy.d.ts",
       "default": "./dist/vue-policy.js"
     },
-    "./development-container": {
-      "source": "./src/development-container.ts",
-      "types": "./dist/development-container.d.ts",
-      "default": "./dist/development-container.js"
+    "./default-environment": {
+      "source": "./src/default-environment.ts",
+      "types": "./dist/default-environment.d.ts",
+      "default": "./dist/default-environment.js"
     },
     "./project-linking": {
       "source": "./src/project-linking.ts",
@@ -132,6 +132,7 @@
     "ignore": "catalog:",
     "jsonc-parser": "catalog:",
     "smol-toml": "catalog:",
+    "valibot": "catalog:",
     "yaml": "catalog:"
   },
   "devDependencies": {

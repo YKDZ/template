@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import type { CiDiagnosticArtifactDeclaration } from "@ykdz/template-environment/ci-diagnostic-artifact";
-
+import type { CiDiagnosticArtifactDeclaration } from "./ci-diagnostic-artifact.ts";
 import type { PackageContribution } from "./package-contribution.ts";
 import type {
   DatabasePreparationRequirement,
