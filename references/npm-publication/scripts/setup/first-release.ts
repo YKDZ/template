@@ -408,3 +408,12 @@ export async function runPublicationSetup(
   write("所选目标的 npm 发布与 GitHub Release 均已完成。");
   write(`现在可删除 scripts/npm-publication-setup/ 与 ${artifactRoot}。`);
 }
+
+if (import.meta.main) {
+  try {
+    await runPublicationSetup();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
+}
