@@ -6,9 +6,7 @@
       "dependsOn": [
         "@ykdz/template-core#build",
         "@ykdz/template-environment#build",
-        "@ykdz/template-workspace-authoring#build",
-        "@ykdz/reference-ts-cli#build:template",
-        "@ykdz/reference-typescript-config#build:template"
+        "@ykdz/template-workspace-authoring#build"
       ],
       "tags": ["quality:light"],
       "cache": true,
@@ -76,6 +74,14 @@
       "cache": false,
       "outputs": [],
       "tags": ["quality:light"]
+    },
+    "sync:release-toolchain-snapshot": {
+      "dependsOn": [],
+      "tags": ["work:repair"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
     }
   }
 }

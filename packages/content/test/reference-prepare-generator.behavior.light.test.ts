@@ -16,13 +16,13 @@ import type {
   PackageCreationInput,
 } from "@ykdz/template-core/workspace-strategy";
 import { createGenerator } from "@ykdz/template-generator";
-import type { GenerationContext } from "@ykdz/template-workspace-authoring/generation-context";
-import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
+import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+import type { GenerationContext } from "@ykdz/template-workspace/generation-context";
+import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
 import {
   defineReferencePackage,
   type ReferencePackage,
-} from "@ykdz/template-workspace-authoring/reference-package";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+} from "@ykdz/template-workspace/reference-package";
 
 const configuration = defineReferencePackage(configurationDefinition);
 const namespace = "ticket-15-first-party";

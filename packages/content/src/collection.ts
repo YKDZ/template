@@ -1,6 +1,6 @@
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import type { ContentSourceOptions } from "@ykdz/template-generator/content-source";
-import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
+import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 import type { LoadedTemplateContentMember } from "./template-content-types.ts";
 

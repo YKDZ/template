@@ -6,6 +6,10 @@ import { format } from "oxfmt";
 import { parse } from "yaml";
 
 import formatterConfig from "../oxfmt.config.ts";
+import {
+  readTemplateToolchainDeclarations,
+  deriveTemplateToolchain,
+} from "./template-toolchain-declarations.ts";
 
 const root = new URL("../", import.meta.url);
 const workspace = parse(
@@ -76,7 +80,27 @@ export const generatedJsonPrintWidth = ${formatterConfig.printWidth};
 `,
 );
 
+const declarations = await readTemplateToolchainDeclarations(
+  fileURLToPath(root),
+);
+const derived = deriveTemplateToolchain(declarations);
+if (derived.diagnostics.length > 0)
+  throw new Error(derived.diagnostics.join("\n"));
+const toolchainSnapshot = await formattedSource(
+  "release-toolchain-snapshot.ts",
+  `// 由根 sync:workspace-policy 从原生工具链声明派生，请修改事实源后显式同步。
+export const releaseToolchainSnapshot = Object.freeze(${JSON.stringify({ nodeVersion: declarations.rootNodeEngine.trim(), packageManagerPin: declarations.packageManagerDeclaration.trim(), rustVersion: declarations.rustToolchainChannel.trim() }, null, 2)} as const);
+
+export type ReleaseToolchainSnapshot = typeof releaseToolchainSnapshot;
+`,
+);
+
 await Promise.all([
+  sendToOwner(
+    "@ykdz/template-workspace",
+    "sync:release-toolchain-snapshot",
+    toolchainSnapshot,
+  ),
   sendToOwner(
     "@ykdz/template-workspace",
     "sync:policy-snapshot",

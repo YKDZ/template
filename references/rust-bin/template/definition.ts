@@ -6,7 +6,7 @@ import { rustToolchainEnvironmentNeed } from "@ykdz/template-environment/module-
 import {
   defineReferencePackage,
   type ReferencePackage,
-} from "@ykdz/template-workspace-authoring/reference-package";
+} from "@ykdz/template-workspace/reference-package";
 import { parse, type TomlTable } from "smol-toml";
 
 type CargoFile = { readonly source: string; readonly data: TomlTable };
@@ -35,7 +35,7 @@ export const referencePackage: ReferencePackage<
       { name: "@ykdz/template-core", purpose: "template-execution" },
       { name: "@ykdz/template-environment", purpose: "template-execution" },
       {
-        name: "@ykdz/template-workspace-authoring",
+        name: "@ykdz/template-workspace",
         purpose: "template-execution",
       },
       { name: "smol-toml", purpose: "template-execution" },

@@ -27,36 +27,11 @@ export const packageManifestKeyOrder = [
 
 export const packageConditionKeyOrder = ["source", "types", "default"] as const;
 
-export type WorkspaceRootInsertion = {
-  readonly before: string;
-  readonly values: Readonly<Record<string, string>>;
-};
-
-function insertBefore(
-  values: Readonly<Record<string, string>>,
-  insertions: readonly WorkspaceRootInsertion[],
-): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(values)) {
-    for (const insertion of insertions) {
-      if (insertion.before === key) {
-        Object.assign(result, insertion.values);
-      }
-    }
-    result[key] = value;
-  }
-  return result;
-}
-
 export function createWorkspaceRootManifest(options: {
   readonly name: string;
   readonly typescriptConfigurationPackageName?: string;
   readonly nodeDeclaration: string;
   readonly packageManagerPin: string;
-  readonly imports?: Readonly<Record<string, string>>;
-  readonly scriptOverrides?: Readonly<Record<string, string>>;
-  readonly scriptInsertions?: readonly WorkspaceRootInsertion[];
-  readonly dependencyInsertions?: readonly WorkspaceRootInsertion[];
 }): Record<string, unknown> {
   const scripts = {
     check: "node --conditions=source scripts/task-gates.ts check",
@@ -72,31 +47,27 @@ export function createWorkspaceRootManifest(options: {
     "lint:fix":
       "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts --fix",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
-    ...options.scriptOverrides,
   };
-  const developmentDependencies = insertBefore(
-    {
-      ...(options.typescriptConfigurationPackageName === undefined
-        ? {}
-        : {
-            [options.typescriptConfigurationPackageName]: "workspace:*",
-          }),
-      "@types/node": "catalog:",
-      oxfmt: "catalog:",
-      oxlint: "catalog:",
-      "oxlint-tsgolint": "catalog:",
-      "smol-toml": "catalog:",
-      turbo: "catalog:",
-      "typescript-7": "catalog:",
-    },
-    options.dependencyInsertions ?? [],
-  );
+  const developmentDependencies = {
+    ...(options.typescriptConfigurationPackageName === undefined
+      ? {}
+      : {
+          [options.typescriptConfigurationPackageName]: "workspace:*",
+        }),
+    "@types/node": "catalog:",
+    oxfmt: "catalog:",
+    oxlint: "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "smol-toml": "catalog:",
+    turbo: "catalog:",
+    "typescript-7": "catalog:",
+  };
+
   return {
     name: options.name,
     private: true,
     type: "module",
-    ...(options.imports === undefined ? {} : { imports: options.imports }),
-    scripts: insertBefore(scripts, options.scriptInsertions ?? []),
+    scripts,
     devDependencies: developmentDependencies,
     engines: { node: options.nodeDeclaration },
     packageManager: options.packageManagerPin,

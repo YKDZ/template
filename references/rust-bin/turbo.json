@@ -12,7 +12,7 @@
       "dependsOn": [
         "@ykdz/template-core#build",
         "@ykdz/template-environment#build",
-        "@ykdz/template-workspace-authoring#build"
+        "@ykdz/template-workspace#build"
       ],
       "inputs": [],
       "outputs": ["template-dist/**"],

@@ -3,8 +3,8 @@ import {
   dockerEngineEnvironmentNeed,
   playwrightBrowserAssetsEnvironmentNeed,
 } from "@ykdz/template-environment/module-graph";
-import type { PackageContribution } from "@ykdz/template-workspace-authoring/package-contribution";
-import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
+import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
+import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vike-web",
@@ -24,7 +24,7 @@ export const referencePackage = defineReferencePackage({
       { name: "@ykdz/template-core", purpose: "template-execution" },
       { name: "@ykdz/template-environment", purpose: "template-execution" },
       {
-        name: "@ykdz/template-workspace-authoring",
+        name: "@ykdz/template-workspace",
         purpose: "template-execution",
       },
       { name: "typescript-7", purpose: "template-execution" },

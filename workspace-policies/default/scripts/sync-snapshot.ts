@@ -8,10 +8,7 @@ async function readInput(): Promise<string> {
   return input;
 }
 
-const destination = new URL(
-  "../src/workspace-policy-snapshot.ts",
-  import.meta.url,
-);
+const destination = new URL(`../${process.argv[2]}`, import.meta.url);
 const expected = await readInput();
 const current = await readFile(destination, "utf8").catch((error: unknown) => {
   if (error instanceof Error && "code" in error && error.code === "ENOENT")

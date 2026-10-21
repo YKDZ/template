@@ -50,7 +50,7 @@
     "@vue/tsconfig": "catalog:",
     "@ykdz/reference-typescript-config": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
-    "@ykdz/template-workspace-authoring": "workspace:*",
+    "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

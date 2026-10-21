@@ -2,6 +2,7 @@ packages:
   - references/*
   - packages/*
   - presets/*
+  - workspace-policies/*
 nodeLinker: isolated
 preferSymlinkedExecutables: true
 shellEmulator: true

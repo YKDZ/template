@@ -1,13 +1,13 @@
 import path from "node:path";
 
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
-import type { GenerationContext } from "@ykdz/template-workspace-authoring/generation-context";
-import { validateCliCommandName } from "@ykdz/template-workspace-authoring/package-contribution";
-import type { PackageLinkRequirement } from "@ykdz/template-workspace-authoring/project-requirements";
+import type { GenerationContext } from "@ykdz/template-workspace/generation-context";
+import { validateCliCommandName } from "@ykdz/template-workspace/package-contribution";
+import type { PackageLinkRequirement } from "@ykdz/template-workspace/project-requirements";
 import {
   defineReferencePackage,
   type ReferencePackage,
-} from "@ykdz/template-workspace-authoring/reference-package";
+} from "@ykdz/template-workspace/reference-package";
 
 import {
   isTsCliPublicCandidateCreationInput,
@@ -61,7 +61,7 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
       dependencies: [
         { name: "@ykdz/template-core", purpose: "template-execution" },
         {
-          name: "@ykdz/template-workspace-authoring",
+          name: "@ykdz/template-workspace",
           purpose: "template-execution",
         },
       ],
