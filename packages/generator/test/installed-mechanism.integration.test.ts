@@ -17,6 +17,9 @@ void it("正式机制制品独立安装后复用文档策略完成初始化、�
   await mkdir(archives);
   await mkdir(consumer);
   try {
+    const { stdout: pnpmVersion } = await run("pnpm", ["--version"], {
+      cwd: packageRoot,
+    });
     const dependencies: Record<string, string> = {};
     for (const name of ["@ykdz/template-core", "@ykdz/template-generator"]) {
       const { stdout } = await run(
@@ -34,6 +37,7 @@ void it("正式机制制品独立安装后复用文档策略完成初始化、�
         version: "1.0.0",
         private: true,
         type: "module",
+        packageManager: `pnpm@${pnpmVersion.trim()}`,
         dependencies,
       }),
     );
@@ -41,7 +45,7 @@ void it("正式机制制品独立安装后复用文档策略完成初始化、�
       path.join(consumer, "pnpm-workspace.yaml"),
       `packages: []\noverrides:\n  "@ykdz/template-core": ${JSON.stringify(dependencies["@ykdz/template-core"])}\n`,
     );
-    await run("pnpm", ["install", "--offline"], { cwd: consumer });
+    await run("pnpm", ["install"], { cwd: consumer });
     const tree = await run(
       "pnpm",
       ["list", "--prod", "--depth", "Infinity", "--json"],

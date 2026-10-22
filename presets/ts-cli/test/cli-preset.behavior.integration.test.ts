@@ -59,7 +59,7 @@ function generator() {
 
 void describe("TypeScript CLI 公开预设安装行为", () => {
   void it(
-    "通过真实生成器验证 source、distribution、workspace bin 与未发布 pack",
+    "通过真实生成器验证源码、分发文件、工作区命令与打包安装",
     { timeout: 600_000 },
     async (testContext) => {
       const workspace = await mkdtemp(
@@ -180,14 +180,12 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
         "release 7.8.9",
       );
       assert.strictEqual(
-        (
-          await execa(
-            process.execPath,
-            ["test/e2e/run-journeys.ts", "distribution"],
-            { cwd: packageRoot, cancelSignal: testContext.signal },
-          )
-        ).stdout,
-        "distribution:lookup:passed",
+        await execa(
+          process.execPath,
+          ["dist/cli.js", "lookup", "ada", "--output-format", "text"],
+          { cwd: packageRoot, cancelSignal: testContext.signal },
+        ).then(({ stdout }) => stdout),
+        "找到记录：Ada Lovelace（ada）",
       );
 
       const consumerRoot = path.join(targetRoot, "packages/consumer");
@@ -221,6 +219,48 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
           cwd: consumerRoot,
         }).then(({ stdout }) => stdout),
         "找到记录：Ada Lovelace（ada）",
+      );
+
+      await execa("pnpm", ["pack", "--pack-destination", packDestination], {
+        cwd: packageRoot,
+        cancelSignal: testContext.signal,
+      });
+      const archives = await readdir(packDestination);
+      assert.strictEqual(archives.length, 1);
+      const installedRoot = path.join(workspace, "installed-consumer");
+      await mkdir(installedRoot);
+      await writeFile(
+        path.join(installedRoot, "package.json"),
+        `${JSON.stringify({
+          private: true,
+          packageManager: (await readManifest(targetRoot)).packageManager,
+          dependencies: {
+            "@demo/cli": `file:${path.join(packDestination, archives[0]!)}`,
+          },
+        })}\n`,
+      );
+      await execa("pnpm", ["install"], {
+        cwd: installedRoot,
+        cancelSignal: testContext.signal,
+      });
+      const installedBin = path.join(
+        installedRoot,
+        "node_modules/.bin/release",
+      );
+      assert.strictEqual(
+        await execa(installedBin, ["--version"], {
+          cwd: installedRoot,
+          cancelSignal: testContext.signal,
+        }).then(({ stdout }) => stdout),
+        "release 7.8.9",
+      );
+      assert.strictEqual(
+        await execa(
+          process.execPath,
+          ["test/e2e/run-journeys.ts", "packed", installedBin],
+          { cwd: packageRoot, cancelSignal: testContext.signal },
+        ).then(({ stdout }) => stdout),
+        "packed:lookup:passed",
       );
     },
   );

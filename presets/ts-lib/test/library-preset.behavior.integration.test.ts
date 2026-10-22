@@ -125,7 +125,6 @@ void describe("TypeScript 库公开预设安装行为", () => {
         JSON.parse(dryRun.stdout) as {
           readonly tasks: readonly {
             readonly taskId: string;
-            readonly command: string;
             readonly dependencies: readonly string[];
           }[];
         }
@@ -145,15 +144,20 @@ void describe("TypeScript 库公开预设安装行为", () => {
       assert.ok(
         !consumerTypecheck.dependencies.includes("@demo/provider#build"),
       );
-      assert.strictEqual(
-        consumerBuild.command,
-        "tsc -p tsconfig.build.json --pretty false",
-      );
-
+      const obsoleteSource = path.join(consumerRoot, "src/obsolete.ts");
+      const obsoleteOutput = path.join(consumerRoot, "dist/obsolete.js");
+      await writeFile(obsoleteSource, "export const obsolete = true;\n");
       await execa("pnpm", ["exec", "turbo", "run", "build", "--force"], {
         cwd: targetRoot,
         cancelSignal: testContext.signal,
       });
+      assert.match(await readFile(obsoleteOutput, "utf8"), /obsolete/u);
+      await rm(obsoleteSource);
+      await execa("pnpm", ["exec", "turbo", "run", "build", "--force"], {
+        cwd: targetRoot,
+        cancelSignal: testContext.signal,
+      });
+      await assert.rejects(readFile(obsoleteOutput), { code: "ENOENT" });
       await rm(path.join(targetRoot, "packages/provider/src"), {
         recursive: true,
         force: true,

@@ -21,6 +21,8 @@ import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { defineNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
 import { execa } from "execa";
 
+import { unprivilegedProcessOptions } from "../test-support/unprivileged-process.ts";
+
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
 void it("任意内容集合仅携带显式执行闭包并交付未被初始化选择的拥有者资源", async () => {
@@ -106,7 +108,9 @@ void it("任意内容集合仅携带显式执行闭包并交付未被初始化�
       driver,
       [
         'import assert from "node:assert/strict";',
+        'import { readdir } from "node:fs/promises";',
         'import { templateContent } from "@fixture/neutral-collection";',
+        'await assert.rejects(readdir(process.argv[2]), { code: "EACCES" });',
         'assert.equal(templateContent[0].alias, "neutral");',
         'assert.equal(await templateContent[0].definition.unselectedResource(), "完整资源声明\\n");',
         'for (const name of ["@ykdz/template-workspace/default-workspace-strategy", "@ykdz/template-workspace-authoring/content-artifact", "never-install-target-application"]) { assert.throws(() => import.meta.resolve(name)); }',
@@ -115,12 +119,15 @@ void it("任意内容集合仅携带显式执行闭包并交付未被初始化�
     await chmod(root, 0o755);
     await chmod(ownerRoot, 0);
     try {
-      await execa(process.execPath, ["--no-global-search-paths", driver], {
-        cwd: consumer,
-        uid: 65534,
-        gid: 65534,
-        env: { NODE_OPTIONS: "", NODE_PATH: "" },
-      });
+      await execa(
+        process.execPath,
+        ["--no-global-search-paths", driver, ownerRoot],
+        {
+          cwd: consumer,
+          ...unprivilegedProcessOptions,
+          env: { NODE_OPTIONS: "", NODE_PATH: "" },
+        },
+      );
     } finally {
       await chmod(ownerRoot, 0o755);
     }

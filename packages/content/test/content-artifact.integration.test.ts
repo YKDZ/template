@@ -37,6 +37,7 @@ import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default
 import { execa } from "execa";
 
 import { createAuthoredContentFixture } from "../test-support/authored-content-fixture.ts";
+import { unprivilegedProcessOptions } from "../test-support/unprivileged-process.ts";
 
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const temporaryRoots: string[] = [];
@@ -497,8 +498,7 @@ void describe("原生内容制品安装链", () => {
               NODE_OPTIONS: "--no-global-search-paths",
               NODE_PATH: "",
             },
-            uid: 65534,
-            gid: 65534,
+            ...unprivilegedProcessOptions,
           },
         ),
     );
@@ -655,8 +655,7 @@ void describe("原生内容制品安装链", () => {
                 NODE_OPTIONS: "--no-global-search-paths",
                 NODE_PATH: "",
               },
-              uid: 65534,
-              gid: 65534,
+              ...unprivilegedProcessOptions,
               reject: false,
             },
           ),
@@ -845,8 +844,7 @@ void describe("原生内容制品安装链", () => {
                 NODE_OPTIONS: "--no-global-search-paths",
                 NODE_PATH: "",
               },
-              uid: 65534,
-              gid: 65534,
+              ...unprivilegedProcessOptions,
             },
           ),
       );
@@ -1066,8 +1064,7 @@ void describe("原生内容制品安装链", () => {
                 NODE_OPTIONS: "--no-global-search-paths",
                 NODE_PATH: "",
               },
-              uid: 65534,
-              gid: 65534,
+              ...unprivilegedProcessOptions,
             },
           ),
       );
@@ -1209,8 +1206,7 @@ void describe("原生内容制品安装链", () => {
                     NODE_OPTIONS: "--no-global-search-paths",
                     NODE_PATH: "",
                   },
-                  uid: 65534,
-                  gid: 65534,
+                  ...unprivilegedProcessOptions,
                 },
               ),
           );
@@ -1603,8 +1599,7 @@ void describe("原生内容制品安装链", () => {
               NODE_OPTIONS: "--no-global-search-paths",
               NODE_PATH: "",
             },
-            uid: 65534,
-            gid: 65534,
+            ...unprivilegedProcessOptions,
           },
         ),
     );
@@ -2177,8 +2172,7 @@ void describe("原生内容制品安装链", () => {
               NODE_OPTIONS: "--no-global-search-paths",
               NODE_PATH: "",
             },
-            uid: 65534,
-            gid: 65534,
+            ...unprivilegedProcessOptions,
           },
         ),
     );
@@ -2388,8 +2382,7 @@ void describe("原生内容制品安装链", () => {
                 NODE_OPTIONS: "--no-global-search-paths",
                 NODE_PATH: "",
               },
-              uid: 65534,
-              gid: 65534,
+              ...unprivilegedProcessOptions,
               reject: false,
             },
           ),
@@ -2480,8 +2473,7 @@ void describe("原生内容制品安装链", () => {
                 NODE_OPTIONS: "--no-global-search-paths",
                 NODE_PATH: "",
               },
-              uid: 65534,
-              gid: 65534,
+              ...unprivilegedProcessOptions,
             },
           ),
       );
@@ -2766,8 +2758,7 @@ void describe("原生内容制品安装链", () => {
               NODE_OPTIONS: "--no-global-search-paths",
               NODE_PATH: "",
             },
-            uid: 65534,
-            gid: 65534,
+            ...unprivilegedProcessOptions,
           },
         ),
     );
