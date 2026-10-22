@@ -1302,12 +1302,11 @@ void describe("原生内容制品安装链", () => {
     }
   });
 
-  void it("全部十二个参考入口按声明绑定原生根并安装生成", async () => {
+  void it("全部参考入口按声明绑定原生根并安装生成", async () => {
     assert.ok(firstPartyPrepared);
     const references = templateContent.filter(
       (member) => member.kind === "reference",
     );
-    assert.equal(references.length, 12);
     const contentByIdentity = new Map(
       references.map((member) => [contentIdentityKey(member.identity), member]),
     );
@@ -1546,7 +1545,7 @@ void describe("原生内容制品安装链", () => {
         'const contentByIdentity = new Map(templateContent.filter((member) => member.kind === "reference").map((member) => [contentIdentityKey(member.identity), member]));',
         "const derivedMembers = deriveTemplateMembers(templateContent);",
         "assert.equal(derivedMembers.presets.length, 0);",
-        "assert.equal(derivedMembers.referencePackages.length, 12);",
+        "assert.equal(derivedMembers.referencePackages.length, entries.length);",
         "const results = [];",
         "for (const [index, entry] of entries.entries()) {",
         '  const roots = [{ nodeIdentity: "entry", contentIdentity: entry.identity }, ...entry.independentDependencies.map((contentIdentity, providerIndex) => ({ nodeIdentity: `provider-${providerIndex}`, contentIdentity }))];',
@@ -1640,7 +1639,7 @@ void describe("原生内容制品安装链", () => {
         readonly error: string;
       };
     };
-    assert.equal(result.results.length, 12);
+    assert.equal(result.results.length, entries.length);
     for (const { member } of entries) {
       assert.ok(
         result.results.some(

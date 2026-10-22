@@ -40,7 +40,8 @@
     }
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "directory": ".package"
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
@@ -48,19 +49,15 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix --ignore-pattern dist .",
     "lint:fix": "oxlint --format=unix --ignore-pattern dist . --fix",
-    "prepack": "pnpm exec turbo run build --filter=.",
-    "pack:bundled": "pnpm exec turbo run publication:prepare --filter=.",
-    "publication:prepare": "node --conditions=source --experimental-strip-types scripts/prepare-publication.ts",
-    "publication:consume": "node --conditions=source --experimental-strip-types scripts/consume-publication.ts",
-    "publication:remote:npm": "node --import @ykdz/reference-npm-publication/publish-target --eval '' --",
-    "publication:remote:release": "node --import @ykdz/reference-npm-publication/release-target --eval '' --",
+    "prepack": "pnpm run build:distribution",
     "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec 'test/**/*.light.test.ts'",
     "test:integration": "node --conditions=source --experimental-strip-types --test --test-concurrency=1 --test-timeout=300000 --test-reporter=spec 'test/**/*.integration.test.ts'",
     "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false && tsc -p tsconfig.scripts.json --noEmit --pretty false",
     "test:e2e:packed": "node --conditions=source --test --test-reporter=tap test/e2e/run-journeys.ts test/e2e/packed-failure.test.ts",
     "test:e2e:source": "TEMPLATE_CLI_JOURNEY_MODE=source node --conditions=source --test --test-reporter=tap test/e2e/run-journeys.ts",
     "test:e2e:distribution": "node --test --test-reporter=tap test/e2e/run-journeys.ts",
-    "test:e2e:resolution": "node --conditions=source test/e2e/assert-source-resolutions.ts"
+    "test:e2e:resolution": "node --conditions=source test/e2e/assert-source-resolutions.ts",
+    "build:distribution": "pnpm exec turbo run build --filter=. && node --conditions=source scripts/prepare-distribution.ts"
   },
   "dependencies": {
     "@valibot/to-json-schema": "catalog:",
@@ -87,7 +84,6 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-tooling-config": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",

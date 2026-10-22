@@ -1,6 +1,5 @@
 import {
   normalizePublicationConfiguration,
-  publicationTargetDependencies,
   projectPublicationTarget,
 } from "@ykdz/reference-npm-publication/template";
 import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
@@ -15,10 +14,8 @@ export const referencePackage = defineReferencePackage({
   role: "shared-library",
   resources: ["."],
   normalizeConfiguration: normalizePublicationConfiguration,
-  targetDependencies: publicationTargetDependencies,
   template: {
     dependencies: [
-      { name: "@ykdz/reference-npm-publication", purpose: "target" },
       {
         name: "@ykdz/reference-npm-publication",
         purpose: "template-execution",
@@ -36,8 +33,6 @@ export const referencePackage = defineReferencePackage({
     return projectPublicationTarget({
       contribution,
       configuration: input.configuration,
-      bindings: input.bindings,
-      buildTask: "build",
     });
   },
   environmentNeeds: [],

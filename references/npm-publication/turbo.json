@@ -39,17 +39,19 @@
       "inputs": [],
       "outputs": []
     },
-    "test:integration": {
-      "dependsOn": [],
-      "tags": ["quality:heavy"],
-      "inputs": ["$TURBO_DEFAULT$"],
-      "outputs": []
-    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "tags": ["quality:light"],
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": []
+    },
+    "publication:pack": {
+      "tags": ["work:release"],
+      "cache": false
+    },
+    "publication:publish": {
+      "tags": ["work:release"],
+      "cache": false
     }
   }
 }

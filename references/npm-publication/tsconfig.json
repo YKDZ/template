@@ -1,8 +1,8 @@
 {
-  "files": [],
-  "references": [
-    {
-      "path": "./tsconfig.scripts.json"
-    }
-  ]
+  "extends": "@ykdz/reference-tooling-config/node.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["template/**/*.ts"]
 }

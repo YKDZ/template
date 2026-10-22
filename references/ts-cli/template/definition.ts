@@ -1,6 +1,5 @@
 import {
   normalizePublicationConfiguration,
-  publicationTargetDependencies,
   projectPublicationTarget,
 } from "@ykdz/reference-npm-publication/template";
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
@@ -29,10 +28,8 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
     role: "cli-tool",
     resources: ["."],
     normalizeConfiguration: normalizePublicationConfiguration,
-    targetDependencies: publicationTargetDependencies,
     template: {
       dependencies: [
-        { name: "@ykdz/reference-npm-publication", purpose: "target" },
         {
           name: "@ykdz/reference-npm-publication",
           purpose: "template-execution",
@@ -85,8 +82,6 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
       }
       return projectPublicationTarget({
         configuration: input.configuration,
-        bindings: input.bindings,
-        buildTask: "build",
         contribution: {
           ...contribution,
           manifest: {

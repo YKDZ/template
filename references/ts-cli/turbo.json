@@ -47,15 +47,6 @@
       "outputs": [],
       "tags": ["work:lifecycle"]
     },
-    "publication:consume": {
-      "tags": ["quality:conditional"],
-      "cache": false
-    },
-    "prepack": {
-      "inputs": [],
-      "outputs": [],
-      "tags": ["work:release"]
-    },
     "test": {
       "dependsOn": [],
       "inputs": [],

@@ -5,38 +5,6 @@
   "type": "module",
   "exports": {
     "./reference": "./package.json",
-    ".": {
-      "source": "./scripts/publication.ts",
-      "types": "./scripts/publication.ts",
-      "default": "./scripts/publication.ts"
-    },
-    "./remote-context": "./scripts/remote-context.ts",
-    "./publish": "./scripts/publish.ts",
-    "./release": "./scripts/release.ts",
-    "./accepted-artifacts": "./scripts/accepted-artifacts.ts",
-    "./restore-accepted": "./scripts/restore-accepted.ts",
-    "./mark-attempts": "./scripts/mark-attempts.ts",
-    "./restore-attempts": "./scripts/restore-attempts.ts",
-    "./publish-target": "./scripts/publish-target.ts",
-    "./release-target": "./scripts/release-target.ts",
-    "./schedule-npm": "./scripts/schedule-npm.ts",
-    "./schedule-release": "./scripts/schedule-release.ts",
-    "./setup": "./scripts/setup/acquire-entry.ts",
-    "./prepare": {
-      "source": "./scripts/generated/prepare.ts",
-      "types": "./scripts/generated/prepare.ts",
-      "default": "./scripts/generated/prepare.ts"
-    },
-    "./prepack-build": {
-      "source": "./scripts/generated/prepack-build.ts",
-      "types": "./scripts/generated/prepack-build.ts",
-      "default": "./scripts/generated/prepack-build.ts"
-    },
-    "./artifact": {
-      "source": "./scripts/generated/artifact.ts",
-      "types": "./scripts/generated/artifact.ts",
-      "default": "./scripts/generated/artifact.ts"
-    },
     "./template": {
       "source": "./template/definition.ts",
       "types": "./template-dist/definition.d.ts",
@@ -49,17 +17,13 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
-    "test:integration": "node --conditions=source --experimental-strip-types --test --test-timeout=300000 --test-reporter=spec 'scripts/**/*.integration.test.ts' 'test/**/*.integration.test.ts'",
-    "typecheck": "tsc -p tsconfig.scripts.json --noEmit --pretty false"
-  },
-  "dependencies": {
-    "semver": "catalog:",
-    "tar": "catalog:",
-    "validate-npm-package-name": "catalog:"
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "publication:pack": "turbo run build && changeset pack --out-dir .changeset/packed",
+    "publication:publish": "changeset publish --from-pack-dir .changeset/packed"
   },
   "devDependencies": {
+    "@changesets/cli": "catalog:",
     "@types/node": "catalog:",
-    "@types/semver": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",

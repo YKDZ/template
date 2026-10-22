@@ -236,10 +236,6 @@ void describe("Template Repository native task model", () => {
       scripts["test:integration"],
       "node --conditions=source scripts/run-root-integration.ts",
     );
-    assert.strictEqual(
-      scripts["test:packed-publication"],
-      "node scripts/run-packed-publication-test.ts",
-    );
     assert.match(scripts.test ?? "", /--test-concurrency=2/u);
 
     const cliManifest = await readJson<Manifest>("packages/cli/package.json");
@@ -411,11 +407,11 @@ void describe("Template Repository native task model", () => {
   void it("lets the public CLI prepack select itself while Turbo builds dependencies", async () => {
     const cli = await readJson<Manifest>("packages/cli/package.json");
 
-    assert.strictEqual(
-      cli.scripts.prepack,
-      "pnpm exec turbo run build --filter=.",
+    assert.strictEqual(cli.scripts.prepack, "pnpm run build:distribution");
+    assert.match(
+      cli.scripts["build:distribution"] ?? "",
+      /^pnpm exec turbo run build --filter=\. && /u,
     );
-    assert.ok(!cli.scripts.prepack.includes("@ykdz/template-core"));
 
     const result = await execa(
       "pnpm",
@@ -461,24 +457,15 @@ void describe("Template Repository native task model", () => {
       "pnpm --filter @ykdz/template run test:e2e:resolution && pnpm --filter @ykdz/template run test:e2e:source",
     );
     assert.deepEqual(directory.get("//#test:e2e:cli")?.tags, ["quality:heavy"]);
-    assert.deepEqual(directory.get("//#test:packed-publication")?.tags, [
-      "quality:conditional",
-    ]);
     const gate = inspectTaskGate(
       "check:heavy",
       process.cwd(),
       "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts",
     );
-    assert.ok(
-      !gate.diagnostics.some((diagnostic) =>
-        diagnostic.includes("//#test:packed-publication"),
-      ),
-    );
     const heavyTasks = new Set(
       gate.plans.flatMap((plan) => plan.tasks.map((task) => task.fullName)),
     );
     assert.ok(heavyTasks.has("//#test:e2e:cli"));
-    assert.ok(!heavyTasks.has("//#test:packed-publication"));
 
     const cliJourney = await runTurboDryRun("test:e2e:cli");
     const cliJourneyTaskIds = new Set(
@@ -486,7 +473,6 @@ void describe("Template Repository native task model", () => {
     );
     assert.ok(cliJourneyTaskIds.has("//#test:e2e:cli"));
     assert.ok(!cliJourneyTaskIds.has("@ykdz/template#build"));
-    assert.ok(!cliJourneyTaskIds.has("@ykdz/template#publication:prepare"));
     assert.ok(cli.scripts["test:e2e:source"]?.includes("--conditions=source"));
     assert.ok(
       !cli.scripts["test:e2e:distribution"]?.includes("--conditions=source"),

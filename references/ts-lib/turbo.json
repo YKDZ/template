@@ -58,14 +58,6 @@
       "cache": false,
       "outputs": [],
       "tags": ["quality:light"]
-    },
-    "publication:consume": {
-      "tags": ["quality:conditional"],
-      "cache": false
-    },
-    "prepack": {
-      "tags": ["work:release"],
-      "cache": false
     }
   }
 }

@@ -139,7 +139,7 @@ const strategyInput = {
 };
 
 void describe("TypeScript CLI 公开组合预设", () => {
-  void it("默认 internal，显式发布按实例恢复并复用共享工具", async () => {
+  void it("默认 internal，显式发布按实例恢复并复用根发布配置", async () => {
     const targetRoot = await createTargetRoot("template-ts-cli-preset-");
     const initialized = await generator().init({
       targetRoot,
@@ -173,7 +173,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
     assert.equal(published.status, "success", JSON.stringify(published));
     const root = await manifest(".");
     assert.equal(root.scripts.notes, "echo 维护者说明");
-    assert.equal(root.devDependencies["@demo/npm-publication"], "workspace:*");
+    assert.equal(root.devDependencies["@changesets/cli"], "catalog:");
     assert.equal((await manifest("packages/public-cli")).private, false);
     const internal = await generator().add({
       repositoryRoot: targetRoot,
@@ -185,10 +185,6 @@ void describe("TypeScript CLI 公开组合预设", () => {
     });
     assert.equal(internal.status, "success", JSON.stringify(internal));
     assert.equal((await manifest("packages/internal-cli")).private, true);
-    assert.equal(
-      (await manifest("packages/internal-cli")).scripts["publication:prepare"],
-      undefined,
-    );
     const second = await generator().add({
       repositoryRoot: targetRoot,
       contentIdentity: library.identity,
@@ -205,14 +201,6 @@ void describe("TypeScript CLI 公开组合预设", () => {
         "utf8",
       ),
     );
-    assert.equal(
-      records.packages.filter(
-        (record: { contentIdentity: typeof cli.identity }) =>
-          record.contentIdentity.packageName ===
-          "@ykdz/reference-npm-publication",
-      ).length,
-      1,
-    );
     assert.deepEqual(
       records.packages
         .filter(
@@ -223,8 +211,8 @@ void describe("TypeScript CLI 公开组合预设", () => {
       [{ publication: false }, { publication: true }, { publication: false }],
     );
     assert.equal(
-      (await manifest(".")).devDependencies["@demo/npm-publication"],
-      "workspace:*",
+      (await manifest(".")).devDependencies["@changesets/cli"],
+      "catalog:",
     );
   });
 
@@ -243,7 +231,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
               source: "consumer#publication",
               manifest: {
                 scripts: {
-                  "publication:artifact": "node consumer-artifact.ts",
+                  "publication:pack": "node consumer-artifact.ts",
                 },
               },
             },
@@ -281,7 +269,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
     assert.equal(initialized.status, "success", JSON.stringify(initialized));
     const manifestPath = path.join(targetRoot, "package.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.scripts["publication:artifact"] = "node custom-publication.ts";
+    manifest.scripts["publication:pack"] = "node custom-publication.ts";
     await writeFile(manifestPath, JSON.stringify(manifest));
     const before = await snapshotTree(targetRoot);
     const result = await generator().add({
@@ -294,7 +282,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
     if (result.status !== "conflict") throw new Error("应拒绝冲突");
     assert.ok(
       result.conflicts.some(
-        (conflict) => conflict.location === "/scripts/publication:artifact",
+        (conflict) => conflict.location === "/scripts/publication:pack",
       ),
     );
     assert.equal(await snapshotTree(targetRoot), before);
@@ -510,10 +498,6 @@ void it("已有内部实例正式开启发布保持身份和定制，第二实�
   )!;
   const manifestPath = path.join(targetRoot, "packages/cli/package.json");
   const customized = JSON.parse(await readFile(manifestPath, "utf8"));
-  assert.equal(
-    customized.scripts.prepack,
-    "pnpm exec turbo run build --filter=.",
-  );
   customized.scripts.notes = "echo 维护者的命令";
   customized.description = "维护者的包说明";
   await writeFile(manifestPath, JSON.stringify(customized));
@@ -552,22 +536,8 @@ void it("已有内部实例正式开启发布保持身份和定制，第二实�
   );
   const actual = JSON.parse(await readFile(manifestPath, "utf8"));
   assert.equal(actual.private, false);
-  assert.equal(actual.devDependencies["@demo/npm-publication"], "workspace:*");
   assert.equal(actual.description, "维护者的包说明");
-  assert.equal(actual.scripts.notes, "echo 维护者的命令");
-  assert.equal(
-    actual.scripts.prepack,
-    "node --import @demo/npm-publication/prepack-build --eval '' -- \"build\"",
-  );
-  const cliTurbo = JSON.parse(
-    await readFile(path.join(targetRoot, "packages/cli/turbo.json"), "utf8"),
-  );
-  assert.deepEqual(cliTurbo.tasks["publication:prepare"].dependsOn, ["build"]);
-  assert.ok(
-    cliTurbo.tasks["publication:prepare"].passThroughEnv.includes(
-      "NPM_PUBLICATION_PREBUILT_TARGETS",
-    ),
-  );
+  assert.deepEqual(actual.scripts, customized.scripts);
   const added = await generator().add({
     repositoryRoot: targetRoot,
     contentIdentity: library.identity,
@@ -587,7 +557,6 @@ void it("已有内部实例正式开启发布保持身份和定制，第二实�
     "package.json",
   );
   const internalLibrary = JSON.parse(await readFile(laterManifestPath, "utf8"));
-  assert.equal(internalLibrary.scripts.prepack, "pnpm run build");
   const second = await generator().configure({
     repositoryRoot: targetRoot,
     packageDefinitionId: later.packageDefinitionId,
@@ -598,27 +567,7 @@ void it("已有内部实例正式开启发布保持身份和定制，第二实�
   const publishedLibrary = JSON.parse(
     await readFile(laterManifestPath, "utf8"),
   );
-  assert.equal(
-    publishedLibrary.scripts.prepack,
-    "node --import @demo/npm-publication/prepack-build --eval '' -- \"build\"",
-  );
-  const libraryTurbo = JSON.parse(
-    await readFile(
-      path.join(targetRoot, laterDefinition.path, "turbo.json"),
-      "utf8",
-    ),
-  );
-  assert.deepEqual(libraryTurbo.tasks["publication:prepare"].dependsOn, [
-    "build",
-  ]);
-  assert.equal(
-    second.generationRecord.packages.filter(
-      (record) =>
-        record.contentIdentity.packageName ===
-        "@ykdz/reference-npm-publication",
-    ).length,
-    1,
-  );
+  assert.deepEqual(publishedLibrary.scripts, internalLibrary.scripts);
   const snapshot = await snapshotTree(targetRoot);
   const repeated = await generator().configure({
     repositoryRoot: targetRoot,
@@ -645,7 +594,7 @@ void it("已有实例开启发布的消费者冲突和未知实例均保留全�
   )!;
   const manifestPath = path.join(targetRoot, "package.json");
   const root = JSON.parse(await readFile(manifestPath, "utf8"));
-  root.scripts["publication:artifact"] = "node consumer-artifact.ts";
+  root.scripts["publication:pack"] = "node consumer-artifact.ts";
   await writeFile(manifestPath, JSON.stringify(root));
   const before = await snapshotTree(targetRoot);
   for (const dryRun of [true, false]) {
@@ -683,7 +632,7 @@ void it("配置已有实例的声明来源冲突列明双方并在写入前拒�
               source: "consumer#publication",
               manifest: {
                 scripts: {
-                  "publication:artifact": "node consumer-artifact.ts",
+                  "publication:pack": "node consumer-artifact.ts",
                 },
               },
             },

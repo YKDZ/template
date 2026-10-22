@@ -1387,7 +1387,7 @@ void describe("template CLI command control", () => {
   });
 });
 
-void it("开启库发布遇到用户打包规则时保留全部字节权限并提示手工解决", async () => {
+void it("开启库发布保留用户的原生打包规则", async () => {
   const workspace = await mkdtemp(
     path.join(tmpdir(), "template-cli-ignore-conflict-"),
   );
@@ -1402,6 +1402,10 @@ void it("开启库发布遇到用户打包规则时保留全部字节权限并�
     const ignorePath = path.join(repositoryRoot, "packages/lib/.npmignore");
     await writeFile(ignorePath, "dist/*\n!dist/index.js\n");
     await chmod(ignorePath, 0o600);
+    const manifestPath = path.join(repositoryRoot, "packages/lib/package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.scripts.prepack = "pnpm run build";
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     const before = await workspaceByteSnapshot(repositoryRoot);
     for (const dryRun of [true, false]) {
       const output = testRuntime([
@@ -1416,12 +1420,21 @@ void it("开启库发布遇到用户打包规则时保留全部字节权限并�
       ]);
       assert.equal(
         await runCli({ ...output.runtime, cwd: repositoryRoot }),
-        1,
+        0,
         output.stderr(),
       );
-      assert.match(output.stderr(), /packages\/lib\/\.npmignore/u);
-      assert.match(output.stderr(), /手工.*重试/u);
-      assert.deepEqual(await workspaceByteSnapshot(repositoryRoot), before);
+      if (dryRun) {
+        assert.deepEqual(await workspaceByteSnapshot(repositoryRoot), before);
+      } else {
+        assert.equal(
+          await readFile(ignorePath, "utf8"),
+          "dist/*\n!dist/index.js\n",
+        );
+        assert.equal((await stat(ignorePath)).mode & 0o777, 0o600);
+        const configured = JSON.parse(await readFile(manifestPath, "utf8"));
+        assert.equal(configured.scripts.prepack, manifest.scripts.prepack);
+        assert.equal(configured.private, false);
+      }
     }
   } finally {
     await rm(workspace, { recursive: true, force: true });

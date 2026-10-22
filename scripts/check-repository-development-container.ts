@@ -25,6 +25,7 @@ const runtimeDirectoryNames = new Set([
   "node_modules",
   "dist",
   "template-dist",
+  ".package",
   "target",
   "coverage",
   ".turbo",
@@ -34,7 +35,6 @@ const runtimeDirectoryNames = new Set([
   ".fixture-evidence-activity",
   ".fixture-native-cache",
   ".fixture-workspace",
-  ".verified-packed-publication",
 ]);
 
 function commandOutput(result: unknown): string {
@@ -124,6 +124,7 @@ export async function checkRepositoryDevelopmentContainer(
       const segments = file.split("/");
       if (
         localContextNames.has(segments[0]!) ||
+        file.startsWith(".changeset/packed/") ||
         /^GLOSSARY.*\.md$/u.test(segments[0]!) ||
         segments.some((segment) => runtimeDirectoryNames.has(segment))
       )

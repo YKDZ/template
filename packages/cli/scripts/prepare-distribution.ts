@@ -2,7 +2,6 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseArgs } from "node:util";
 
 import { templateContent } from "@ykdz/template-content";
 import {
@@ -21,6 +20,7 @@ type PackageManifest = {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   bundleDependencies?: string[];
+  publishConfig?: { access?: string; directory?: string };
 };
 
 type WorkspaceDependency = {
@@ -32,14 +32,11 @@ type WorkspacePackage = {
   dependencies?: Record<string, WorkspaceDependency>;
 };
 
-const { values } = parseArgs({
-  options: { "pack-destination": { type: "string", default: "." } },
-});
-const destination = path.resolve(values["pack-destination"]);
 const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const destination = path.join(packageRoot, ".package");
 const packageManifestPath = path.join(packageRoot, "package.json");
 const packageManifest = JSON.parse(
   await readFile(packageManifestPath, "utf8"),
@@ -119,6 +116,8 @@ function packageManifestForArchives(
   ].toSorted();
   const scripts = { ...packageManifest.scripts };
   delete scripts.prepack;
+  const publishConfig = { ...packageManifest.publishConfig };
+  delete publishConfig.directory;
 
   return {
     ...packageManifest,
@@ -128,24 +127,11 @@ function packageManifestForArchives(
       "!**/node_modules/**/node_modules",
     ],
     scripts,
+    publishConfig,
     dependencies,
     bundleDependencies,
     devDependencies: {},
   };
-}
-
-function packedFilename(stdout: string): string {
-  const output = JSON.parse(stdout) as unknown;
-  const record = Array.isArray(output) ? output[0] : output;
-  if (
-    typeof record !== "object" ||
-    record === null ||
-    !("filename" in record) ||
-    typeof record.filename !== "string"
-  ) {
-    throw new Error("pnpm 原生 pack 未返回归档路径");
-  }
-  return record.filename;
 }
 
 try {
@@ -173,7 +159,6 @@ try {
     `${JSON.stringify(packageManifestForArchives(archives, dependencies), null, 2)}\n`,
   );
   await writeNativeArchiveOverrides(stage, archives);
-  await mkdir(destination, { recursive: true });
 
   const install = await execa(
     "pnpm",
@@ -186,18 +171,9 @@ try {
     );
   }
 
-  const packed = await execa(
-    "pnpm",
-    [
-      "--config.node-linker=hoisted",
-      "pack",
-      "--json",
-      "--pack-destination",
-      destination,
-    ],
-    { cwd: stage },
-  );
-  console.log(path.resolve(stage, packedFilename(packed.stdout)));
+  await rm(destination, { recursive: true, force: true });
+  await cp(stage, destination, { recursive: true });
+  console.log(`CLI 分发目录已准备：${destination}`);
 } finally {
   try {
     await prepared?.cleanup();

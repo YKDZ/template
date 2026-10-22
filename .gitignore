@@ -2,6 +2,7 @@ node_modules/
 .pnpm-store/
 dist/
 template-dist/
+.package/
 target/
 .turbo/
 coverage/
@@ -16,7 +17,6 @@ test-results/
 .fixture-evidence-activity/
 .fixture-native-cache/
 .fixture-workspace/
-.verified-packed-publication/
+.changeset/packed/
 .cli-journey-diagnostics/
 .preset-behavior-diagnostics/
-scripts/npm-publication-setup/

@@ -1,17 +1,11 @@
-# 共享 npm 发布
+# npm 发布配置
 
-本包为已显式启用发布能力的工作区包提供唯一的准备、整批本地验收、npm 发布与 GitHub Release 实现。常规 Actions 发布从默认分支手动触发，目标选择由 pnpm 原生 `--filter` 处理；命令与具体状态见生成根及作者根的 `publication:artifact`、发布 workflow。
+本参考包提供 Changesets 原生依赖、配置和 GitHub Actions 工作流。启用发布能力后，生成项目直接使用 Changesets，不复制发布工具项目或辅助脚本。
 
-本地首次发布由 `publication:setup` 显式取得并运行一次性向导。首次使用时传入一个或多个 `--filter`；不带选择器运行只会取得向导并显示用法。向导通过 `publication:artifact` 为所选目标准备、安装并验收原始 tgz。确认后依次调用 `publication:remote:npm` 和 `publication:remote:release`：前者按 pnpm 原生依赖顺序处理整批目标，后者只为已就绪目标创建 Release。npm 阶段报告部分失败时，向导仍运行 Release 阶段，让独立就绪目标继续；整体失败时保留 `.verified-packed-publication/first-release` 中的 accepted 清单、回执和 tgz。确认远端事实后可不带选择器重新运行向导续办原件。不要在版本可见性不确定时重新打包或重发。
+目标包以 `private: false` 参与发布，版本与包间依赖使用原生 `package.json` 管理。可以手工修改版本，也可以按需使用 `pnpm exec changeset` 和 `pnpm exec changeset version`；不要求每次提交添加 changeset，不自动创建版本 PR。
 
-发布前应检查目标包的 manifest 版本、当前版本 CHANGELOG 正文和默认分支提交。向导要求当前提交已推送、工作区干净，并在全部原件验收通过后才展示目标、版本和 SHA-512 供确认。它不会改源码或文档，也不会自动创建分支、commit、push 或 PR。npm 与 GitHub Release 共用同一 accepted 原件；远端失败时保留原件并按提示续办，不自动改写已存在的版本、tag 或 Release。
+`pnpm publication:pack` 把未发布版本打包到 `.changeset/packed`；`pnpm publication:publish` 发布同一目录中的制品。打包前由 Turbo 根据工作区依赖顺序统一构建；包内无需发布生命周期脚本。包选择、依赖顺序、已发布版本跳过和发布错误处理遵循 Changesets 的约定。
 
-## 配置 Trusted Publisher
+GitHub Actions 通过 `release.yml` 手动触发。检查与打包在只读作业中完成，独立发布作业使用 npm Trusted Publishing 上传官方打包 Action 传递的制品；存在当前版本 CHANGELOG 时，按 Changesets 约定创建 GitHub Release。每个包需在 npm 配置实际 GitHub 仓库、工作流 `release.yml` 和环境 `npm`；首次发布、权限与可信发布者配置使用 npm 官方工具完成。
 
-在首个真实后续版本准备发布时，按实际锁定的 npm 原生命令帮助确认本机 `npm trust github --help`，然后使用 npm 自带的 GitHub 信任配置，例如：
-
-```sh
-npm trust github @组织/包名 --file release.yml --repository 组织/仓库 --environment npm --allow-publish
-```
-
-文件名、仓库与环境必须和发布 workflow 一致。按 npm 提示完成认证与确认；本包不提供额外 trust 包装命令。配置后运行正常的 OIDC 发布 workflow，让首个真实版本完成首次成功发布。
+参考 [Changesets 自动化文档](https://changesets.dev/guide/automating)和 [npm Trusted Publishing 文档](https://docs.npmjs.com/trusted-publishers/)。

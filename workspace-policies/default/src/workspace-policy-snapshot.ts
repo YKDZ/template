@@ -1,5 +1,6 @@
 // 由根 sync:workspace-policy 从原生声明派生，请修改其事实源后显式同步。
 export const dependencyCatalogSnapshot: Readonly<Record<string, string>> = {
+  "@changesets/cli": "3.0.3",
   "@types/eslint": "^9.6.1",
   "@ykdz/cli-contract": "0.3.0",
   "@valibot/to-json-schema": "^1.8.0",
@@ -24,14 +25,12 @@ export const dependencyCatalogSnapshot: Readonly<Record<string, string>> = {
   oxlint: "^1.77.0",
   "oxlint-tsgolint": "^7.0.2001",
   semver: "^7.8.5",
-  "@types/semver": "^7.7.1",
   "smol-toml": "^1.8.0",
   "toml-eslint-parser": "^1.0.3",
   pinia: "^4.0.2",
   playwright: "1.64.0",
   srvx: "^1.0.0",
   tailwindcss: "^4.3.3",
-  tar: "^7.5.22",
   telefunc: "^0.2.22",
   turbo: "2.11.10",
   typescript: "npm:@typescript/typescript6@^6.0.2",

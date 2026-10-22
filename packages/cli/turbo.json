@@ -42,54 +42,11 @@
       "outputs": [],
       "persistent": false
     },
-    "pack:bundled": {
-      "tags": ["work:preparation"],
-      "cache": false,
-      "inputs": [],
-      "outputs": [],
-      "persistent": false
-    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "tags": ["quality:light"],
       "cache": true,
       "inputs": ["$TURBO_DEFAULT$"],
-      "outputs": [],
-      "persistent": false
-    },
-    "publication:prepare": {
-      "dependsOn": ["build"],
-      "tags": ["work:preparation"],
-      "cache": false,
-      "inputs": ["$TURBO_DEFAULT$"],
-      "outputs": [],
-      "persistent": false,
-      "passThroughEnv": [
-        "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
-        "TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR",
-        "PUBLICATION_SOURCE_SHA",
-        "GITHUB_DEFAULT_BRANCH",
-        "PUBLICATION_BATCH_TARGET_COUNT"
-      ]
-    },
-    "publication:consume": {
-      "tags": ["work:preparation"],
-      "cache": false,
-      "inputs": [],
-      "outputs": [],
-      "persistent": false
-    },
-    "publication:remote:npm": {
-      "tags": ["work:on-demand"],
-      "cache": false,
-      "inputs": [],
-      "outputs": [],
-      "persistent": false
-    },
-    "publication:remote:release": {
-      "tags": ["work:on-demand"],
-      "cache": false,
-      "inputs": [],
       "outputs": [],
       "persistent": false
     },
@@ -171,6 +128,13 @@
         "TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR",
         "TEMPLATE_CLI_JOURNEY_WORKER_PID_FILE"
       ]
+    },
+    "build:distribution": {
+      "tags": ["work:preparation"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [".package/**"],
+      "persistent": false
     }
   }
 }
