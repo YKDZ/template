@@ -879,7 +879,7 @@ export async function runAuthorPlanningRoleCheck(
     roots.splice(0, roots.length, ...selectedRoots);
   }
 
-  const configPath = path.resolve("tsconfig.json");
+  const configPath = path.resolve("tsconfig.config.json");
   const violations = findPlanningEffectViolations(roots, configPath);
   if (violations.length === 0) return;
   for (const violation of violations) {

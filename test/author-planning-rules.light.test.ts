@@ -122,7 +122,7 @@ export const referencePackage = defineReferencePackage({
             identity: "@fixture/preparation-owner#./template",
           },
         ],
-        path.join(repositoryRoot, "tsconfig.json"),
+        path.join(repositoryRoot, "tsconfig.config.json"),
       );
 
       assert.equal(violations.length, 2);
@@ -141,48 +141,64 @@ export const referencePackage = defineReferencePackage({
     }
   });
 
-  void it("根据公开 SDK 的已安装声明识别规划角色", async () => {
-    const fixtureRoot = await mkdtemp(
-      path.join(os.tmpdir(), "author-planning-declaration-"),
-    );
-    try {
-      const packageRoot = path.join(fixtureRoot, "owner");
-      const sdkRoot = path.join(
-        packageRoot,
-        "node_modules/@ykdz/template-core",
+  for (const sdk of [
+    {
+      label: "已安装声明",
+      entry: "preset-definition.d.ts",
+      exports: { types: "./preset-definition.d.ts" },
+    },
+    {
+      label: "源码条件",
+      entry: "preset-definition.ts",
+      exports: {
+        source: "./preset-definition.ts",
+        types: "./dist/preset-definition.d.ts",
+      },
+    },
+  ]) {
+    void it(`根据公开 SDK 的${sdk.label}识别规划角色`, async () => {
+      const fixtureRoot = await mkdtemp(
+        path.join(os.tmpdir(), "author-planning-declaration-"),
       );
-      await mkdir(sdkRoot, { recursive: true });
-      await Promise.all([
-        writeFile(
-          path.join(packageRoot, "package.json"),
-          JSON.stringify({ name: "@fixture/installed-owner", type: "module" }),
-        ),
-        writeFile(
-          path.join(sdkRoot, "package.json"),
-          JSON.stringify({
-            name: "@ykdz/template-core",
-            type: "module",
-            exports: {
-              "./preset-definition": {
-                types: "./preset-definition.d.ts",
+      try {
+        const packageRoot = path.join(fixtureRoot, "owner");
+        const sdkRoot = path.join(
+          packageRoot,
+          "node_modules/@ykdz/template-core",
+        );
+        await mkdir(sdkRoot, { recursive: true });
+        await Promise.all([
+          writeFile(
+            path.join(packageRoot, "package.json"),
+            JSON.stringify({
+              name: "@fixture/installed-owner",
+              type: "module",
+            }),
+          ),
+          writeFile(
+            path.join(sdkRoot, "package.json"),
+            JSON.stringify({
+              name: "@ykdz/template-core",
+              type: "module",
+              exports: {
+                "./preset-definition": sdk.exports,
               },
-            },
-          }),
-        ),
-        writeFile(
-          path.join(sdkRoot, "preset-definition.d.ts"),
-          `export type PresetProjectOptions = Readonly<Record<string, unknown>>;
+            }),
+          ),
+          writeFile(
+            path.join(sdkRoot, sdk.entry),
+            `export type PresetProjectOptions = Readonly<Record<string, unknown>>;
 export declare function definePreset(options: {
   readonly owner: { readonly packageName: string; readonly exportPath: string };
   project(options: PresetProjectOptions): unknown;
 }): unknown;
 `,
-        ),
-      ]);
-      const entryFile = path.join(packageRoot, "template.ts");
-      await writeFile(
-        entryFile,
-        `import { readFileSync } from "node:fs";
+          ),
+        ]);
+        const entryFile = path.join(packageRoot, "template.ts");
+        await writeFile(
+          entryFile,
+          `import { readFileSync } from "node:fs";
 import { definePreset } from "@ykdz/template-core/preset-definition";
 
 export const preset = definePreset({
@@ -192,29 +208,30 @@ export const preset = definePreset({
   },
 });
 `,
-      );
+        );
 
-      const violations = findPlanningEffectViolations(
-        [
-          {
-            entryFile,
-            packageRoot,
-            identity: "@fixture/installed-owner#./template",
-          },
-        ],
-        path.join(repositoryRoot, "tsconfig.json"),
-      );
+        const violations = findPlanningEffectViolations(
+          [
+            {
+              entryFile,
+              packageRoot,
+              identity: "@fixture/installed-owner#./template",
+            },
+          ],
+          path.join(repositoryRoot, "tsconfig.config.json"),
+        );
 
-      assert.equal(violations.length, 1);
-      assert.equal(
-        violations[0]?.role,
-        "@fixture/installed-owner#./template:preset.project",
-      );
-      assert.equal(violations[0]?.file, entryFile);
-    } finally {
-      await rm(fixtureRoot, { recursive: true, force: true });
-    }
-  });
+        assert.equal(violations.length, 1);
+        assert.equal(
+          violations[0]?.role,
+          "@fixture/installed-owner#./template:preset.project",
+        );
+        assert.equal(violations[0]?.file, entryFile);
+      } finally {
+        await rm(fixtureRoot, { recursive: true, force: true });
+      }
+    });
+  }
 
   void it("通过公开 namespace SDK 导入识别规划角色", async () => {
     const fixtureRoot = await mkdtemp(
@@ -262,7 +279,7 @@ export const preset = sdk.definePreset({
             identity: "@fixture/namespace-owner#./template",
           },
         ],
-        path.join(repositoryRoot, "tsconfig.json"),
+        path.join(repositoryRoot, "tsconfig.config.json"),
       );
 
       assert.equal(violations.length, 1);
@@ -301,7 +318,7 @@ export const preset = sdk.definePreset({
       await writeFile(
         path.join(packageRoot, "tsconfig.template.json"),
         JSON.stringify({
-          extends: path.join(repositoryRoot, "tsconfig.json"),
+          extends: path.join(repositoryRoot, "tsconfig.config.json"),
           include: ["*.ts"],
         }),
       );
@@ -350,7 +367,7 @@ export const spare = definePreset({
             identity: "@fixture/production-owner#./template",
           },
         ],
-        path.join(repositoryRoot, "tsconfig.json"),
+        path.join(repositoryRoot, "tsconfig.config.json"),
       );
 
       assert.deepEqual(
@@ -426,7 +443,7 @@ export function loadComputedModule(): void {
             identity: "@fixture/effect-owner#./template",
           },
         ],
-        path.join(repositoryRoot, "tsconfig.json"),
+        path.join(repositoryRoot, "tsconfig.config.json"),
       );
 
       assert.deepEqual(
@@ -519,7 +536,7 @@ export const referencePackage = defineReferencePackage({
             identity: "@fixture/static-metadata-owner#./template",
           },
         ],
-        path.join(repositoryRoot, "tsconfig.json"),
+        path.join(repositoryRoot, "tsconfig.config.json"),
       );
 
       assert.deepEqual(violations, []);
