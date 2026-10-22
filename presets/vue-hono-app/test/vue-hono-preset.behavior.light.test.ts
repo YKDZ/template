@@ -17,7 +17,6 @@ import { referencePackage as apiDefinition } from "@ykdz/reference-hono-api/temp
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import { referencePackage as libraryDefinition } from "@ykdz/reference-ts-lib/template";
 import { referencePackage as webDefinition } from "@ykdz/reference-vue-hono-web/template";
-import { referencePackage as vueSharedDefinition } from "@ykdz/reference-vue-shared/template";
 import {
   createContentIndex,
   type LoadedContentMember,
@@ -35,7 +34,6 @@ const loadedContent = await loadContentSource({
   members: [
     "@ykdz/reference-hono-api/template",
     "@ykdz/reference-vue-hono-web/template",
-    "@ykdz/reference-vue-shared/template",
     "@ykdz/reference-tooling-config/template",
     "@ykdz/reference-ts-lib/template",
     "@ykdz/preset-vue-hono-app/template",
@@ -56,7 +54,6 @@ function referenceMember(definition: unknown) {
 }
 const api = referenceMember(apiDefinition);
 const web = referenceMember(webDefinition);
-const vueShared = referenceMember(vueSharedDefinition);
 const library = referenceMember(libraryDefinition);
 const configuration = contentIndex.resolve(
   {
@@ -67,36 +64,7 @@ const configuration = contentIndex.resolve(
   "reference",
 );
 const preset = contentIndex.fromDefinition(presetDefinition, "preset");
-const content = [api, web, vueShared, configuration, library, preset] as const;
-const missingResourceSharedDefinition = defineReferencePackage({
-  packageName: vueShared.definition.manifest.name,
-  resolve: vueShared.definition.resolve,
-  resourceRoot: new URL(
-    "../",
-    import.meta.resolve(`${vueShared.definition.manifest.name}/template`),
-  ),
-  alias: vueShared.definition.alias,
-  instance: vueShared.definition.instance,
-  defaultLeafName: vueShared.definition.defaultLeafName,
-  role: vueShared.definition.role,
-  resources: ["__missing-vue-shared-resource__.ts"],
-  template: {
-    dependencies: vueShared.definition.templateDependencies,
-    scripts: ["build:template"],
-    resources: ["template", "tsconfig.template.json"],
-  },
-  foundation: {
-    toolchains: {},
-    editorCapabilities: [],
-    dependencyMaintenance: { ecosystems: [], interval: "weekly" },
-  },
-  environmentNeeds: [],
-});
-const missingResourceShared = Object.freeze({
-  ...vueShared,
-  definition: missingResourceSharedDefinition,
-});
-
+const content = [api, web, configuration, library, preset] as const;
 async function snapshotTree(root: string): Promise<{
   readonly rootMode: number;
   readonly entries: readonly {
@@ -243,21 +211,22 @@ void describe("Vue-Hono 组合预设公开行为", () => {
 
     assert.deepStrictEqual(
       result.blueprint.packages.map(({ path: packagePath }) => packagePath),
-      [
-        "apps/web",
-        "apps/api",
-        "packages/tooling-config",
-        "packages/vue-shared",
-      ],
+      ["apps/web", "apps/api", "packages/tooling-config"],
     );
     assert.deepStrictEqual(result.blueprint.packageLinkIntents, [
       { consumerPackagePath: "apps/web", providerPackagePath: "apps/api" },
     ]);
-    assert.deepStrictEqual(
-      JSON.parse(
-        await readFile(path.join(targetRoot, "joint-e2e.json"), "utf8"),
-      ),
-      { apiPackageName: "@demo/api", webPackageName: "@demo/web" },
+    const playwrightConfiguration = await readFile(
+      path.join(targetRoot, "playwright.config.ts"),
+      "utf8",
+    );
+    assert.match(
+      playwrightConfiguration,
+      /const apiPackageName = "@demo\/api";/u,
+    );
+    assert.match(
+      playwrightConfiguration,
+      /const webPackageName = "@demo\/web";/u,
     );
 
     const webManifest = JSON.parse(
@@ -267,10 +236,6 @@ void describe("Vue-Hono 组合预设公开行为", () => {
       devDependencies: Record<string, string>;
     };
     assert.strictEqual(webManifest.dependencies["@demo/api"], "workspace:*");
-    assert.strictEqual(
-      webManifest.dependencies["@demo/vue-shared"],
-      "workspace:*",
-    );
     assert.strictEqual(
       webManifest.devDependencies["@demo/tooling-config"],
       "workspace:*",
@@ -318,7 +283,7 @@ void describe("Vue-Hono 组合预设公开行为", () => {
     assert.ok(
       (
         JSON.parse(
-          await readFile(path.join(targetRoot, "tsconfig.json"), "utf8"),
+          await readFile(path.join(targetRoot, "tsconfig.config.json"), "utf8"),
         ) as { include: readonly string[] }
       ).include.includes("test/**/*.ts"),
     );
@@ -450,42 +415,11 @@ void describe("Vue-Hono 组合预设公开行为", () => {
     assert.throws(
       () =>
         createGenerator({
-          content: [web, vueShared, configuration, library, preset],
+          content: [web, configuration, library, preset],
           strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
         }),
       /未装载的来源定义/u,
     );
-    await assert.rejects(stat(targetRoot), { code: "ENOENT" });
-  });
-
-  void it("缺少共享参考资源时给出来源诊断且不创建目标目录", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-vue-hono-preset-missing-resource-"),
-    );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const incompleteGenerator = createGenerator({
-      content: [api, web, missingResourceShared, configuration, preset],
-      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
-    });
-    const result = await incompleteGenerator.init({
-      targetRoot,
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput,
-    });
-
-    assert.strictEqual(
-      result.status,
-      "operation-failure",
-      JSON.stringify(result),
-    );
-    if (result.status === "operation-failure") {
-      assert.strictEqual(result.phase, "planning");
-      assert.match(result.error.message, /reference-vue-shared/u);
-      assert.match(result.error.message, /__missing-vue-shared-resource__/u);
-    }
     await assert.rejects(stat(targetRoot), { code: "ENOENT" });
   });
 

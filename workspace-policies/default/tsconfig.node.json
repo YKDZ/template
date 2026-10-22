@@ -1,0 +1,12 @@
+{
+  "extends": "@ykdz/reference-tooling-config/node.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "rewriteRelativeImportExtensions": false,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "resources/**/*.ts", "*.config.ts"]
+}

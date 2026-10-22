@@ -4,7 +4,7 @@ import { render } from "vitest-browser-vue";
 
 import App from "../src/App.vue";
 
-it("显示应用并使用公共计数组件", async () => {
+it("显示应用并更新本地计数器", async () => {
   const screen = await render(App, { global: { plugins: [createPinia()] } });
   const button = screen.getByRole("button", { name: /计数/ });
   await expect.element(button).toHaveTextContent("计数：0");

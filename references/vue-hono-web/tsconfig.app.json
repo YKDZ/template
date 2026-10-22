@@ -1,6 +1,17 @@
 {
-  "extends": "@ykdz/reference-vue-shared/tsconfig.app.json",
+  "extends": [
+    "@vue/tsconfig/tsconfig.dom.json",
+    "@ykdz/reference-tooling-config/base.json"
+  ],
   "compilerOptions": {
+    "composite": true,
+    "customConditions": ["source"],
+    "exactOptionalPropertyTypes": false,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "rewriteRelativeImportExtensions": false,
+    "target": "es2024",
+    "types": ["web-bluetooth"],
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo"
   },
   "include": ["env.d.ts", "src/**/*.ts", "src/**/*.vue"]

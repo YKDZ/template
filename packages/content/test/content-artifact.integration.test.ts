@@ -875,27 +875,6 @@ void describe("原生内容制品安装链", () => {
         [preset.identity.packageName],
       );
       assert.ok(result.initialized.packagePaths.length > 0);
-      if (preset.alias === "vike-app") {
-        const deployment = JSON.parse(
-          await readFile(path.join(targetRoot, "deployment.json"), "utf8"),
-        ) as {
-          readonly application: {
-            readonly name: string;
-            readonly path: string;
-          };
-          readonly database: { readonly name: string; readonly path: string };
-          readonly migrations: { readonly name: string; readonly path: string };
-        };
-        for (const definition of Object.values(deployment)) {
-          const generatedManifest = JSON.parse(
-            await readFile(
-              path.join(targetRoot, definition.path, "package.json"),
-              "utf8",
-            ),
-          ) as { readonly name: string };
-          assert.equal(generatedManifest.name, definition.name);
-        }
-      }
       const closure = await auditInstalledClosure(consumerRoot, [
         ...authorRoots,
         workspaceRoot,
@@ -1440,35 +1419,35 @@ void describe("原生内容制品安装链", () => {
         .sort(),
       references.map((member) => contentIdentityKey(member.identity)).sort(),
     );
-    assert.equal(prepared.owners.length, 12);
-    const vueSharedOwner = prepared.owners.find(
+    assert.equal(prepared.owners.length, 11);
+    const vueAppOwner = prepared.owners.find(
       (owner) =>
-        owner.member.identity.packageName === "@ykdz/reference-vue-shared",
+        owner.member.identity.packageName === "@ykdz/reference-vue-app",
     );
-    assert.ok(vueSharedOwner);
-    const vueSharedNativeList = await execa(
+    assert.ok(vueAppOwner);
+    const vueAppNativeList = await execa(
       "pnpm",
-      ["--dir", vueSharedOwner.packageRoot, "list", "--depth", "0", "--json"],
+      ["--dir", vueAppOwner.packageRoot, "list", "--depth", "0", "--json"],
       { cwd: workspaceRoot },
     );
-    const vueSharedNativeProject = (
-      JSON.parse(vueSharedNativeList.stdout) as readonly {
+    const vueAppNativeProject = (
+      JSON.parse(vueAppNativeList.stdout) as readonly {
         readonly devDependencies?: Readonly<
           Record<string, { readonly from?: string; readonly version?: string }>
         >;
       }[]
     )[0];
     const nativeTypeScript =
-      vueSharedNativeProject?.devDependencies?.["typescript-7"];
+      vueAppNativeProject?.devDependencies?.["typescript-7"];
     assert.ok(nativeTypeScript?.from && nativeTypeScript.version);
-    const vueSharedArchiveManifest = JSON.parse(
+    const vueAppArchiveManifest = JSON.parse(
       await readFile(
-        path.join(vueSharedOwner.installRoot, "package.json"),
+        path.join(vueAppOwner.installRoot, "package.json"),
         "utf8",
       ),
     ) as { readonly dependencies?: Readonly<Record<string, string>> };
     assert.equal(
-      vueSharedArchiveManifest.dependencies?.["typescript-7"],
+      vueAppArchiveManifest.dependencies?.["typescript-7"],
       nativeTypeScript.from === "typescript-7"
         ? nativeTypeScript.version
         : `npm:${nativeTypeScript.from}@${nativeTypeScript.version}`,
@@ -1707,12 +1686,12 @@ void describe("原生内容制品安装链", () => {
       ...authorRoots,
       workspaceRoot,
     ]);
-    const installedVueShared = closure.packages.find(
-      ({ name }) => name === "@ykdz/reference-vue-shared",
+    const installedVueApp = closure.packages.find(
+      ({ name }) => name === "@ykdz/reference-vue-app",
     );
-    assert.ok(installedVueShared);
+    assert.ok(installedVueApp);
     const installedTypeScript = createRequire(
-      path.join(installedVueShared.path, "package.json"),
+      path.join(installedVueApp.path, "package.json"),
     )("typescript-7") as { readonly version: string };
     assert.equal(installedTypeScript.version, nativeTypeScript.version);
     for (const archive of [

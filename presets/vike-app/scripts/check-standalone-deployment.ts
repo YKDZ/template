@@ -2,30 +2,16 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-type DeploymentPackage = {
-  readonly name: string;
-  readonly path: string;
-};
-
-export type DeploymentConfiguration = {
-  readonly application: DeploymentPackage;
-  readonly database: DeploymentPackage;
-  readonly migrations: DeploymentPackage;
-};
-
 const repositoryRoot = process.cwd();
-const configuration: DeploymentConfiguration = JSON.parse(
-  await readFile(new URL("../deployment.json", import.meta.url), "utf8"),
-);
 const rootManifest: { readonly engines: { readonly node: string } } =
   JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"));
-const applicationPackageName = configuration.application.name;
+const applicationPackageName = "@ykdz/reference-vike-web";
 const buildArguments = Object.entries({
   NODE_VERSION: rootManifest.engines.node,
   APPLICATION_PACKAGE_NAME: applicationPackageName,
-  APPLICATION_PACKAGE_PATH: configuration.application.path,
-  DATABASE_PACKAGE_NAME: configuration.database.name,
-  MIGRATION_PACKAGE_NAME: configuration.migrations.name,
+  APPLICATION_PACKAGE_PATH: "references/vike-web",
+  DATABASE_PACKAGE_NAME: "@ykdz/reference-vike-db",
+  MIGRATION_PACKAGE_NAME: "@ykdz/reference-vike-migrations",
 }).flatMap(([name, value]) => ["--build-arg", `${name}=${value}`]);
 const uniqueId = `${process.pid}-${Date.now()}`;
 const standaloneImage = `vike-deployment-check-standalone:${uniqueId}`;

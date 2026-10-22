@@ -16,7 +16,6 @@ import { referencePackage as libraryDefinition } from "@ykdz/reference-ts-lib/te
 import { referencePackage as databaseDefinition } from "@ykdz/reference-vike-db/template";
 import { referencePackage as migrationsDefinition } from "@ykdz/reference-vike-migrations/template";
 import { referencePackage as webDefinition } from "@ykdz/reference-vike-web/template";
-import { referencePackage as vueSharedDefinition } from "@ykdz/reference-vue-shared/template";
 import { createContentIndex } from "@ykdz/template-core/content-identity";
 import { createGenerator } from "@ykdz/template-generator";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
@@ -30,7 +29,6 @@ const loadedContent = await loadContentSource({
     "@ykdz/reference-vike-web/template",
     "@ykdz/reference-vike-db/template",
     "@ykdz/reference-vike-migrations/template",
-    "@ykdz/reference-vue-shared/template",
     "@ykdz/reference-ts-lib/template",
     "@ykdz/reference-tooling-config/template",
     "@ykdz/reference-npm-publication/template",
@@ -49,7 +47,6 @@ const migrations = contentIndex.fromDefinition(
   migrationsDefinition,
   "reference",
 );
-const vueShared = contentIndex.fromDefinition(vueSharedDefinition, "reference");
 const library = contentIndex.fromDefinition(libraryDefinition, "reference");
 const configuration = contentIndex.resolve(
   {
@@ -64,7 +61,6 @@ const content = [
   web,
   database,
   migrations,
-  vueShared,
   library,
   configuration,
   contentIndex.resolve(
@@ -198,16 +194,19 @@ void describe("Vike 应用公开预设", () => {
       scriptsBefore["database:prepare:dev"],
       "DATABASE_PROFILE=dev pnpm --filter @demo/db-migrations run db:push && DATABASE_PROFILE=dev pnpm --filter @demo/db run db:seed:example",
     );
-    assert.deepStrictEqual(
-      await readJson(path.join(targetRoot, "deployment.json")),
-      {
-        application: { name: "@demo/web", path: "apps/web" },
-        database: { name: "@demo/db", path: "packages/db" },
-        migrations: {
-          name: "@demo/db-migrations",
-          path: "packages/db-migrations",
-        },
-      },
+    const deploymentChecker = await readFile(
+      path.join(targetRoot, "scripts/check-standalone-deployment.ts"),
+      "utf8",
+    );
+    assert.match(
+      deploymentChecker,
+      /const applicationPackageName = "@demo\/web";/u,
+    );
+    assert.match(deploymentChecker, /APPLICATION_PACKAGE_PATH: "apps\/web"/u);
+    assert.match(deploymentChecker, /DATABASE_PACKAGE_NAME: "@demo\/db"/u);
+    assert.match(
+      deploymentChecker,
+      /MIGRATION_PACKAGE_NAME: "@demo\/db-migrations"/u,
     );
     const checkWorkflow = await readFile(
       path.join(targetRoot, ".github/workflows/check.yml"),
@@ -323,16 +322,12 @@ void describe("Vike 应用公开预设", () => {
       ],
       scriptsBefore["database:prepare:dev"],
     );
-    assert.deepStrictEqual(
-      await readJson(path.join(targetRoot, "deployment.json")),
-      {
-        application: { name: "@demo/web", path: "apps/web" },
-        database: { name: "@demo/db", path: "packages/db" },
-        migrations: {
-          name: "@demo/db-migrations",
-          path: "packages/db-migrations",
-        },
-      },
+    assert.strictEqual(
+      await readFile(
+        path.join(targetRoot, "scripts/check-standalone-deployment.ts"),
+        "utf8",
+      ),
+      deploymentChecker,
     );
     assert.strictEqual(
       (await stat(path.join(targetRoot, "scripts/container-entrypoint.sh")))
@@ -385,7 +380,7 @@ void describe("Vike 应用公开预设", () => {
     );
     const targetRoot = path.join(temporaryRoot, "demo");
     const generator = createGenerator({
-      content: content.filter((item) => item !== vueShared),
+      content: content.filter((item) => item !== configuration),
       strategy: createDefaultWorkspaceStrategy(),
     });
 

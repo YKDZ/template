@@ -16,7 +16,6 @@ void describe("Generated Repository Oxc cache inputs", () => {
       },
       referenceNames: new Map(),
       toolingConfigPackagePath: "packages/custom-tooling-config",
-      rootTsconfigTemplate: {},
       rootTsconfigCompilerOptions: {},
       rootTsconfigInclude: [],
       tsconfigConfigTemplate: {},

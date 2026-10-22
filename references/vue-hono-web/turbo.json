@@ -52,18 +52,13 @@
     },
     "typecheck": {
       "cache": true,
-      "dependsOn": [
-        "@ykdz/reference-hono-api#build",
-        "@ykdz/reference-vue-shared#build",
-        "^typecheck"
-      ],
+      "dependsOn": ["@ykdz/reference-hono-api#build", "^typecheck"],
       "outputs": [],
       "tags": ["quality:light"]
     },
     "build:template": {
       "dependsOn": [
         "@ykdz/reference-hono-api#build",
-        "@ykdz/reference-vue-shared#build",
         "@ykdz/template-core#build",
         "@ykdz/template-workspace#build"
       ],

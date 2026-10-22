@@ -8,9 +8,9 @@ import { contentIdentityKey } from "@ykdz/template-core/content-identity";
 import { execa } from "execa";
 
 import {
-  customizeSharedVue,
-  verifySharedVueCombination,
-  type SharedVueCustomization,
+  customizeVueApplication,
+  verifyVueApplicationCombination,
+  type VueApplicationCustomization,
 } from "../scripts/capability-customization.ts";
 import { materializeGeneratedScenario } from "../scripts/generated-scenario.ts";
 import {
@@ -620,7 +620,7 @@ async function runScenario(
       );
     }
   };
-  let customization: SharedVueCustomization | undefined;
+  let customization: VueApplicationCustomization | undefined;
   const receipt = await materializeGeneratedScenario({
     runtime: sourceGeneratedScenarioRuntime,
     scenario,
@@ -636,10 +636,9 @@ async function runScenario(
         scenario.base.identity.namespace === "ykdz" &&
         scenario.base.identity.packageName === "@ykdz/preset-vue-app"
       )
-        customization = await customizeSharedVue(
+        customization = await customizeVueApplication(
           initialization,
           projectDir,
-          sourceGeneratedScenarioRuntime,
         );
       if (mode !== "init")
         await stageFixtureGitRepository({ repositoryRoot: projectDir, run });
@@ -657,11 +656,10 @@ async function runScenario(
     scenario.addition?.identity.namespace === "ykdz" &&
     scenario.addition.identity.packageName === "@ykdz/preset-vue-app"
   )
-    await verifySharedVueCombination({
+    await verifyVueApplicationCombination({
       initialization,
       result: finalResult,
       projectDir,
-      runtime: sourceGeneratedScenarioRuntime,
       ...(customization === undefined ? {} : { customization }),
     });
   const fullQuality = mode !== "init" && mode !== "focused";

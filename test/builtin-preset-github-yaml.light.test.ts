@@ -14,7 +14,7 @@ import { parse } from "yaml";
 import {
   initializePreset,
   type GeneratedPresetReceipt,
-} from "../test-support/generated-preset-receipt.ts";
+} from "./support/generated-preset-receipt.ts";
 
 async function renderedPresetSource(
   ownsDeploymentCheck: boolean,
@@ -479,7 +479,7 @@ void describe("Built-in Preset GitHub YAML checker", () => {
     );
     assert.deepStrictEqual(steps.at(-2)?.env, {
       PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: "apps/admin\napps/web",
-      VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "apps/web\npackages/vue-shared",
+      VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "apps/web",
     });
   });
 });

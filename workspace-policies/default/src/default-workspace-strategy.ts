@@ -916,7 +916,6 @@ function projectOperations(options: {
       ? {}
       : { toolingConfigPackagePath: configuration.definition.path }),
     turboBoundaryTags: boundaryTags(contributions),
-    rootTsconfigTemplate: prepared.rootTemplates.tsconfig,
     rootTsconfigCompilerOptions: shared.typescript.compilerOptions,
     rootTsconfigInclude: shared.typescript.include,
     tsconfigConfigTemplate: prepared.rootTemplates.tsconfigConfig,
@@ -942,6 +941,7 @@ function projectOperations(options: {
   const reconciliation: readonly ProjectProjectionReconciliation[] = [
     ...shared.reconciliation,
     { path: "tsconfig.json", driver: "structured" },
+    { path: "tsconfig.scripts.json", driver: "structured" },
     { path: "turbo.json", driver: "structured" },
     { path: ".vscode/settings.json", driver: "structured" },
     {
@@ -1023,6 +1023,7 @@ function projectOperations(options: {
     ),
     rootProjection.tsconfig,
     rootProjection.tsconfigConfig,
+    rootProjection.tsconfigScripts,
     ...(configuration === undefined
       ? []
       : [

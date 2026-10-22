@@ -15,6 +15,7 @@ export const referencePackage = defineReferencePackage({
     "resources/setup",
     "scripts",
     "tsconfig.json",
+    "tsconfig.scripts.json",
     "turbo.json",
   ],
   template: {

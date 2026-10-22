@@ -27,7 +27,7 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix --ignore-pattern dist .",
     "lint:fix": "oxlint --format=unix --ignore-pattern dist . --fix",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false && tsc -p tsconfig.scripts.json --noEmit --pretty false",
     "test": "node --conditions=source --experimental-strip-types --import=./test-support/setup.ts --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec 'test/**/*.light.test.ts'",
     "test:integration": "node --conditions=source --experimental-strip-types scripts/run-installed-integration.ts",
     "check:generated:output": "node --conditions=source scripts/check-generated-output.ts",

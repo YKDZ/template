@@ -17,7 +17,6 @@ const content = await loadContentSource({
     "@ykdz/reference-vike-web/template",
     "@ykdz/reference-vike-db/template",
     "@ykdz/reference-vike-migrations/template",
-    "@ykdz/reference-vue-shared/template",
     "@ykdz/reference-ts-lib/template",
     "@ykdz/reference-tooling-config/template",
     "@ykdz/preset-vike-app/template",

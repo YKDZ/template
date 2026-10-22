@@ -298,7 +298,7 @@ void it("有序根内容保留重复片段和 CI 步骤顺序，独占资源由�
     );
     assert.deepEqual(turbo.tasks["//#docs:check"], { tags: ["quality:light"] });
     const tsconfig = JSON.parse(
-      await readFile(path.join(targetRoot, "tsconfig.json"), "utf8"),
+      await readFile(path.join(targetRoot, "tsconfig.config.json"), "utf8"),
     );
     assert.ok(tsconfig.include.includes("docs.config.ts"));
     assert.equal(

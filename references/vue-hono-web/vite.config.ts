@@ -1,4 +1,5 @@
-import vueConfig from "@ykdz/reference-vue-shared/vite";
+import tailwindcss from "@tailwindcss/vite";
+import vue from "@vitejs/plugin-vue";
 import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
@@ -10,8 +11,9 @@ export default defineConfig(({ mode }) => {
   const previewPort = process.env.PLAYWRIGHT_WEB_PORT;
 
   return {
-    ...vueConfig,
+    plugins: [vue(), tailwindcss()],
     server: {
+      host: true,
       proxy: {
         "/api": apiBaseUrl,
       },

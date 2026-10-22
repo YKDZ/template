@@ -605,9 +605,6 @@ importers:
       '@ykdz/reference-vue-hono-web':
         specifier: workspace:*
         version: link:../../references/vue-hono-web
-      '@ykdz/reference-vue-shared':
-        specifier: workspace:*
-        version: link:../../references/vue-shared
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
@@ -926,9 +923,6 @@ importers:
       '@ykdz/reference-ts-lib':
         specifier: workspace:*
         version: link:../../references/ts-lib
-      '@ykdz/reference-vue-shared':
-        specifier: workspace:*
-        version: link:../../references/vue-shared
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../../packages/generator
@@ -966,9 +960,6 @@ importers:
       '@ykdz/reference-ts-lib':
         specifier: workspace:*
         version: link:../../references/ts-lib
-      '@ykdz/reference-vue-shared':
-        specifier: workspace:*
-        version: link:../../references/vue-shared
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../../packages/generator
@@ -1021,9 +1012,6 @@ importers:
       '@ykdz/reference-ts-lib':
         specifier: workspace:*
         version: link:../../references/ts-lib
-      '@ykdz/reference-vue-shared':
-        specifier: workspace:*
-        version: link:../../references/vue-shared
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../../packages/generator
@@ -1352,12 +1340,12 @@ importers:
       '@vitest/browser-playwright':
         specifier: 'catalog:'
         version: 5.0.4(playwright@1.64.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vitest@5.0.4)
+      '@vue/tsconfig':
+        specifier: 'catalog:'
+        version: 0.9.1(@typescript/typescript6@6.0.2)(vue@3.5.44)
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
-      '@ykdz/reference-vue-shared':
-        specifier: workspace:*
-        version: link:../vue-shared
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -1403,9 +1391,9 @@ importers:
 
   references/vue-app:
     dependencies:
-      '@ykdz/reference-vue-shared':
-        specifier: workspace:*
-        version: link:../vue-shared
+      '@vue/devtools-api':
+        specifier: 'catalog:'
+        version: 8.2.1
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -1419,12 +1407,18 @@ importers:
       '@playwright/test':
         specifier: 'catalog:'
         version: 1.64.0
+      '@tailwindcss/vite':
+        specifier: 'catalog:'
+        version: 4.3.3(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
       '@types/web-bluetooth':
         specifier: 'catalog:'
         version: 0.0.21
+      '@vitejs/plugin-vue':
+        specifier: 'catalog:'
+        version: 6.0.10(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vue@3.5.44)
       '@vitest/browser-playwright':
         specifier: 'catalog:'
         version: 5.0.4(playwright@1.64.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vitest@5.0.4)
@@ -1473,98 +1467,25 @@ importers:
       '@ykdz/reference-hono-api':
         specifier: workspace:*
         version: link:../hono-api
-      '@ykdz/reference-vue-shared':
-        specifier: workspace:*
-        version: link:../vue-shared
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
-      pinia:
-        specifier: 'catalog:'
-        version: 4.1.0(@vue/devtools-api@8.2.1)(vue@3.5.44)
       vue:
         specifier: 'catalog:'
         version: 3.5.44
     devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@types/web-bluetooth':
-        specifier: 'catalog:'
-        version: 0.0.21
-      '@vitest/browser-playwright':
-        specifier: 'catalog:'
-        version: 5.0.4(playwright@1.64.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vitest@5.0.4)
-      '@vue/tsconfig':
-        specifier: 'catalog:'
-        version: 0.9.1(@typescript/typescript6@6.0.2)(vue@3.5.44)
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../tooling-config
-      '@ykdz/template-workspace':
-        specifier: workspace:*
-        version: link:../../workspace-policies/default
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      playwright:
-        specifier: 'catalog:'
-        version: 1.64.0
-      typescript:
-        specifier: 'catalog:'
-        version: '@typescript/typescript6@6.0.2'
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-      vite:
-        specifier: 'catalog:'
-        version: 8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)
-      vitest:
-        specifier: 'catalog:'
-        version: 5.0.4(@types/node@24.19.2)(@vitest/browser-playwright@5.0.4)(@vitest/ui@5.0.4)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
-      vitest-browser-vue:
-        specifier: 'catalog:'
-        version: 3.1.0(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(vitest@5.0.4)(vue@3.5.44)
-      vue-tsc:
-        specifier: 'catalog:'
-        version: 3.3.13(@typescript/typescript6@6.0.2)
-
-  references/vue-shared:
-    dependencies:
       '@tailwindcss/vite':
         specifier: 'catalog:'
         version: 4.3.3(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
-      '@vitejs/plugin-vue':
-        specifier: 'catalog:'
-        version: 6.0.10(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vue@3.5.44)
-      '@vue/devtools-api':
-        specifier: 'catalog:'
-        version: 8.2.1
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      pinia:
-        specifier: 'catalog:'
-        version: 4.1.0(@vue/devtools-api@8.2.1)(vue@3.5.44)
-      tailwindcss:
-        specifier: 'catalog:'
-        version: 4.3.3
-      vue:
-        specifier: 'catalog:'
-        version: 3.5.44
-    devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
       '@types/web-bluetooth':
         specifier: 'catalog:'
         version: 0.0.21
+      '@vitejs/plugin-vue':
+        specifier: 'catalog:'
+        version: 6.0.10(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vue@3.5.44)
       '@vitest/browser-playwright':
         specifier: 'catalog:'
         version: 5.0.4(playwright@1.64.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vitest@5.0.4)

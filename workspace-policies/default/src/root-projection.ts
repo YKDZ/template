@@ -46,7 +46,7 @@ export function createWorkspaceRootManifest(options: {
     lint: "oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts scripts",
     "lint:fix":
       "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts scripts --fix",
-    typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
+    typecheck: "tsc --build --noEmit --pretty false",
   };
   const developmentDependencies = {
     ...(options.toolingConfigPackageName === undefined
@@ -83,7 +83,6 @@ export function projectPreparedWorkspaceRoot(options: {
   readonly referenceNames: ReadonlyMap<string, string>;
   readonly toolingConfigPackagePath?: string;
   readonly turboBoundaryTags?: readonly ("app" | "library")[];
-  readonly rootTsconfigTemplate: Readonly<Record<string, unknown>>;
   readonly rootTsconfigCompilerOptions: Readonly<Record<string, unknown>>;
   readonly rootTsconfigInclude: readonly string[];
   readonly tsconfigConfigTemplate: Readonly<Record<string, unknown>>;
@@ -93,9 +92,15 @@ export function projectPreparedWorkspaceRoot(options: {
   readonly turbo: RenderOperation;
   readonly tsconfig: RenderOperation;
   readonly tsconfigConfig: RenderOperation;
+  readonly tsconfigScripts: RenderOperation;
 } {
+  // 作者仓的发布时间豁免不作为生成仓的默认策略。
+  const {
+    minimumReleaseAgeExclude: _minimumReleaseAgeExclude,
+    ...installPolicy
+  } = workspaceInstallPolicySnapshot;
   const workspace = {
-    ...workspaceInstallPolicySnapshot,
+    ...installPolicy,
     packages: options.packageGlobs,
     overrides: options.dependencyOverrides,
     catalog: options.dependencyCatalog,
@@ -139,16 +144,24 @@ export function projectPreparedWorkspaceRoot(options: {
       ),
     );
   }
-  const rootTsconfig = {
-    ...options.rootTsconfigTemplate,
+  const rootConfig = {
+    ...(mapPackageNamesInJson(
+      options.tsconfigConfigTemplate,
+      options.referenceNames,
+    ) as Record<string, unknown>),
     compilerOptions: {
-      ...((options.rootTsconfigTemplate.compilerOptions ?? {}) as Record<
+      ...((options.tsconfigConfigTemplate.compilerOptions ?? {}) as Record<
         string,
         unknown
       >),
       ...options.rootTsconfigCompilerOptions,
+      composite: false,
+      noEmit: true,
+      tsBuildInfoFile: "./node_modules/.tmp/tsconfig.config.tsbuildinfo",
     },
-    include: options.rootTsconfigInclude,
+    include: options.rootTsconfigInclude.filter(
+      (entry) => !entry.startsWith("scripts/"),
+    ),
   };
 
   return {
@@ -165,14 +178,34 @@ export function projectPreparedWorkspaceRoot(options: {
       text: stringifyYaml(workspace),
     },
     turbo: { kind: "writeJson", to: "turbo.json", value: rootTurbo },
-    tsconfig: { kind: "writeJson", to: "tsconfig.json", value: rootTsconfig },
+    tsconfig: {
+      kind: "writeJson",
+      to: "tsconfig.json",
+      value: {
+        files: [],
+        references: [
+          { path: "./tsconfig.config.json" },
+          { path: "./tsconfig.scripts.json" },
+        ],
+      },
+    },
     tsconfigConfig: {
       kind: "writeJson",
       to: "tsconfig.config.json",
-      value: mapPackageNamesInJson(
-        options.tsconfigConfigTemplate,
-        options.referenceNames,
-      ),
+      value: rootConfig,
+    },
+    tsconfigScripts: {
+      kind: "writeJson",
+      to: "tsconfig.scripts.json",
+      value: {
+        ...rootConfig,
+        compilerOptions: {
+          ...rootConfig.compilerOptions,
+          erasableSyntaxOnly: true,
+          tsBuildInfoFile: "./node_modules/.tmp/tsconfig.scripts.tsbuildinfo",
+        },
+        include: ["scripts/**/*.ts"],
+      },
     },
   };
 }

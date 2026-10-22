@@ -61,17 +61,13 @@
       "tags": ["quality:heavy"]
     },
     "typecheck": {
-      "dependsOn": [
-        "@ykdz/reference-vike-db#build",
-        "@ykdz/reference-vue-shared#build"
-      ],
+      "dependsOn": ["@ykdz/reference-vike-db#build"],
       "outputs": [],
       "tags": ["quality:light"]
     },
     "build:template": {
       "dependsOn": [
         "@ykdz/reference-vike-db#build",
-        "@ykdz/reference-vue-shared#build",
         "@ykdz/template-core#build",
         "@ykdz/template-workspace#build"
       ],
@@ -81,7 +77,6 @@
     "typecheck:template": {
       "dependsOn": [
         "@ykdz/reference-vike-db#build",
-        "@ykdz/reference-vue-shared#build",
         "@ykdz/template-core#build",
         "@ykdz/template-workspace#build"
       ],

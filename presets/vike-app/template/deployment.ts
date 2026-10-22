@@ -26,6 +26,7 @@ const buildxStepPath = path.join(deploymentDirectory, "setup-buildx-step.yml");
 const checkerPath = fileURLToPath(
   new URL("../scripts/check-standalone-deployment.ts", import.meta.url),
 );
+const checkerSource = readFileSync(checkerPath, "utf8");
 
 function packageResource(
   resourcePath: string,
@@ -61,7 +62,6 @@ const rootFiles = {
   dockerfile: vikeDeploymentResources[0],
   dockerIgnore: vikeDeploymentResources[1],
   containerEntrypoint: vikeDeploymentResources[2],
-  checker: vikeDeploymentResources[3],
 } as const;
 
 function readBuildxStep(): Readonly<Record<string, unknown>> & {
@@ -395,10 +395,28 @@ export function projectVikeDeploymentContribution(options: {
         operation: copyResource(rootFiles.dockerIgnore, ".dockerignore"),
       },
       {
-        operation: copyResource(
-          rootFiles.checker,
-          "scripts/check-standalone-deployment.ts",
-        ),
+        operation: {
+          kind: "writeText",
+          to: "scripts/check-standalone-deployment.ts",
+          text: checkerSource
+            .replaceAll(
+              JSON.stringify("@ykdz/reference-vike-web"),
+              JSON.stringify(application.name),
+            )
+            .replaceAll(
+              JSON.stringify("references/vike-web"),
+              JSON.stringify(application.path),
+            )
+            .replaceAll(
+              JSON.stringify("@ykdz/reference-vike-db"),
+              JSON.stringify(database.name),
+            )
+            .replaceAll(
+              JSON.stringify("@ykdz/reference-vike-migrations"),
+              JSON.stringify(migrations.name),
+            ),
+          overwrite: true,
+        },
       },
       {
         operation: copyResource(
@@ -406,20 +424,6 @@ export function projectVikeDeploymentContribution(options: {
           "scripts/container-entrypoint.sh",
         ),
         executable: true,
-      },
-      {
-        operation: {
-          kind: "writeJson",
-          to: "deployment.json",
-          value: {
-            application: {
-              name: application.name,
-              path: application.path,
-            },
-            database: { name: database.name, path: database.path },
-            migrations: { name: migrations.name, path: migrations.path },
-          },
-        },
       },
     ],
   };

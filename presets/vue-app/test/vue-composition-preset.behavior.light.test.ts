@@ -14,7 +14,6 @@ import { describe, it } from "node:test";
 
 import { preset as presetDefinition } from "@ykdz/preset-vue-app/template";
 import { referencePackage as vueAppDefinition } from "@ykdz/reference-vue-app/template";
-import { referencePackage as vueSharedDefinition } from "@ykdz/reference-vue-shared/template";
 import {
   contentIdentityKey,
   createContentIndex,
@@ -32,7 +31,6 @@ const content = await loadContentSource({
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
     "@ykdz/reference-vue-app/template",
-    "@ykdz/reference-vue-shared/template",
     "@ykdz/reference-ts-lib/template",
     "@ykdz/reference-tooling-config/template",
     "@ykdz/preset-vue-app/template",
@@ -51,7 +49,6 @@ const vueApp = contentIndex.fromDefinition(
   ReturnType<typeof defineReferencePackage>,
   "reference"
 >;
-const vueShared = contentIndex.fromDefinition(vueSharedDefinition, "reference");
 const library = contentIndex.resolve(
   {
     namespace: "ykdz",
@@ -172,7 +169,7 @@ void describe("Vue 独立组合预设", () => {
     ]);
   });
 
-  void it("连续新增独立应用并保留应用、共享模块、配置和根定制", async (testContext) => {
+  void it("连续新增独立应用并保留应用、状态模块、配置和根定制", async (testContext) => {
     const temporaryRoot = await mkdtemp(
       path.join(tmpdir(), "template-vue-composition-preset-"),
     );
@@ -203,7 +200,7 @@ void describe("Vue 独立组合预设", () => {
       initialized.blueprint.packages
         .map(({ path: packagePath }) => packagePath)
         .toSorted(),
-      ["apps/web", "packages/tooling-config", "packages/vue-shared"].toSorted(),
+      ["apps/web", "packages/tooling-config"].toSorted(),
     );
     const appManifest = JSON.parse(
       await readFile(path.join(targetRoot, "apps/web/package.json"), "utf8"),
@@ -214,7 +211,7 @@ void describe("Vue 独立组合预设", () => {
     };
     assert.strictEqual(appManifest.name, "@demo/web");
     assert.deepStrictEqual(appManifest.dependencies, {
-      "@demo/vue-shared": "workspace:*",
+      "@vue/devtools-api": "catalog:",
       pinia: "catalog:",
       vue: "catalog:",
     });
@@ -228,9 +225,9 @@ void describe("Vue 独立组合预设", () => {
     );
 
     const appSourcePath = path.join(targetRoot, "apps/web/src/App.vue");
-    const sharedSourcePath = path.join(
+    const storeSourcePath = path.join(
       targetRoot,
-      "packages/vue-shared/src/stores/counter.ts",
+      "apps/web/src/stores/counter.ts",
     );
     const configurationPath = path.join(
       targetRoot,
@@ -238,13 +235,12 @@ void describe("Vue 独立组合预设", () => {
     );
     const customizedApp =
       (await readFile(appSourcePath, "utf8")) + "\n<!-- 保留已有页面定制 -->\n";
-    const customizedShared =
-      (await readFile(sharedSourcePath, "utf8")) +
-      "\n// 保留已有共享模块定制\n";
+    const customizedStore =
+      (await readFile(storeSourcePath, "utf8")) + "\n// 保留已有应用状态定制\n";
     const customizedConfiguration =
       (await readFile(configurationPath, "utf8")) + "\n// 保留已有配置定制\n";
     await writeFile(appSourcePath, customizedApp);
-    await writeFile(sharedSourcePath, customizedShared);
+    await writeFile(storeSourcePath, customizedStore);
     await writeFile(configurationPath, customizedConfiguration);
     const rootManifestPath = path.join(targetRoot, "package.json");
     const rootManifest = JSON.parse(
@@ -276,10 +272,6 @@ void describe("Vue 独立组合预设", () => {
       };
       assert.strictEqual(addedManifest.name, `@demo/${leafName}`);
       assert.strictEqual(
-        addedManifest.dependencies["@demo/vue-shared"],
-        "workspace:*",
-      );
-      assert.strictEqual(
         addedManifest.devDependencies["@demo/tooling-config"],
         "workspace:*",
       );
@@ -297,17 +289,13 @@ void describe("Vue 独立组合预设", () => {
       devDependencies: Record<string, string>;
     };
     assert.strictEqual(
-      retainedWebManifest.dependencies["@demo/vue-shared"],
-      "workspace:*",
-    );
-    assert.strictEqual(
       retainedWebManifest.devDependencies["@demo/tooling-config"],
       "workspace:*",
     );
     assert.strictEqual(await readFile(appSourcePath, "utf8"), customizedApp);
     assert.strictEqual(
-      await readFile(sharedSourcePath, "utf8"),
-      customizedShared,
+      await readFile(storeSourcePath, "utf8"),
+      customizedStore,
     );
     assert.strictEqual(
       await readFile(configurationPath, "utf8"),
@@ -380,53 +368,18 @@ void describe("Vue 独立组合预设", () => {
         .toSorted(),
       ["addition", "addition"],
     );
-    const sharedInstances = packages.filter(
-      (item) =>
-        contentIdentityKey(item.contentIdentity) ===
-        contentIdentityKey(vueShared.identity),
-    );
     const configurationInstances = packages.filter(
       (item) =>
         contentIdentityKey(item.contentIdentity) ===
         contentIdentityKey(configuration.identity),
     );
-    assert.strictEqual(sharedInstances.length, 1);
     assert.strictEqual(configurationInstances.length, 1);
     for (const app of apps) {
-      assert.strictEqual(
-        app.bindings[contentIdentityKey(vueShared.identity)],
-        sharedInstances[0]!.packageDefinitionId,
-      );
       assert.strictEqual(
         app.bindings[contentIdentityKey(configuration.identity)],
         configurationInstances[0]!.packageDefinitionId,
       );
     }
-  });
-
-  void it("缺少 Vue 共享参考内容时初始化失败且目标仍不存在", async (testContext) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-vue-missing-content-"),
-    );
-    testContext.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const generator = createGenerator({
-      content: [vueApp, configuration, preset],
-      strategy: createDefaultWorkspaceStrategy(),
-    });
-    const result = await generator.init({
-      targetRoot,
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
-    });
-
-    assert.strictEqual(result.status, "operation-failure");
-    if (result.status === "operation-failure") {
-      assert.match(result.error.message, /vue-shared/u);
-    }
-    await assert.rejects(stat(targetRoot), { code: "ENOENT" });
   });
 
   void it("生成记录的共享绑定失效时加包失败且目标树不变", async (testContext) => {
@@ -464,8 +417,8 @@ void describe("Vue 独立组合预设", () => {
       (item) => item.packageDefinitionId === record.nodeInstances.web,
     );
     assert.ok(web);
-    assert.ok(web.bindings[contentIdentityKey(vueShared.identity)]);
-    web.bindings[contentIdentityKey(vueShared.identity)] =
+    assert.ok(web.bindings[contentIdentityKey(configuration.identity)]);
+    web.bindings[contentIdentityKey(configuration.identity)] =
       "missing-shared-instance";
     const invalidRecord = JSON.stringify(record, null, 2) + "\n";
     await writeFile(generationPath, invalidRecord);
@@ -479,7 +432,7 @@ void describe("Vue 独立组合预设", () => {
 
     assert.strictEqual(result.status, "operation-failure");
     if (result.status === "operation-failure") {
-      assert.match(result.error.message, /vue-shared|实例/u);
+      assert.match(result.error.message, /tooling-config|实例/u);
     }
     assert.deepStrictEqual(await snapshotTree(targetRoot), beforeAddition);
   });
@@ -566,7 +519,7 @@ void describe("Vue 独立组合预设", () => {
     );
     const targetRoot = path.join(temporaryRoot, "demo");
     const generator = createGenerator({
-      content: [vueApp, vueShared, configuration, layoutPreset],
+      content: [vueApp, configuration, layoutPreset],
       strategy: createDefaultWorkspaceStrategy(),
     });
     const initialized = await generator.init({

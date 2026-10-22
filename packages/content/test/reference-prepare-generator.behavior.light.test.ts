@@ -9,7 +9,6 @@ import { referencePackage as rustBin } from "@ykdz/reference-rust-bin/template";
 import { referenceDefinition as configurationDefinition } from "@ykdz/reference-tooling-config/template";
 import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
 import { referencePackage as vueApp } from "@ykdz/reference-vue-app/template";
-import { referencePackage as vueShared } from "@ykdz/reference-vue-shared/template";
 import type { LoadedContentMember } from "@ykdz/template-core/content-identity";
 import type {
   GeneratorContent,
@@ -387,52 +386,6 @@ void describe("参考包 owner prepare 的公开生成器生命周期", () => {
     assert.match(
       result.error.message,
       /@ykdz\/reference-vue-app.*prepare 阶段失败.*@ykdz\/missing-template-runtime/u,
-    );
-    assert.deepEqual(await snapshotTree(targetRoot), before);
-
-    const brokenShared = defineReferencePackage({
-      packageName: vueShared.manifest.name,
-      resolve: (specifier) => import.meta.resolve(specifier),
-      resourceRoot: resourceRoot(vueShared.manifest.name),
-      alias: vueShared.alias,
-      instance: vueShared.instance,
-      defaultLeafName: vueShared.defaultLeafName,
-      defaultPath: vueShared.defaultPath,
-      role: vueShared.role,
-      resources: ["."],
-      template: {
-        dependencies: vueShared.templateDependencies,
-        scripts: ["build:template"],
-        resources: ["template", "tsconfig.template.json"],
-      },
-      prepare() {
-        throw new Error("fixture shared prepare failure");
-      },
-      foundation: simpleFoundation(),
-      environmentNeeds: [],
-    });
-    const validVueMember = loadedReference(vueApp);
-    const brokenSharedMember = loadedReference(brokenShared);
-    const dependencyFailureGenerator = createGenerator({
-      content: [
-        apiMember,
-        configurationMember,
-        validVueMember,
-        brokenSharedMember,
-      ],
-      strategy: createDefaultWorkspaceStrategy(),
-    });
-    const dependencyFailure = await dependencyFailureGenerator.add({
-      repositoryRoot: targetRoot,
-      contentIdentity: validVueMember.identity,
-    });
-
-    assert.equal(dependencyFailure.status, "operation-failure");
-    if (dependencyFailure.status !== "operation-failure") return;
-    assert.equal(dependencyFailure.phase, "planning");
-    assert.match(
-      dependencyFailure.error.message,
-      /@ykdz\/reference-vue-shared.*prepare 阶段失败.*fixture shared prepare failure/u,
     );
     assert.deepEqual(await snapshotTree(targetRoot), before);
   });

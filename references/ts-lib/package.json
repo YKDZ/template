@@ -29,7 +29,7 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",
     "lint:fix": "oxlint --format=unix . --fix",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false && tsc -p tsconfig.scripts.json --noEmit --pretty false",
     "build": "rm -rf dist && tsc -p tsconfig.build.json --pretty false",
     "test": "node --conditions=source --test --test-reporter=spec 'test/**/*.test.ts'",
     "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",

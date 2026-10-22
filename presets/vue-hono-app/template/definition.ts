@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { referencePackage as api } from "@ykdz/reference-hono-api/template";
@@ -26,6 +27,10 @@ const jointE2eResources = [
   "resources/joint-e2e/test/e2e/app.spec.ts",
   "resources/joint-e2e/test/e2e/fixtures.ts",
 ] as const;
+const jointE2eConfiguration = readFileSync(
+  new URL(jointE2eResources[0], resourceRoot),
+  "utf8",
+);
 
 function requireNode(
   nodeInstances: ReadonlyMap<string, PackageDefinition>,
@@ -121,15 +126,19 @@ function projectJointE2e(
         ],
       },
       resources: [
-        copy(jointE2eResources[0], "playwright.config.ts"),
         {
           operation: {
-            kind: "writeJson",
-            to: "joint-e2e.json",
-            value: {
-              apiPackageName: apiPackage.name,
-              webPackageName: webPackage.name,
-            },
+            kind: "writeText",
+            to: "playwright.config.ts",
+            text: jointE2eConfiguration
+              .replaceAll(
+                JSON.stringify(api.manifest.name),
+                JSON.stringify(apiPackage.name),
+              )
+              .replaceAll(
+                JSON.stringify(web.manifest.name),
+                JSON.stringify(webPackage.name),
+              ),
           },
         },
         copy(jointE2eResources[1], "test/e2e/app.spec.ts"),

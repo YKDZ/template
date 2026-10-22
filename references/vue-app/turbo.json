@@ -58,13 +58,12 @@
     },
     "typecheck": {
       "cache": true,
-      "dependsOn": ["@ykdz/reference-vue-shared#build", "^typecheck"],
+      "dependsOn": ["^typecheck"],
       "outputs": [],
       "tags": ["quality:light"]
     },
     "build:template": {
       "dependsOn": [
-        "@ykdz/reference-vue-shared#build",
         "@ykdz/template-core#build",
         "@ykdz/template-workspace#build"
       ],
@@ -73,6 +72,11 @@
     },
     "check:author-planning-roles": {
       "cache": false,
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "test": {
+      "cache": true,
       "outputs": [],
       "tags": ["quality:light"]
     }

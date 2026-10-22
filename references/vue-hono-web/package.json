@@ -30,21 +30,21 @@
     "typecheck": "vue-tsc --build --noEmit --pretty false",
     "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
     "browser:prepare": "playwright install chromium",
-    "test:browser": "vitest run --project=browser --reporter=agent --silent=passed-only",
+    "test:browser": "vitest run --project=browser --reporter=agent --silent=passed-only --fsModuleCachePath=node_modules/.vitest-cache/browser",
     "build": "vite build",
     "dev": "vite",
     "preview": "vite preview"
   },
   "dependencies": {
     "@ykdz/reference-hono-api": "workspace:*",
-    "@ykdz/reference-vue-shared": "workspace:*",
     "@ykdz/template-core": "workspace:*",
-    "pinia": "catalog:",
     "vue": "catalog:"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
     "@types/web-bluetooth": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
     "@vitest/browser-playwright": "catalog:",
     "@vue/tsconfig": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",

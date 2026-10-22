@@ -29,7 +29,7 @@
     "lint:fix": "oxlint --format=unix --ignore-pattern template-dist . --fix",
     "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 'test/**/*.light.test.ts'",
     "test:integration": "node --conditions=source --experimental-strip-types --test --test-concurrency=1 --test-timeout=300000 'test/**/*.integration.test.ts'",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false && tsc -p tsconfig.scripts.json --noEmit --pretty false"
   },
   "dependencies": {
     "@ykdz/reference-vike-db": "workspace:*",
@@ -44,7 +44,6 @@
     "@types/node": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/reference-ts-lib": "workspace:*",
-    "@ykdz/reference-vue-shared": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",

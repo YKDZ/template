@@ -192,11 +192,11 @@ void describe("Erasable TypeScript enforcement", () => {
           });
           const sharedConfiguration = templateReferencePackages.find(
             (reference) =>
-              reference.identity.packageName === "@ykdz/reference-vue-shared",
+              reference.identity.packageName === "@ykdz/reference-vue-app",
           );
           assert.ok(sharedConfiguration);
           const sourceConfiguration = resolveTemplateSource(
-            sharedConfiguration.definition.source("tsconfig.app.base.json"),
+            sharedConfiguration.definition.source("tsconfig.app.json"),
             ".",
           );
           const vueConfiguration = createRequire(sourceConfiguration).resolve(

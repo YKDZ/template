@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 
-import CounterButton from "#/components/CounterButton.vue";
-
 import { onAddTodo, onLoadTodos } from "./+Page.telefunc";
 
 const title = ref("");
@@ -49,7 +47,6 @@ onMounted(() => {
         使用 Hono 路由、Telefunc 动作和 Drizzle 数据访问构建服务端渲染 Vue
         应用。
       </p>
-      <CounterButton />
     </div>
 
     <form class="flex max-w-xl gap-2" @submit.prevent="submitTodo">

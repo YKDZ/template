@@ -11,7 +11,7 @@ import { parse } from "yaml";
 import {
   initializePreset,
   type GeneratedPresetReceipt,
-} from "../test-support/generated-preset-receipt.ts";
+} from "./support/generated-preset-receipt.ts";
 
 async function renderRootCheckWorkflow(): Promise<{
   readonly source: string;

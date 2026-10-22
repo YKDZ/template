@@ -21,7 +21,6 @@
         "@ykdz/template-workspace-authoring#build",
         "@ykdz/preset-vue-app#build",
         "@ykdz/reference-vue-app#build:template",
-        "@ykdz/reference-vue-shared#build:template",
         "@ykdz/preset-vue-hono-app#build",
         "@ykdz/reference-hono-api#build:template",
         "@ykdz/reference-npm-publication#build:template",

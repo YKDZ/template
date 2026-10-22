@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 
-import CounterButton from "./counter-button.ts";
+import CounterButton from "./components/CounterButton.vue";
 const themeLabel = ref<"深色" | "浅色">("浅色");
 
 let preferredThemeQuery: MediaQueryList | undefined;

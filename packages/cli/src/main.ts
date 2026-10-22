@@ -563,6 +563,7 @@ function createCliContract(runtime: CliRuntime) {
                         `${conflict.path}${conflict.location === undefined ? "" : ` ${conflict.location}`}: ${conflict.reason}`,
                       ],
                 ),
+                "请手工解决上述文件冲突后重试。",
               ]),
           },
         },

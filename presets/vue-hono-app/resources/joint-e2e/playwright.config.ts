@@ -1,22 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
 import { defineConfig, devices } from "@playwright/test";
 
-const projectConfig = new URL("./joint-e2e.json", import.meta.url);
-const generatedPackages = existsSync(fileURLToPath(projectConfig))
-  ? (JSON.parse(readFileSync(projectConfig, "utf8")) as {
-      readonly apiPackageName: string;
-      readonly webPackageName: string;
-    })
-  : undefined;
-const apiPackageName =
-  generatedPackages?.apiPackageName ?? process.env.PLAYWRIGHT_API_PACKAGE_NAME;
-const webPackageName =
-  generatedPackages?.webPackageName ?? process.env.PLAYWRIGHT_WEB_PACKAGE_NAME;
-if (apiPackageName === undefined || webPackageName === undefined) {
-  throw new Error("Vue-Hono Playwright 配置缺少实际 API 与 web 包身份");
-}
+const apiPackageName = "@ykdz/reference-hono-api";
+const webPackageName = "@ykdz/reference-vue-hono-web";
 
 const apiPort = process.env.PLAYWRIGHT_API_PORT ?? "0";
 const webPort = process.env.PLAYWRIGHT_WEB_PORT ?? "0";

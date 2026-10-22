@@ -22,7 +22,6 @@ export type GeneratedPackageManifestDependencies = {
 
 const exactNpmPackageIdentityPattern =
   /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
-const defaultGeneratedMinimumReleaseAgeExclusions = ["@ykdz/template"] as const;
 
 function assertMinimumReleaseAgeExclusions(
   exclusions: readonly string[],
@@ -198,15 +197,8 @@ export function pnpmWorkspaceYamlWithCatalogDependencies(
 export function renderGeneratedPnpmWorkspaceYaml(
   options: GeneratedDependencyCatalogOptions,
 ): string {
-  const configuredMinimumReleaseAgeExclusions =
-    options.minimumReleaseAgeExclude ?? [];
-  assertMinimumReleaseAgeExclusions(configuredMinimumReleaseAgeExclusions);
-  const minimumReleaseAgeExclude = [
-    ...new Set([
-      ...defaultGeneratedMinimumReleaseAgeExclusions,
-      ...configuredMinimumReleaseAgeExclusions,
-    ]),
-  ];
+  const minimumReleaseAgeExclude = options.minimumReleaseAgeExclude ?? [];
+  assertMinimumReleaseAgeExclusions(minimumReleaseAgeExclude);
   if (
     options.dependencyLinker?.kind === "hoisted" &&
     (options.dependencyLinker.evidence.trim().length === 0 ||

@@ -57,14 +57,14 @@ void describe("公开内容集合中的 Vue 预设", () => {
       )
         .packages.map((definition: { path: string }) => definition.path)
         .toSorted(),
-      ["apps/web", "packages/tooling-config", "packages/vue-shared"].toSorted(),
+      ["apps/web", "packages/tooling-config"].toSorted(),
     );
     assert.deepStrictEqual(
       JSON.parse(
         await readFile(path.join(targetRoot, "apps/web/package.json"), "utf8"),
       ).dependencies,
       {
-        "@demo/vue-shared": "workspace:*",
+        "@vue/devtools-api": "catalog:",
         pinia: "catalog:",
         vue: "catalog:",
       },

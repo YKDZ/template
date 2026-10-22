@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -1384,6 +1385,47 @@ void describe("template CLI command control", () => {
     assert.equal(output.stdout(), "");
     assert.deepEqual(await workspaceByteSnapshot(target), before);
   });
+});
+
+void it("开启库发布遇到用户打包规则时保留全部字节权限并提示手工解决", async () => {
+  const workspace = await mkdtemp(
+    path.join(tmpdir(), "template-cli-ignore-conflict-"),
+  );
+  try {
+    const initialized = testRuntime(["init", "demo", "--preset", "ts-lib"]);
+    assert.equal(
+      await runCli({ ...initialized.runtime, cwd: workspace }),
+      0,
+      initialized.stderr(),
+    );
+    const repositoryRoot = path.join(workspace, "demo");
+    const ignorePath = path.join(repositoryRoot, "packages/lib/.npmignore");
+    await writeFile(ignorePath, "dist/*\n!dist/index.js\n");
+    await chmod(ignorePath, 0o600);
+    const before = await workspaceByteSnapshot(repositoryRoot);
+    for (const dryRun of [true, false]) {
+      const output = testRuntime([
+        "configure",
+        "package",
+        "--path",
+        "packages/lib",
+        "--publication",
+        ...(dryRun ? ["--dry-run"] : []),
+        "--output-format",
+        "text",
+      ]);
+      assert.equal(
+        await runCli({ ...output.runtime, cwd: repositoryRoot }),
+        1,
+        output.stderr(),
+      );
+      assert.match(output.stderr(), /packages\/lib\/\.npmignore/u);
+      assert.match(output.stderr(), /手工.*重试/u);
+      assert.deepEqual(await workspaceByteSnapshot(repositoryRoot), before);
+    }
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
 
 void it("正式配置命令保持已登记实例身份，未知原生包拒绝接管并可安全重试", async () => {

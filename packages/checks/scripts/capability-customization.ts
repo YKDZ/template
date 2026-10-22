@@ -3,69 +3,45 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import formatterConfig from "@ykdz/reference-tooling-config/oxfmt";
-import {
-  contentIdentityKey,
-  type ContentIdentity,
-} from "@ykdz/template-core/content-identity";
 import { format } from "oxfmt";
 
-import type {
-  GeneratedScenarioRuntime,
-  SuccessfulScenarioResult,
-} from "../src/generated-content.ts";
+import type { SuccessfulScenarioResult } from "../src/generated-content.ts";
 
-const sharedSource = "@ykdz/reference-vue-shared";
-
-export type SharedVueCustomization = {
+export type VueApplicationCustomization = {
   readonly file: string;
   readonly contents: string;
 };
 
-function referenceIdentity(
-  runtime: GeneratedScenarioRuntime,
-  packageName: string,
-): ContentIdentity {
-  const references = runtime.content.filter(
-    (member) =>
-      member.kind === "reference" &&
-      member.identity.packageName === packageName,
+function applications(result: SuccessfulScenarioResult) {
+  const identities = new Set(
+    result.generationRecord.packages
+      .filter(
+        (item) =>
+          item.contentIdentity.packageName === "@ykdz/reference-vue-app",
+      )
+      .map((item) => item.packageDefinitionId),
   );
-  if (references.length !== 1) {
-    throw new Error(
-      `唯一内容集合必须明确公开一个${packageName} reference，实际为${references.length}项`,
-    );
-  }
-  return references[0]!.identity;
+  return result.blueprint.packages.filter((item) =>
+    identities.has(item.packageDefinitionId),
+  );
 }
 
-/** 在实际生成的共同组件中加入定制，供后续真实浏览器入口观察。 */
-export async function customizeSharedVue(
+/** 定制已有应用，后续新增应用应保留这份定制并拥有独立示例。 */
+export async function customizeVueApplication(
   result: SuccessfulScenarioResult,
   projectDir: string,
-  runtime: GeneratedScenarioRuntime,
-): Promise<SharedVueCustomization> {
-  const identity = referenceIdentity(runtime, sharedSource);
-  const identityKey = contentIdentityKey(identity);
-  const shared = result.generationRecord.packages.find(
-    (item) =>
-      item.createdBy === "shared-dependency" &&
-      contentIdentityKey(item.contentIdentity) === identityKey,
-  );
-  assert.ok(shared);
-  const sharedDefinition = result.blueprint.packages.find(
-    (definition) =>
-      definition.packageDefinitionId === shared.packageDefinitionId,
-  );
-  assert.ok(sharedDefinition);
+): Promise<VueApplicationCustomization> {
+  const application = applications(result)[0];
+  assert.ok(application);
   const file = path.join(
     projectDir,
-    sharedDefinition.path,
+    application.path,
     "src/components/CounterButton.vue",
   );
   const original = await readFile(file, "utf8");
   const edited = original.replace(
     '    type="button"',
-    '    data-shared-customization="preserved"\n    type="button"',
+    '    data-app-customization="preserved"\n    type="button"',
   );
   assert.notEqual(edited, original);
   const formatted = await format("CounterButton.vue", edited, formatterConfig);
@@ -74,85 +50,40 @@ export async function customizeSharedVue(
   return { file, contents: formatted.code };
 }
 
-export async function verifySharedVueCombination(options: {
+export async function verifyVueApplicationCombination(options: {
   readonly initialization: SuccessfulScenarioResult;
   readonly result: SuccessfulScenarioResult;
   readonly projectDir: string;
-  readonly runtime: GeneratedScenarioRuntime;
-  readonly customization?: SharedVueCustomization;
+  readonly customization?: VueApplicationCustomization;
 }): Promise<void> {
-  const identity = referenceIdentity(options.runtime, sharedSource);
-  const identityKey = contentIdentityKey(identity);
-  const initial = options.initialization.generationRecord.packages.filter(
-    (item) =>
-      item.createdBy === "shared-dependency" &&
-      contentIdentityKey(item.contentIdentity) === identityKey,
-  );
-  const record = JSON.parse(
-    await readFile(
-      path.join(options.projectDir, ".template/generation.json"),
-      "utf8",
-    ),
-  ) as SuccessfulScenarioResult["generationRecord"];
-  const shared = record.packages.filter(
-    (item) =>
-      item.createdBy === "shared-dependency" &&
-      contentIdentityKey(item.contentIdentity) === identityKey,
-  );
-  assert.equal(shared.length, 1);
-  const provider = shared[0]!;
-  const providerDefinition = options.result.blueprint.packages.find(
-    (definition) =>
-      definition.packageDefinitionId === provider.packageDefinitionId,
-  );
-  assert.ok(providerDefinition);
-  if (initial.length > 0) {
-    const initialProviderDefinition =
-      options.initialization.blueprint.packages.find(
-        (definition) =>
-          definition.packageDefinitionId === initial[0]!.packageDefinitionId,
-      );
-    assert.ok(initialProviderDefinition);
-    assert.equal(provider.packageDefinitionId, initial[0]!.packageDefinitionId);
-    assert.equal(providerDefinition.path, initialProviderDefinition.path);
-  }
-  const consumers = options.result.generationRecord.packages.filter(
-    (item) => item.bindings[identityKey] !== undefined,
-  );
-  assert.equal(consumers.length, initial.length === 0 ? 1 : 2);
-  for (const consumer of consumers) {
-    assert.equal(consumer.bindings[identityKey], provider.packageDefinitionId);
-  }
+  const apps = applications(options.result);
+  assert.equal(apps.length, applications(options.initialization).length + 1);
   if (options.customization === undefined) return;
   assert.equal(
     await readFile(options.customization.file, "utf8"),
     options.customization.contents,
   );
-  const observer = await format(
-    "shared-customization.spec.ts",
-    `import { expect, test } from "@playwright/test";
-
-test("新旧应用复用已有共同组件并保留定制", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("button", { name: "计数：0" })).toHaveAttribute("data-shared-customization", "preserved");
-});
-`,
-    formatterConfig,
-  );
-  assert.equal(observer.errors.length, 0);
-  for (const consumer of consumers) {
-    const definition = options.result.blueprint.packages.find(
-      (item) => item.packageDefinitionId === consumer.packageDefinitionId,
+  for (const app of apps) {
+    const customized =
+      path.join(
+        options.projectDir,
+        app.path,
+        "src/components/CounterButton.vue",
+      ) === options.customization.file;
+    const observer = await format(
+      "app-customization.spec.ts",
+      'import { expect, test } from "@playwright/test";\n\ntest("已有应用保留定制，新增应用保持独立", async ({ page }) => {\n  await page.goto("/");\n  await expect(page.getByRole("button", { name: "计数：0" }))' +
+        (customized
+          ? '.toHaveAttribute("data-app-customization", "preserved")'
+          : '.not.toHaveAttribute("data-app-customization", "preserved")') +
+        ";\n});\n",
+      formatterConfig,
     );
-    assert.ok(definition);
-    const directory = path.join(
-      options.projectDir,
-      definition.path,
-      "test/e2e",
-    );
+    assert.equal(observer.errors.length, 0);
+    const directory = path.join(options.projectDir, app.path, "test/e2e");
     await mkdir(directory, { recursive: true });
     await writeFile(
-      path.join(directory, "shared-customization.spec.ts"),
+      path.join(directory, "app-customization.spec.ts"),
       observer.code,
       { flag: "wx" },
     );

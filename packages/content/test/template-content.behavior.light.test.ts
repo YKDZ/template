@@ -907,18 +907,19 @@ void describe("公开模板内容集合", () => {
     ) as { exports: Record<string, unknown> };
     assert.ok(databaseManifest.exports["./queries/todos"]);
     assert.ok(databaseManifest.exports["./schema"]);
-    assert.deepStrictEqual(
-      JSON.parse(
-        await readFile(path.join(targetRoot, "deployment.json"), "utf8"),
-      ),
-      {
-        application: { name: "@demo/web", path: "apps/web" },
-        database: { name: "@demo/db", path: "packages/db" },
-        migrations: {
-          name: "@demo/db-migrations",
-          path: "packages/db-migrations",
-        },
-      },
+    const deploymentChecker = await readFile(
+      path.join(targetRoot, "scripts/check-standalone-deployment.ts"),
+      "utf8",
+    );
+    assert.match(
+      deploymentChecker,
+      /const applicationPackageName = "@demo\/web";/u,
+    );
+    assert.match(deploymentChecker, /APPLICATION_PACKAGE_PATH: "apps\/web"/u);
+    assert.match(deploymentChecker, /DATABASE_PACKAGE_NAME: "@demo\/db"/u);
+    assert.match(
+      deploymentChecker,
+      /MIGRATION_PACKAGE_NAME: "@demo\/db-migrations"/u,
     );
     const checkWorkflow = await readFile(
       path.join(targetRoot, ".github/workflows/check.yml"),
@@ -939,12 +940,6 @@ void describe("公开模板内容集合", () => {
     assert.strictEqual(
       blueprint.packages.filter(
         (definition) => definition.path === "packages/tooling-config",
-      ).length,
-      1,
-    );
-    assert.strictEqual(
-      blueprint.packages.filter(
-        (definition) => definition.path === "packages/vue-shared",
       ).length,
       1,
     );

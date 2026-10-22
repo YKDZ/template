@@ -8,7 +8,7 @@ import { assertWorkflowContract } from "@ykdz/template-checks/workflow-contract"
 import { templatePresets } from "@ykdz/template-content";
 import { parse } from "yaml";
 
-import { initializePreset } from "../test-support/generated-preset-receipt.ts";
+import { initializePreset } from "./support/generated-preset-receipt.ts";
 
 async function renderDeploymentWorkflow(): Promise<{
   readonly source: string;

@@ -1,5 +1,5 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "./tsconfig.scripts.json",
   "compilerOptions": {
     "customConditions": [],
     "noEmit": false,

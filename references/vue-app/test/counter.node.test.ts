@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { useCounterStore } from "../src/stores/counter.ts";
 
-describe("counter store", () => {
-  it("increments the count", () => {
+describe("计数状态", () => {
+  it("增加计数", () => {
     setActivePinia(createPinia());
     const counter = useCounterStore();
 

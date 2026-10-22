@@ -1,7 +1,7 @@
-import { mountApplication } from "@ykdz/reference-vue-shared/mount";
+import { createApp } from "vue";
 
 import App from "./App.vue";
 
-import "@ykdz/reference-vue-shared/style.css";
+import "./style.css";
 
-mountApplication(App);
+createApp(App).mount("#app");

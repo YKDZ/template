@@ -19,7 +19,6 @@ export const templateContent = (await loadTemplateContent({
     "@ykdz/reference-rust-bin/template",
     "@ykdz/preset-rust-bin/template",
     "@ykdz/reference-vue-app/template",
-    "@ykdz/reference-vue-shared/template",
     "@ykdz/preset-vue-app/template",
     "@ykdz/reference-hono-api/template",
     "@ykdz/reference-vue-hono-web/template",

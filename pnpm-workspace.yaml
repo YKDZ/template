@@ -15,7 +15,6 @@ minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
 minimumReleaseAgeExclude:
   - "@ykdz/template"
-  # Turbo 2.11.10 修复根任务直接运行 boundaries 时的递归误判；其平台包也须通过同一精确版本检查。
   - "turbo@2.11.10"
   - "@turbo/darwin-64@2.11.10"
   - "@turbo/darwin-arm64@2.11.10"

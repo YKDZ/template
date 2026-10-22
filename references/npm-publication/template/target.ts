@@ -44,7 +44,7 @@ export function publicationTargetDependencies(options: {
   );
 }
 
-/** 目标包只修改自身清单和任务，工具通过公开出口在目标 cwd 执行。 */
+/** 目标包投影自身发布清单、任务与资源，工具通过公开出口在目标 cwd 执行。 */
 export function projectPublicationTarget(options: {
   readonly contribution: PackageContribution;
   readonly configuration: unknown;
@@ -72,6 +72,12 @@ export function projectPublicationTarget(options: {
       scripts.prepack = `node --import ${tool.name}/prepack-build --eval '' -- ${JSON.stringify(buildTask)}`;
     }
   } else {
+    if (scripts.typecheck !== undefined) {
+      scripts.typecheck = scripts.typecheck.replace(
+        " && tsc -p tsconfig.scripts.json --noEmit --pretty false",
+        "",
+      );
+    }
     delete scripts["publication:prepare"];
     delete scripts["publication:consume"];
     delete scripts["publication:remote:npm"];
@@ -92,11 +98,32 @@ export function projectPublicationTarget(options: {
           enabled ||
           !(
             "to" in operation &&
-            operation.to ===
-              `${contribution.definition.path}/scripts/publication-consumer.ts`
+            (operation.to === `${contribution.definition.path}/.npmignore` ||
+              operation.to ===
+                `${contribution.definition.path}/tsconfig.scripts.json` ||
+              operation.to ===
+                `${contribution.definition.path}/scripts/publication-consumer.ts`)
           ),
       )
       .map((operation) => {
+        if (
+          !enabled &&
+          operation.kind === "writeJson" &&
+          operation.to === `${contribution.definition.path}/tsconfig.json`
+        ) {
+          const config = operation.value as {
+            readonly references: readonly { readonly path: string }[];
+          };
+          return {
+            ...operation,
+            value: {
+              ...config,
+              references: config.references.filter(
+                (reference) => reference.path !== "./tsconfig.scripts.json",
+              ),
+            },
+          };
+        }
         if (
           operation.kind !== "writeJson" ||
           operation.to !== `${contribution.definition.path}/turbo.json`

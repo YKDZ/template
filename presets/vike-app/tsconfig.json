@@ -1,7 +1,11 @@
 {
-  "extends": "@ykdz/reference-tooling-config/node.json",
-  "compilerOptions": {
-    "types": ["node"]
-  },
-  "include": ["template/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
+  "files": [],
+  "references": [
+    {
+      "path": "./tsconfig.node.json"
+    },
+    {
+      "path": "./tsconfig.scripts.json"
+    }
+  ]
 }

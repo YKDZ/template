@@ -1,16 +1,11 @@
 {
-  "extends": "./tsconfig.config.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "allowJs": true,
-    "checkJs": true,
-    "rewriteRelativeImportExtensions": false,
-    "allowImportingTsExtensions": true
-  },
-  "include": [
-    "*.config.ts",
-    "scripts/**/*.ts",
-    "test/**/*.ts",
-    "test-support/**/*.ts"
+  "files": [],
+  "references": [
+    {
+      "path": "./tsconfig.config.json"
+    },
+    {
+      "path": "./tsconfig.scripts.json"
+    }
   ]
 }

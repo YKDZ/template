@@ -19,7 +19,7 @@ export const referencePackage = defineReferencePackage({
       },
     ],
     scripts: ["build:template", "check:author-planning-roles"],
-    resources: ["template", "tsconfig.template.json"],
+    resources: ["template", "tsconfig.template.json", ".npmignore"],
   },
   foundation: ({ definition }) => ({
     toolchains: {},

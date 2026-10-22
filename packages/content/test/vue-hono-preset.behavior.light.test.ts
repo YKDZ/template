@@ -78,21 +78,22 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
       initialized.blueprint.packages
         .map(({ path: packagePath }) => packagePath)
         .toSorted(),
-      [
-        "apps/api",
-        "apps/web",
-        "packages/tooling-config",
-        "packages/vue-shared",
-      ].toSorted(),
+      ["apps/api", "apps/web", "packages/tooling-config"].toSorted(),
     );
     assert.deepStrictEqual(initialized.blueprint.packageLinkIntents, [
       { consumerPackagePath: "apps/web", providerPackagePath: "apps/api" },
     ]);
-    assert.deepStrictEqual(
-      JSON.parse(
-        await readFile(path.join(targetRoot, "joint-e2e.json"), "utf8"),
-      ),
-      { apiPackageName: "@demo/api", webPackageName: "@demo/web" },
+    const playwrightConfiguration = await readFile(
+      path.join(targetRoot, "playwright.config.ts"),
+      "utf8",
+    );
+    assert.match(
+      playwrightConfiguration,
+      /const apiPackageName = "@demo\/api";/u,
+    );
+    assert.match(
+      playwrightConfiguration,
+      /const webPackageName = "@demo\/web";/u,
     );
 
     const webSourcePath = path.join(targetRoot, "apps/web/src/App.vue");
@@ -163,7 +164,6 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
         "packages/native",
         "packages/tool",
         "packages/tooling-config",
-        "packages/vue-shared",
       ].toSorted(),
     );
     assert.deepStrictEqual(finalBlueprint.packageLinkIntents, [
@@ -191,10 +191,6 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
     };
     assert.strictEqual(
       finalWebManifest.dependencies["@demo/api"],
-      "workspace:*",
-    );
-    assert.strictEqual(
-      finalWebManifest.dependencies["@demo/vue-shared"],
       "workspace:*",
     );
     assert.strictEqual(
@@ -240,16 +236,12 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
       devDependencies: Record<string, string>;
     };
     assert.strictEqual(
-      vueManifest.dependencies["@demo/vue-shared"],
-      "workspace:*",
-    );
-    assert.strictEqual(
       vueManifest.devDependencies["@demo/tooling-config"],
       "workspace:*",
     );
     assert.strictEqual(
-      await readFile(path.join(targetRoot, "joint-e2e.json"), "utf8"),
-      `${JSON.stringify({ apiPackageName: "@demo/api", webPackageName: "@demo/web" }, null, 2)}\n`,
+      await readFile(path.join(targetRoot, "playwright.config.ts"), "utf8"),
+      playwrightConfiguration,
     );
   });
 });

@@ -62,7 +62,7 @@ const journey: CliJourney = {
       assert.deepEqual(await snapshot(project), before);
     return [
       {
-        name: "初始化尚无公共 Vue 包的库项目",
+        name: "初始化库项目",
         args: [
           "init",
           "project",
@@ -73,24 +73,24 @@ const journey: CliJourney = {
         ],
       },
       {
-        name: "预览应用及缺失共同包",
+        name: "预览自包含的应用",
         cwd: project,
         args: [...addition("portal"), "--dry-run"],
         prepare: remember,
       },
       {
-        name: "原子添加首个应用及共同包",
+        name: "原子添加首个应用",
         cwd: project,
         args: addition("portal"),
         prepare: unchanged,
       },
       {
-        name: "保留共同包定制并预览第二个同源应用",
+        name: "保留应用和配置定制并预览第二个应用",
         cwd: project,
         args: [...addition("console"), "--dry-run"],
         async prepare() {
           for (const file of [
-            "packages/vue-shared/src/stores/counter.ts",
+            "services/portal/src/stores/counter.ts",
             "packages/tooling-config/oxfmt.config.ts",
           ]) {
             const full = path.join(project, file);
@@ -122,7 +122,7 @@ const journey: CliJourney = {
         },
       },
       {
-        name: "第二个应用复用新增阶段创建的共同包",
+        name: "新增第二个自包含应用并复用工具配置",
         cwd: project,
         args: addition("console"),
         prepare: unchanged,
@@ -134,7 +134,7 @@ const journey: CliJourney = {
         prepare: remember,
       },
       {
-        name: "后续新增再次回放共同关系",
+        name: "后续新增再次回放工具配置关系",
         cwd: project,
         args: addition("dashboard"),
         prepare: unchanged,
@@ -170,7 +170,7 @@ const journey: CliJourney = {
         },
       },
       {
-        name: "检查共用定制依赖的三个独立应用",
+        name: "检查保留定制的三个独立应用",
         cwd: project,
         executable: "pnpm",
         args: ["run", "check"],
@@ -193,7 +193,7 @@ const journey: CliJourney = {
     assert.ok(
       preview.data.actions.some(
         (action: { path: string }) =>
-          action.path === "packages/vue-shared/package.json",
+          action.path === "services/portal/package.json",
       ),
     );
     assert.deepEqual(JSON.parse(results[5]!.stdout).data.actions, []);
@@ -217,10 +217,13 @@ const journey: CliJourney = {
         ),
       );
       assert.equal(manifest.name, `@acme/${name}`);
-      assert.equal(manifest.dependencies["@acme/vue-shared"], "workspace:*");
+      assert.equal(
+        manifest.devDependencies["@acme/tooling-config"],
+        "workspace:*",
+      );
     }
     for (const file of [
-      "packages/vue-shared/src/stores/counter.ts",
+      "services/portal/src/stores/counter.ts",
       "packages/tooling-config/oxfmt.config.ts",
     ]) {
       assert.ok(
@@ -242,7 +245,7 @@ const journey: CliJourney = {
     );
     assert.equal(
       blueprint.packages.filter(
-        (item: { name: string }) => item.name === "@acme/vue-shared",
+        (item: { name: string }) => item.name === "@acme/tooling-config",
       ).length,
       1,
     );

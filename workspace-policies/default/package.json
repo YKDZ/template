@@ -111,7 +111,7 @@
     "lint:fix": "oxlint --format=unix . --fix",
     "sync:policy-snapshot": "node scripts/sync-snapshot.ts src/workspace-policy-snapshot.ts",
     "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec 'test/**/*.light.test.ts'",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false && tsc -p tsconfig.scripts.json --noEmit --pretty false",
     "sync:release-toolchain-snapshot": "node scripts/sync-snapshot.ts src/release-toolchain-snapshot.ts"
   },
   "dependencies": {

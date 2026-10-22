@@ -124,7 +124,6 @@ void describe("Template Repository native task model", () => {
       ["@ykdz/template-workspace", "template-workspace"],
     ] as const)
       assert.ok(packageTags.get(name)?.includes(tag));
-    assert.ok(packageTags.has("@ykdz/reference-vue-shared"));
     assert.ok(packageTags.has("@ykdz/reference-tooling-config"));
 
     for (const task of nativeTaskByName(directory).values()) {

@@ -3,7 +3,6 @@ import { onMounted, onUnmounted, ref } from "vue";
 
 import { getHealth } from "#/api";
 
-import CounterButton from "./counter-button.ts";
 const themeLabel = ref<"深色" | "浅色">("浅色");
 const apiStatus = ref("检查中");
 
@@ -39,10 +38,9 @@ onMounted(async () => {
       </p>
       <h1 class="mt-4 text-4xl font-semibold">Vue 和 Hono 工作区</h1>
       <p class="mt-4 text-lg text-slate-300">
-        Web 和 API 是独立应用包，共享代码应放入 packages/*。
+        页面启动后会检查服务状态，并在下方展示结果。
       </p>
       <div class="mt-8 flex flex-wrap items-center gap-4">
-        <CounterButton />
         <span class="text-sm text-slate-400">系统主题：{{ themeLabel }}</span>
         <span class="text-sm text-slate-400">API 状态：{{ apiStatus }}</span>
       </div>

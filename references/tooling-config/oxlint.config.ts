@@ -1,7 +1,8 @@
 import { defineConfig } from "oxlint";
 
-// OXC's current erasing-op rule does not reject enum, runtime namespace, or
-// parameter properties. TypeScript 7 erasableSyntaxOnly is authoritative.
+// Oxc 的 erasing-op 规则尚不拒绝枚举、运行时命名空间和参数属性；
+// 可擦除语法以 TypeScript 7 的 erasableSyntaxOnly 检查为准。
 export default defineConfig({
   options: { typeAware: true },
+  categories: { correctness: "error", suspicious: "warn" },
 });
