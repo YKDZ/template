@@ -1,6 +1,9 @@
 name: 发布 npm 包
 
 on:
+  push:
+    branches:
+      - experiment/changesets-real-publication
   workflow_dispatch:
 
 permissions: {}
