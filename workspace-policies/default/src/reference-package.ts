@@ -31,6 +31,7 @@ import type {
   CheckEnvironmentNeed,
   DeploymentEnvironmentNeed,
 } from "./environment-needs.ts";
+import type { SharedRootContribution } from "./shared-root-files.ts";
 
 export type ReferencePackageManifest = NativeContentManifest & {
   readonly imports?: Readonly<Record<string, unknown>>;
@@ -83,6 +84,12 @@ export type DefaultRootDeclarationData = {
     readonly check?: readonly CheckEnvironmentNeed[];
     readonly deployment?: readonly DeploymentEnvironmentNeed[];
   }>;
+  /** 由共享根文件合成器按冲突与来源规则消费。 */
+  readonly ciJob?: SharedRootContribution["ciJob"];
+  /** 保留插入锚点、声明顺序和步骤身份。 */
+  readonly ciSteps?: SharedRootContribution["ciSteps"];
+  /** 由外层工作区规则投影到Dependabot根配置。 */
+  readonly dependencyMaintenance?: SharedRootContribution["dependencyMaintenance"];
   /** 根级 CI 工作流的诊断制品声明。 */
   readonly ciDiagnosticArtifacts?: readonly CiDiagnosticArtifactDeclaration[];
   /** 根位置的独占原生资源；由默认组合校验来源与路径冲突。 */
@@ -746,6 +753,18 @@ export function defineReferencePackage<
       );
     }
   }
+  const dependencyPurposes = new Map<
+    string,
+    readonly ("target" | "template-execution")[]
+  >(
+    dependencyUses.map(({ name, purposes }) => [
+      name,
+      purposes.filter(
+        (purpose): purpose is "target" | "template-execution" =>
+          purpose !== "template-build",
+      ),
+    ]),
+  );
   const resourceMappings = [
     ...options.resources,
     ...(options.compositionResources ?? []),
@@ -1110,6 +1129,7 @@ export function defineReferencePackage<
       ? {}
       : { artifactVersion: options.artifactVersion }),
     resources,
+    dependencyPurposes,
     executionDependencies,
     prepareFacts(snapshot, prepareOptions) {
       const nativeDocuments: DefaultNativeDocument[] = [

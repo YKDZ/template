@@ -556,7 +556,7 @@ void it("同一份严格TypeScript消费代码通过源码和正式安装制品"
     );
     assert.deepEqual(
       alphaDependencyPurposes.get("never-install-target-application"),
-      [],
+      ["target"],
     );
     const alphaInstalledManifest = JSON.parse(
       await readFile(
