@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { lstat, readFile } from "node:fs/promises";
+import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import type { Composition } from "@ykdz/template-core/composition";
@@ -17,6 +19,7 @@ import {
 } from "@ykdz/template-core/content-identity";
 import {
   assertGenerationRecordMatchesBlueprint,
+  parseGenerationRecordStructure,
   type GenerationRecord,
   type GenerationRecordPackage,
   type GenerationRecordSelection,
@@ -45,6 +48,7 @@ import {
   type ProjectProjectionAction,
   type ProjectProjectionChangePlan,
   type ProjectProjectionConflict,
+  type CurrentProjectProjectionEntry,
   type ProjectProjectionEntry,
   type ProjectProjectionPathPrecondition,
   type ProjectProjectionReconciliation,
@@ -101,6 +105,10 @@ type PackageNodeDraft<CreationInput extends JsonValue = JsonValue> = {
   readonly creationInput: CreationInput | undefined;
   readonly layout: unknown;
   readonly nodeIdentity: string;
+  readonly restored?: {
+    readonly packageDefinitionId: PackageDefinitionId;
+    readonly createdBy: "initialization" | "addition" | "shared-dependency";
+  };
   readonly dependencies: readonly {
     readonly key: string;
     readonly package: PackageNodeDraft<CreationInput>;
@@ -114,6 +122,10 @@ type PreparedNode<CreationInput extends JsonValue = JsonValue> = {
   readonly creationInput: CreationInput | undefined;
   readonly layout: unknown;
   readonly nodeIdentity: string;
+  readonly restored?: {
+    readonly packageDefinitionId: PackageDefinitionId;
+    readonly createdBy: "initialization" | "addition" | "shared-dependency";
+  };
   readonly dependencies: readonly {
     readonly key: string;
     readonly package: PreparedNode<CreationInput>;
@@ -122,12 +134,32 @@ type PreparedNode<CreationInput extends JsonValue = JsonValue> = {
 
 type PreparedSelection<CreationInput extends JsonValue = JsonValue> = {
   readonly presetIdentity: ContentIdentity | null;
+  readonly selectionId?: string;
+  readonly recordedNodeIds?: Readonly<Record<string, PackageDefinitionId>>;
+  readonly createdBy?: "initialization" | "addition";
   readonly roots: readonly PreparedNode<CreationInput>[];
 };
 
 type PackageSelectionDraft<CreationInput extends JsonValue = JsonValue> = {
   readonly presetIdentity: ContentIdentity | null;
+  readonly selectionId?: string;
+  readonly recordedNodeIds?: Readonly<Record<string, PackageDefinitionId>>;
+  readonly createdBy?: "initialization" | "addition";
   readonly roots: readonly PackageNodeDraft<CreationInput>[];
+};
+
+type RestoredProject = {
+  readonly blueprint: ProjectBlueprint;
+  readonly generationRecord: GenerationRecord;
+};
+
+export type GeneratorRestoredProject<
+  CreationInput extends JsonValue = JsonValue,
+> = RestoredProject & {
+  readonly targetRoot: string;
+  readonly packages: readonly CompositionPackage<CreationInput>[];
+  readonly selections: readonly GenerationRecordSelection[];
+  readonly readFacts: readonly CurrentProjectProjectionEntry[];
 };
 
 export type PreparedProject<
@@ -141,6 +173,7 @@ export type PreparedProject<
   readonly composition: CompositionDefinition;
   readonly selections: readonly PreparedSelection<CreationInput>[];
   readonly operationFacts: OperationFacts;
+  readonly restored?: RestoredProject;
 };
 
 export type ComputedPackage<ContributionFacts = unknown> = {
@@ -216,7 +249,12 @@ export type GeneratorResult<
     }
   | {
       readonly status: "operation-failure";
-      readonly phase: "preparation" | "calculation" | "planning" | "commit";
+      readonly phase:
+        | "metadata"
+        | "preparation"
+        | "calculation"
+        | "planning"
+        | "commit";
       readonly error: { readonly message: string };
     };
 
@@ -242,9 +280,59 @@ export type GeneratorPlanningResult<
     }
   | {
       readonly status: "operation-failure";
-      readonly phase: "preparation" | "calculation" | "planning" | "commit";
+      readonly phase:
+        | "metadata"
+        | "preparation"
+        | "calculation"
+        | "planning"
+        | "commit";
       readonly error: { readonly message: string };
     };
+
+export type GeneratorAdditionOptions<
+  CreationInput extends JsonValue = JsonValue,
+  OperationFacts = null,
+> = GeneratorAdditionSelection<CreationInput> & {
+  readonly repositoryRoot: string;
+  readonly operationFacts: OperationFacts;
+  /** 外围在准备时实际读取的只读目标事实。 */
+  readonly readFacts?: readonly CurrentProjectProjectionEntry[];
+};
+
+export type GeneratorAdditionSelection<
+  CreationInput extends JsonValue = JsonValue,
+> = {
+  readonly creationInput?: CreationInput;
+} & (
+  | {
+      readonly contentIdentity: ContentSelector;
+      readonly nodeIdentity?: string;
+      readonly layout?: unknown;
+    }
+  | { readonly preset: ContentSelector }
+);
+
+export type GeneratorAdditionPreparation<
+  Conventions extends JsonValue,
+  CreationInput extends JsonValue,
+  CompositionDefinition extends CompositionDefinitionLike,
+  OperationFacts,
+> = {
+  readonly restored: GeneratorRestoredProject<CreationInput>;
+  readonly before: PreparedProject<
+    Conventions,
+    CreationInput,
+    CompositionDefinition,
+    OperationFacts
+  >;
+  readonly after: PreparedProject<
+    Conventions,
+    CreationInput,
+    CompositionDefinition,
+    OperationFacts
+  >;
+  readonly readFacts: readonly CurrentProjectProjectionEntry[];
+};
 
 export type Generator<
   OwnerFacts = unknown,
@@ -268,6 +356,55 @@ export type Generator<
       CompositionOperationFacts<CompositionDefinition>
     >,
   ): Promise<GeneratorPlanningResult<OwnerFacts, Conventions, CreationInput>>;
+  add(
+    options: GeneratorAdditionOptions<
+      CreationInput,
+      CompositionOperationFacts<CompositionDefinition>
+    > & { readonly dryRun?: boolean },
+  ): Promise<GeneratorResult<OwnerFacts, Conventions, CreationInput>>;
+  planAdd(
+    options: GeneratorAdditionOptions<
+      CreationInput,
+      CompositionOperationFacts<CompositionDefinition>
+    >,
+  ): Promise<GeneratorPlanningResult<OwnerFacts, Conventions, CreationInput>>;
+  planComputedAdd(options: {
+    readonly preparation: GeneratorAdditionPreparation<
+      Conventions,
+      CreationInput,
+      CompositionDefinition,
+      CompositionOperationFacts<CompositionDefinition>
+    >;
+    readonly before: ComputedProject<
+      OwnerFacts,
+      Conventions,
+      CreationInput,
+      ContributionFacts
+    >;
+    readonly after: ComputedProject<
+      OwnerFacts,
+      Conventions,
+      CreationInput,
+      ContributionFacts
+    >;
+    /** 外围在准备项目时实际读取的额外只读事实。 */
+    readonly readFacts?: readonly CurrentProjectProjectionEntry[];
+  }): Promise<GeneratorPlanningResult<OwnerFacts, Conventions, CreationInput>>;
+  restoreProject(options: {
+    readonly repositoryRoot: string;
+  }): Promise<GeneratorRestoredProject<CreationInput>>;
+  prepareAddProject(options: {
+    readonly restored: GeneratorRestoredProject<CreationInput>;
+    readonly selection: GeneratorAdditionSelection<CreationInput>;
+    readonly operationFacts: CompositionOperationFacts<CompositionDefinition>;
+  }): Promise<
+    GeneratorAdditionPreparation<
+      Conventions,
+      CreationInput,
+      CompositionDefinition,
+      CompositionOperationFacts<CompositionDefinition>
+    >
+  >;
   commitPlan(
     plan: ProjectProjectionChangePlan,
   ): Promise<GeneratorResult<OwnerFacts, Conventions, CreationInput>>;
@@ -298,7 +435,7 @@ type PackageNode = {
   readonly id: PackageDefinitionId;
   readonly content: RuntimeReference;
   readonly definition: PersistedPackageDefinition;
-  readonly createdBy: "initialization" | "shared-dependency";
+  readonly createdBy: "initialization" | "addition" | "shared-dependency";
   readonly creationInput: JsonValue | null;
   readonly preparation: PreparedReference<unknown>;
   readonly dependencies: Map<string, PackageNode>;
@@ -353,6 +490,32 @@ function conflictReason(
   conflicts: readonly ProjectProjectionConflict[],
 ): string {
   return conflicts.map((conflict) => conflict.reason).join("\n");
+}
+
+function preserveProjectionPaths(
+  before: ProjectProjection,
+  after: ProjectProjection,
+): ProjectProjection {
+  const entries = new Map(after.entries.map((entry) => [entry.path, entry]));
+  for (const entry of before.entries) {
+    if (!entries.has(entry.path)) entries.set(entry.path, entry);
+  }
+  const reconciliation = new Map(
+    after.reconciliation.map((policy) => [policy.path, policy]),
+  );
+  for (const policy of before.reconciliation) {
+    if (!reconciliation.has(policy.path)) {
+      reconciliation.set(policy.path, policy);
+    }
+  }
+  return {
+    entries: [...entries.values()].toSorted((left, right) =>
+      comparePaths(left.path, right.path),
+    ),
+    reconciliation: [...reconciliation.values()].toSorted((left, right) =>
+      comparePaths(left.path, right.path),
+    ),
+  };
 }
 
 function isCanonicalRelativeFilePath(value: string): boolean {
@@ -551,10 +714,89 @@ export function createGenerator<
     entries: [],
     reconciliation: [],
   };
-  const pendingInitializationPlans = new WeakMap<
+  const pendingPlans = new WeakMap<
     ProjectProjectionChangePlan,
     { readonly targetRoot: string; readonly computed: InitializedProject }
   >();
+
+  const readMetadataFact = async (
+    targetRoot: string,
+    metadataPath: string,
+  ): Promise<CurrentProjectProjectionEntry> => {
+    const filePath = path.join(targetRoot, metadataPath);
+    try {
+      const stat = await lstat(filePath);
+      if (!stat.isFile()) {
+        return {
+          path: metadataPath,
+          kind: stat.isDirectory()
+            ? "directory"
+            : stat.isSymbolicLink()
+              ? "symbolic-link"
+              : "other",
+        };
+      }
+      return {
+        path: metadataPath,
+        kind: "file",
+        content: new Uint8Array(await readFile(filePath)),
+        mode: stat.mode & 0o111,
+      };
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        (error.code === "ENOENT" || error.code === "ENOTDIR")
+      ) {
+        return { path: metadataPath, kind: "missing" };
+      }
+      throw error;
+    }
+  };
+
+  const readRestoredProject = async (
+    targetRoot: string,
+  ): Promise<{
+    readonly restored: RestoredProject;
+    readonly readFacts: readonly CurrentProjectProjectionEntry[];
+  }> => {
+    const paths = [
+      ".template/blueprint.json",
+      ".template/generation.json",
+    ] as const;
+    const readFacts = await Promise.all(
+      paths.map((metadataPath) => readMetadataFact(targetRoot, metadataPath)),
+    );
+    const [blueprintFact, generationRecordFact] = readFacts;
+    if (
+      blueprintFact?.kind !== "file" ||
+      generationRecordFact?.kind !== "file"
+    ) {
+      throw new Error("目标项目缺少可读取的 schema4 蓝图或 schema6 生成记录");
+    }
+    let blueprintValue: unknown;
+    let generationRecordValue: unknown;
+    try {
+      blueprintValue = JSON.parse(
+        new TextDecoder("utf-8", { fatal: true }).decode(blueprintFact.content),
+      ) as unknown;
+      generationRecordValue = JSON.parse(
+        new TextDecoder("utf-8", { fatal: true }).decode(
+          generationRecordFact.content,
+        ),
+      ) as unknown;
+    } catch (error) {
+      throw new Error(`生成元数据不是有效 JSON：${errorMessage(error)}`, {
+        cause: error,
+      });
+    }
+    const blueprint = assertProjectBlueprint(blueprintValue);
+    const generationRecord = parseGenerationRecordStructure(
+      generationRecordValue,
+    );
+    assertGenerationRecordMatchesBlueprint(generationRecord, blueprint);
+    return { restored: { blueprint, generationRecord }, readFacts };
+  };
 
   const resolveReference = (selector: ContentSelector): RuntimeReference =>
     contentIndex.resolve(selector, "reference") as RuntimeReference;
@@ -567,12 +809,45 @@ export function createGenerator<
     readonly layout?: unknown;
     readonly conventions: CompositionConventions<CompositionDefinition>;
     readonly ancestry: readonly string[];
+    readonly restored?: PackageNodeDraft<
+      ContentCreationInput<Members>
+    >["restored"];
+    readonly sharedDrafts?: Map<
+      string,
+      PackageNodeDraft<ContentCreationInput<Members>>
+    >;
   }): PackageNodeDraft<ContentCreationInput<Members>> => {
     const identityKey = contentIdentityKey(request.content.identity);
     if (request.ancestry.includes(identityKey)) {
       throw new Error(
         `参考包依赖形成循环：${[...request.ancestry, identityKey].join(" → ")}`,
       );
+    }
+    const sharedKey =
+      request.content.definition.instance === "shared"
+        ? identityKey
+        : undefined;
+    const cached =
+      sharedKey === undefined
+        ? undefined
+        : request.sharedDrafts?.get(sharedKey);
+    if (cached !== undefined) {
+      if (
+        !isDeepStrictEqual(cached.definition, request.definition) ||
+        !isDeepStrictEqual(
+          cached.creationInput ?? null,
+          request.creationInput ?? null,
+        )
+      ) {
+        throw new Error(
+          `共享参考包的创建事实不一致：${contentIdentityLabel(request.content.identity)}`,
+        );
+      }
+      return {
+        ...cached,
+        nodeIdentity: request.nodeIdentity,
+        layout: request.layout,
+      };
     }
     const dependencies = request.content.definition.dependencies ?? [];
     const dependencyKeys = new Set<string>();
@@ -608,17 +883,23 @@ export function createGenerator<
         layout: undefined,
         conventions: request.conventions,
         ancestry: [...request.ancestry, identityKey],
+        ...(request.sharedDrafts === undefined
+          ? {}
+          : { sharedDrafts: request.sharedDrafts }),
       });
       dependencyDrafts.push({ key: dependency.key, package: providerNode });
     }
-    return {
+    const draft: PackageNodeDraft<ContentCreationInput<Members>> = {
       content: request.content,
       definition: request.definition,
       creationInput: request.creationInput,
       layout: request.layout,
       nodeIdentity: request.nodeIdentity,
+      ...(request.restored === undefined ? {} : { restored: request.restored }),
       dependencies: dependencyDrafts,
     };
+    if (sharedKey !== undefined) request.sharedDrafts?.set(sharedKey, draft);
+    return draft;
   };
 
   const preparePackageNode = async (
@@ -650,14 +931,260 @@ export function createGenerator<
       creationInput: draft.creationInput,
       layout: draft.layout,
       nodeIdentity: draft.nodeIdentity,
+      ...(draft.restored === undefined ? {} : { restored: draft.restored }),
       dependencies: preparedDependencies,
     };
   };
 
-  async function prepareProject(
+  const restoredSelectionDrafts = (
+    restored: RestoredProject,
+  ): PackageSelectionDraft<ContentCreationInput<Members>>[] => {
+    const { generationRecord, blueprint } = restored;
+    if (
+      contentIdentityKey(generationRecord.composition.identity) !==
+      contentIdentityKey(composition.identity)
+    ) {
+      throw new Error("目标项目使用了不兼容的组合定义");
+    }
+    assertGenerationRecordMatchesBlueprint(generationRecord, blueprint);
+    const conventions = composition.parseConventions(
+      generationRecord.composition.conventions,
+    ) as CompositionConventions<CompositionDefinition>;
+    assertJsonValue(conventions, "组合约定");
+    if (
+      !isDeepStrictEqual(conventions, generationRecord.composition.conventions)
+    ) {
+      throw new Error("生成记录中的组合约定不符合当前组合定义");
+    }
+
+    const recordsById = new Map(
+      generationRecord.packages.map((item) => [item.packageDefinitionId, item]),
+    );
+    const definitionsById = new Map(
+      blueprint.packages.map((definition) => [
+        definition.packageDefinitionId,
+        definition,
+      ]),
+    );
+    const contentsById = new Map<PackageDefinitionId, RuntimeReference>();
+    const inputsById = new Map<
+      PackageDefinitionId,
+      ContentCreationInput<Members> | undefined
+    >();
+    const draftsById = new Map<
+      PackageDefinitionId,
+      PackageNodeDraft<ContentCreationInput<Members>>
+    >();
+    const sharedIdentities = new Set<string>();
+
+    for (const item of generationRecord.packages) {
+      const content = resolveReference(item.contentIdentity);
+      const definition = definitionsById.get(item.packageDefinitionId);
+      if (definition === undefined) {
+        throw new Error(`项目蓝图缺少包实例：${item.packageDefinitionId}`);
+      }
+      const creationInput =
+        item.creationInput === null
+          ? undefined
+          : (requireParsedCreationInput(
+              content,
+              item.creationInput,
+            ) as ContentCreationInput<Members>);
+      if (!isDeepStrictEqual(creationInput ?? null, item.creationInput)) {
+        throw new Error(
+          `生成记录中的创建事实不规范：${item.packageDefinitionId}`,
+        );
+      }
+      contentsById.set(item.packageDefinitionId, content);
+      inputsById.set(item.packageDefinitionId, creationInput);
+      if (content.definition.instance === "shared") {
+        const identity = contentIdentityKey(content.identity);
+        if (sharedIdentities.has(identity)) {
+          throw new Error(
+            `共享参考包必须只有一个实例：${contentIdentityLabel(content.identity)}`,
+          );
+        }
+        sharedIdentities.add(identity);
+      }
+    }
+
+    const visiting = new Set<PackageDefinitionId>();
+    const buildDraft = (
+      id: PackageDefinitionId,
+    ): PackageNodeDraft<ContentCreationInput<Members>> => {
+      const existing = draftsById.get(id);
+      if (existing !== undefined) return existing;
+      if (visiting.has(id)) throw new Error("生成记录依赖包含循环");
+      const item = recordsById.get(id);
+      const persistedDefinition = definitionsById.get(id);
+      const content = contentsById.get(id);
+      if (
+        item === undefined ||
+        persistedDefinition === undefined ||
+        content === undefined
+      ) {
+        throw new Error(`生成记录引用了未知包实例：${id}`);
+      }
+
+      visiting.add(id);
+      const declarations = content.definition.dependencies ?? [];
+      const declaredKeys = new Set<string>();
+      for (const dependency of declarations) {
+        if (
+          dependency.key.trim().length === 0 ||
+          declaredKeys.has(dependency.key)
+        ) {
+          throw new Error(`参考包依赖键不能为空且不能重复：${dependency.key}`);
+        }
+        declaredKeys.add(dependency.key);
+      }
+      const recordedBindings = Object.entries(item.dependencyBindings);
+      if (
+        recordedBindings.length !== declarations.length ||
+        recordedBindings.some(([key]) => !declaredKeys.has(key))
+      ) {
+        throw new Error(`生成记录中的依赖绑定与当前参考包不一致：${id}`);
+      }
+      const dependencies = declarations.map((dependency) => {
+        const providerId = item.dependencyBindings[dependency.key];
+        const providerRecord =
+          providerId === undefined ? undefined : recordsById.get(providerId);
+        const providerContent =
+          providerId === undefined ? undefined : contentsById.get(providerId);
+        if (
+          providerId === undefined ||
+          providerRecord === undefined ||
+          providerContent === undefined ||
+          contentIdentityKey(providerContent.identity) !==
+            contentIdentityKey(dependency.contentIdentity)
+        ) {
+          throw new Error(
+            `生成记录包含无效依赖绑定：${id} → ${dependency.key}`,
+          );
+        }
+        const expectedInput = requireParsedCreationInput(
+          providerContent,
+          dependency.creationInput,
+        );
+        if (
+          !isDeepStrictEqual(
+            inputsById.get(providerId) ?? null,
+            expectedInput ?? null,
+          )
+        ) {
+          throw new Error(
+            `生成记录中的依赖创建事实不一致：${id} → ${dependency.key}`,
+          );
+        }
+        return { key: dependency.key, package: buildDraft(providerId) };
+      });
+      visiting.delete(id);
+
+      const { packageDefinitionId: _id, ...definition } = persistedDefinition;
+      const draft: PackageNodeDraft<ContentCreationInput<Members>> = {
+        content,
+        definition,
+        creationInput: inputsById.get(id),
+        layout: undefined,
+        nodeIdentity: `restored-${id}`,
+        restored: {
+          packageDefinitionId: id,
+          createdBy: item.createdBy,
+        },
+        dependencies,
+      };
+      draftsById.set(id, draft);
+      return draft;
+    };
+
+    const reachable = new Set<PackageDefinitionId>();
+    const collectReachable = (id: PackageDefinitionId): void => {
+      if (reachable.has(id)) return;
+      reachable.add(id);
+      const item = recordsById.get(id);
+      if (item === undefined) throw new Error(`未知包实例：${id}`);
+      for (const providerId of Object.values(item.dependencyBindings)) {
+        collectReachable(providerId);
+      }
+    };
+
+    const result = generationRecord.selections.map((selection) => {
+      const nodeEntries = Object.entries(selection.nodes);
+      requireUniqueNodes(
+        nodeEntries.map(([nodeIdentity]) => ({ nodeIdentity })),
+      );
+      if (selection.presetIdentity !== null) {
+        const preset = contentIndex.resolve(
+          selection.presetIdentity,
+          "preset",
+        ) as RuntimePreset;
+        const definition = preset.definition;
+        if (
+          !isRecord(definition) ||
+          definition.kind !== "preset" ||
+          !isRecord(definition.nodes)
+        ) {
+          throw new Error(
+            `预设定义无效：${contentIdentityLabel(preset.identity)}`,
+          );
+        }
+        const presetNodes = Object.entries(definition.nodes);
+        if (
+          presetNodes.length !== nodeEntries.length ||
+          presetNodes.some(
+            ([nodeIdentity]) => !Object.hasOwn(selection.nodes, nodeIdentity),
+          )
+        ) {
+          throw new Error(
+            `生成记录中的预设选择与当前定义不一致：${contentIdentityLabel(preset.identity)}`,
+          );
+        }
+        for (const [nodeIdentity, node] of presetNodes) {
+          if (!isRecord(node) || !isRecord(node.reference)) {
+            throw new Error(`预设节点定义无效：${nodeIdentity}`);
+          }
+          const rootRecord = recordsById.get(selection.nodes[nodeIdentity]!);
+          const rootContent =
+            rootRecord === undefined
+              ? undefined
+              : contentsById.get(rootRecord.packageDefinitionId);
+          const expected = resolveReference({
+            alias: String(node.reference.alias),
+            namespace: preset.identity.namespace,
+          });
+          if (
+            rootContent === undefined ||
+            contentIdentityKey(rootContent.identity) !==
+              contentIdentityKey(expected.identity)
+          ) {
+            throw new Error(`生成记录中的预设节点引用不一致：${nodeIdentity}`);
+          }
+        }
+      }
+      const roots = nodeEntries.map(([nodeIdentity, id]) => {
+        collectReachable(id);
+        return { ...buildDraft(id), nodeIdentity };
+      });
+      // 规范化 JSON 会按键名排序 nodes，无法从记录恢复原始根数组顺序。
+      return {
+        presetIdentity: selection.presetIdentity,
+        selectionId: selection.selectionId,
+        recordedNodeIds: selection.nodes,
+        roots,
+      };
+    });
+    if (reachable.size !== recordsById.size) {
+      throw new Error("生成记录包含未被选择引用的包实例");
+    }
+    return result;
+  };
+
+  async function prepareProjectInternal(
     prepareOptions: {
-      readonly selection: GeneratorSelection<ContentCreationInput<Members>>;
-      readonly conventions: unknown;
+      readonly selection?: GeneratorSelection<ContentCreationInput<Members>>;
+      readonly conventions?: unknown;
+      readonly restored?: RestoredProject;
+      readonly operation: "init" | "add";
     } & OperationFactsInput<CompositionOperationFacts<CompositionDefinition>>,
   ): Promise<
     PreparedProject<
@@ -667,14 +1194,121 @@ export function createGenerator<
       CompositionOperationFacts<CompositionDefinition>
     >
   > {
-    const conventions = composition.parseConventions(
-      prepareOptions.conventions,
-    ) as CompositionConventions<CompositionDefinition>;
+    const parsedConventions = prepareOptions.restored
+      ? composition.parseConventions(
+          prepareOptions.restored.generationRecord.composition.conventions,
+        )
+      : composition.parseConventions(prepareOptions.conventions);
+    const conventions =
+      parsedConventions as CompositionConventions<CompositionDefinition>;
     assertJsonValue(conventions, "组合约定");
-    const selectionDrafts: PackageSelectionDraft<
-      ContentCreationInput<Members>
-    >[] = [];
-    const directRoots = prepareOptions.selection.roots ?? [];
+    if (
+      prepareOptions.restored &&
+      !isDeepStrictEqual(
+        conventions,
+        prepareOptions.restored.generationRecord.composition.conventions,
+      )
+    ) {
+      throw new Error("生成记录中的组合约定不符合当前组合定义");
+    }
+    const selectionDrafts = prepareOptions.restored
+      ? restoredSelectionDrafts(prepareOptions.restored)
+      : [];
+    const sharedDrafts = new Map<
+      string,
+      PackageNodeDraft<ContentCreationInput<Members>>
+    >();
+    const indexSharedDrafts = (
+      roots: readonly PackageNodeDraft<ContentCreationInput<Members>>[],
+    ): void => {
+      for (const root of roots) {
+        if (root.content.definition.instance === "shared") {
+          sharedDrafts.set(contentIdentityKey(root.content.identity), root);
+        }
+        indexSharedDrafts(root.dependencies.map((item) => item.package));
+      }
+    };
+    for (const selectionDraft of selectionDrafts) {
+      indexSharedDrafts(selectionDraft.roots);
+    }
+    const operation = prepareOptions.operation;
+
+    const identifyDraftSelection = (
+      presetIdentity: ContentIdentity | null,
+      roots: readonly {
+        readonly content: RuntimeReference;
+        readonly nodeIdentity: string;
+        readonly creationInput: ContentCreationInput<Members> | undefined;
+        readonly definition: PackageDefinition;
+      }[],
+    ): string =>
+      selectionId({
+        compositionIdentity: composition.identity,
+        presetIdentity,
+        roots: roots.map((root) => ({
+          nodeIdentity: root.nodeIdentity,
+          contentIdentity: root.content.identity,
+          creationInput: root.creationInput ?? null,
+          definition: root.definition,
+        })),
+      });
+
+    const appendSelection = (
+      group: PackageSelectionDraft<ContentCreationInput<Members>>,
+    ): void => {
+      const existing = selectionDrafts.find(
+        (candidate) => candidate.selectionId === group.selectionId,
+      );
+      if (existing !== undefined) {
+        const existingRoots = existing.roots
+          .map((root) => ({
+            nodeIdentity: root.nodeIdentity,
+            identity: contentIdentityKey(root.content.identity),
+            creationInput: root.creationInput ?? null,
+            definition: root.definition,
+          }))
+          .toSorted((left, right) =>
+            left.nodeIdentity < right.nodeIdentity
+              ? -1
+              : left.nodeIdentity > right.nodeIdentity
+                ? 1
+                : 0,
+          );
+        const requestedRoots = group.roots
+          .map((root) => ({
+            nodeIdentity: root.nodeIdentity,
+            identity: contentIdentityKey(root.content.identity),
+            creationInput: root.creationInput ?? null,
+            definition: root.definition,
+          }))
+          .toSorted((left, right) =>
+            left.nodeIdentity < right.nodeIdentity
+              ? -1
+              : left.nodeIdentity > right.nodeIdentity
+                ? 1
+                : 0,
+          );
+        const existingPresetIdentity =
+          existing.presetIdentity === null
+            ? null
+            : contentIdentityKey(existing.presetIdentity);
+        const requestedPresetIdentity =
+          group.presetIdentity === null
+            ? null
+            : contentIdentityKey(group.presetIdentity);
+        if (existingPresetIdentity === requestedPresetIdentity) {
+          if (!isDeepStrictEqual(existingRoots, requestedRoots)) {
+            throw new Error("相同选择标识对应不同的包创建事实");
+          }
+          return;
+        }
+        throw new Error("生成记录包含重复选择标识");
+      }
+      selectionDrafts.push(group);
+    };
+
+    const selection = prepareOptions.selection;
+    const directRoots = selection?.roots ?? [];
     if (directRoots.length > 0) {
       const selectedRoots = directRoots.map((root) => ({
         content: resolveReference(root.contentIdentity),
@@ -699,24 +1333,24 @@ export function createGenerator<
           ),
         };
       });
-      const group = {
+      const roots = preparedRoots.map((root) =>
+        makePackageNodeDraft({
+          ...root,
+          conventions,
+          ancestry: [],
+          sharedDrafts,
+        }),
+      );
+      requireUniqueNodes(roots);
+      appendSelection({
         presetIdentity: null,
-        roots: [] as PackageNodeDraft<ContentCreationInput<Members>>[],
-      };
-      selectionDrafts.push(group);
-      for (const root of preparedRoots) {
-        group.roots.push(
-          makePackageNodeDraft({
-            ...root,
-            conventions,
-            ancestry: [],
-          }),
-        );
-      }
-      requireUniqueNodes(group.roots);
+        selectionId: identifyDraftSelection(null, preparedRoots),
+        createdBy: operation === "init" ? "initialization" : "addition",
+        roots,
+      });
     }
 
-    for (const presetRequest of prepareOptions.selection.presets ?? []) {
+    for (const presetRequest of selection?.presets ?? []) {
       const presetMember = contentIndex.resolve(
         presetRequest.contentIdentity,
         "preset",
@@ -732,9 +1366,9 @@ export function createGenerator<
         );
       }
       const definition = preset as unknown as PresetSelectionDefinition;
-      if (!definition.operations.includes("init")) {
+      if (!definition.operations.includes(operation)) {
         throw new Error(
-          `预设不支持初始化：${contentIdentityLabel(presetMember.identity)}`,
+          `预设不支持${operation === "init" ? "初始化" : "加包"}：${contentIdentityLabel(presetMember.identity)}`,
         );
       }
       const entries = Object.entries(definition.nodes);
@@ -743,11 +1377,6 @@ export function createGenerator<
       if (presetRequest.creationInput !== undefined && entries.length !== 1) {
         throw new Error("多节点预设不能接收单个软件包创建输入");
       }
-      const group = {
-        presetIdentity: presetMember.identity,
-        roots: [] as PackageNodeDraft<ContentCreationInput<Members>>[],
-      };
-      selectionDrafts.push(group);
       const presetRoots: {
         readonly content: RuntimeReference;
         readonly nodeIdentity: string;
@@ -756,7 +1385,7 @@ export function createGenerator<
       }[] = [];
       for (const [nodeIdentity, node] of entries) {
         const selectedInput = mergeCreationInput(
-          node.creationInput?.init,
+          node.creationInput?.[operation],
           presetRequest.creationInput,
         );
         const content = resolveReference({
@@ -787,20 +1416,34 @@ export function createGenerator<
           ),
         };
       });
-      for (const root of preparedRoots) {
-        group.roots.push(
-          makePackageNodeDraft({
-            ...root,
-            conventions,
-            ancestry: [],
-          }),
-        );
-      }
-      requireUniqueNodes(group.roots);
+      const roots = preparedRoots.map((root) =>
+        makePackageNodeDraft({
+          ...root,
+          conventions,
+          ancestry: [],
+          sharedDrafts,
+        }),
+      );
+      requireUniqueNodes(roots);
+      appendSelection({
+        presetIdentity: presetMember.identity,
+        selectionId: identifyDraftSelection(
+          presetMember.identity,
+          preparedRoots,
+        ),
+        createdBy: operation === "init" ? "initialization" : "addition",
+        roots,
+      });
     }
 
     if (selectionDrafts.length === 0) {
-      throw new Error("初始化至少需要选择一个参考包或预设");
+      throw new Error(
+        prepareOptions.restored
+          ? "生成记录至少需要一个选择"
+          : operation === "init"
+            ? "初始化至少需要选择一个参考包或预设"
+            : "加包至少需要选择一个参考包或预设",
+      );
     }
     const selectedPaths = [
       ...new Set(
@@ -817,6 +1460,15 @@ export function createGenerator<
       }
       selections.push({
         presetIdentity: selection.presetIdentity,
+        ...(selection.selectionId === undefined
+          ? {}
+          : { selectionId: selection.selectionId }),
+        ...(selection.recordedNodeIds === undefined
+          ? {}
+          : { recordedNodeIds: selection.recordedNodeIds }),
+        ...(selection.createdBy === undefined
+          ? {}
+          : { createdBy: selection.createdBy }),
         roots,
       });
     }
@@ -826,6 +1478,121 @@ export function createGenerator<
       selections,
       operationFacts:
         prepareOptions.operationFacts as CompositionOperationFacts<CompositionDefinition>,
+      ...(prepareOptions.restored === undefined
+        ? {}
+        : { restored: prepareOptions.restored }),
+    };
+  }
+
+  async function prepareProject(
+    prepareOptions: {
+      readonly selection: GeneratorSelection<ContentCreationInput<Members>>;
+      readonly conventions: unknown;
+    } & OperationFactsInput<CompositionOperationFacts<CompositionDefinition>>,
+  ): Promise<
+    PreparedProject<
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>,
+      CompositionDefinition,
+      CompositionOperationFacts<CompositionDefinition>
+    >
+  > {
+    return prepareProjectInternal({ ...prepareOptions, operation: "init" });
+  }
+
+  async function restoreProject(restoreOptions: {
+    readonly repositoryRoot: string;
+  }): Promise<GeneratorRestoredProject<ContentCreationInput<Members>>> {
+    const targetRoot = path.resolve(restoreOptions.repositoryRoot);
+    const { restored, readFacts } = await readRestoredProject(targetRoot);
+    restoredSelectionDrafts(restored);
+    const definitionsById = new Map(
+      restored.blueprint.packages.map((definition) => [
+        definition.packageDefinitionId,
+        definition,
+      ]),
+    );
+    const packages = restored.generationRecord.packages.map((item) => {
+      const definition = definitionsById.get(item.packageDefinitionId);
+      if (definition === undefined) {
+        throw new Error(`项目蓝图缺少包实例：${item.packageDefinitionId}`);
+      }
+      return {
+        ...item,
+        definition,
+      } as CompositionPackage<ContentCreationInput<Members>>;
+    });
+    return {
+      ...restored,
+      targetRoot,
+      packages,
+      selections: restored.generationRecord.selections,
+      readFacts,
+    };
+  }
+
+  const additionSelection = (
+    selection: GeneratorAdditionSelection<ContentCreationInput<Members>>,
+  ): GeneratorSelection<ContentCreationInput<Members>> =>
+    "preset" in selection
+      ? {
+          presets: [
+            {
+              contentIdentity: selection.preset,
+              ...(selection.creationInput === undefined
+                ? {}
+                : { creationInput: selection.creationInput }),
+            },
+          ],
+        }
+      : {
+          roots: [
+            {
+              nodeIdentity: selection.nodeIdentity ?? "addition",
+              contentIdentity: selection.contentIdentity,
+              ...(selection.creationInput === undefined
+                ? {}
+                : { creationInput: selection.creationInput }),
+              ...(selection.layout === undefined
+                ? {}
+                : { layout: selection.layout }),
+            },
+          ],
+        };
+
+  async function prepareAddProject(prepareOptions: {
+    readonly restored: GeneratorRestoredProject<ContentCreationInput<Members>>;
+    readonly selection: GeneratorAdditionSelection<
+      ContentCreationInput<Members>
+    >;
+    readonly operationFacts: CompositionOperationFacts<CompositionDefinition>;
+  }): Promise<
+    GeneratorAdditionPreparation<
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>,
+      CompositionDefinition,
+      CompositionOperationFacts<CompositionDefinition>
+    >
+  > {
+    const restored: RestoredProject = {
+      blueprint: prepareOptions.restored.blueprint,
+      generationRecord: prepareOptions.restored.generationRecord,
+    };
+    const common = {
+      restored,
+      operation: "add" as const,
+      operationFacts: prepareOptions.operationFacts,
+    };
+    const before = await prepareProjectInternal(common);
+    const after = await prepareProjectInternal({
+      ...common,
+      selection: additionSelection(prepareOptions.selection),
+    });
+    return {
+      restored: prepareOptions.restored,
+      before,
+      after,
+      readFacts: prepareOptions.restored.readFacts,
     };
   }
 
@@ -842,16 +1609,23 @@ export function createGenerator<
     }
     const nodes: PackageNode[] = [];
     const sharedNodes = new Map<string, PackageNode>();
+    const nodesById = new Map<PackageDefinitionId, PackageNode>();
     const selectionRecords: GenerationRecordSelection[] = [];
-    const explicitlySelectedSharedReferences = new Set(
-      preparedProject.selections.flatMap((selection) =>
-        selection.roots.flatMap((root) =>
-          root.content.definition.instance === "shared"
-            ? [contentIdentityKey(root.content.identity)]
-            : [],
-        ),
-      ),
-    );
+    const explicitlySelectedSharedReferences = new Map<
+      string,
+      "initialization" | "addition"
+    >();
+    for (const selection of preparedProject.selections) {
+      if (selection.createdBy === undefined) continue;
+      for (const root of selection.roots) {
+        if (root.content.definition.instance === "shared") {
+          explicitlySelectedSharedReferences.set(
+            contentIdentityKey(root.content.identity),
+            selection.createdBy,
+          );
+        }
+      }
+    }
 
     const makeNode = (
       prepared: PreparedNode,
@@ -859,6 +1633,27 @@ export function createGenerator<
       discriminator: string,
     ): PackageNode => {
       const identityKey = contentIdentityKey(prepared.content.identity);
+      const restoredId = prepared.restored?.packageDefinitionId;
+      if (restoredId !== undefined) {
+        const restored = nodesById.get(restoredId);
+        if (restored !== undefined) {
+          if (
+            contentIdentityKey(restored.content.identity) !== identityKey ||
+            !isDeepStrictEqual(restored.definition, {
+              ...prepared.definition,
+              packageDefinitionId: restoredId,
+            }) ||
+            !isDeepStrictEqual(
+              restored.creationInput,
+              prepared.creationInput ?? null,
+            ) ||
+            !isDeepStrictEqual(restored.preparation, prepared.preparation)
+          ) {
+            throw new Error(`生成记录中的包实例事实不一致：${restoredId}`);
+          }
+          return restored;
+        }
+      }
       const sharedKey =
         prepared.content.definition.instance === "shared"
           ? identityKey
@@ -885,24 +1680,30 @@ export function createGenerator<
               `共享参考包的创建事实不一致：${contentIdentityLabel(prepared.content.identity)}`,
             );
           }
+          if (restoredId !== undefined && existing.id !== restoredId) {
+            throw new Error(`共享实例标识与生成记录不一致：${restoredId}`);
+          }
           return existing;
         }
       }
       const effectiveCreatedBy =
-        sharedKey !== undefined &&
-        explicitlySelectedSharedReferences.has(sharedKey)
-          ? "initialization"
-          : createdBy;
+        prepared.restored?.createdBy ??
+        (sharedKey === undefined
+          ? undefined
+          : explicitlySelectedSharedReferences.get(sharedKey)) ??
+        createdBy;
       const definition = {
         ...prepared.definition,
-        packageDefinitionId: packageId({
-          contentIdentity: prepared.content.identity,
-          definition: prepared.definition,
-          creationInput: prepared.creationInput ?? null,
-          createdBy: effectiveCreatedBy,
-          discriminator:
-            sharedKey === undefined ? discriminator : "shared-reference",
-        }),
+        packageDefinitionId:
+          restoredId ??
+          packageId({
+            contentIdentity: prepared.content.identity,
+            definition: prepared.definition,
+            creationInput: prepared.creationInput ?? null,
+            createdBy: effectiveCreatedBy,
+            discriminator:
+              sharedKey === undefined ? discriminator : "shared-reference",
+          }),
       } as PersistedPackageDefinition;
       const node: PackageNode = {
         id: definition.packageDefinitionId,
@@ -914,6 +1715,7 @@ export function createGenerator<
         dependencies: new Map(),
       };
       nodes.push(node);
+      nodesById.set(node.id, node);
       if (sharedKey !== undefined) sharedNodes.set(sharedKey, node);
       for (const dependency of prepared.dependencies) {
         const provider = makeNode(
@@ -927,30 +1729,58 @@ export function createGenerator<
     };
 
     for (const selection of preparedProject.selections) {
-      const id = selectionId({
-        compositionIdentity: composition.identity,
-        presetIdentity: selection.presetIdentity,
-        roots: selection.roots.map((root) => ({
-          nodeIdentity: root.nodeIdentity,
-          contentIdentity: root.content.identity,
-          creationInput: root.creationInput ?? null,
-          definition: root.definition,
-        })),
-      });
+      const id =
+        selection.selectionId ??
+        selectionId({
+          compositionIdentity: composition.identity,
+          presetIdentity: selection.presetIdentity,
+          roots: selection.roots.map((root) => ({
+            nodeIdentity: root.nodeIdentity,
+            contentIdentity: root.content.identity,
+            creationInput: root.creationInput ?? null,
+            definition: root.definition,
+          })),
+        });
       const nodeIds: Record<string, PackageDefinitionId> = {};
       for (const root of selection.roots) {
         const node = makeNode(
           root,
-          "initialization",
+          selection.createdBy ?? "initialization",
           `${id}:${root.nodeIdentity}`,
         );
+        const expected = selection.recordedNodeIds?.[root.nodeIdentity];
+        if (expected !== undefined && expected !== node.id) {
+          throw new Error(
+            `生成记录中的选择节点实例不一致：${root.nodeIdentity}`,
+          );
+        }
         nodeIds[root.nodeIdentity] = node.id;
+      }
+      if (
+        selection.recordedNodeIds !== undefined &&
+        Object.keys(selection.recordedNodeIds).length !==
+          Object.keys(nodeIds).length
+      ) {
+        throw new Error(`生成记录中的选择节点数量不一致：${id}`);
       }
       selectionRecords.push({
         selectionId: id,
         presetIdentity: selection.presetIdentity,
         nodes: nodeIds,
       });
+    }
+
+    if (preparedProject.restored !== undefined) {
+      const recordedOrder = new Map(
+        preparedProject.restored.generationRecord.packages.map(
+          (item, index) => [item.packageDefinitionId, index],
+        ),
+      );
+      nodes.sort(
+        (left, right) =>
+          (recordedOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+          (recordedOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER),
+      );
     }
 
     const packageRecords: GenerationRecordPackage<JsonValue>[] = nodes.map(
@@ -1020,6 +1850,38 @@ export function createGenerator<
       ...provisionalBlueprint,
       packageLinkIntents: resolution.packageLinkIntents ?? [],
     });
+
+    if (preparedProject.restored !== undefined) {
+      const existingIds = new Set(
+        preparedProject.restored.generationRecord.packages.map(
+          (item) => item.packageDefinitionId,
+        ),
+      );
+      const existingBlueprintPackages = blueprint.packages.filter((item) =>
+        existingIds.has(item.packageDefinitionId),
+      );
+      const recordedBlueprintPackages =
+        preparedProject.restored.blueprint.packages.filter((item) =>
+          existingIds.has(item.packageDefinitionId),
+        );
+      if (
+        !isDeepStrictEqual(existingBlueprintPackages, recordedBlueprintPackages)
+      ) {
+        throw new Error("回放后的包定义与持久蓝图不一致");
+      }
+      const existingLinks = blueprint.packageLinkIntents.filter(
+        ({ consumerId, providerId }) =>
+          existingIds.has(consumerId) && existingIds.has(providerId),
+      );
+      if (
+        !isDeepStrictEqual(
+          existingLinks,
+          preparedProject.restored.blueprint.packageLinkIntents,
+        )
+      ) {
+        throw new Error("回放后的显式包连接与持久蓝图不一致");
+      }
+    }
 
     const visiting = new Set<PackageDefinitionId>();
     const complete = new Set<PackageDefinitionId>();
@@ -1297,7 +2159,7 @@ export function createGenerator<
           actions: [],
         };
       }
-      pendingInitializationPlans.set(planning.plan, {
+      pendingPlans.set(planning.plan, {
         targetRoot: current.targetRoot,
         computed,
       });
@@ -1319,6 +2181,239 @@ export function createGenerator<
     }
   }
 
+  async function planComputedAdd(options: {
+    readonly preparation: GeneratorAdditionPreparation<
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>,
+      CompositionDefinition,
+      CompositionOperationFacts<CompositionDefinition>
+    >;
+    readonly before: InitializedProject;
+    readonly after: InitializedProject;
+    readonly readFacts?: readonly CurrentProjectProjectionEntry[];
+  }): Promise<
+    GeneratorPlanningResult<
+      CompositionOwnerFacts<CompositionDefinition>,
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>
+    >
+  > {
+    const { preparation, before } = options;
+    let after: InitializedProject;
+    try {
+      if (
+        !isDeepStrictEqual(
+          before.generationRecord,
+          preparation.restored.generationRecord,
+        ) ||
+        !isDeepStrictEqual(before.blueprint, preparation.restored.blueprint)
+      ) {
+        throw new Error("Before 计算结果与恢复的项目记录不一致");
+      }
+      const afterPackages = new Map(
+        options.after.generationRecord.packages.map((item) => [
+          item.packageDefinitionId,
+          item,
+        ]),
+      );
+      const afterDefinitions = new Map(
+        options.after.blueprint.packages.map((item) => [
+          item.packageDefinitionId,
+          item,
+        ]),
+      );
+      for (const item of before.generationRecord.packages) {
+        if (
+          !isDeepStrictEqual(afterPackages.get(item.packageDefinitionId), item)
+        ) {
+          throw new Error(
+            `After 未保留既有包实例事实：${item.packageDefinitionId}`,
+          );
+        }
+      }
+      for (const item of before.blueprint.packages) {
+        if (
+          !isDeepStrictEqual(
+            afterDefinitions.get(item.packageDefinitionId),
+            item,
+          )
+        ) {
+          throw new Error(
+            `After 未保留既有包定义：${item.packageDefinitionId}`,
+          );
+        }
+      }
+      for (const selection of before.generationRecord.selections) {
+        if (
+          !isDeepStrictEqual(
+            options.after.generationRecord.selections.find(
+              (item) => item.selectionId === selection.selectionId,
+            ),
+            selection,
+          )
+        ) {
+          throw new Error(`After 未保留既有内容选择：${selection.selectionId}`);
+        }
+      }
+      if (
+        !isDeepStrictEqual(
+          options.after.generationRecord.composition,
+          before.generationRecord.composition,
+        )
+      ) {
+        throw new Error("After 未保留既有组合事实");
+      }
+      after = {
+        ...options.after,
+        projection: preserveProjectionPaths(
+          before.projection,
+          options.after.projection,
+        ),
+      };
+    } catch (error) {
+      return {
+        status: "operation-failure",
+        phase: "calculation",
+        error: { message: errorMessage(error) },
+      };
+    }
+
+    try {
+      const existingIds = new Set(
+        before.blueprint.packages.map((item) => item.packageDefinitionId),
+      );
+      const newPackages = after.blueprint.packages.filter(
+        (item) => !existingIds.has(item.packageDefinitionId),
+      );
+      const sourcesById = new Map(
+        after.packages.map(({ package: item }) => [
+          item.packageDefinitionId,
+          {
+            identity: `content:${contentIdentityKey(item.contentIdentity)}:${item.packageDefinitionId}`,
+            label: `${contentIdentityLabel(item.contentIdentity)}（${item.definition.path}）`,
+          } satisfies ProjectProjectionSource,
+        ]),
+      );
+      const preconditions: readonly ProjectProjectionPathPrecondition[] =
+        newPackages
+          .filter((item) => item.path !== ".")
+          .map((item) => ({
+            path: item.path,
+            kind: "must-not-exist" as const,
+            reason: `新包路径必须不存在：${item.path}`,
+            ...(sourcesById.get(item.packageDefinitionId) === undefined
+              ? {}
+              : { sources: [sourcesById.get(item.packageDefinitionId)!] }),
+          }));
+      const current = await readProjectProjectionCurrent({
+        targetRoot: preparation.restored.targetRoot,
+        before: before.projection,
+        after: after.projection,
+        preconditions,
+      });
+      const planning = planProjectProjections({
+        before: before.projection,
+        current,
+        after: after.projection,
+        preconditions,
+        readFacts: [...preparation.readFacts, ...(options.readFacts ?? [])],
+      });
+      if (!planning.ok) {
+        return {
+          status: "conflict",
+          reason: conflictReason(planning.conflicts),
+          conflicts: planning.conflicts,
+          actions: [],
+        };
+      }
+      pendingPlans.set(planning.plan, {
+        targetRoot: current.targetRoot,
+        computed: after,
+      });
+      return {
+        status: "planned",
+        plan: planning.plan,
+        blueprint: after.blueprint,
+        generationRecord: after.generationRecord,
+        projection: after.projection,
+        ownerFacts: after.ownerFacts,
+        actions: planning.plan.actions,
+      };
+    } catch (error) {
+      return {
+        status: "operation-failure",
+        phase: "planning",
+        error: { message: errorMessage(error) },
+      };
+    }
+  }
+
+  async function planAdd(
+    addOptions: GeneratorAdditionOptions<
+      ContentCreationInput<Members>,
+      CompositionOperationFacts<CompositionDefinition>
+    >,
+  ): Promise<
+    GeneratorPlanningResult<
+      CompositionOwnerFacts<CompositionDefinition>,
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>
+    >
+  > {
+    const targetRoot = path.resolve(addOptions.repositoryRoot);
+    let restored: GeneratorRestoredProject<ContentCreationInput<Members>>;
+    try {
+      restored = await restoreProject({ repositoryRoot: targetRoot });
+    } catch (error) {
+      return {
+        status: "operation-failure",
+        phase: "metadata",
+        error: { message: errorMessage(error) },
+      };
+    }
+
+    let preparation: GeneratorAdditionPreparation<
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>,
+      CompositionDefinition,
+      CompositionOperationFacts<CompositionDefinition>
+    >;
+    try {
+      preparation = await prepareAddProject({
+        restored,
+        selection: addOptions,
+        operationFacts: addOptions.operationFacts,
+      });
+    } catch (error) {
+      return {
+        status: "operation-failure",
+        phase: "preparation",
+        error: { message: errorMessage(error) },
+      };
+    }
+
+    let before: InitializedProject;
+    let after: InitializedProject;
+    try {
+      before = computeProject(preparation.before);
+      after = computeProject(preparation.after);
+    } catch (error) {
+      return {
+        status: "operation-failure",
+        phase: "calculation",
+        error: { message: errorMessage(error) },
+      };
+    }
+    return planComputedAdd({
+      preparation,
+      before,
+      after,
+      ...(addOptions.readFacts === undefined
+        ? {}
+        : { readFacts: addOptions.readFacts }),
+    });
+  }
+
   async function commitPlan(
     plan: ProjectProjectionChangePlan,
   ): Promise<
@@ -1328,12 +2423,15 @@ export function createGenerator<
       ContentCreationInput<Members>
     >
   > {
-    const pending = pendingInitializationPlans.get(plan);
+    const pending = pendingPlans.get(plan);
     if (pending === undefined) {
       return {
         status: "operation-failure",
         phase: "commit",
-        error: { message: "提交计划必须由当前生成器的 planInit 创建" },
+        error: {
+          message:
+            "提交计划必须由当前生成器的 planInit、planAdd 或 planComputedAdd 创建",
+        },
       };
     }
     try {
@@ -1405,10 +2503,45 @@ export function createGenerator<
     };
   }
 
+  async function add(
+    addOptions: GeneratorAdditionOptions<
+      ContentCreationInput<Members>,
+      CompositionOperationFacts<CompositionDefinition>
+    > & { readonly dryRun?: boolean },
+  ): Promise<
+    GeneratorResult<
+      CompositionOwnerFacts<CompositionDefinition>,
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>
+    >
+  > {
+    const { dryRun = false, ...planningOptions } = addOptions;
+    const planned = await planAdd(planningOptions);
+    if (planned.status === "operation-failure") return planned;
+    if (planned.status === "conflict") {
+      return { ...planned, dryRun, actions: [] };
+    }
+    if (!dryRun) return commitPlan(planned.plan);
+    return {
+      status: "success",
+      dryRun: true,
+      blueprint: planned.blueprint,
+      generationRecord: planned.generationRecord,
+      projection: planned.projection,
+      ownerFacts: planned.ownerFacts,
+      actions: planned.actions,
+    };
+  }
+
   return {
     init,
+    add,
     planInit,
+    planAdd,
+    planComputedAdd,
     commitPlan,
+    restoreProject,
+    prepareAddProject,
     prepareProject,
     computeProject,
   } as unknown as Generator<
