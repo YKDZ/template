@@ -252,7 +252,7 @@ void describe("TypeScript CLI 公开预设", () => {
         ...(usePreset
           ? { preset: preset.identity }
           : { contentIdentity: cli.identity, nodeIdentity: "cli" }),
-        creationInput: { linkToNodeIdentity: "library" },
+        creationInput: { linkTo: { nodeIdentity: "library" } },
       });
       assert.strictEqual(planned.status, "planned", JSON.stringify(planned));
       if (planned.status !== "planned") {
@@ -287,7 +287,7 @@ void describe("TypeScript CLI 公开预设", () => {
         preset: preset.identity,
         creationInput: {
           leafName: "cli-extra",
-          linkToNodeIdentity: "library",
+          linkTo: { nodeIdentity: "library" },
         },
       });
       assert.strictEqual(
@@ -314,6 +314,95 @@ void describe("TypeScript CLI 公开预设", () => {
     }
   });
 
+  void it("按实例ID选择同名库，并在后续加包时保留该连接", async () => {
+    const targetRoot = await createTargetRoot("template-ts-cli-instance-link-");
+    const generator = createDefaultGenerator({ content });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: {
+        presets: [
+          {
+            contentIdentity: libraryPreset.identity,
+            creationInput: { leafName: "lib-one" },
+          },
+          {
+            contentIdentity: libraryPreset.identity,
+            creationInput: { leafName: "lib-two" },
+          },
+        ],
+      },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+    if (initialized.status !== "success") {
+      throw new Error("两个同名节点应初始化为不同的包实例");
+    }
+    const selectedLibrary = initialized.blueprint.packages.find(
+      ({ path: packagePath }) => packagePath === "packages/lib-two",
+    );
+    assert.ok(selectedLibrary);
+
+    const linked = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: cli.identity,
+      nodeIdentity: "cli",
+      creationInput: {
+        linkTo: { packageDefinitionId: selectedLibrary.packageDefinitionId },
+      },
+    });
+    assert.strictEqual(linked.status, "success", JSON.stringify(linked));
+    if (linked.status !== "success") {
+      throw new Error("CLI应按实例ID连接指定的库");
+    }
+    const cliPackage = linked.blueprint.packages.find(
+      ({ path: packagePath }) => packagePath === "packages/cli",
+    );
+    assert.ok(cliPackage);
+    assert.deepStrictEqual(linked.blueprint.packageLinkIntents, [
+      {
+        consumerId: cliPackage.packageDefinitionId,
+        providerId: selectedLibrary.packageDefinitionId,
+      },
+    ]);
+    const linkedManifest = await readManifest(targetRoot, "packages/cli");
+    assert.strictEqual(
+      linkedManifest.dependencies["@demo/lib-two"],
+      "workspace:*",
+    );
+    assert.strictEqual(linkedManifest.dependencies["@demo/lib"], undefined);
+
+    const addedSameName = await generator.add({
+      repositoryRoot: targetRoot,
+      preset: libraryPreset.identity,
+      creationInput: { leafName: "lib-three" },
+    });
+    assert.strictEqual(
+      addedSameName.status,
+      "success",
+      JSON.stringify(addedSameName),
+    );
+    if (addedSameName.status !== "success") {
+      throw new Error("后续同名节点不能改变已有CLI连接");
+    }
+    assert.deepStrictEqual(
+      addedSameName.blueprint.packageLinkIntents,
+      linked.blueprint.packageLinkIntents,
+    );
+    assert.strictEqual(
+      (await readManifest(targetRoot, "packages/cli")).dependencies[
+        "@demo/lib-two"
+      ],
+      "workspace:*",
+    );
+  });
+
   void it("未知节点身份或不兼容的原生提供者会在写入前拒绝", async () => {
     const targetRoot = await createTargetRoot("template-ts-cli-invalid-link-");
     const generator = createDefaultGenerator({ content });
@@ -334,9 +423,19 @@ void describe("TypeScript CLI 公开预设", () => {
     const unknown = await generator.add({
       repositoryRoot: targetRoot,
       contentIdentity: cli.identity,
-      creationInput: { linkToNodeIdentity: "not-selected" },
+      creationInput: { linkTo: { nodeIdentity: "not-selected" } },
     });
     assert.strictEqual(unknown.status, "operation-failure");
+    assert.strictEqual(await snapshotTree(targetRoot), beforeUnknown);
+
+    const missingId = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: cli.identity,
+      creationInput: {
+        linkTo: { packageDefinitionId: "package-not-restored" },
+      },
+    });
+    assert.strictEqual(missingId.status, "operation-failure");
     assert.strictEqual(await snapshotTree(targetRoot), beforeUnknown);
 
     const nativeTarget = await createTargetRoot("template-ts-cli-native-link-");
@@ -360,7 +459,7 @@ void describe("TypeScript CLI 公开预设", () => {
     const native = await nativeGenerator.add({
       repositoryRoot: nativeTarget,
       contentIdentity: cli.identity,
-      creationInput: { linkToNodeIdentity: "workspace" },
+      creationInput: { linkTo: { nodeIdentity: "workspace" } },
     });
     assert.strictEqual(native.status, "operation-failure");
     assert.strictEqual(await snapshotTree(nativeTarget), beforeNative);
@@ -402,7 +501,7 @@ void describe("TypeScript CLI 公开预设", () => {
     const staleTargetPlan = await generator.planAdd({
       repositoryRoot: targetRoot,
       contentIdentity: cli.identity,
-      creationInput: { linkToNodeIdentity: "library" },
+      creationInput: { linkTo: { nodeIdentity: "library" } },
     });
     assert.strictEqual(staleTargetPlan.status, "planned");
     if (staleTargetPlan.status !== "planned") {
@@ -417,7 +516,7 @@ void describe("TypeScript CLI 公开预设", () => {
     const staleManifestPlan = await generator.planAdd({
       repositoryRoot: targetRoot,
       contentIdentity: cli.identity,
-      creationInput: { linkToNodeIdentity: "library" },
+      creationInput: { linkTo: { nodeIdentity: "library" } },
     });
     assert.strictEqual(staleManifestPlan.status, "planned");
     if (staleManifestPlan.status !== "planned") {
@@ -440,7 +539,7 @@ void describe("TypeScript CLI 公开预设", () => {
     const unrelatedPlan = await generator.planAdd({
       repositoryRoot: targetRoot,
       contentIdentity: cli.identity,
-      creationInput: { linkToNodeIdentity: "library" },
+      creationInput: { linkTo: { nodeIdentity: "library" } },
     });
     assert.strictEqual(unrelatedPlan.status, "planned");
     if (unrelatedPlan.status !== "planned") {
@@ -467,7 +566,7 @@ void describe("TypeScript CLI 公开预设", () => {
       preset: preset.identity,
       creationInput: {
         leafName: "next-cli",
-        linkToNodeIdentity: "library",
+        linkTo: { nodeIdentity: "library" },
       },
     });
     assert.strictEqual(staleConsumerPlan.status, "planned");
@@ -519,7 +618,7 @@ void describe("TypeScript CLI 公开预设", () => {
     const result = await generator.add({
       repositoryRoot: targetRoot,
       contentIdentity: cli.identity,
-      creationInput: { linkToNodeIdentity: "library" },
+      creationInput: { linkTo: { nodeIdentity: "library" } },
     });
 
     assert.strictEqual(result.status, "operation-failure");
@@ -555,7 +654,7 @@ void describe("TypeScript CLI 公开预设", () => {
       creationInput: {
         leafName: "occupied-cli",
         packagePath: "packages/occupied-cli",
-        linkToNodeIdentity: "library",
+        linkTo: { nodeIdentity: "library" },
       },
     });
 

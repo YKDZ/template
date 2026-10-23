@@ -199,37 +199,57 @@ async function additionFacts(
     linkedPackageIds.add(intent.providerId);
     linkedProviderIds.add(intent.providerId);
   }
-  const requestedLinkToNodeIdentity = isRecord(options.selection.creationInput)
-    ? options.selection.creationInput.linkToNodeIdentity
+  const linkTo = isRecord(options.selection.creationInput)
+    ? options.selection.creationInput.linkTo
     : undefined;
-  if (requestedLinkToNodeIdentity !== undefined) {
-    if (
-      typeof requestedLinkToNodeIdentity !== "string" ||
-      requestedLinkToNodeIdentity.length === 0
-    ) {
-      throw new Error("包连接请求需要非空节点身份");
-    }
-    const providerIds = new Set(
-      options.restored.selections.flatMap((selection) =>
-        Object.hasOwn(selection.nodes, requestedLinkToNodeIdentity)
-          ? [selection.nodes[requestedLinkToNodeIdentity]!]
-          : [],
-      ),
-    );
-    if (providerIds.size === 0) {
-      throw new Error(`包连接节点身份不存在：${requestedLinkToNodeIdentity}`);
-    }
-    if (providerIds.size > 1) {
-      throw new Error(`包连接节点身份不唯一：${requestedLinkToNodeIdentity}`);
-    }
-    const providerId = providerIds.values().next().value;
-    if (providerId === undefined || !currentById.has(providerId)) {
-      throw new Error(
-        `包连接节点身份没有当前实例：${requestedLinkToNodeIdentity}`,
+  if (isRecord(linkTo)) {
+    if (typeof linkTo.packageDefinitionId === "string") {
+      const providerId =
+        linkTo.packageDefinitionId as GeneratorRestoredProject<JsonValue>["blueprint"]["packages"][number]["packageDefinitionId"];
+      if (!currentById.has(providerId)) {
+        throw new Error(`包连接实例ID不存在：${linkTo.packageDefinitionId}`);
+      }
+      linkedPackageIds.add(providerId);
+      linkedProviderIds.add(providerId);
+    } else if (typeof linkTo.nodeIdentity === "string") {
+      const nodeIdentity = linkTo.nodeIdentity;
+      const providerIds = new Set(
+        options.restored.selections.flatMap((selection) =>
+          Object.hasOwn(selection.nodes, nodeIdentity)
+            ? [selection.nodes[nodeIdentity]!]
+            : [],
+        ),
       );
+      if (providerIds.size > 1) {
+        throw new Error(`包连接节点身份不唯一：${nodeIdentity}`);
+      }
+      const providerId = providerIds.values().next().value;
+      if (providerId !== undefined && currentById.has(providerId)) {
+        linkedPackageIds.add(providerId);
+        linkedProviderIds.add(providerId);
+      }
     }
-    linkedPackageIds.add(providerId);
-    linkedProviderIds.add(providerId);
+  }
+  const selectionRecord: unknown = options.selection;
+  const requestedBindings = isRecord(selectionRecord)
+    ? selectionRecord.dependencyBindings
+    : undefined;
+  if (isRecord(requestedBindings)) {
+    for (const binding of Object.values(requestedBindings)) {
+      if (
+        !isRecord(binding) ||
+        typeof binding.packageDefinitionId !== "string"
+      ) {
+        continue;
+      }
+      const providerId =
+        binding.packageDefinitionId as GeneratorRestoredProject<JsonValue>["blueprint"]["packages"][number]["packageDefinitionId"];
+      if (!currentById.has(providerId)) {
+        throw new Error(`依赖绑定实例ID不存在：${binding.packageDefinitionId}`);
+      }
+      linkedPackageIds.add(providerId);
+      linkedProviderIds.add(providerId);
+    }
   }
   for (const packageId of linkedPackageIds) {
     await readPackageManifest(packageId);
@@ -389,6 +409,12 @@ async function additionFacts(
       nodeDeclaration,
       packageManagerPin,
       targetManifests,
+      existingPackageDefinitionIds: new Set(
+        options.restored.blueprint.packages.map(
+          ({ packageDefinitionId }) => packageDefinitionId,
+        ),
+      ),
+      existingPackageLinkIntents: options.restored.blueprint.packageLinkIntents,
     },
     readFacts: currentFacts,
   };

@@ -86,7 +86,10 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
       const targetRoot = path.join(workspace, "demo-cli");
       const packageRoot = path.join(targetRoot, "packages/cli");
       const libraryRoot = path.join(targetRoot, "packages/lib");
-      const packDestination = path.join(workspace, "packs");
+      const unpublishedPackDestination = path.join(
+        workspace,
+        "unpublished-pack",
+      );
       testContext.after(async () =>
         rm(workspace, { recursive: true, force: true }),
       );
@@ -107,7 +110,7 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
       const added = await generator().add({
         repositoryRoot: targetRoot,
         preset: cliPreset.identity,
-        creationInput: { linkToNodeIdentity: "library" },
+        creationInput: { linkTo: { nodeIdentity: "library" } },
       });
       assert.strictEqual(added.status, "success", JSON.stringify(added));
 
@@ -135,10 +138,18 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
       assert.deepStrictEqual(originalManifest.files, ["dist"]);
       assert.strictEqual(Object.hasOwn(originalManifest, "version"), false);
 
-      await mkdir(packDestination);
+      assert.strictEqual(
+        await execa(
+          process.execPath,
+          ["--conditions=source", "src/cli.ts", "--version"],
+          { cwd: packageRoot },
+        ).then(({ stdout }) => stdout),
+        "cli unpublished",
+      );
+      await mkdir(unpublishedPackDestination);
       const unpublishedPack = await execa(
         "pnpm",
-        ["pack", "--pack-destination", packDestination],
+        ["pack", "--pack-destination", unpublishedPackDestination],
         { cwd: packageRoot, cancelSignal: testContext.signal, reject: false },
       );
       assert.strictEqual(unpublishedPack.exitCode, 1);
@@ -151,16 +162,8 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
         await readFile(path.join(packageRoot, "package.json"), "utf8"),
         originalManifestBytes,
       );
-      assert.deepStrictEqual(await readdir(packDestination), []);
+      assert.deepStrictEqual(await readdir(unpublishedPackDestination), []);
 
-      assert.strictEqual(
-        await execa(
-          process.execPath,
-          ["--conditions=source", "src/cli.ts", "--version"],
-          { cwd: packageRoot },
-        ).then(({ stdout }) => stdout),
-        "cli unpublished",
-      );
       const sourceManifest = await readManifest(packageRoot);
       await writeFile(
         path.join(packageRoot, "package.json"),
@@ -168,6 +171,7 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
           {
             ...sourceManifest,
             version: "7.8.9",
+            private: false,
             bin: { release: "./dist/cli.js" },
           },
           null,
@@ -287,19 +291,41 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
         "找到记录：Ada Lovelace（ada）",
       );
 
-      await execa("pnpm", ["pack", "--pack-destination", packDestination], {
-        cwd: libraryRoot,
+      await execa("pnpm", ["run", "publication:pack"], {
+        cwd: targetRoot,
         cancelSignal: testContext.signal,
       });
-      await execa("pnpm", ["pack", "--pack-destination", packDestination], {
-        cwd: packageRoot,
-        cancelSignal: testContext.signal,
-      });
-      const archives = await readdir(packDestination);
-      assert.deepStrictEqual(archives.toSorted(), [
-        "demo-cli-7.8.9.tgz",
-        "demo-lib-1.2.3.tgz",
-      ]);
+      const packedRoot = path.join(targetRoot, ".changeset/packed");
+      const publishPlan = JSON.parse(
+        await readFile(path.join(packedRoot, "publish-plan.json"), "utf8"),
+      ) as {
+        readonly plan: readonly (readonly {
+          readonly name: string;
+          readonly tarball: { readonly path: string };
+        }[])[];
+      };
+      const packedPackages = publishPlan.plan.flat();
+      const packedCli = packedPackages.find(({ name }) => name === "@demo/cli");
+      const packedLibrary = packedPackages.find(
+        ({ name }) => name === "@demo/lib",
+      );
+      assert.ok(packedCli);
+      assert.ok(packedLibrary);
+      assert.deepStrictEqual(
+        packedPackages.map(({ name }) => name).toSorted(),
+        ["@demo/cli", "@demo/lib"],
+      );
+      const cliTarballPath = path.join(packedRoot, packedCli.tarball.path);
+      const libraryTarballPath = path.join(
+        packedRoot,
+        packedLibrary.tarball.path,
+      );
+      const packedCliManifest = JSON.parse(
+        await execa("tar", ["-xOf", cliTarballPath, "package/package.json"], {
+          cancelSignal: testContext.signal,
+        }).then(({ stdout }) => stdout),
+      ) as { readonly dependencies: Readonly<Record<string, string>> };
+      assert.strictEqual(packedCliManifest.dependencies["@demo/lib"], "1.2.3");
       const installedRoot = path.join(workspace, "installed-consumer");
       await mkdir(installedRoot);
       await writeFile(
@@ -308,10 +334,14 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
           private: true,
           packageManager: (await readManifest(targetRoot)).packageManager,
           dependencies: {
-            "@demo/cli": `file:${path.join(packDestination, "demo-cli-7.8.9.tgz")}`,
-            "@demo/lib": `file:${path.join(packDestination, "demo-lib-1.2.3.tgz")}`,
+            "@demo/cli": `file:${cliTarballPath}`,
+            "@demo/lib": `file:${libraryTarballPath}`,
           },
         })}\n`,
+      );
+      await writeFile(
+        path.join(installedRoot, "pnpm-workspace.yaml"),
+        `overrides:\n  '@demo/lib@1.2.3': ${JSON.stringify(`file:${libraryTarballPath}`)}\n`,
       );
       await execa("pnpm", ["install"], {
         cwd: installedRoot,

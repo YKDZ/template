@@ -118,6 +118,9 @@ export type DefaultOperationFacts = {
   readonly resources: DefaultCompositionResources;
   readonly rootDeclarations: readonly DefaultRootDeclaration[];
   readonly rootAttachmentDependencies: readonly DefaultRootAttachmentDependencyFact[];
+  /** 现存创建输入中的一次性连接已由蓝图固定为实例ID。 */
+  readonly existingPackageDefinitionIds: ReadonlySet<PackageDefinitionId>;
+  readonly existingPackageLinkIntents: readonly PackageLinkIntent[];
   /** 本次add明确连接端点读取到的当前manifest；键为恢复后的实例ID。 */
   readonly targetManifests: ReadonlyMap<
     PackageDefinitionId,
@@ -236,6 +239,8 @@ export function prepareDefaultInitOperationFacts(
     resources: options.resources ?? prepareDefaultCompositionResources(),
     rootDeclarations: options.rootDeclarations ?? [],
     rootAttachmentDependencies: options.rootAttachmentDependencies ?? [],
+    existingPackageDefinitionIds: new Set<PackageDefinitionId>(),
+    existingPackageLinkIntents: [],
     targetManifests: new Map(),
   });
 }
@@ -344,6 +349,8 @@ function validateDefaultFacts(
     value.packageManagerPin.trim().length === 0 ||
     !Array.isArray(value.rootDeclarations) ||
     !Array.isArray(value.rootAttachmentDependencies) ||
+    !(value.existingPackageDefinitionIds instanceof Set) ||
+    !Array.isArray(value.existingPackageLinkIntents) ||
     !isRecord(value.resources)
   ) {
     throw new Error("默认工作区本次operationFacts无效");
@@ -420,6 +427,8 @@ function packageLinks(options: {
   readonly packages: readonly CompositionPackage<JsonValue>[];
   readonly content: readonly DefaultContentMember[];
   readonly selections: readonly GenerationRecordSelection[];
+  readonly existingPackageDefinitionIds: ReadonlySet<PackageDefinitionId>;
+  readonly existingPackageLinkIntents: readonly PackageLinkIntent[];
 }): readonly PackageLinkIntent[] {
   const seen = new Set<string>();
   const links: PackageLinkIntent[] = [];
@@ -449,6 +458,9 @@ function packageLinks(options: {
     seen.add(identity);
     links.push({ consumerId, providerId });
   };
+  for (const intent of options.existingPackageLinkIntents) {
+    add(intent.consumerId, intent.providerId);
+  }
 
   for (const consumer of options.packages) {
     const consumerMember = contentByIdentity.get(
@@ -486,27 +498,58 @@ function packageLinks(options: {
     }
 
     const creationInput = consumer.creationInput;
-    if (isRecord(creationInput)) {
-      const linkToNodeIdentity = creationInput.linkToNodeIdentity;
-      if (linkToNodeIdentity !== undefined) {
+    const isExistingPackage = options.existingPackageDefinitionIds.has(
+      consumer.packageDefinitionId,
+    );
+    if (!isExistingPackage && isRecord(creationInput)) {
+      const linkTo = creationInput.linkTo;
+      if (linkTo !== undefined) {
+        if (!isRecord(linkTo)) {
+          throw new Error("包连接目标必须是节点身份或现存实例ID");
+        }
+        const targetKeys = Object.keys(linkTo);
         if (
-          typeof linkToNodeIdentity !== "string" ||
-          linkToNodeIdentity.length === 0
+          targetKeys.length !== 1 ||
+          !["nodeIdentity", "packageDefinitionId"].includes(targetKeys[0]!)
         ) {
-          throw new Error("包连接请求需要非空节点身份");
+          throw new Error("包连接目标必须且只能指定一种身份");
         }
-        const candidates = packagesByNodeIdentity.get(linkToNodeIdentity);
-        if (candidates === undefined || candidates.size === 0) {
-          throw new Error(`包连接节点身份不存在：${linkToNodeIdentity}`);
+        const nodeIdentity = linkTo.nodeIdentity;
+        const packageDefinitionId = linkTo.packageDefinitionId;
+        let providerId: PackageDefinitionId | undefined;
+        if (typeof nodeIdentity === "string") {
+          if (nodeIdentity.length === 0) {
+            throw new Error("包连接请求需要非空节点身份");
+          }
+          const candidates = packagesByNodeIdentity.get(nodeIdentity);
+          if (candidates === undefined || candidates.size === 0) {
+            throw new Error(`包连接节点身份不存在：${nodeIdentity}`);
+          }
+          if (candidates.size > 1) {
+            throw new Error(`包连接节点身份不唯一：${nodeIdentity}`);
+          }
+          providerId = candidates.values().next().value;
+        } else if (typeof packageDefinitionId === "string") {
+          if (packageDefinitionId.length === 0) {
+            throw new Error("包连接请求需要非空实例ID");
+          }
+          if (
+            !options.existingPackageDefinitionIds.has(
+              packageDefinitionId as PackageDefinitionId,
+            )
+          ) {
+            throw new Error(`包连接实例ID不存在：${packageDefinitionId}`);
+          }
+          providerId = packageDefinitionId as PackageDefinitionId;
         }
-        if (candidates.size > 1) {
-          throw new Error(`包连接节点身份不唯一：${linkToNodeIdentity}`);
-        }
-        const providerId = candidates.values().next().value as
-          | PackageDefinitionId
-          | undefined;
         if (providerId === undefined || !packagesById.has(providerId)) {
-          throw new Error(`包连接节点身份没有当前实例：${linkToNodeIdentity}`);
+          const identity =
+            typeof nodeIdentity === "string"
+              ? nodeIdentity
+              : typeof packageDefinitionId === "string"
+                ? packageDefinitionId
+                : "实例ID";
+          throw new Error(`包连接目标没有当前实例：${identity}`);
         }
         if (providerId === consumer.packageDefinitionId) {
           throw new Error("包连接请求不能连接自身");
@@ -514,7 +557,11 @@ function packageLinks(options: {
         add(consumer.packageDefinitionId, providerId);
       }
     }
-    if (!isRecord(creationInput) || creationInput.linkFrom === undefined) {
+    if (
+      isExistingPackage ||
+      !isRecord(creationInput) ||
+      creationInput.linkFrom === undefined
+    ) {
       continue;
     }
     if (
@@ -1053,6 +1100,10 @@ export function createDefaultComposition(options: {
           packages: resolveOptions.packages,
           content: options.content,
           selections: resolveOptions.selections,
+          existingPackageDefinitionIds:
+            resolveOptions.operationFacts.existingPackageDefinitionIds,
+          existingPackageLinkIntents:
+            resolveOptions.operationFacts.existingPackageLinkIntents,
         }),
       };
     },

@@ -5,7 +5,9 @@ import { defineReferencePackage } from "@ykdz/template-workspace/reference-packa
 import referenceManifest from "../package.json" with { type: "json" };
 
 export type TsCliCreationInput = Readonly<Record<string, JsonValue>> & {
-  readonly linkToNodeIdentity?: string;
+  readonly linkTo?:
+    | Readonly<{ readonly nodeIdentity: string }>
+    | Readonly<{ readonly packageDefinitionId: string }>;
 };
 
 function nodeDeclarationFrom(value: unknown): string {
@@ -40,6 +42,15 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
       key: "tooling-config",
       ownerLocal: {
         specifier: "@ykdz/reference-tooling-config/template",
+        resolve: (specifier) => import.meta.resolve(specifier),
+      },
+    },
+  ],
+  rootAttachmentDependencies: [
+    {
+      key: "npm-publication",
+      ownerLocal: {
+        specifier: "@ykdz/reference-npm-publication/template",
         resolve: (specifier) => import.meta.resolve(specifier),
       },
     },
