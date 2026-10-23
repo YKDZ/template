@@ -121,6 +121,17 @@ function assertOwnedPath(options: {
       `包贡献路径与生成器元数据路径冲突；${options.definition.name}尝试写入 ${targetPath}`,
     );
   }
+  const occupiedPackageScope = options.blueprint.packages.find(
+    (packageDefinition) =>
+      packageDefinition.path !== "." &&
+      (packageDefinition.path === targetPath ||
+        packageDefinition.path.startsWith(`${targetPath}/`)),
+  );
+  if (occupiedPackageScope !== undefined) {
+    throw new Error(
+      `项目文件与已登记包目录冲突：${targetPath} 会覆盖 ${occupiedPackageScope.path}`,
+    );
+  }
   const owner = fileOwner(options.blueprint.packages, targetPath);
   if (owner === undefined) {
     throw new Error(`项目输出没有对应的软件包拥有者：${targetPath}`);
@@ -240,12 +251,15 @@ export function projectPackageContributions(options: {
       throw new Error(`项目协调规则引用了未知路径：${policyPath}`);
     }
   }
-  const sortedPaths = entries.map((entry) => entry.path).toSorted();
-  for (let index = 0; index < sortedPaths.length; index += 1) {
-    const current = sortedPaths[index]!;
-    const next = sortedPaths[index + 1];
-    if (next !== undefined && next.startsWith(`${current}/`)) {
-      throw new Error(`项目文件与目录路径冲突：${current} 和 ${next}`);
+  const sortedPaths = entries.map((entry) => entry.path).toSorted(comparePaths);
+  for (const current of sortedPaths) {
+    const segments = current.split("/");
+    let parent = "";
+    for (const segment of segments.slice(0, -1)) {
+      parent = parent.length === 0 ? segment : `${parent}/${segment}`;
+      if (outputPaths.has(parent)) {
+        throw new Error(`项目文件与目录路径冲突：${parent} 和 ${current}`);
+      }
     }
   }
 

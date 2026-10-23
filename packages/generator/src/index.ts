@@ -95,6 +95,18 @@ type RuntimeReference = LoadedContentMember<
 >;
 type RuntimePreset = LoadedContentMember<PresetSelectionDefinition, "preset">;
 
+type PackageNodeDraft<CreationInput extends JsonValue = JsonValue> = {
+  readonly content: RuntimeReference;
+  readonly definition: PackageDefinition;
+  readonly creationInput: CreationInput | undefined;
+  readonly layout: unknown;
+  readonly nodeIdentity: string;
+  readonly dependencies: readonly {
+    readonly key: string;
+    readonly package: PackageNodeDraft<CreationInput>;
+  }[];
+};
+
 type PreparedNode<CreationInput extends JsonValue = JsonValue> = {
   readonly content: RuntimeReference;
   readonly preparation: PreparedReference<unknown>;
@@ -111,6 +123,11 @@ type PreparedNode<CreationInput extends JsonValue = JsonValue> = {
 type PreparedSelection<CreationInput extends JsonValue = JsonValue> = {
   readonly presetIdentity: ContentIdentity | null;
   readonly roots: readonly PreparedNode<CreationInput>[];
+};
+
+type PackageSelectionDraft<CreationInput extends JsonValue = JsonValue> = {
+  readonly presetIdentity: ContentIdentity | null;
+  readonly roots: readonly PackageNodeDraft<CreationInput>[];
 };
 
 export type PreparedProject<
@@ -440,14 +457,16 @@ function excludedPackagePaths(
   );
 }
 
-function preparedPackagePaths(roots: readonly PreparedNode[]): string[] {
+function packageNodePaths(roots: readonly PackageNodeDraft[]): string[] {
   return roots.flatMap((root) => [
     root.definition.path,
-    ...preparedPackagePaths(root.dependencies.map((item) => item.package)),
+    ...packageNodePaths(root.dependencies.map((item) => item.package)),
   ]);
 }
 
-function requireUniqueNodes(roots: readonly PreparedNode[]): void {
+function requireUniqueNodes(
+  roots: readonly { readonly nodeIdentity: string }[],
+): void {
   const seen = new Set<string>();
   for (const root of roots) {
     if (!/^[a-z][a-z0-9-]*$/u.test(root.nodeIdentity)) {
@@ -540,16 +559,15 @@ export function createGenerator<
   const resolveReference = (selector: ContentSelector): RuntimeReference =>
     contentIndex.resolve(selector, "reference") as RuntimeReference;
 
-  const makePreparedNode = async (request: {
+  const makePackageNodeDraft = (request: {
     readonly content: RuntimeReference;
     readonly nodeIdentity: string;
     readonly creationInput: ContentCreationInput<Members> | undefined;
     readonly definition: PackageDefinition;
     readonly layout?: unknown;
     readonly conventions: CompositionConventions<CompositionDefinition>;
-    readonly selectedPaths: readonly string[];
     readonly ancestry: readonly string[];
-  }): Promise<PreparedNode<ContentCreationInput<Members>>> => {
+  }): PackageNodeDraft<ContentCreationInput<Members>> => {
     const identityKey = contentIdentityKey(request.content.identity);
     if (request.ancestry.includes(identityKey)) {
       throw new Error(
@@ -558,9 +576,9 @@ export function createGenerator<
     }
     const dependencies = request.content.definition.dependencies ?? [];
     const dependencyKeys = new Set<string>();
-    const preparedDependencies: {
+    const dependencyDrafts: {
       key: string;
-      package: PreparedNode<ContentCreationInput<Members>>;
+      package: PackageNodeDraft<ContentCreationInput<Members>>;
     }[] = [];
     for (const dependency of dependencies) {
       assertContentIdentity(dependency.contentIdentity);
@@ -582,35 +600,56 @@ export function createGenerator<
           creationInput: providerCreationInput,
         }),
       );
-      const providerNode = await makePreparedNode({
+      const providerNode = makePackageNodeDraft({
         content: provider,
         nodeIdentity: `${request.nodeIdentity}-${dependency.key}`,
         creationInput: providerCreationInput,
         definition: providerDefinition,
         layout: undefined,
         conventions: request.conventions,
-        selectedPaths: [...request.selectedPaths, providerDefinition.path],
         ancestry: [...request.ancestry, identityKey],
       });
-      preparedDependencies.push({ key: dependency.key, package: providerNode });
+      dependencyDrafts.push({ key: dependency.key, package: providerNode });
     }
-    const prepared = preparationSnapshot(
-      await request.content.definition.prepare({
-        excludedPackagePaths: excludedPackagePaths(request.definition, [
-          ...request.selectedPaths,
-          ...preparedPackagePaths(
-            preparedDependencies.map((item) => item.package),
-          ),
-        ]),
-      }),
-    );
     return {
       content: request.content,
-      preparation: prepared,
       definition: request.definition,
       creationInput: request.creationInput,
       layout: request.layout,
       nodeIdentity: request.nodeIdentity,
+      dependencies: dependencyDrafts,
+    };
+  };
+
+  const preparePackageNode = async (
+    draft: PackageNodeDraft<ContentCreationInput<Members>>,
+    selectedPaths: readonly string[],
+  ): Promise<PreparedNode<ContentCreationInput<Members>>> => {
+    const preparedDependencies: {
+      key: string;
+      package: PreparedNode<ContentCreationInput<Members>>;
+    }[] = [];
+    for (const dependency of draft.dependencies) {
+      preparedDependencies.push({
+        key: dependency.key,
+        package: await preparePackageNode(dependency.package, selectedPaths),
+      });
+    }
+    const prepared = preparationSnapshot(
+      await draft.content.definition.prepare({
+        excludedPackagePaths: excludedPackagePaths(
+          draft.definition,
+          selectedPaths,
+        ),
+      }),
+    );
+    return {
+      content: draft.content,
+      preparation: prepared,
+      definition: draft.definition,
+      creationInput: draft.creationInput,
+      layout: draft.layout,
+      nodeIdentity: draft.nodeIdentity,
       dependencies: preparedDependencies,
     };
   };
@@ -632,7 +671,9 @@ export function createGenerator<
       prepareOptions.conventions,
     ) as CompositionConventions<CompositionDefinition>;
     assertJsonValue(conventions, "组合约定");
-    const selections: PreparedSelection<ContentCreationInput<Members>>[] = [];
+    const selectionDrafts: PackageSelectionDraft<
+      ContentCreationInput<Members>
+    >[] = [];
     const directRoots = prepareOptions.selection.roots ?? [];
     if (directRoots.length > 0) {
       const selectedRoots = directRoots.map((root) => ({
@@ -660,16 +701,14 @@ export function createGenerator<
       });
       const group = {
         presetIdentity: null,
-        roots: [] as PreparedNode<ContentCreationInput<Members>>[],
+        roots: [] as PackageNodeDraft<ContentCreationInput<Members>>[],
       };
-      selections.push(group);
-      const selectedPaths = preparedRoots.map((root) => root.definition.path);
+      selectionDrafts.push(group);
       for (const root of preparedRoots) {
         group.roots.push(
-          await makePreparedNode({
+          makePackageNodeDraft({
             ...root,
             conventions,
-            selectedPaths,
             ancestry: [],
           }),
         );
@@ -706,9 +745,9 @@ export function createGenerator<
       }
       const group = {
         presetIdentity: presetMember.identity,
-        roots: [] as PreparedNode<ContentCreationInput<Members>>[],
+        roots: [] as PackageNodeDraft<ContentCreationInput<Members>>[],
       };
-      selections.push(group);
+      selectionDrafts.push(group);
       const presetRoots: {
         readonly content: RuntimeReference;
         readonly nodeIdentity: string;
@@ -748,13 +787,11 @@ export function createGenerator<
           ),
         };
       });
-      const selectedPaths = preparedRoots.map((root) => root.definition.path);
       for (const root of preparedRoots) {
         group.roots.push(
-          await makePreparedNode({
+          makePackageNodeDraft({
             ...root,
             conventions,
-            selectedPaths,
             ancestry: [],
           }),
         );
@@ -762,8 +799,26 @@ export function createGenerator<
       requireUniqueNodes(group.roots);
     }
 
-    if (selections.length === 0) {
+    if (selectionDrafts.length === 0) {
       throw new Error("初始化至少需要选择一个参考包或预设");
+    }
+    const selectedPaths = [
+      ...new Set(
+        selectionDrafts.flatMap((selection) =>
+          packageNodePaths(selection.roots),
+        ),
+      ),
+    ];
+    const selections: PreparedSelection<ContentCreationInput<Members>>[] = [];
+    for (const selection of selectionDrafts) {
+      const roots: PreparedNode<ContentCreationInput<Members>>[] = [];
+      for (const root of selection.roots) {
+        roots.push(await preparePackageNode(root, selectedPaths));
+      }
+      selections.push({
+        presetIdentity: selection.presetIdentity,
+        roots,
+      });
     }
     return {
       conventions,

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { access, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 
 import type { Composition } from "@ykdz/template-core/composition";
@@ -12,7 +15,10 @@ import type {
   PackageDefinition,
   PackageDefinitionId,
 } from "@ykdz/template-core/project-blueprint";
-import type { PackageBinding } from "@ykdz/template-core/reference-package";
+import type {
+  PackageBinding,
+  PresetSelectionDefinition,
+} from "@ykdz/template-core/reference-package";
 
 import { createGenerator } from "../src/index.ts";
 
@@ -26,12 +32,20 @@ const compositionIdentity: ContentIdentity = {
   packageName: "@fixture/docs",
   exportPath: "./composition",
 };
+const presetIdentity: ContentIdentity = {
+  namespace: "fixture",
+  packageName: "@fixture/docs",
+  exportPath: "./preset",
+};
 
 type CreationInput = {
   readonly path: string;
   readonly leak?: boolean;
   readonly nearPrefix?: boolean;
   readonly metadataAncestor?: boolean;
+  readonly outputPath?: string;
+  readonly emptyFiles?: boolean;
+  readonly hierarchicalOutputs?: "conflict" | "valid";
 };
 type Conventions = { readonly edition: string };
 type Contribution = PackageContribution<{
@@ -152,19 +166,37 @@ function documentationEngine() {
           (file) => file.path === "README.md",
         );
         if (source === undefined) throw new Error("缺少 README 资源");
-        const files = [
-          {
-            path: creationInput?.leak
-              ? "packages/a/README.md"
-              : creationInput?.metadataAncestor
-                ? ".template"
-                : "README.md",
-            content: new TextEncoder().encode(
-              `${stableCommon.edition}:${stableCommon.currentProvider}:${packageInput?.currentProvider}:${new TextDecoder().decode(source.content)}`,
-            ),
-            mode: 0,
-          },
-        ];
+        const files = creationInput?.emptyFiles
+          ? []
+          : creationInput?.hierarchicalOutputs === "conflict"
+            ? ["config", "config.example", "config/settings.json"].map(
+                (path) => ({
+                  path,
+                  content: new TextEncoder().encode(`${path}\n`),
+                  mode: 0,
+                }),
+              )
+            : creationInput?.hierarchicalOutputs === "valid"
+              ? ["config.example", "config/settings.json"].map((path) => ({
+                  path,
+                  content: new TextEncoder().encode(`${path}\n`),
+                  mode: 0,
+                }))
+              : [
+                  {
+                    path:
+                      creationInput?.outputPath ??
+                      (creationInput?.leak
+                        ? "packages/a/README.md"
+                        : creationInput?.metadataAncestor
+                          ? ".template"
+                          : "README.md"),
+                    content: new TextEncoder().encode(
+                      `${stableCommon.edition}:${stableCommon.currentProvider}:${packageInput?.currentProvider}:${new TextDecoder().decode(source.content)}`,
+                    ),
+                    mode: 0,
+                  },
+                ];
         if (creationInput?.nearPrefix) {
           files.push({
             path: "packages/ab/ROOT.md",
@@ -184,6 +216,30 @@ function documentationEngine() {
             resourcePaths: prepared.resources.map((file) => file.path),
           },
         };
+      },
+    },
+  };
+
+  const preset: LoadedContentMember<
+    PresetSelectionDefinition<CreationInput>,
+    "preset"
+  > = {
+    identity: presetIdentity,
+    kind: "preset",
+    alias: "docs-preset",
+    source: {
+      specifier: "@fixture/docs/preset",
+      moduleURL: "file:///fixture/docs/preset.js",
+      manifestURL: "file:///fixture/docs/package.json",
+    },
+    definition: {
+      kind: "preset",
+      operations: ["init"],
+      nodes: {
+        child: {
+          reference: { alias: "docs", instance: "independent" },
+          creationInput: { init: { path: "packages/a" } },
+        },
       },
     },
   };
@@ -252,12 +308,142 @@ function documentationEngine() {
       };
     },
   };
-  const generator = createGenerator({ content: [reference], composition });
+  const generator = createGenerator({
+    content: [reference, preset],
+    composition,
+  });
 
   return { generator, reference };
 }
 
+async function withTemporaryTarget(
+  run: (targetRoot: string) => Promise<void>,
+): Promise<void> {
+  const temporaryRoot = await mkdtemp(
+    path.join(tmpdir(), "generator-public-sdk-"),
+  );
+  try {
+    await run(path.join(temporaryRoot, "target"));
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
 void describe("公开生成计算", () => {
+  void it("准备资源时包含直接根与预设子包的完整目标作用域", async () => {
+    const { generator } = documentationEngine();
+    const prepared = await generator.prepareProject({
+      selection: {
+        roots: [
+          {
+            nodeIdentity: "root-guide",
+            contentIdentity: referenceIdentity,
+            creationInput: { path: "." },
+          },
+        ],
+        presets: [{ contentIdentity: presetIdentity }],
+      },
+      conventions: { edition: "draft" },
+      operationFacts: { currentProvider: "provider-snapshot" },
+    });
+    const root = prepared.selections[0]?.roots[0];
+
+    assert.ok(root);
+    assert.deepEqual(
+      root.preparation.resources.map((resource) => resource.path),
+      ["README.md"],
+    );
+    assert.equal(generator.computeProject(prepared).packages.length, 2);
+  });
+
+  void it("拒绝文件占用已登记子包目录及其祖先", async () => {
+    const { generator } = documentationEngine();
+    await withTemporaryTarget(async (targetRoot) => {
+      for (const outputPath of ["packages/a", "packages"]) {
+        const result = await generator.planInit({
+          targetRoot,
+          selection: {
+            roots: [
+              {
+                nodeIdentity: "root-guide",
+                contentIdentity: referenceIdentity,
+                creationInput: { path: ".", outputPath },
+              },
+              {
+                nodeIdentity: "child-guide",
+                contentIdentity: referenceIdentity,
+                creationInput: { path: "packages/a", emptyFiles: true },
+              },
+            ],
+          },
+          conventions: { edition: "draft" },
+          operationFacts: { currentProvider: "provider-snapshot" },
+        });
+        assert.equal(
+          result.status,
+          "operation-failure",
+          JSON.stringify(result),
+        );
+        if (result.status !== "operation-failure") {
+          throw new Error("文件不能占用已登记包目录");
+        }
+        assert.equal(result.phase, "calculation");
+        assert.match(result.error.message, /已登记包目录/u);
+        await assert.rejects(access(targetRoot), { code: "ENOENT" });
+      }
+    });
+  });
+
+  void it("纯规划检测非相邻文件与目录冲突且允许近似路径", async () => {
+    const { generator } = documentationEngine();
+    await withTemporaryTarget(async (targetRoot) => {
+      const conflicted = await generator.planInit({
+        targetRoot,
+        selection: {
+          roots: [
+            {
+              nodeIdentity: "root-guide",
+              contentIdentity: referenceIdentity,
+              creationInput: { path: ".", hierarchicalOutputs: "conflict" },
+            },
+          ],
+        },
+        conventions: { edition: "draft" },
+        operationFacts: { currentProvider: "provider-snapshot" },
+      });
+
+      assert.equal(
+        conflicted.status,
+        "operation-failure",
+        JSON.stringify(conflicted),
+      );
+      if (conflicted.status !== "operation-failure") {
+        throw new Error("文件树前缀冲突必须在计算阶段拒绝");
+      }
+      assert.equal(conflicted.phase, "calculation");
+      assert.match(conflicted.error.message, /文件与目录路径冲突/u);
+      await assert.rejects(access(targetRoot), { code: "ENOENT" });
+
+      const valid = await generator.planInit({
+        targetRoot,
+        selection: {
+          roots: [
+            {
+              nodeIdentity: "root-guide",
+              contentIdentity: referenceIdentity,
+              creationInput: { path: ".", hierarchicalOutputs: "valid" },
+            },
+          ],
+        },
+        conventions: { edition: "draft" },
+        operationFacts: { currentProvider: "provider-snapshot" },
+      });
+
+      assert.equal(valid.status, "planned", JSON.stringify(valid));
+      await assert.rejects(access(targetRoot), { code: "ENOENT" });
+    });
+  });
+
   void it("同一参考声明可作为根包和子包，重复计算不访问目标或改变结果", async () => {
     const { generator } = documentationEngine();
     const prepared = await generator.prepareProject({
