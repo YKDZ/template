@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { honoApiDependencyKey } from "@ykdz/reference-vue-hono-web/template";
 import type { CompositionPackage } from "@ykdz/template-core/composition";
 import type { ContentIdentity } from "@ykdz/template-core/content-identity";
 import type { PackageDefinitionId } from "@ykdz/template-core/project-blueprint";
+import type { DefaultPresetPackageEvaluation } from "@ykdz/template-workspace/default-composition";
 
 import { preset } from "../template/definition.ts";
 
 const { compose: composeVueHonoJointE2e, prepare: prepareJointE2eResources } =
-  preset.jointE2e;
+  preset.rootContribution;
 
 const ownerIdentity: ContentIdentity = {
   namespace: "ykdz",
@@ -22,7 +24,7 @@ const apiId = "package-api" as PackageDefinitionId;
 const otherApiId = "package-other-api" as PackageDefinitionId;
 
 function resources() {
-  return prepareJointE2eResources();
+  return prepareJointE2eResources().ownerFacts.resources;
 }
 
 function packageInstance(options: {
@@ -52,6 +54,44 @@ function packageInstance(options: {
   };
 }
 
+function evaluation(
+  packageInstance: CompositionPackage,
+): DefaultPresetPackageEvaluation {
+  return {
+    package: packageInstance,
+    bindings: new Map(),
+    contribution: {
+      packageDefinitionId: packageInstance.packageDefinitionId,
+      files: [],
+      facts: {
+        sourcePackageName: packageInstance.contentIdentity.packageName,
+        manifest: {},
+        exposure: { exports: {}, imports: {} },
+        nativeDocuments: [],
+        compositionFiles: [],
+        dependencyUses: [],
+        templateDependencies: [],
+        foundation: {},
+        environmentNeeds: [],
+        ciDiagnosticArtifacts: [],
+        referenceBindings: {},
+        ownerFacts: {},
+      },
+    },
+  };
+}
+
+function selectedPackages(
+  ...entries: readonly (readonly [string, CompositionPackage])[]
+): ReadonlyMap<string, DefaultPresetPackageEvaluation> {
+  return new Map(
+    entries.map(([nodeIdentity, packageInstance]) => [
+      nodeIdentity,
+      evaluation(packageInstance),
+    ]),
+  );
+}
+
 function validSelection() {
   const root = packageInstance({
     id: rootId,
@@ -73,7 +113,7 @@ function validSelection() {
     name: "@demo/web",
     path: "apps/web",
     role: "runtime-service",
-    dependencyBindings: { "hono-api": apiId },
+    dependencyBindings: { [honoApiDependencyKey]: apiId },
   });
   return {
     root,
@@ -94,27 +134,21 @@ void describe("Vue-Hono 预设联合验收组合", () => {
       ownerIdentity,
       selection,
       rootPackage: root,
-      selectedPackages: new Map([
-        [webId, web],
-        [apiId, api],
-      ]),
-      resources: resources(),
+      selectedPackages: selectedPackages(["web", web], ["api", api]),
+      ownerFacts: { resources: resources() },
     });
 
     assert.deepStrictEqual(
-      result.files.map(({ packageDefinitionId, file }) => [
-        packageDefinitionId,
-        file.path,
-        file.mode,
-      ]),
+      result.rootDeclaration.files?.map(({ path, mode }) => [path, mode]),
       [
-        [rootId, "playwright.config.ts", 0],
-        [rootId, "test/e2e/app.spec.ts", 0],
-        [rootId, "test/e2e/fixtures.ts", 0],
+        ["playwright.config.ts", 0],
+        ["test/e2e/app.spec.ts", 0],
+        ["test/e2e/fixtures.ts", 0],
       ],
     );
+    assert.strictEqual(result.rootPackageDefinitionId, rootId);
     const configuration = new TextDecoder().decode(
-      result.files[0]!.file.content,
+      result.rootDeclaration.files![0]!.content,
     );
     assert.match(configuration, /const apiPackageName = "@demo\/api";/u);
     assert.match(configuration, /const webPackageName = "@demo\/web";/u);
@@ -138,7 +172,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
     assert.deepStrictEqual(result.rootDeclaration.typescript, {
       include: ["test/**/*.ts"],
     });
-    assert.deepStrictEqual(result.rootDeclaration.environmentNeeds.check, [
+    assert.deepStrictEqual(result.rootDeclaration.environmentNeeds?.check, [
       {
         kind: "playwright-browser-assets",
         browser: "chromium",
@@ -155,10 +189,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
 
   void it("拒绝身份、选择节点、服务角色或API绑定不匹配", () => {
     const { root, web, api, selection } = validSelection();
-    const validPackages = new Map([
-      [webId, web],
-      [apiId, api],
-    ]);
+    const validPackages = selectedPackages(["web", web], ["api", api]);
 
     assert.throws(
       () =>
@@ -167,7 +198,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
           selection,
           rootPackage: root,
           selectedPackages: validPackages,
-          resources: resources(),
+          ownerFacts: { resources: resources() },
         }),
       /预设身份/u,
     );
@@ -178,7 +209,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
           selection: { ...selection, nodes: { web: webId } },
           rootPackage: root,
           selectedPackages: validPackages,
-          resources: resources(),
+          ownerFacts: { resources: resources() },
         }),
       /节点 api/u,
     );
@@ -188,17 +219,17 @@ void describe("Vue-Hono 预设联合验收组合", () => {
           ownerIdentity,
           selection,
           rootPackage: root,
-          selectedPackages: new Map([
+          selectedPackages: selectedPackages(
             [
-              webId,
+              "web",
               {
                 ...web,
                 definition: { ...web.definition, role: "shared-library" },
               },
             ],
-            [apiId, api],
-          ]),
-          resources: resources(),
+            ["api", api],
+          ),
+          ownerFacts: { resources: resources() },
         }),
       /web.*runtime-service/u,
     );
@@ -208,36 +239,67 @@ void describe("Vue-Hono 预设联合验收组合", () => {
           ownerIdentity,
           selection,
           rootPackage: root,
-          selectedPackages: new Map([
-            [webId, { ...web, dependencyBindings: { "hono-api": otherApiId } }],
-            [apiId, api],
-          ]),
-          resources: resources(),
+          selectedPackages: selectedPackages(
+            ["web", { ...web, dependencyBindings: { "hono-api": otherApiId } }],
+            ["api", api],
+          ),
+          ownerFacts: { resources: resources() },
         }),
       /绑定.*API/u,
+    );
+    assert.throws(
+      () =>
+        composeVueHonoJointE2e({
+          ownerIdentity,
+          selection,
+          rootPackage: root,
+          selectedPackages: selectedPackages(
+            [
+              "web",
+              {
+                ...web,
+                contentIdentity: {
+                  ...web.contentIdentity,
+                  packageName: "@other/web",
+                },
+              },
+            ],
+            ["api", api],
+          ),
+          ownerFacts: { resources: resources() },
+        }),
+      /Web 原生包名/u,
     );
   });
 
   void it("外层准备联合配置与两个测试资源", () => {
     const prepared = resources();
     assert.match(
-      new TextDecoder().decode(prepared.configuration.content),
+      new TextDecoder().decode(
+        prepared.find(
+          ({ path }) => path === "resources/joint-e2e/playwright.config.ts",
+        )!.content,
+      ),
       /@ykdz\/reference-hono-api/u,
     );
     assert.match(
-      new TextDecoder().decode(prepared.appSpec.content),
+      new TextDecoder().decode(
+        prepared.find(
+          ({ path }) => path === "resources/joint-e2e/test/e2e/app.spec.ts",
+        )!.content,
+      ),
       /calls the API/u,
     );
     assert.match(
-      new TextDecoder().decode(prepared.fixtures.content),
+      new TextDecoder().decode(
+        prepared.find(
+          ({ path }) => path === "resources/joint-e2e/test/e2e/fixtures.ts",
+        )!.content,
+      ),
       /PLAYWRIGHT_WEB_URL/u,
     );
     assert.deepStrictEqual(
-      [
-        prepared.configuration.mode,
-        prepared.appSpec.mode,
-        prepared.fixtures.mode,
-      ],
+      prepared.map(({ mode }) => mode),
       [0, 0, 0],
     );
   });

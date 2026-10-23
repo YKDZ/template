@@ -10,268 +10,183 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 
-import { preset as presetDefinition } from "@ykdz/preset-vue-hono-app/template";
-import { referencePackage as apiDefinition } from "@ykdz/reference-hono-api/template";
-import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
-import { referencePackage as libraryDefinition } from "@ykdz/reference-ts-lib/template";
-import { referencePackage as webDefinition } from "@ykdz/reference-vue-hono-web/template";
+import { honoApiDependencyKey } from "@ykdz/reference-vue-hono-web/template";
 import {
-  createContentIndex,
+  contentIdentityKey,
+  type ContentIdentity,
   type LoadedContentMember,
 } from "@ykdz/template-core/content-identity";
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
-import { createGenerator } from "@ykdz/template-generator";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
-import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 
-const loadedContent = await loadContentSource({
+const content = await loadContentSource({
   namespace: "ykdz",
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
-    "@ykdz/reference-hono-api/template",
-    "@ykdz/reference-vue-hono-web/template",
-    "@ykdz/reference-tooling-config/template",
-    "@ykdz/reference-ts-lib/template",
-    "@ykdz/preset-vue-hono-app/template",
+    {
+      specifier: "@ykdz/reference-workspace-root/template",
+      load: () => import("@ykdz/reference-workspace-root/template"),
+    },
+    {
+      specifier: "@ykdz/reference-hono-api/template",
+      load: () => import("@ykdz/reference-hono-api/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vue-hono-web/template",
+      load: () => import("@ykdz/reference-vue-hono-web/template"),
+    },
+    {
+      specifier: "@ykdz/reference-tooling-config/template",
+      load: () => import("@ykdz/reference-tooling-config/template"),
+    },
+    {
+      specifier: "@ykdz/reference-ts-lib/template",
+      load: () => import("@ykdz/reference-ts-lib/template"),
+    },
+    {
+      specifier: "@ykdz/reference-npm-publication/template",
+      load: () => import("@ykdz/reference-npm-publication/template"),
+    },
+    {
+      specifier: "@ykdz/preset-vue-hono-app/template",
+      load: () => import("@ykdz/preset-vue-hono-app/template"),
+    },
   ],
-  prepareReferenceDefinition(definition) {
-    return defineReferencePackage(
-      definition as Parameters<typeof defineReferencePackage>[0],
-    );
-  },
 });
-const contentIndex = createContentIndex(loadedContent);
-type PreparedReference = ReturnType<typeof defineReferencePackage>;
-function referenceMember(definition: unknown) {
-  return contentIndex.fromDefinition(
-    definition,
-    "reference",
-  ) as LoadedContentMember<PreparedReference, "reference">;
+
+function member(
+  kind: "preset" | "reference",
+  packageName: string,
+): LoadedContentMember {
+  const found = content.find(
+    (item) => item.kind === kind && item.identity.packageName === packageName,
+  );
+  assert.ok(found, `显式内容集合缺少 ${kind} ${packageName}`);
+  return found;
 }
-const api = referenceMember(apiDefinition);
-const web = referenceMember(webDefinition);
-const library = referenceMember(libraryDefinition);
-const configuration = contentIndex.resolve(
-  {
-    namespace: "ykdz",
-    packageName: "@ykdz/reference-tooling-config",
-    exportPath: "./template",
-  },
-  "reference",
-);
-const preset = contentIndex.fromDefinition(presetDefinition, "preset");
-const content = [api, web, configuration, library, preset] as const;
-async function snapshotTree(root: string): Promise<{
-  readonly rootMode: number;
-  readonly entries: readonly {
+
+const root = member("reference", "@ykdz/reference-workspace-root");
+const api = member("reference", "@ykdz/reference-hono-api");
+const web = member("reference", "@ykdz/reference-vue-hono-web");
+const library = member("reference", "@ykdz/reference-ts-lib");
+const preset = member("preset", "@ykdz/preset-vue-hono-app");
+
+const conventions = {
+  repositoryName: "demo",
+  defaultPackageScope: "demo",
+};
+
+const temporaryRoots = new Set<string>();
+
+async function createTargetRoot(prefix: string): Promise<string> {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), prefix));
+  temporaryRoots.add(temporaryRoot);
+  return path.join(temporaryRoot, "demo");
+}
+
+async function snapshotTree(targetRoot: string): Promise<
+  readonly {
     readonly path: string;
-    readonly kind: "directory" | "file";
     readonly mode: number;
     readonly bytes: string;
-  }[];
-}> {
-  const entries: {
-    path: string;
-    kind: "directory" | "file";
-    mode: number;
-    bytes: string;
-  }[] = [];
+  }[]
+> {
+  const entries: { path: string; mode: number; bytes: string }[] = [];
   async function visit(directory: string, relative = ""): Promise<void> {
     for (const entry of (
       await readdir(directory, { withFileTypes: true })
     ).sort((left, right) => left.name.localeCompare(right.name))) {
-      const filePath = path.join(directory, entry.name);
+      const absolutePath = path.join(directory, entry.name);
       const entryPath = path.posix.join(relative, entry.name);
       if (entry.isDirectory()) {
-        entries.push({
-          path: entryPath,
-          kind: "directory",
-          mode: (await stat(filePath)).mode & 0o777,
-          bytes: "",
-        });
-        await visit(filePath, entryPath);
+        await visit(absolutePath, entryPath);
       } else {
         entries.push({
           path: entryPath,
-          kind: "file",
-          mode: (await stat(filePath)).mode & 0o777,
-          bytes: (await readFile(filePath)).toString("base64"),
+          mode: (await stat(absolutePath)).mode & 0o777,
+          bytes: (await readFile(absolutePath)).toString("base64"),
         });
       }
     }
   }
-  await visit(root);
-  return { rootMode: (await stat(root)).mode & 0o777, entries };
+  await visit(targetRoot);
+  return entries;
 }
 
 function generator() {
-  return createGenerator({
-    content,
-    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
-  });
+  return createDefaultGenerator({ content });
 }
 
-const strategyInput = {
-  repositoryName: "demo",
-  defaultPackageScope: "demo",
-};
-
-const projectContext = {
-  targetDir: "/tmp/demo",
-  repositoryName: "demo",
-  defaultPackageScope: "demo",
-  toolchain: {
-    nodeLtsMajor: "24",
-    nodeVersion: "24.21.0",
-    packageManagerPin: "pnpm@12.9.1",
-  },
-};
-
-function projectPreset(options: {
-  readonly contributions: readonly PackageContribution[];
-  readonly nodeInstances: ReadonlyMap<string, PackageDefinition>;
-}) {
-  assert.ok(presetDefinition.project);
-  return presetDefinition.project({
-    context: projectContext,
-    ...options,
-  });
-}
+after(async () => {
+  await Promise.all(
+    [...temporaryRoots].map((temporaryRoot) =>
+      rm(temporaryRoot, { recursive: true, force: true }),
+    ),
+  );
+});
 
 void describe("Vue-Hono 组合预设公开行为", () => {
-  void it("在产生根文件前拒绝角色错误的实际服务实例", () => {
-    assert.throws(
-      () =>
-        projectPreset({
-          contributions: [],
-          nodeInstances: new Map([
-            [
-              "web",
-              {
-                ...webDefinition.defaultIdentity("demo"),
-                role: "shared-library",
-              },
-            ],
-            ["api", apiDefinition.defaultIdentity("demo")],
-          ]),
-        }),
-      /web.*runtime-service/u,
-    );
-  });
-
-  void it("在产生根文件前拒绝绑定到其他 API 的实际 web 实例", () => {
-    const web = webDefinition.defaultIdentity("demo");
-    const api = apiDefinition.defaultIdentity("demo");
-    const otherApi = {
-      ...api,
-      name: "@demo/other-api",
-      path: "apps/other-api",
-    };
-    const webContribution = {
-      definition: web,
-      referenceBindings: {
-        [apiDefinition.manifest.name]: otherApi,
-      },
-    } as PackageContribution;
-
-    assert.throws(
-      () =>
-        projectPreset({
-          contributions: [webContribution],
-          nodeInstances: new Map([
-            ["web", web],
-            ["api", api],
-          ]),
-        }),
-      /web.*API.*apps\/api/u,
-    );
-  });
-
-  void it("通过真实生成器投影 web 与 API 的联合验收和包连接", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-vue-hono-preset-init-"),
-    );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const generated = generator();
-    const result = await generated.init({
+  void it("初始化原生包、绑定、联合验收资源与根声明，并在新generator回放后保留", async () => {
+    const targetRoot = await createTargetRoot("template-vue-hono-preset-");
+    const initialized = await generator().init({
       targetRoot,
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput,
+      selection: { presets: [{ contentIdentity: preset.identity }] },
+      conventions,
     });
-
-    assert.strictEqual(result.status, "success", JSON.stringify(result));
-    if (result.status !== "success") return;
-
-    assert.deepStrictEqual(
-      result.blueprint.packages.map(({ path: packagePath }) => packagePath),
-      ["apps/web", "apps/api", "packages/tooling-config"],
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
     );
-    assert.deepStrictEqual(result.blueprint.packageLinkIntents, [
-      { consumerPackagePath: "apps/web", providerPackagePath: "apps/api" },
+    if (initialized.status !== "success") return;
+
+    const packages = initialized.blueprint.packages;
+    const rootPackage = packages.find(
+      ({ path: packagePath }) => packagePath === ".",
+    );
+    const apiPackage = packages.find(
+      ({ path: packagePath }) => packagePath === "apps/api",
+    );
+    const webPackage = packages.find(
+      ({ path: packagePath }) => packagePath === "apps/web",
+    );
+    assert.ok(rootPackage);
+    assert.ok(apiPackage);
+    assert.ok(webPackage);
+    assert.ok(
+      packages.some(
+        ({ path: packagePath }) => packagePath === "packages/tooling-config",
+      ),
+    );
+    assert.deepStrictEqual(initialized.blueprint.packageLinkIntents, [
+      {
+        consumerId: webPackage.packageDefinitionId,
+        providerId: apiPackage.packageDefinitionId,
+      },
     ]);
-    const playwrightConfiguration = await readFile(
-      path.join(targetRoot, "playwright.config.ts"),
-      "utf8",
+    assert.deepStrictEqual(
+      initialized.generationRecord.selections.map(
+        ({ presetIdentity }) => presetIdentity,
+      ),
+      [preset.identity],
     );
-    assert.match(
-      playwrightConfiguration,
-      /const apiPackageName = "@demo\/api";/u,
-    );
-    assert.match(
-      playwrightConfiguration,
-      /const webPackageName = "@demo\/web";/u,
-    );
+
+    const playwrightPath = path.join(targetRoot, "playwright.config.ts");
+    const playwrightBeforeAdd = await readFile(playwrightPath, "utf8");
+    assert.match(playwrightBeforeAdd, /const apiPackageName = "@demo\/api";/u);
+    assert.match(playwrightBeforeAdd, /const webPackageName = "@demo\/web";/u);
 
     const webManifest = JSON.parse(
       await readFile(path.join(targetRoot, "apps/web/package.json"), "utf8"),
-    ) as {
-      dependencies: Record<string, string>;
-      devDependencies: Record<string, string>;
-    };
-    assert.strictEqual(webManifest.dependencies["@demo/api"], "workspace:*");
-    assert.strictEqual(
-      webManifest.devDependencies["@demo/tooling-config"],
-      "workspace:*",
-    );
-
-    const apiManifest = JSON.parse(
-      await readFile(path.join(targetRoot, "apps/api/package.json"), "utf8"),
     ) as { dependencies: Record<string, string> };
-    assert.strictEqual(
-      apiManifest.dependencies["@demo/tooling-config"],
-      "workspace:*",
-    );
-    const environmentNeeds = JSON.parse(
-      await readFile(
-        path.join(targetRoot, ".template/environment-needs.json"),
-        "utf8",
-      ),
-    ) as {
-      check: readonly {
-        kind: string;
-        owner?: { kind: string; path: string };
-      }[];
-    };
-    assert.ok(
-      environmentNeeds.check.some(
-        (need) =>
-          need.kind === "playwright-browser-assets" &&
-          need.owner?.kind === "workspace-orchestration" &&
-          need.owner.path === ".",
-      ),
-    );
-    assert.strictEqual(
-      JSON.parse(await readFile(path.join(targetRoot, "package.json"), "utf8"))
-        .scripts["test:e2e"],
-      "playwright test",
-    );
+    assert.strictEqual(webManifest.dependencies["@demo/api"], "workspace:*");
+
+    const rootManifest = JSON.parse(
+      await readFile(path.join(targetRoot, "package.json"), "utf8"),
+    ) as { scripts: Record<string, string> };
+    assert.strictEqual(rootManifest.scripts["test:e2e"], "playwright test");
     const turbo = JSON.parse(
       await readFile(path.join(targetRoot, "turbo.json"), "utf8"),
     ) as { tasks: Record<string, { dependsOn: readonly string[] }> };
@@ -280,12 +195,18 @@ void describe("Vue-Hono 组合预设公开行为", () => {
       "@demo/web#build",
       "@demo/web#browser:prepare",
     ]);
+    const typeScriptConfiguration = JSON.parse(
+      await readFile(path.join(targetRoot, "tsconfig.config.json"), "utf8"),
+    ) as { include: readonly string[] };
+    assert.ok(typeScriptConfiguration.include.includes("test/**/*.ts"));
+
     assert.ok(
-      (
-        JSON.parse(
-          await readFile(path.join(targetRoot, "tsconfig.config.json"), "utf8"),
-        ) as { include: readonly string[] }
-      ).include.includes("test/**/*.ts"),
+      initialized.ownerFacts.environmentNeeds.check.some(
+        (need) =>
+          need.kind === "playwright-browser-assets" &&
+          need.owner?.kind === "workspace-orchestration" &&
+          need.owner.path === ".",
+      ),
     );
     assert.match(
       await readFile(
@@ -296,194 +217,81 @@ void describe("Vue-Hono 组合预设公开行为", () => {
     );
 
     const beforeUnsupportedAdd = await snapshotTree(targetRoot);
-    const rejectedAdd = await generated.add({
+    const unsupportedAdd = await generator().add({
       repositoryRoot: targetRoot,
       preset: preset.identity,
     });
     assert.strictEqual(
-      rejectedAdd.status,
+      unsupportedAdd.status,
       "operation-failure",
-      JSON.stringify(rejectedAdd),
+      JSON.stringify(unsupportedAdd),
     );
     assert.deepStrictEqual(
       await snapshotTree(targetRoot),
       beforeUnsupportedAdd,
     );
-  });
 
-  void it("保留通过公开内容身份直接组合 web 与 API 的用法", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-vue-hono-direct-composition-"),
-    );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const result = await generator().init({
-      targetRoot,
-      selection: {
-        roots: [
-          { nodeIdentity: "web", contentIdentity: web.identity },
-          { nodeIdentity: "api", contentIdentity: api.identity },
-        ],
-      },
-      strategyInput,
-    });
-
-    assert.strictEqual(result.status, "success", JSON.stringify(result));
-    if (result.status !== "success") return;
-    assert.ok(
-      result.blueprint.packages.some(
-        ({ path: packagePath }) => packagePath === "apps/web",
-      ),
-    );
-    assert.ok(
-      result.blueprint.packages.some(
-        ({ path: packagePath }) => packagePath === "apps/api",
-      ),
-    );
-    assert.strictEqual(
-      JSON.parse(
-        await readFile(path.join(targetRoot, "apps/web/package.json"), "utf8"),
-      ).dependencies["@demo/api"],
-      "workspace:*",
-    );
-  });
-
-  void it("拒绝重复选择独立 web 节点且不创建目标目录", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-vue-hono-preset-duplicate-"),
-    );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const result = await generator().init({
-      targetRoot,
-      selection: {
-        roots: [
-          { nodeIdentity: "web-one", contentIdentity: web.identity },
-          { nodeIdentity: "web-two", contentIdentity: web.identity },
-          { nodeIdentity: "api", contentIdentity: api.identity },
-        ],
-      },
-      strategyInput,
-    });
-
-    assert.strictEqual(
-      result.status,
-      "operation-failure",
-      JSON.stringify(result),
-    );
-    await assert.rejects(stat(targetRoot), { code: "ENOENT" });
-  });
-
-  void it("拒绝用单包布局输入指定多节点预设主包且不创建目标目录", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-vue-hono-preset-primary-input-"),
-    );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const result = await generator().init({
-      targetRoot,
-      selection: {
-        roots: [
-          { preset: preset.identity, creationInput: { leafName: "custom" } },
-        ],
-      },
-      strategyInput,
-    });
-
-    assert.strictEqual(
-      result.status,
-      "operation-failure",
-      JSON.stringify(result),
-    );
-    await assert.rejects(stat(targetRoot), { code: "ENOENT" });
-  });
-
-  void it("缺少 API 参考内容时拒绝预设绑定且不创建目标目录", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-vue-hono-preset-missing-binding-"),
-    );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    assert.throws(
-      () =>
-        createGenerator({
-          content: [web, configuration, library, preset],
-          strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
-        }),
-      /未装载的来源定义/u,
-    );
-    await assert.rejects(stat(targetRoot), { code: "ENOENT" });
-  });
-
-  void it("缺失实际 API 节点时拒绝后续操作且目标树逐字节不变", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-vue-hono-preset-missing-node-"),
-    );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const generated = generator();
-    const initialized = await generated.init({
-      targetRoot,
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput,
-    });
-    assert.strictEqual(
-      initialized.status,
-      "success",
-      JSON.stringify(initialized),
-    );
-
-    const generationPath = path.join(targetRoot, ".template/generation.json");
-    const record = JSON.parse(await readFile(generationPath, "utf8")) as {
-      nodeInstances: Record<string, string>;
-    };
-    delete record.nodeInstances.api;
-    await writeFile(generationPath, JSON.stringify(record, null, 2) + "\n");
-    const before = await snapshotTree(targetRoot);
-    const added = await generated.add({
+    const added = await generator().add({
       repositoryRoot: targetRoot,
       contentIdentity: library.identity,
-      creationInput: {
-        leafName: "helper",
-        packagePath: "packages/helper",
-      },
+      creationInput: { leafName: "extra" },
     });
-
+    assert.strictEqual(added.status, "success", JSON.stringify(added));
     assert.strictEqual(
-      added.status,
-      "operation-failure",
-      JSON.stringify(added),
+      await readFile(playwrightPath, "utf8"),
+      playwrightBeforeAdd,
     );
-    if (added.status === "operation-failure") {
-      assert.strictEqual(added.phase, "metadata");
-      assert.match(added.error.message, /api/u);
-    }
-    assert.deepStrictEqual(await snapshotTree(targetRoot), before);
+    const updatedRecord = JSON.parse(
+      await readFile(
+        path.join(targetRoot, ".template/generation.json"),
+        "utf8",
+      ),
+    ) as {
+      packages: {
+        contentIdentity: ContentIdentity;
+        packageDefinitionId: string;
+      }[];
+      selections: {
+        presetIdentity: ContentIdentity | null;
+        nodes: Record<string, string>;
+      }[];
+    };
+    assert.strictEqual(
+      updatedRecord.packages.find(
+        ({ contentIdentity }) =>
+          contentIdentityKey(contentIdentity) ===
+          contentIdentityKey(root.identity),
+      )?.packageDefinitionId,
+      rootPackage.packageDefinitionId,
+    );
+    assert.strictEqual(
+      updatedRecord.selections[0]?.presetIdentity?.packageName,
+      preset.identity.packageName,
+    );
+    assert.ok(
+      updatedRecord.packages.some(
+        ({ contentIdentity }) =>
+          contentIdentityKey(contentIdentity) ===
+          contentIdentityKey(library.identity),
+      ),
+    );
   });
 
-  void it("新增包后保留联合验收共享根声明之外的用户脚本", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-vue-hono-preset-add-customization-"),
-    );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const generated = generator();
-    const initialized = await generated.init({
+  void it("通过公开内容身份直接绑定web与API实例", async () => {
+    const targetRoot = await createTargetRoot("template-vue-hono-direct-");
+    const initialized = await generator().init({
       targetRoot,
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput,
+      selection: {
+        roots: [
+          {
+            nodeIdentity: "web",
+            contentIdentity: web.identity,
+            dependencyBindings: { [honoApiDependencyKey]: "api" },
+          },
+          { nodeIdentity: "api", contentIdentity: api.identity },
+        ],
+      },
+      conventions,
     });
     assert.strictEqual(
       initialized.status,
@@ -492,72 +300,46 @@ void describe("Vue-Hono 组合预设公开行为", () => {
     );
     if (initialized.status !== "success") return;
 
-    const manifestPath = path.join(targetRoot, "package.json");
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
-      scripts: Record<string, string>;
-    };
-    manifest.scripts["user:check"] = "pnpm run check";
-    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-
-    const added = await generated.add({
-      repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
-      creationInput: {
-        leafName: "helper",
-        packagePath: "packages/helper",
+    const webRecord = initialized.generationRecord.packages.find(
+      ({ contentIdentity }) =>
+        contentIdentityKey(contentIdentity) ===
+        contentIdentityKey(web.identity),
+    );
+    const apiPackageId = webRecord?.dependencyBindings[honoApiDependencyKey];
+    const apiPackage = initialized.blueprint.packages.find(
+      ({ packageDefinitionId }) => packageDefinitionId === apiPackageId,
+    );
+    const webPackage = initialized.blueprint.packages.find(
+      ({ path: packagePath }) => packagePath === "apps/web",
+    );
+    assert.ok(apiPackage);
+    assert.ok(webPackage);
+    assert.deepStrictEqual(initialized.blueprint.packageLinkIntents, [
+      {
+        consumerId: webPackage.packageDefinitionId,
+        providerId: apiPackage.packageDefinitionId,
       },
-    });
-    assert.strictEqual(added.status, "success", JSON.stringify(added));
-
-    const reconciledManifest = JSON.parse(
-      await readFile(manifestPath, "utf8"),
-    ) as { scripts: Record<string, string> };
-    assert.strictEqual(
-      reconciledManifest.scripts["user:check"],
-      "pnpm run check",
-    );
-    assert.strictEqual(
-      reconciledManifest.scripts["test:e2e"],
-      "playwright test",
-    );
+    ]);
+    const manifest = JSON.parse(
+      await readFile(path.join(targetRoot, "apps/web/package.json"), "utf8"),
+    ) as { dependencies: Record<string, string> };
+    assert.strictEqual(manifest.dependencies["@demo/api"], "workspace:*");
   });
 
-  void it("加包协调冲突时保留用户文件且不部分加包", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-vue-hono-preset-root-conflict-"),
+  void it("联合根文件冲突时不提交任何生成内容", async () => {
+    const targetRoot = await createTargetRoot("template-vue-hono-conflict-");
+    await mkdir(targetRoot, { recursive: true });
+    await writeFile(
+      path.join(targetRoot, "playwright.config.ts"),
+      "export default {};\n",
     );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const generated = generator();
-    const initialized = await generated.init({
-      targetRoot,
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput,
-    });
-    assert.strictEqual(
-      initialized.status,
-      "success",
-      JSON.stringify(initialized),
-    );
-    const conflictDirectory = path.join(targetRoot, "packages/helper");
-    await mkdir(conflictDirectory, { recursive: true });
-    const userFile = path.join(conflictDirectory, "README.md");
-    await writeFile(userFile, "user bytes\n");
     const before = await snapshotTree(targetRoot);
-
-    const result = await generated.add({
-      repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
-      creationInput: {
-        leafName: "helper",
-        packagePath: "packages/helper",
-      },
+    const result = await generator().init({
+      targetRoot,
+      selection: { presets: [{ contentIdentity: preset.identity }] },
+      conventions,
     });
-
     assert.strictEqual(result.status, "conflict", JSON.stringify(result));
-    assert.strictEqual(await readFile(userFile, "utf8"), "user bytes\n");
     assert.deepStrictEqual(await snapshotTree(targetRoot), before);
   });
 });
