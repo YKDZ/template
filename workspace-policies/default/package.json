@@ -15,7 +15,6 @@
       "types": "./dist/dependency-catalog.d.ts",
       "default": "./dist/dependency-catalog.js"
     },
-    "./task-gates": "./scripts/task-gates.ts",
     "./project-github": {
       "source": "./src/project-github.ts",
       "types": "./dist/project-github.d.ts",
@@ -36,35 +35,15 @@
       "types": "./dist/default-environment.d.ts",
       "default": "./dist/default-environment.js"
     },
-    "./project-linking": {
-      "source": "./src/project-linking.ts",
-      "types": "./dist/project-linking.d.ts",
-      "default": "./dist/project-linking.js"
-    },
     "./release-toolchain-snapshot": {
       "source": "./src/release-toolchain-snapshot.ts",
       "types": "./dist/release-toolchain-snapshot.d.ts",
       "default": "./dist/release-toolchain-snapshot.js"
     },
-    "./root-projection": {
-      "source": "./src/root-projection.ts",
-      "types": "./dist/root-projection.d.ts",
-      "default": "./dist/root-projection.js"
-    },
-    "./default-workspace-strategy": {
-      "source": "./src/default-workspace-strategy.ts",
-      "types": "./dist/default-workspace-strategy.d.ts",
-      "default": "./dist/default-workspace-strategy.js"
-    },
     "./default-package-identity": {
       "source": "./src/default-package-identity.ts",
       "types": "./dist/default-package-identity.d.ts",
       "default": "./dist/default-package-identity.js"
-    },
-    "./package-addition-facts": {
-      "source": "./src/package-addition-facts.ts",
-      "types": "./dist/package-addition-facts.d.ts",
-      "default": "./dist/package-addition-facts.js"
     },
     "./rust-toolchain-facts": {
       "source": "./src/rust-toolchain-facts.ts",
@@ -75,16 +54,6 @@
       "source": "./src/shared-root-files.ts",
       "types": "./dist/shared-root-files.d.ts",
       "default": "./dist/shared-root-files.js"
-    },
-    "./generation-context": {
-      "source": "./src/generation-context.ts",
-      "types": "./dist/generation-context.d.ts",
-      "default": "./dist/generation-context.js"
-    },
-    "./package-contribution": {
-      "source": "./src/package-contribution.ts",
-      "types": "./dist/package-contribution.d.ts",
-      "default": "./dist/package-contribution.js"
     },
     "./project-requirements": {
       "source": "./src/project-requirements.ts",
@@ -100,6 +69,16 @@
       "source": "./src/reference-package.ts",
       "types": "./dist/reference-package.d.ts",
       "default": "./dist/reference-package.js"
+    },
+    "./default-composition": {
+      "source": "./src/default-composition.ts",
+      "types": "./dist/default-composition.d.ts",
+      "default": "./dist/default-composition.js"
+    },
+    "./default-generation": {
+      "source": "./src/default-generation.ts",
+      "types": "./dist/default-generation.d.ts",
+      "default": "./dist/default-generation.js"
     }
   },
   "scripts": {
@@ -117,6 +96,7 @@
   "dependencies": {
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
+    "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*",
     "ignore": "catalog:",
     "jsonc-parser": "catalog:",

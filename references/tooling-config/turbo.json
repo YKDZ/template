@@ -3,9 +3,10 @@
   "tags": ["library"],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": [],
       "inputs": [],
-      "outputs": []
+      "outputs": [],
+      "tags": []
     },
     "format:check": {
       "inputs": [],
@@ -26,7 +27,7 @@
       "tags": ["work:repair"]
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"],
+      "dependsOn": [],
       "inputs": [],
       "outputs": [],
       "tags": ["quality:light"]
@@ -39,7 +40,7 @@
     },
     "build:template": {
       "tags": ["work:preparation"],
-      "dependsOn": [],
+      "dependsOn": ["@ykdz/template-workspace#build"],
       "outputs": ["template-dist/**"]
     },
     "check:author-planning-roles": {

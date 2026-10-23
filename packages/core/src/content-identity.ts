@@ -184,13 +184,25 @@ export function createContentIndex<Member extends LoadedContentMember>(
     ) {
       throw new Error("内容别名不能为空");
     }
-    const candidates = (aliases.get(aliasSelector.alias) ?? []).filter(
+    const namespaceCandidates = (aliases.get(aliasSelector.alias) ?? []).filter(
       (member) =>
         aliasSelector.namespace === undefined ||
         member.identity.namespace === aliasSelector.namespace,
     );
+    const candidates = namespaceCandidates.filter(
+      (member) => member.kind === expectedKind,
+    );
     if (candidates.length === 0) {
-      throw new Error(`内容别名不存在：${aliasSelector.alias}`);
+      if (namespaceCandidates.length === 1) {
+        return requireKind(namespaceCandidates[0]!, expectedKind);
+      }
+      if (namespaceCandidates.length === 0) {
+        throw new Error(`内容别名不存在：${aliasSelector.alias}`);
+      }
+      const choices = namespaceCandidates
+        .map((member) => contentIdentityLabel(member.identity))
+        .join("、");
+      throw new Error(`内容别名存在歧义：${aliasSelector.alias}（${choices}）`);
     }
     if (candidates.length > 1) {
       const choices = candidates

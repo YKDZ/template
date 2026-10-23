@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import formatterConfig from "@ykdz/reference-tooling-config/oxfmt";
-import { inspectTaskGate } from "@ykdz/template-workspace/task-gates";
+import { inspectTaskGate } from "@ykdz/reference-workspace-root/task-gates";
 import { format } from "oxfmt";
 import { parse as parseToml } from "smol-toml";
 

@@ -8,5 +8,5 @@
     "rootDir": "template",
     "rewriteRelativeImportExtensions": true
   },
-  "include": ["template/**/*.ts"]
+  "include": ["template/definition.ts"]
 }

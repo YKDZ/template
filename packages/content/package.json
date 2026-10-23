@@ -52,6 +52,7 @@
     "@ykdz/reference-vike-web": "workspace:*",
     "@ykdz/reference-vue-app": "workspace:*",
     "@ykdz/reference-vue-hono-web": "workspace:*",
+    "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",

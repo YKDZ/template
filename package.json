@@ -36,6 +36,7 @@
     "@devcontainers/cli": "catalog:",
     "@types/node": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
+    "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/reference-ts-cli": "workspace:*",
     "@ykdz/template-checks": "workspace:*",
     "@ykdz/template-content": "workspace:*",

@@ -1,6 +1,9 @@
-export const referenceDefinition = {
-  packageName: "@ykdz/reference-tooling-config",
-  resolve: (specifier: string) => import.meta.resolve(specifier),
+import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+
+import referenceManifest from "../package.json" with { type: "json" };
+
+export const referencePackage = defineReferencePackage({
+  manifest: referenceManifest,
   resourceRoot: new URL("../", import.meta.url),
   alias: "tooling-config",
   instance: "shared",
@@ -9,13 +12,33 @@ export const referenceDefinition = {
     kind: "typescript-workspace-configuration",
   },
   role: "shared-library",
-  resources: ["."],
-  template: {
-    dependencies: [],
-    scripts: ["build:template", "check:author-planning-roles"],
-    resources: ["template", "tsconfig.template.json"],
-  },
-  environmentNeeds: [],
+  resources: [
+    { path: "base.json" },
+    { path: "node.json" },
+    { path: "tsconfig.json" },
+    { path: "turbo.json" },
+    { path: "oxlint.config.ts" },
+    { path: "oxfmt.config.ts" },
+  ],
+  compositionResources: [
+    {
+      path: "template/workspace/oxlint.config.ts",
+      targetPath: "oxlint.config.ts",
+    },
+    {
+      path: "template/workspace/oxfmt.config.ts",
+      targetPath: "oxfmt.config.ts",
+    },
+  ],
+  templateDependencies: [
+    {
+      name: "@ykdz/template-workspace",
+      purpose: "template-execution",
+    },
+  ],
+  executionDependencies: ["@ykdz/template-workspace"],
+  templateScripts: ["build:template", "check:author-planning-roles"],
+  templateExports: ["./reference", "./template"],
   foundation: {
     toolchains: {},
     editorCapabilities: ["oxc-format-lint"],
@@ -24,4 +47,5 @@ export const referenceDefinition = {
       interval: "weekly",
     },
   },
-} as const;
+  environmentNeeds: [],
+});

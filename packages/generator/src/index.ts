@@ -57,11 +57,15 @@ import {
 import type {
   PreparedReference,
   PackageBinding,
+  ReferenceDependency,
   ReferencePackageDefinition,
   ReferenceSelectionRoot,
+  SelectionDependencyBindingTarget,
   PresetSelectionDefinition,
   PresetSelectionRequest,
 } from "@ykdz/template-core/reference-package";
+
+import { resolveReferenceDependencyIdentity } from "./owner-local-reference.ts";
 
 type CompositionDefinitionLike = Composition<
   JsonValue,
@@ -83,6 +87,7 @@ export type {
   ReferencePackageDefinition,
 } from "@ykdz/template-core/reference-package";
 export type { Composition } from "@ykdz/template-core/composition";
+export { resolveReferenceDependencyIdentity } from "./owner-local-reference.ts";
 
 type RuntimeReferenceDefinition = ReferencePackageDefinition<
   JsonValue,
@@ -109,7 +114,12 @@ type PackageNodeDraft<CreationInput extends JsonValue = JsonValue> = {
     readonly packageDefinitionId: PackageDefinitionId;
     readonly createdBy: "initialization" | "addition" | "shared-dependency";
   };
-  readonly dependencies: readonly {
+  readonly explicitRoot?: {
+    readonly selectionId: string;
+    readonly nodeIdentity: string;
+    readonly createdBy: "initialization" | "addition";
+  };
+  dependencies: {
     readonly key: string;
     readonly package: PackageNodeDraft<CreationInput>;
   }[];
@@ -125,6 +135,11 @@ type PreparedNode<CreationInput extends JsonValue = JsonValue> = {
   readonly restored?: {
     readonly packageDefinitionId: PackageDefinitionId;
     readonly createdBy: "initialization" | "addition" | "shared-dependency";
+  };
+  readonly explicitRoot?: {
+    readonly selectionId: string;
+    readonly nodeIdentity: string;
+    readonly createdBy: "initialization" | "addition";
   };
   readonly dependencies: readonly {
     readonly key: string;
@@ -151,7 +166,16 @@ type PackageSelectionDraft<CreationInput extends JsonValue = JsonValue> = {
 type RestoredProject = {
   readonly blueprint: ProjectBlueprint;
   readonly generationRecord: GenerationRecord;
+  readonly normalizedDependencies?: readonly GeneratorDependencyIdentity[];
 };
+
+export type GeneratorDependencyIdentity = {
+  readonly consumerContentIdentity: ContentIdentity;
+  readonly key: string;
+  readonly contentIdentity: ContentIdentity;
+};
+
+type DependencyIdentityCache = Map<string, GeneratorDependencyIdentity>;
 
 export type GeneratorRestoredProject<
   CreationInput extends JsonValue = JsonValue,
@@ -160,6 +184,7 @@ export type GeneratorRestoredProject<
   readonly packages: readonly CompositionPackage<CreationInput>[];
   readonly selections: readonly GenerationRecordSelection[];
   readonly readFacts: readonly CurrentProjectProjectionEntry[];
+  readonly normalizedDependencies: readonly GeneratorDependencyIdentity[];
 };
 
 export type PreparedProject<
@@ -308,6 +333,9 @@ export type GeneratorAdditionSelection<
       readonly contentIdentity: ContentSelector;
       readonly nodeIdentity?: string;
       readonly layout?: unknown;
+      readonly dependencyBindings?: Readonly<
+        Record<string, SelectionDependencyBindingTarget>
+      >;
     }
   | { readonly preset: ContentSelector }
 );
@@ -486,6 +514,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function dependencyIdentityCacheKey(
+  consumer: ContentIdentity,
+  dependencyKey: string,
+): string {
+  return JSON.stringify([contentIdentityKey(consumer), dependencyKey]);
+}
+
 function conflictReason(
   conflicts: readonly ProjectProjectionConflict[],
 ): string {
@@ -625,10 +660,95 @@ function excludedPackagePaths(
 }
 
 function packageNodePaths(roots: readonly PackageNodeDraft[]): string[] {
-  return roots.flatMap((root) => [
-    root.definition.path,
-    ...packageNodePaths(root.dependencies.map((item) => item.package)),
-  ]);
+  const paths: string[] = [];
+  const visited = new Set<PackageNodeDraft>();
+  const visit = (root: PackageNodeDraft): void => {
+    if (visited.has(root)) return;
+    visited.add(root);
+    paths.push(root.definition.path);
+    for (const dependency of root.dependencies) {
+      visit(dependency.package);
+    }
+  };
+  for (const root of roots) visit(root);
+  return paths;
+}
+
+function assertAcyclicPackageDrafts(
+  roots: readonly PackageNodeDraft[],
+  explicitlySelectedSharedReferences: ReadonlyMap<
+    string,
+    "initialization" | "addition"
+  >,
+): void {
+  const visiting = new Set<PackageDefinitionId>();
+  const completed = new Map<
+    PackageDefinitionId,
+    readonly { readonly key: string; readonly packageId: PackageDefinitionId }[]
+  >();
+  const packageIdFor = (
+    node: PackageNodeDraft,
+    parentId?: PackageDefinitionId,
+    dependencyKey?: string,
+  ): PackageDefinitionId => {
+    if (node.restored !== undefined) {
+      return node.restored.packageDefinitionId;
+    }
+    const identityKey = contentIdentityKey(node.content.identity);
+    const shared = node.content.definition.instance === "shared";
+    const explicitRoot = shared ? undefined : node.explicitRoot;
+    const createdBy =
+      explicitRoot?.createdBy ??
+      (shared
+        ? explicitlySelectedSharedReferences.get(identityKey)
+        : undefined) ??
+      (parentId === undefined ? "initialization" : "shared-dependency");
+    const discriminator = shared
+      ? "shared-reference"
+      : explicitRoot === undefined
+        ? parentId === undefined || dependencyKey === undefined
+          ? undefined
+          : `${parentId}:${dependencyKey}`
+        : `${explicitRoot.selectionId}:${explicitRoot.nodeIdentity}`;
+    if (discriminator === undefined) {
+      throw new Error("参考包实例缺少明确的创建地址");
+    }
+    return packageId({
+      contentIdentity: node.content.identity,
+      definition: node.definition,
+      creationInput: node.creationInput ?? null,
+      createdBy,
+      discriminator,
+    });
+  };
+  const visit = (
+    node: PackageNodeDraft,
+    parentId?: PackageDefinitionId,
+    dependencyKey?: string,
+  ): void => {
+    const id = packageIdFor(node, parentId, dependencyKey);
+    if (visiting.has(id)) {
+      throw new Error("预设节点依赖形成循环");
+    }
+    const edges = node.dependencies.map((dependency) => ({
+      key: dependency.key,
+      packageId: packageIdFor(dependency.package, id, dependency.key),
+    }));
+    const previousEdges = completed.get(id);
+    if (previousEdges !== undefined) {
+      if (!isDeepStrictEqual(previousEdges, edges)) {
+        throw new Error("共享参考包的依赖绑定不一致");
+      }
+      return;
+    }
+    visiting.add(id);
+    for (const dependency of node.dependencies) {
+      visit(dependency.package, id, dependency.key);
+    }
+    visiting.delete(id);
+    completed.set(id, edges);
+  };
+  for (const root of roots) visit(root);
 }
 
 function requireUniqueNodes(
@@ -805,28 +925,50 @@ export function createGenerator<
   const resolveReference = (selector: ContentSelector): RuntimeReference =>
     contentIndex.resolve(selector, "reference") as RuntimeReference;
 
-  const makePackageNodeDraft = (request: {
+  const normalizeDependencyIdentity = (
+    consumer: RuntimeReference,
+    dependency: ReferenceDependency,
+    cache: DependencyIdentityCache,
+  ): ContentIdentity => {
+    const cacheKey = dependencyIdentityCacheKey(
+      consumer.identity,
+      dependency.key,
+    );
+    const cached = cache.get(cacheKey);
+    if (cached !== undefined) return cached.contentIdentity;
+
+    const identity = resolveReferenceDependencyIdentity({
+      consumerIdentity: consumer.identity,
+      dependency,
+      members: contentIndex.members,
+    });
+
+    cache.set(cacheKey, {
+      consumerContentIdentity: consumer.identity,
+      key: dependency.key,
+      contentIdentity: identity,
+    });
+    return identity;
+  };
+
+  const createPackageNodeDraft = (request: {
     readonly content: RuntimeReference;
     readonly nodeIdentity: string;
     readonly creationInput: ContentCreationInput<Members> | undefined;
     readonly definition: PackageDefinition;
     readonly layout?: unknown;
-    readonly conventions: CompositionConventions<CompositionDefinition>;
-    readonly ancestry: readonly string[];
     readonly restored?: PackageNodeDraft<
       ContentCreationInput<Members>
     >["restored"];
+    readonly explicitRoot?: PackageNodeDraft<
+      ContentCreationInput<Members>
+    >["explicitRoot"];
     readonly sharedDrafts?: Map<
       string,
       PackageNodeDraft<ContentCreationInput<Members>>
     >;
   }): PackageNodeDraft<ContentCreationInput<Members>> => {
     const identityKey = contentIdentityKey(request.content.identity);
-    if (request.ancestry.includes(identityKey)) {
-      throw new Error(
-        `参考包依赖形成循环：${[...request.ancestry, identityKey].join(" → ")}`,
-      );
-    }
     const sharedKey =
       request.content.definition.instance === "shared"
         ? identityKey
@@ -851,47 +993,11 @@ export function createGenerator<
         ...cached,
         nodeIdentity: request.nodeIdentity,
         layout: request.layout,
-      };
-    }
-    const dependencies = request.content.definition.dependencies ?? [];
-    const dependencyKeys = new Set<string>();
-    const dependencyDrafts: {
-      key: string;
-      package: PackageNodeDraft<ContentCreationInput<Members>>;
-    }[] = [];
-    for (const dependency of dependencies) {
-      assertContentIdentity(dependency.contentIdentity);
-      if (
-        dependency.key.trim().length === 0 ||
-        dependencyKeys.has(dependency.key)
-      ) {
-        throw new Error(`参考包依赖键不能为空且不能重复：${dependency.key}`);
-      }
-      dependencyKeys.add(dependency.key);
-      const provider = resolveReference(dependency.contentIdentity);
-      const providerCreationInput = requireParsedCreationInput(
-        provider,
-        dependency.creationInput,
-      ) as ContentCreationInput<Members> | undefined;
-      const providerDefinition = packageDefinition(
-        provider.definition.createDefinition({
-          conventions: request.conventions,
-          creationInput: providerCreationInput,
-        }),
-      );
-      const providerNode = makePackageNodeDraft({
-        content: provider,
-        nodeIdentity: `${request.nodeIdentity}-${dependency.key}`,
-        creationInput: providerCreationInput,
-        definition: providerDefinition,
-        layout: undefined,
-        conventions: request.conventions,
-        ancestry: [...request.ancestry, identityKey],
-        ...(request.sharedDrafts === undefined
+        ...(request.explicitRoot === undefined
           ? {}
-          : { sharedDrafts: request.sharedDrafts }),
-      });
-      dependencyDrafts.push({ key: dependency.key, package: providerNode });
+          : { explicitRoot: request.explicitRoot }),
+        dependencies: [...cached.dependencies],
+      };
     }
     const draft: PackageNodeDraft<ContentCreationInput<Members>> = {
       content: request.content,
@@ -899,51 +1005,238 @@ export function createGenerator<
       creationInput: request.creationInput,
       layout: request.layout,
       nodeIdentity: request.nodeIdentity,
+      ...(request.explicitRoot === undefined
+        ? {}
+        : { explicitRoot: request.explicitRoot }),
       ...(request.restored === undefined ? {} : { restored: request.restored }),
-      dependencies: dependencyDrafts,
+      dependencies: [],
     };
     if (sharedKey !== undefined) request.sharedDrafts?.set(sharedKey, draft);
     return draft;
   };
 
+  const populatePackageNodeDraft = (options: {
+    readonly draft: PackageNodeDraft<ContentCreationInput<Members>>;
+    readonly conventions: CompositionConventions<CompositionDefinition>;
+    readonly ancestry: readonly string[];
+    readonly sharedDrafts: Map<
+      string,
+      PackageNodeDraft<ContentCreationInput<Members>>
+    >;
+    readonly dependencyIdentities: DependencyIdentityCache;
+    readonly explicitTargets?: ReadonlyMap<
+      string,
+      PackageNodeDraft<ContentCreationInput<Members>>
+    >;
+    readonly restoredTargets?: ReadonlyMap<
+      PackageDefinitionId,
+      PackageNodeDraft<ContentCreationInput<Members>>
+    >;
+    readonly dependencyBindings?: Readonly<
+      Record<string, SelectionDependencyBindingTarget>
+    >;
+  }): void => {
+    const { draft } = options;
+    const identityKey = contentIdentityKey(draft.content.identity);
+    if (options.ancestry.includes(identityKey)) {
+      throw new Error(
+        `参考包依赖形成循环：${[...options.ancestry, identityKey].join(" → ")}`,
+      );
+    }
+    const dependencies = draft.content.definition.dependencies ?? [];
+    const dependencyKeys = new Set<string>();
+    const bindings = options.dependencyBindings ?? {};
+    const bindingEntries = Object.entries(bindings);
+    for (const [key, target] of bindingEntries) {
+      if (key.trim().length === 0) {
+        throw new Error(`选择节点依赖绑定无效：${draft.nodeIdentity}/${key}`);
+      }
+      if (typeof target === "string") {
+        if (
+          target.trim().length === 0 ||
+          !options.explicitTargets?.has(target)
+        ) {
+          throw new Error(
+            `选择节点依赖绑定目标不存在：${draft.nodeIdentity}/${key}`,
+          );
+        }
+      } else if (
+        !isRecord(target) ||
+        typeof target.packageDefinitionId !== "string" ||
+        target.packageDefinitionId.trim().length === 0 ||
+        !options.restoredTargets?.has(
+          target.packageDefinitionId as PackageDefinitionId,
+        )
+      ) {
+        throw new Error(
+          `选择节点依赖绑定目标不存在：${draft.nodeIdentity}/${key}`,
+        );
+      }
+    }
+    const populated: PackageNodeDraft<
+      ContentCreationInput<Members>
+    >["dependencies"] = [];
+    for (const dependency of dependencies) {
+      if (
+        dependency.key.trim().length === 0 ||
+        dependencyKeys.has(dependency.key)
+      ) {
+        throw new Error(`参考包依赖键不能为空且不能重复：${dependency.key}`);
+      }
+      dependencyKeys.add(dependency.key);
+      const providerIdentity = normalizeDependencyIdentity(
+        draft.content,
+        dependency,
+        options.dependencyIdentities,
+      );
+      const bindingTarget = bindings[dependency.key];
+      if (bindingTarget !== undefined) {
+        const selectedTarget =
+          typeof bindingTarget === "string"
+            ? options.explicitTargets?.get(bindingTarget)
+            : options.restoredTargets?.get(bindingTarget.packageDefinitionId);
+        if (selectedTarget === undefined) {
+          throw new Error(
+            `选择节点依赖绑定目标不存在：${draft.nodeIdentity}/${dependency.key}`,
+          );
+        }
+        if (
+          contentIdentityKey(selectedTarget.content.identity) !==
+          contentIdentityKey(providerIdentity)
+        ) {
+          throw new Error(
+            `选择节点依赖绑定身份不一致：${draft.nodeIdentity}/${dependency.key}`,
+          );
+        }
+        if (dependency.creationInput !== undefined) {
+          const expectedInput = requireParsedCreationInput(
+            selectedTarget.content,
+            dependency.creationInput,
+          ) as ContentCreationInput<Members> | undefined;
+          if (
+            !isDeepStrictEqual(
+              selectedTarget.creationInput ?? null,
+              expectedInput ?? null,
+            )
+          ) {
+            throw new Error(
+              `选择节点依赖创建输入不一致：${draft.nodeIdentity}/${dependency.key}`,
+            );
+          }
+        }
+        populated.push({ key: dependency.key, package: selectedTarget });
+        continue;
+      }
+
+      const provider = resolveReference(providerIdentity);
+      const providerCreationInput = requireParsedCreationInput(
+        provider,
+        dependency.creationInput,
+      ) as ContentCreationInput<Members> | undefined;
+      const providerDefinition = packageDefinition(
+        provider.definition.createDefinition({
+          conventions: options.conventions,
+          creationInput: providerCreationInput,
+        }),
+      );
+      const providerNode = createPackageNodeDraft({
+        content: provider,
+        nodeIdentity: `${draft.nodeIdentity}-${dependency.key}`,
+        creationInput: providerCreationInput,
+        definition: providerDefinition,
+        layout: undefined,
+        sharedDrafts: options.sharedDrafts,
+      });
+      populatePackageNodeDraft({
+        draft: providerNode,
+        conventions: options.conventions,
+        ancestry: [...options.ancestry, identityKey],
+        sharedDrafts: options.sharedDrafts,
+        dependencyIdentities: options.dependencyIdentities,
+      });
+      populated.push({ key: dependency.key, package: providerNode });
+    }
+    for (const [key] of bindingEntries) {
+      if (!dependencyKeys.has(key)) {
+        throw new Error(
+          `选择节点依赖绑定键不存在：${draft.nodeIdentity}/${key}`,
+        );
+      }
+    }
+    draft.dependencies = populated;
+  };
+
   const preparePackageNode = async (
     draft: PackageNodeDraft<ContentCreationInput<Members>>,
     selectedPaths: readonly string[],
+    preparedDrafts: WeakMap<
+      PackageNodeDraft<ContentCreationInput<Members>>,
+      Promise<PreparedNode<ContentCreationInput<Members>>>
+    >,
   ): Promise<PreparedNode<ContentCreationInput<Members>>> => {
-    const preparedDependencies: {
-      key: string;
-      package: PreparedNode<ContentCreationInput<Members>>;
-    }[] = [];
-    for (const dependency of draft.dependencies) {
-      preparedDependencies.push({
-        key: dependency.key,
-        package: await preparePackageNode(dependency.package, selectedPaths),
-      });
-    }
-    const prepared = preparationSnapshot(
-      await draft.content.definition.prepare({
-        excludedPackagePaths: excludedPackagePaths(
-          draft.definition,
-          selectedPaths,
-        ),
-      }),
-    );
-    return {
-      content: draft.content,
-      preparation: prepared,
-      definition: draft.definition,
-      creationInput: draft.creationInput,
-      layout: draft.layout,
-      nodeIdentity: draft.nodeIdentity,
-      ...(draft.restored === undefined ? {} : { restored: draft.restored }),
-      dependencies: preparedDependencies,
-    };
+    const existing = preparedDrafts.get(draft);
+    if (existing !== undefined) return existing;
+    const pending = (async () => {
+      const preparedDependencies: {
+        key: string;
+        package: PreparedNode<ContentCreationInput<Members>>;
+      }[] = [];
+      for (const dependency of draft.dependencies) {
+        preparedDependencies.push({
+          key: dependency.key,
+          package: await preparePackageNode(
+            dependency.package,
+            selectedPaths,
+            preparedDrafts,
+          ),
+        });
+      }
+      const prepared = preparationSnapshot(
+        await draft.content.definition.prepare({
+          excludedPackagePaths: excludedPackagePaths(
+            draft.definition,
+            selectedPaths,
+          ),
+        }),
+      );
+      return {
+        content: draft.content,
+        preparation: prepared,
+        definition: draft.definition,
+        creationInput: draft.creationInput,
+        layout: draft.layout,
+        nodeIdentity: draft.nodeIdentity,
+        ...(draft.explicitRoot === undefined
+          ? {}
+          : { explicitRoot: draft.explicitRoot }),
+        ...(draft.restored === undefined ? {} : { restored: draft.restored }),
+        dependencies: preparedDependencies,
+      };
+    })();
+    preparedDrafts.set(draft, pending);
+    return pending;
   };
 
   const restoredSelectionDrafts = (
     restored: RestoredProject,
+    dependencyIdentities: DependencyIdentityCache = new Map(),
   ): PackageSelectionDraft<ContentCreationInput<Members>>[] => {
     const { generationRecord, blueprint } = restored;
+    for (const requirement of restored.normalizedDependencies ?? []) {
+      const key = dependencyIdentityCacheKey(
+        requirement.consumerContentIdentity,
+        requirement.key,
+      );
+      const existing = dependencyIdentities.get(key);
+      if (
+        existing !== undefined &&
+        contentIdentityKey(existing.contentIdentity) !==
+          contentIdentityKey(requirement.contentIdentity)
+      ) {
+        throw new Error("缓存的内容依赖身份不一致");
+      }
+      dependencyIdentities.set(key, requirement);
+    }
     if (
       contentIdentityKey(generationRecord.composition.identity) !==
       contentIdentityKey(composition.identity)
@@ -1012,6 +1305,124 @@ export function createGenerator<
       }
     }
 
+    const explicitBindingsByConsumer = new Map<
+      PackageDefinitionId,
+      Map<string, PackageDefinitionId>
+    >();
+    for (const selection of generationRecord.selections) {
+      if (selection.presetIdentity === null) continue;
+      const preset = contentIndex.resolve(
+        selection.presetIdentity,
+        "preset",
+      ) as RuntimePreset;
+      const definition = preset.definition;
+      if (
+        !isRecord(definition) ||
+        definition.kind !== "preset" ||
+        !isRecord(definition.nodes)
+      ) {
+        throw new Error(
+          `预设定义无效：${contentIdentityLabel(preset.identity)}`,
+        );
+      }
+      const presetNodes = Object.entries(definition.nodes);
+      if (
+        presetNodes.length !== Object.keys(selection.nodes).length ||
+        presetNodes.some(
+          ([nodeIdentity]) => !Object.hasOwn(selection.nodes, nodeIdentity),
+        )
+      ) {
+        throw new Error(
+          `生成记录中的预设选择与当前定义不一致：${contentIdentityLabel(preset.identity)}`,
+        );
+      }
+      for (const [nodeIdentity, rawNode] of presetNodes) {
+        if (!isRecord(rawNode) || !isRecord(rawNode.reference)) {
+          throw new Error(`预设节点定义无效：${nodeIdentity}`);
+        }
+        const consumerId = selection.nodes[nodeIdentity];
+        const consumerRecord =
+          consumerId === undefined ? undefined : recordsById.get(consumerId);
+        const consumer =
+          consumerId === undefined ? undefined : contentsById.get(consumerId);
+        const expected = resolveReference({
+          alias: String(rawNode.reference.alias),
+          namespace: preset.identity.namespace,
+        });
+        if (
+          consumerId === undefined ||
+          consumerRecord === undefined ||
+          consumer === undefined ||
+          contentIdentityKey(consumer.identity) !==
+            contentIdentityKey(expected.identity)
+        ) {
+          throw new Error(`生成记录中的预设节点引用不一致：${nodeIdentity}`);
+        }
+        const rawBindings = rawNode.dependencyBindings;
+        if (rawBindings === undefined) continue;
+        if (!isRecord(rawBindings)) {
+          throw new Error(`预设节点依赖绑定无效：${nodeIdentity}`);
+        }
+        const declarations = consumer.definition.dependencies ?? [];
+        const declaredKeys = new Set(declarations.map(({ key }) => key));
+        for (const [key, targetNodeIdentity] of Object.entries(rawBindings)) {
+          if (
+            key.trim().length === 0 ||
+            typeof targetNodeIdentity !== "string" ||
+            targetNodeIdentity.trim().length === 0
+          ) {
+            throw new Error(`预设节点依赖绑定无效：${nodeIdentity}/${key}`);
+          }
+          if (!declaredKeys.has(key)) {
+            throw new Error(`预设节点依赖绑定键不存在：${nodeIdentity}/${key}`);
+          }
+          const providerId = selection.nodes[targetNodeIdentity];
+          const providerRecord =
+            providerId === undefined ? undefined : recordsById.get(providerId);
+          const provider =
+            providerId === undefined ? undefined : contentsById.get(providerId);
+          const dependency = declarations.find((item) => item.key === key);
+          if (
+            providerId === undefined ||
+            providerRecord === undefined ||
+            provider === undefined ||
+            dependency === undefined
+          ) {
+            throw new Error(
+              `预设节点依赖绑定目标不存在：${nodeIdentity}/${key}`,
+            );
+          }
+          const expectedIdentity = normalizeDependencyIdentity(
+            consumer,
+            dependency,
+            dependencyIdentities,
+          );
+          if (
+            contentIdentityKey(provider.identity) !==
+              contentIdentityKey(expectedIdentity) ||
+            consumerRecord.dependencyBindings[key] !== providerId
+          ) {
+            throw new Error(
+              `生成记录中的预设节点依赖绑定不一致：${consumerId} → ${key}`,
+            );
+          }
+          const bindings =
+            explicitBindingsByConsumer.get(consumerId) ?? new Map();
+          const existingProviderId = bindings.get(key);
+          if (
+            existingProviderId !== undefined &&
+            existingProviderId !== providerId
+          ) {
+            throw new Error(
+              `生成记录中的预设节点依赖绑定不一致：${consumerId} → ${key}`,
+            );
+          }
+          bindings.set(key, providerId);
+          explicitBindingsByConsumer.set(consumerId, bindings);
+        }
+      }
+    }
+
     const visiting = new Set<PackageDefinitionId>();
     const buildDraft = (
       id: PackageDefinitionId,
@@ -1050,6 +1461,15 @@ export function createGenerator<
         throw new Error(`生成记录中的依赖绑定与当前参考包不一致：${id}`);
       }
       const dependencies = declarations.map((dependency) => {
+        const consumer = contentsById.get(id);
+        if (consumer === undefined) {
+          throw new Error(`生成记录引用了未知内容实例：${id}`);
+        }
+        const declaredIdentity = normalizeDependencyIdentity(
+          consumer,
+          dependency,
+          dependencyIdentities,
+        );
         const providerId = item.dependencyBindings[dependency.key];
         const providerRecord =
           providerId === undefined ? undefined : recordsById.get(providerId);
@@ -1060,10 +1480,21 @@ export function createGenerator<
           providerRecord === undefined ||
           providerContent === undefined ||
           contentIdentityKey(providerContent.identity) !==
-            contentIdentityKey(dependency.contentIdentity)
+            contentIdentityKey(declaredIdentity)
         ) {
           throw new Error(
             `生成记录包含无效依赖绑定：${id} → ${dependency.key}`,
+          );
+        }
+        const explicitProviderId = explicitBindingsByConsumer
+          .get(id)
+          ?.get(dependency.key);
+        if (
+          explicitProviderId !== undefined &&
+          providerId !== explicitProviderId
+        ) {
+          throw new Error(
+            `生成记录中的预设节点依赖绑定不一致：${id} → ${dependency.key}`,
           );
         }
         const expectedInput = requireParsedCreationInput(
@@ -1071,6 +1502,7 @@ export function createGenerator<
           dependency.creationInput,
         );
         if (
+          dependency.creationInput !== undefined &&
           !isDeepStrictEqual(
             inputsById.get(providerId) ?? null,
             expectedInput ?? null,
@@ -1189,6 +1621,7 @@ export function createGenerator<
       readonly conventions?: unknown;
       readonly restored?: RestoredProject;
       readonly operation: "init" | "add";
+      readonly dependencyIdentities?: DependencyIdentityCache;
     } & OperationFactsInput<CompositionOperationFacts<CompositionDefinition>>,
   ): Promise<
     PreparedProject<
@@ -1215,9 +1648,31 @@ export function createGenerator<
     ) {
       throw new Error("生成记录中的组合约定不符合当前组合定义");
     }
+    const dependencyIdentities =
+      prepareOptions.dependencyIdentities ??
+      new Map<string, GeneratorDependencyIdentity>();
     const selectionDrafts = prepareOptions.restored
-      ? restoredSelectionDrafts(prepareOptions.restored)
+      ? restoredSelectionDrafts(prepareOptions.restored, dependencyIdentities)
       : [];
+    const restoredTargetsById = new Map<
+      PackageDefinitionId,
+      PackageNodeDraft<ContentCreationInput<Members>>
+    >();
+    const indexRestoredTargets = (
+      roots: readonly PackageNodeDraft<ContentCreationInput<Members>>[],
+    ): void => {
+      for (const root of roots) {
+        if (root.restored !== undefined) {
+          restoredTargetsById.set(root.restored.packageDefinitionId, root);
+        }
+        indexRestoredTargets(
+          root.dependencies.map(({ package: item }) => item),
+        );
+      }
+    };
+    for (const selectionDraft of selectionDrafts) {
+      indexRestoredTargets(selectionDraft.roots);
+    }
     const sharedDrafts = new Map<
       string,
       PackageNodeDraft<ContentCreationInput<Members>>
@@ -1236,6 +1691,8 @@ export function createGenerator<
       indexSharedDrafts(selectionDraft.roots);
     }
     const operation = prepareOptions.operation;
+    const createdBy: "initialization" | "addition" =
+      operation === "init" ? "initialization" : "addition";
 
     const identifyDraftSelection = (
       presetIdentity: ContentIdentity | null,
@@ -1257,6 +1714,35 @@ export function createGenerator<
         })),
       });
 
+    const selectionRootFacts = (
+      root: PackageNodeDraft<ContentCreationInput<Members>>,
+    ) => ({
+      nodeIdentity: root.nodeIdentity,
+      identity: contentIdentityKey(root.content.identity),
+      creationInput: root.creationInput ?? null,
+      definition: root.definition,
+      dependencies: root.dependencies
+        .map(({ key, package: dependency }) => ({
+          key,
+          target:
+            dependency.restored !== undefined
+              ? { packageDefinitionId: dependency.restored.packageDefinitionId }
+              : dependency.explicitRoot !== undefined
+                ? {
+                    selectionId: dependency.explicitRoot.selectionId,
+                    nodeIdentity: dependency.explicitRoot.nodeIdentity,
+                  }
+                : {
+                    identity: contentIdentityKey(dependency.content.identity),
+                    creationInput: dependency.creationInput ?? null,
+                    definition: dependency.definition,
+                  },
+        }))
+        .toSorted((left, right) =>
+          left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
+        ),
+    });
+
     const appendSelection = (
       group: PackageSelectionDraft<ContentCreationInput<Members>>,
     ): void => {
@@ -1265,12 +1751,7 @@ export function createGenerator<
       );
       if (existing !== undefined) {
         const existingRoots = existing.roots
-          .map((root) => ({
-            nodeIdentity: root.nodeIdentity,
-            identity: contentIdentityKey(root.content.identity),
-            creationInput: root.creationInput ?? null,
-            definition: root.definition,
-          }))
+          .map(selectionRootFacts)
           .toSorted((left, right) =>
             left.nodeIdentity < right.nodeIdentity
               ? -1
@@ -1279,12 +1760,7 @@ export function createGenerator<
                 : 0,
           );
         const requestedRoots = group.roots
-          .map((root) => ({
-            nodeIdentity: root.nodeIdentity,
-            identity: contentIdentityKey(root.content.identity),
-            creationInput: root.creationInput ?? null,
-            definition: root.definition,
-          }))
+          .map(selectionRootFacts)
           .toSorted((left, right) =>
             left.nodeIdentity < right.nodeIdentity
               ? -1
@@ -1319,6 +1795,7 @@ export function createGenerator<
         nodeIdentity: root.nodeIdentity,
         rawCreationInput: root.creationInput,
         layout: root.layout,
+        dependencyBindings: root.dependencyBindings,
       }));
       const preparedRoots = selectedRoots.map((root) => {
         const creationInput = requireParsedCreationInput(
@@ -1337,18 +1814,47 @@ export function createGenerator<
           ),
         };
       });
-      const roots = preparedRoots.map((root) =>
-        makePackageNodeDraft({
+      const id = identifyDraftSelection(null, preparedRoots);
+      const roots = preparedRoots.map((root) => {
+        const explicitRoot =
+          root.content.definition.instance === "independent"
+            ? {
+                selectionId: id,
+                nodeIdentity: root.nodeIdentity,
+                createdBy,
+              }
+            : undefined;
+        return createPackageNodeDraft({
           ...root,
+          sharedDrafts,
+          ...(explicitRoot === undefined ? {} : { explicitRoot }),
+        });
+      });
+      requireUniqueNodes(roots);
+      const rootsByIdentity = new Map(
+        roots.map((root) => [root.nodeIdentity, root]),
+      );
+      for (const root of roots) {
+        const dependencyBindings = directRoots.find(
+          ({ nodeIdentity }) => nodeIdentity === root.nodeIdentity,
+        )?.dependencyBindings;
+        if (dependencyBindings !== undefined && !isRecord(dependencyBindings)) {
+          throw new Error(`选择节点依赖绑定无效：${root.nodeIdentity}`);
+        }
+        populatePackageNodeDraft({
+          draft: root,
           conventions,
           ancestry: [],
           sharedDrafts,
-        }),
-      );
-      requireUniqueNodes(roots);
+          dependencyIdentities,
+          explicitTargets: rootsByIdentity,
+          restoredTargets: restoredTargetsById,
+          ...(dependencyBindings === undefined ? {} : { dependencyBindings }),
+        });
+      }
       appendSelection({
         presetIdentity: null,
-        selectionId: identifyDraftSelection(null, preparedRoots),
+        selectionId: id,
         createdBy: operation === "init" ? "initialization" : "addition",
         roots,
       });
@@ -1420,21 +1926,56 @@ export function createGenerator<
           ),
         };
       });
-      const roots = preparedRoots.map((root) =>
-        makePackageNodeDraft({
+      const id = identifyDraftSelection(presetMember.identity, preparedRoots);
+      const rootsByIdentity = new Map<
+        string,
+        PackageNodeDraft<ContentCreationInput<Members>>
+      >();
+      const roots = preparedRoots.map((root) => {
+        const declaration = preset.nodes[root.nodeIdentity];
+        const dependencyBindings =
+          declaration !== undefined && isRecord(declaration)
+            ? declaration.dependencyBindings
+            : undefined;
+        if (dependencyBindings !== undefined && !isRecord(dependencyBindings)) {
+          throw new Error(`预设节点依赖绑定无效：${root.nodeIdentity}`);
+        }
+        const explicitRoot =
+          root.content.definition.instance === "independent"
+            ? {
+                selectionId: id,
+                nodeIdentity: root.nodeIdentity,
+                createdBy,
+              }
+            : undefined;
+        const draft = createPackageNodeDraft({
           ...root,
+          sharedDrafts,
+          ...(explicitRoot === undefined ? {} : { explicitRoot }),
+        });
+        rootsByIdentity.set(root.nodeIdentity, draft);
+        return draft;
+      });
+      requireUniqueNodes(roots);
+      for (const root of roots) {
+        const declaration = preset.nodes[root.nodeIdentity];
+        const dependencyBindings =
+          declaration !== undefined && isRecord(declaration)
+            ? declaration.dependencyBindings
+            : undefined;
+        populatePackageNodeDraft({
+          draft: root,
           conventions,
           ancestry: [],
           sharedDrafts,
-        }),
-      );
-      requireUniqueNodes(roots);
+          dependencyIdentities,
+          explicitTargets: rootsByIdentity,
+          ...(dependencyBindings === undefined ? {} : { dependencyBindings }),
+        });
+      }
       appendSelection({
         presetIdentity: presetMember.identity,
-        selectionId: identifyDraftSelection(
-          presetMember.identity,
-          preparedRoots,
-        ),
+        selectionId: id,
         createdBy: operation === "init" ? "initialization" : "addition",
         roots,
       });
@@ -1449,6 +1990,25 @@ export function createGenerator<
             : "加包至少需要选择一个参考包或预设",
       );
     }
+    const explicitlySelectedSharedReferences = new Map<
+      string,
+      "initialization" | "addition"
+    >();
+    for (const selectionDraft of selectionDrafts) {
+      if (selectionDraft.createdBy === undefined) continue;
+      for (const root of selectionDraft.roots) {
+        if (root.content.definition.instance === "shared") {
+          explicitlySelectedSharedReferences.set(
+            contentIdentityKey(root.content.identity),
+            selectionDraft.createdBy,
+          );
+        }
+      }
+    }
+    assertAcyclicPackageDrafts(
+      selectionDrafts.flatMap((item) => item.roots),
+      explicitlySelectedSharedReferences,
+    );
     const selectedPaths = [
       ...new Set(
         selectionDrafts.flatMap((selection) =>
@@ -1457,10 +2017,16 @@ export function createGenerator<
       ),
     ];
     const selections: PreparedSelection<ContentCreationInput<Members>>[] = [];
+    const preparedDrafts = new WeakMap<
+      PackageNodeDraft<ContentCreationInput<Members>>,
+      Promise<PreparedNode<ContentCreationInput<Members>>>
+    >();
     for (const selection of selectionDrafts) {
       const roots: PreparedNode<ContentCreationInput<Members>>[] = [];
       for (const root of selection.roots) {
-        roots.push(await preparePackageNode(root, selectedPaths));
+        roots.push(
+          await preparePackageNode(root, selectedPaths, preparedDrafts),
+        );
       }
       selections.push({
         presetIdentity: selection.presetIdentity,
@@ -1509,7 +2075,9 @@ export function createGenerator<
   }): Promise<GeneratorRestoredProject<ContentCreationInput<Members>>> {
     const targetRoot = path.resolve(restoreOptions.repositoryRoot);
     const { restored, readFacts } = await readRestoredProject(targetRoot);
-    restoredSelectionDrafts(restored);
+    const dependencyIdentities: DependencyIdentityCache = new Map();
+    restoredSelectionDrafts(restored, dependencyIdentities);
+    const normalizedDependencies = [...dependencyIdentities.values()];
     const definitionsById = new Map(
       restored.blueprint.packages.map((definition) => [
         definition.packageDefinitionId,
@@ -1532,6 +2100,7 @@ export function createGenerator<
       packages,
       selections: restored.generationRecord.selections,
       readFacts,
+      normalizedDependencies,
     };
   }
 
@@ -1560,6 +2129,9 @@ export function createGenerator<
               ...(selection.layout === undefined
                 ? {}
                 : { layout: selection.layout }),
+              ...(selection.dependencyBindings === undefined
+                ? {}
+                : { dependencyBindings: selection.dependencyBindings }),
             },
           ],
         };
@@ -1581,11 +2153,22 @@ export function createGenerator<
     const restored: RestoredProject = {
       blueprint: prepareOptions.restored.blueprint,
       generationRecord: prepareOptions.restored.generationRecord,
+      normalizedDependencies: prepareOptions.restored.normalizedDependencies,
     };
+    const dependencyIdentities: DependencyIdentityCache = new Map(
+      restored.normalizedDependencies?.map((requirement) => [
+        dependencyIdentityCacheKey(
+          requirement.consumerContentIdentity,
+          requirement.key,
+        ),
+        requirement,
+      ]),
+    );
     const common = {
       restored,
       operation: "add" as const,
       operationFacts: prepareOptions.operationFacts,
+      dependencyIdentities,
     };
     const before = await prepareProjectInternal(common);
     const after = await prepareProjectInternal({
@@ -1614,6 +2197,8 @@ export function createGenerator<
     const nodes: PackageNode[] = [];
     const sharedNodes = new Map<string, PackageNode>();
     const nodesById = new Map<PackageDefinitionId, PackageNode>();
+    const nodesByPrepared = new WeakMap<PreparedNode, PackageNode>();
+    const wiringNodes = new Set<PackageNode>();
     const selectionRecords: GenerationRecordSelection[] = [];
     const explicitlySelectedSharedReferences = new Map<
       string,
@@ -1636,6 +2221,8 @@ export function createGenerator<
       createdBy: PackageNode["createdBy"],
       discriminator: string,
     ): PackageNode => {
+      const preparedNode = nodesByPrepared.get(prepared);
+      if (preparedNode !== undefined) return preparedNode;
       const identityKey = contentIdentityKey(prepared.content.identity);
       const restoredId = prepared.restored?.packageDefinitionId;
       if (restoredId !== undefined) {
@@ -1655,6 +2242,7 @@ export function createGenerator<
           ) {
             throw new Error(`生成记录中的包实例事实不一致：${restoredId}`);
           }
+          nodesByPrepared.set(prepared, restored);
           return restored;
         }
       }
@@ -1687,14 +2275,42 @@ export function createGenerator<
           if (restoredId !== undefined && existing.id !== restoredId) {
             throw new Error(`共享实例标识与生成记录不一致：${restoredId}`);
           }
+          if (wiringNodes.has(existing)) {
+            throw new Error("预设节点依赖形成循环");
+          }
+          wiringNodes.add(existing);
+          const proposedDependencies = prepared.dependencies.map(
+            (dependency) => ({
+              key: dependency.key,
+              package: makeNode(
+                dependency.package,
+                "shared-dependency",
+                `${existing.id}:${dependency.key}`,
+              ),
+            }),
+          );
+          wiringNodes.delete(existing);
+          if (
+            proposedDependencies.length !== existing.dependencies.size ||
+            proposedDependencies.some(
+              ({ key, package: provider }) =>
+                existing.dependencies.get(key)?.id !== provider.id,
+            )
+          ) {
+            throw new Error("共享参考包的依赖绑定不一致");
+          }
+          nodesByPrepared.set(prepared, existing);
           return existing;
         }
       }
+      const explicitRoot =
+        sharedKey === undefined ? prepared.explicitRoot : undefined;
       const effectiveCreatedBy =
         prepared.restored?.createdBy ??
         (sharedKey === undefined
           ? undefined
           : explicitlySelectedSharedReferences.get(sharedKey)) ??
+        explicitRoot?.createdBy ??
         createdBy;
       const definition = {
         ...prepared.definition,
@@ -1706,7 +2322,11 @@ export function createGenerator<
             creationInput: prepared.creationInput ?? null,
             createdBy: effectiveCreatedBy,
             discriminator:
-              sharedKey === undefined ? discriminator : "shared-reference",
+              sharedKey !== undefined
+                ? "shared-reference"
+                : explicitRoot === undefined
+                  ? discriminator
+                  : `${explicitRoot.selectionId}:${explicitRoot.nodeIdentity}`,
           }),
       } as PersistedPackageDefinition;
       const node: PackageNode = {
@@ -1720,7 +2340,9 @@ export function createGenerator<
       };
       nodes.push(node);
       nodesById.set(node.id, node);
+      nodesByPrepared.set(prepared, node);
       if (sharedKey !== undefined) sharedNodes.set(sharedKey, node);
+      wiringNodes.add(node);
       for (const dependency of prepared.dependencies) {
         const provider = makeNode(
           dependency.package,
@@ -1729,6 +2351,7 @@ export function createGenerator<
         );
         node.dependencies.set(dependency.key, provider);
       }
+      wiringNodes.delete(node);
       return node;
     };
 

@@ -41,12 +41,34 @@ export function readTextResource(
   }
 }
 
-export type ReferenceDependency<CreationInput extends JsonValue = JsonValue> = {
+export type ContentIdentityReferenceDependency<
+  CreationInput extends JsonValue = JsonValue,
+> = {
   /** 所属内容稳定拥有的要求键。 */
   readonly key: string;
   readonly contentIdentity: ContentIdentity;
   readonly creationInput?: CreationInput;
 };
+
+/** 由所属包公开入口解析、只可绑定同一来源命名空间的原生依赖。 */
+export type OwnerLocalReferenceDependency<
+  CreationInput extends JsonValue = JsonValue,
+> = {
+  /** 所属内容稳定拥有的要求键。 */
+  readonly key: string;
+  readonly ownerLocal: {
+    /** 规范原生包与公开子路径，例如 @scope/tooling/template。 */
+    readonly specifier: string;
+    /** 必须来自声明所属模块的公开包解析器。 */
+    readonly resolve: (specifier: string) => string;
+  };
+  readonly creationInput?: CreationInput;
+};
+
+/** 新作者可声明完整来源身份，原生包可声明自己的公开入口。 */
+export type ReferenceDependency<CreationInput extends JsonValue = JsonValue> =
+  | ContentIdentityReferenceDependency<CreationInput>
+  | OwnerLocalReferenceDependency<CreationInput>;
 
 export type PackageBinding = {
   readonly packageDefinitionId: PackageDefinitionId;
@@ -113,11 +135,19 @@ export type ReferencePackage<
   Definition extends ReferencePackageDefinition = ReferencePackageDefinition,
 > = LoadedContentMember<Definition, "reference">;
 
+/** 显式依赖边指向本次选择节点，或 add 时指向已恢复实例。 */
+export type SelectionDependencyBindingTarget =
+  | string
+  | Readonly<{ readonly packageDefinitionId: PackageDefinitionId }>;
+
 export type ReferenceSelectionRoot<
   CreationInput extends JsonValue = JsonValue,
 > = {
   readonly nodeIdentity: string;
   readonly contentIdentity: ContentSelector;
+  readonly dependencyBindings?: Readonly<
+    Record<string, SelectionDependencyBindingTarget>
+  >;
   readonly creationInput?: CreationInput;
   readonly layout?: unknown;
 };
@@ -137,6 +167,7 @@ export type PresetSelectionDefinition<
       string,
       {
         readonly reference: PresetReference;
+        readonly dependencyBindings?: Readonly<Record<string, string>>;
         readonly layout?: unknown;
         readonly creationInput?: Partial<Record<"init" | "add", CreationInput>>;
       }
