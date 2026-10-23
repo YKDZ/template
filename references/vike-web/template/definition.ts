@@ -1,60 +1,132 @@
+import type { ReferenceDependency } from "@ykdz/template-core/reference-package";
 import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-workspace/default-environment";
 import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
+import referenceManifest from "../package.json" with { type: "json" };
+
+const databaseDependency = {
+  key: "database" as const,
+  ownerLocal: {
+    specifier: "@ykdz/reference-vike-db/template",
+    resolve: (specifier: string) => import.meta.resolve(specifier),
+  },
+} as const satisfies ReferenceDependency;
+
+const baseWorkspaceDependency = {
+  key: "base-workspace" as const,
+  ownerLocal: {
+    specifier: "@ykdz/reference-workspace-root/template",
+    resolve: (specifier: string) => import.meta.resolve(specifier),
+  },
+} as const satisfies ReferenceDependency;
+
+const toolingConfigDependency = {
+  key: "tooling-config" as const,
+  ownerLocal: {
+    specifier: "@ykdz/reference-tooling-config/template",
+    resolve: (specifier: string) => import.meta.resolve(specifier),
+  },
+} as const satisfies ReferenceDependency;
+
+export const databaseDependencyKey = databaseDependency.key;
+
 export const referencePackage = defineReferencePackage({
-  packageName: "@ykdz/reference-vike-web",
-  // 私有原生清单未声明 npm 版本，给制品显式提供未发布坐标。
+  manifest: referenceManifest,
   artifactVersion: "0.0.0",
-  resolve: (specifier) => import.meta.resolve(specifier),
   resourceRoot: new URL("../", import.meta.url),
   alias: "vike-web",
   instance: "independent",
   defaultLeafName: "web",
   defaultPath: "apps/web",
   role: "runtime-service",
-  resources: ["."],
-  template: {
-    resources: ["template", "tsconfig.template.json"],
-    dependencies: [
-      { name: "@ykdz/template-core", purpose: "template-execution" },
-      {
-        name: "@ykdz/template-workspace",
-        purpose: "template-execution",
-      },
-      { name: "typescript-7", purpose: "template-execution" },
-    ],
-    scripts: [
-      "build:template",
-      "typecheck:template",
-      "check:author-planning-roles",
-    ],
-  },
-  foundation: ({ definition }) => ({
+  dependencies: [
+    baseWorkspaceDependency,
+    toolingConfigDependency,
+    databaseDependency,
+  ],
+  resources: [
+    { path: "+server.ts" },
+    { path: ".env.example" },
+    { path: "TESTING.md" },
+    { path: "assets/logo.svg" },
+    { path: "components/PageShell.vue" },
+    { path: "pages/+Head.vue" },
+    { path: "pages/+Layout.vue" },
+    { path: "pages/+config.ts" },
+    { path: "pages/index/+Page.telefunc.ts" },
+    { path: "pages/index/+Page.vue" },
+    { path: "pages/tailwind.css" },
+    { path: "playwright.config.ts" },
+    { path: "server/api.ts" },
+    { path: "server/app.ts" },
+    { path: "server/database.ts" },
+    { path: "test/e2e/app.spec.ts" },
+    { path: "test/playwright-teardown.ts" },
+    { path: "test/todos.browser.test.ts" },
+    { path: "tooling/vite.ts" },
+    { path: "tsconfig.app.json" },
+    { path: "tsconfig.json" },
+    { path: "tsconfig.node.json" },
+    { path: "turbo.json" },
+    { path: "types/env.d.ts" },
+    { path: "types/global.d.ts" },
+    { path: "vite.config.ts" },
+    { path: "vitest.config.ts" },
+  ],
+  templateDependencies: [
+    { name: "@ykdz/reference-tooling-config", purpose: "target" },
+    {
+      name: "@ykdz/reference-tooling-config",
+      purpose: "template-execution",
+    },
+    {
+      name: "@ykdz/reference-workspace-root",
+      purpose: "template-execution",
+    },
+    {
+      name: "@ykdz/template-core",
+      purpose: "template-execution",
+    },
+    {
+      name: "@ykdz/template-workspace",
+      purpose: "template-execution",
+    },
+    { name: "typescript-7", purpose: "template-build" },
+  ],
+  executionDependencies: [
+    "@ykdz/template-core",
+    "@ykdz/template-workspace",
+    "@ykdz/reference-workspace-root",
+    "@ykdz/reference-tooling-config",
+  ],
+  templateScripts: [
+    "build:template",
+    "typecheck:template",
+    "check:author-planning-roles",
+  ],
+  foundation: {
     toolchains: {},
     editorCapabilities: ["oxc-format-lint", "vue", "tailwind", "vitest"],
     dependencyMaintenance: {
       ecosystems: ["npm", "github-actions", "docker"],
       interval: "weekly",
     },
-    workspacePackageGlobs: [`${definition.path.split("/")[0]}/*`],
-  }),
+    workspacePackageGlobs: ["apps/*"],
+  },
   environmentNeeds: ({ definition }) => [
     playwrightBrowserAssetsEnvironmentNeed({
       browser: "chromium",
       owner: { kind: "package-boundary", path: definition.path },
     }),
   ],
-  project: (contribution, { definition }) => ({
-    ...contribution,
-    ciDiagnosticArtifacts: [
-      {
-        kind: "playwright",
-        owner: { kind: "package-boundary", path: definition.path },
-      },
-      {
-        kind: "vitest-browser",
-        owner: { kind: "package-boundary", path: definition.path },
-      },
-    ],
-  }),
+  ciDiagnosticArtifacts: ({ definition }) => [
+    {
+      kind: "playwright",
+      owner: { kind: "package-boundary", path: definition.path },
+    },
+    {
+      kind: "vitest-browser",
+      owner: { kind: "package-boundary", path: definition.path },
+    },
+  ],
 });

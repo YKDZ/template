@@ -34,6 +34,7 @@
     "@types/node": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/reference-ts-lib": "workspace:*",
+    "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*",

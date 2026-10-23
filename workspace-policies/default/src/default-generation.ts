@@ -28,6 +28,7 @@ import {
   type DefaultContentMember,
   type DefaultOperationFacts,
 } from "./default-composition.ts";
+import { prepareRootRustToolchainTarget } from "./rust-toolchain-facts.ts";
 
 const nodeDeclarationPattern = /^([0-9]+)(?:\.([0-9]+)\.([0-9]+))?$/u;
 const pnpmPinPattern = /^pnpm@[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/u;
@@ -38,6 +39,42 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function referencesSelectedByAddition(
+  content: readonly DefaultContentMember[],
+  selection: GeneratorAdditionSelection<JsonValue>,
+): ReadonlySet<string> {
+  const index = createContentIndex(content);
+  if (!("preset" in selection)) {
+    const selected = index.resolve(selection.contentIdentity, "reference");
+    return new Set([contentIdentityKey(selected.identity)]);
+  }
+
+  const preset = index.resolve(selection.preset, "preset");
+  if (!isRecord(preset.definition) || !isRecord(preset.definition.nodes)) {
+    throw new Error(
+      `预设缺少节点声明：${contentIdentityLabel(preset.identity)}`,
+    );
+  }
+  const selected = new Set<string>();
+  for (const node of Object.values(preset.definition.nodes)) {
+    if (!isRecord(node) || !isRecord(node.reference)) continue;
+    const reference = node.reference;
+    const owner = content.find(
+      (member) =>
+        member.kind === "reference" &&
+        (member.definition === reference ||
+          (isRecord(member.definition) &&
+            isRecord(member.definition.manifest) &&
+            member.definition.manifest.name ===
+              (isRecord(reference.manifest) ? reference.manifest.name : null) &&
+            member.definition.alias === reference.alias &&
+            member.definition.instance === reference.instance)),
+    );
+    if (owner !== undefined) selected.add(contentIdentityKey(owner.identity));
+  }
+  return selected;
 }
 
 function defaultRootIdentity(content: readonly DefaultContentMember[]) {
@@ -521,6 +558,36 @@ async function additionFacts(
     selections: options.restored.selections,
     packages: options.restored.packages,
   });
+  const rustOwnerIdentities = new Set(
+    baseFacts.rootDeclarations
+      .filter(
+        (declaration) =>
+          declaration.applicationRequirements?.rustToolchain !== undefined,
+      )
+      .map((declaration) => contentIdentityKey(declaration.sourceIdentity)),
+  );
+  const hasRustPackage = options.restored.packages.some((record) =>
+    rustOwnerIdentities.has(contentIdentityKey(record.contentIdentity)),
+  );
+  const addsRustPackage = [
+    ...referencesSelectedByAddition(content, options.selection),
+  ].some((identity) => rustOwnerIdentities.has(identity));
+  let rustToolchainTarget:
+    | Awaited<ReturnType<typeof prepareRootRustToolchainTarget>>
+    | undefined;
+  if (hasRustPackage || addsRustPackage) {
+    rustToolchainTarget = await prepareRootRustToolchainTarget({
+      repositoryRoot,
+      required: hasRustPackage,
+    });
+  }
+  if (
+    rustToolchainTarget !== undefined &&
+    !currentFactPaths.has(rustToolchainTarget.readFact.path)
+  ) {
+    currentFacts.push(rustToolchainTarget.readFact);
+    currentFactPaths.add(rustToolchainTarget.readFact.path);
+  }
   const readPreparedLinkFacts = async (creationInputs: readonly unknown[]) => {
     const factCount = currentFacts.length;
     const selectedProviderIds = new Set<
@@ -580,6 +647,9 @@ async function additionFacts(
       ...baseFacts,
       nodeDeclaration,
       packageManagerPin,
+      ...(rustToolchainTarget?.target === undefined
+        ? {}
+        : { rustToolchainTarget: rustToolchainTarget.target }),
       targetManifests,
       existingPackageDefinitionIds: new Set(
         options.restored.blueprint.packages.map(
