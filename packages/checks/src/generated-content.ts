@@ -196,7 +196,47 @@ async function focusedConsumerPath(options: {
         linkFrom: [consumer.path],
       },
     });
-    if (planned.status === "planned") return consumer.path;
+    if (planned.status === "planned") {
+      const initializedPackageIds = new Set(
+        options.blueprint.packages.map(
+          (definition) => definition.packageDefinitionId,
+        ),
+      );
+      const addition = planned.blueprint.packages.find(
+        (definition) =>
+          !initializedPackageIds.has(definition.packageDefinitionId),
+      );
+      if (addition === undefined)
+        throw new Error(
+          `${options.additionPreset.identity.packageName}: focused plan omitted its added package`,
+        );
+      const manifestEntry = planned.projection.entries.find(
+        (entry) =>
+          entry.path === path.posix.join(addition.path, "package.json"),
+      );
+      if (manifestEntry?.kind !== "file")
+        throw new Error(
+          `${options.additionPreset.identity.packageName}: focused plan omitted its package manifest`,
+        );
+      const manifest = JSON.parse(
+        Buffer.from(manifestEntry.content).toString("utf8"),
+      ) as Readonly<Record<string, unknown>>;
+      const exports = manifest.exports;
+      const rootExport =
+        typeof exports === "object" &&
+        exports !== null &&
+        !Array.isArray(exports)
+          ? Reflect.get(exports, ".")
+          : undefined;
+      const sourceExport =
+        typeof rootExport === "object" &&
+        rootExport !== null &&
+        !Array.isArray(rootExport)
+          ? Reflect.get(rootExport, "source")
+          : undefined;
+      if (typeof sourceExport !== "string") return undefined;
+      return consumer.path;
+    }
     if (
       planned.status === "operation-failure" &&
       planned.error.packageLinkIssue?.kind === "unsupported-link"
