@@ -1,0 +1,12 @@
+{
+  "extends": "@ykdz/reference-tooling-config/node.json",
+  "compilerOptions": {
+    "customConditions": [],
+    "noEmit": false,
+    "declaration": true,
+    "outDir": "template-dist",
+    "rootDir": "template",
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["template/**/*.ts"]
+}
