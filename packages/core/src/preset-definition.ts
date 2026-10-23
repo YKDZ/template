@@ -71,6 +71,8 @@ export type PresetNode<
   CreationInput = never,
 > = {
   readonly reference: Reference;
+  /** 将此节点的依赖显式绑定到同一次预设选择中的节点。 */
+  readonly dependencyBindings?: Readonly<Record<string, string>>;
   /** 由工作区策略解释的节点布局覆盖。 */
   readonly layout?: Layout;
   /** 按操作应用、并可由单次调用补充的原生创建输入。 */
@@ -82,6 +84,7 @@ type PresetNodeMap = Readonly<
     string,
     {
       readonly reference: PresetReference;
+      readonly dependencyBindings?: Readonly<Record<string, string>>;
       readonly layout?: unknown;
       readonly creationInput?: Partial<Record<PresetOperation, unknown>>;
     }
@@ -214,6 +217,7 @@ export function definePreset<const Nodes extends PresetNodeMap>(
     throw new Error("预设至少声明一个节点");
   }
   const independentReferences = new Set<PresetReference>();
+  const nodeIdentities = new Set(nodeEntries.map(([identity]) => identity));
   const nodes: Record<
     string,
     PresetNode<NodeReference<Nodes>, unknown, unknown>
@@ -256,9 +260,31 @@ export function definePreset<const Nodes extends PresetNodeMap>(
         }
       }
     }
+    if (value.dependencyBindings !== undefined) {
+      if (!isRecord(value.dependencyBindings)) {
+        throw new Error(`预设节点依赖绑定无效：${identity}`);
+      }
+      for (const [key, target] of Object.entries(value.dependencyBindings)) {
+        if (
+          key.trim().length === 0 ||
+          typeof target !== "string" ||
+          target.trim().length === 0
+        ) {
+          throw new Error(`预设节点依赖绑定无效：${identity}/${key}`);
+        }
+        if (!nodeIdentities.has(target)) {
+          throw new Error(`预设节点依赖绑定目标不存在：${identity}/${key}`);
+        }
+      }
+    }
     nodes[identity] = Object.freeze({
       ...value,
       reference,
+      ...(value.dependencyBindings === undefined
+        ? {}
+        : {
+            dependencyBindings: Object.freeze({ ...value.dependencyBindings }),
+          }),
     });
   }
   return Object.freeze({
