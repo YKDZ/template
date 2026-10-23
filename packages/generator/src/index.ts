@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
@@ -29,11 +28,17 @@ import {
   type ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
 import {
-  reconcileAndApplyProjectProjections,
+  commitProjectProjectionPlan,
   materializeProjectProjection,
+  planProjectProjections,
+  readProjectProjectionCurrent,
+  type CurrentProjectProjectionEntry,
+  type ProjectProjection,
   type ProjectProjectionAction,
+  type ProjectProjectionChangePlan,
   type ProjectProjectionConflict,
   type ProjectProjectionPathPrecondition,
+  type ProjectProjectionSource,
 } from "@ykdz/template-core/project-projection";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { parseGenerationRecordStructure } from "@ykdz/template-core/workspace-strategy";
@@ -126,6 +131,50 @@ export type GeneratorPackageIdentity = Pick<
   "name" | "path" | "role"
 >;
 
+export type GeneratorAddOptions<
+  Reference extends PresetReference,
+  NodeLayout,
+  CreationInput extends PackageCreationInput,
+  Context,
+  Contribution extends PackageContribution,
+  PresetProjectContribution,
+> = {
+  readonly repositoryRoot: string;
+  readonly creationInput?: CreationInput;
+} & (
+  | { readonly contentIdentity: ContentSelector }
+  | {
+      readonly preset:
+        | ContentSelector
+        | PresetDefinition<
+            Reference,
+            NodeLayout,
+            CreationInput,
+            PresetProjectOptions<Context, Contribution>,
+            PresetProjectContribution
+          >;
+    }
+);
+
+export type GeneratorAdditionPlan = ProjectProjectionChangePlan;
+
+export type GeneratorPlanningResult<
+  CreationInput extends PackageCreationInput = PackageCreationInput,
+  OwnerFacts = unknown,
+> =
+  | {
+      readonly status: "planned";
+      readonly plan: GeneratorAdditionPlan;
+      readonly blueprint: ProjectBlueprint;
+      readonly generationRecord: GenerationRecord<CreationInput>;
+      readonly projection: WorkspaceProjection<OwnerFacts> | null;
+      readonly actions: readonly ProjectProjectionAction[];
+    }
+  | Exclude<
+      GeneratorResult<CreationInput, OwnerFacts>,
+      { readonly status: "success" }
+    >;
+
 function packageIdentity(
   definition: PackageDefinition,
 ): GeneratorPackageIdentity {
@@ -162,24 +211,27 @@ export type Generator<
     readonly dryRun?: boolean;
   }): Promise<GeneratorResult<CreationInput, OwnerFacts>>;
   add(
-    options: {
-      readonly repositoryRoot: string;
-      readonly creationInput?: CreationInput;
-      readonly dryRun?: boolean;
-    } & (
-      | { readonly contentIdentity: ContentSelector }
-      | {
-          readonly preset:
-            | ContentSelector
-            | PresetDefinition<
-                Reference,
-                NodeLayout,
-                CreationInput,
-                PresetProjectOptions<Context, Contribution>,
-                PresetProjectContribution
-              >;
-        }
-    ),
+    options: GeneratorAddOptions<
+      Reference,
+      NodeLayout,
+      CreationInput,
+      Context,
+      Contribution,
+      PresetProjectContribution
+    > & { readonly dryRun?: boolean },
+  ): Promise<GeneratorResult<CreationInput, OwnerFacts>>;
+  planAdd(
+    options: GeneratorAddOptions<
+      Reference,
+      NodeLayout,
+      CreationInput,
+      Context,
+      Contribution,
+      PresetProjectContribution
+    >,
+  ): Promise<GeneratorPlanningResult<CreationInput, OwnerFacts>>;
+  commitPlan(
+    plan: GeneratorAdditionPlan,
   ): Promise<GeneratorResult<CreationInput, OwnerFacts>>;
 };
 
@@ -411,6 +463,163 @@ export function createGenerator<
   PresetProjectContribution,
   OwnerFacts
 > {
+  const metadataPaths = [
+    ".template/blueprint.json",
+    ".template/generation.json",
+  ] as const;
+  const emptyProjectProjection: ProjectProjection = {
+    entries: [],
+    reconciliation: [],
+  };
+  const pendingAdditionPlans = new WeakMap<
+    GeneratorAdditionPlan,
+    {
+      readonly targetRoot: string;
+      readonly projectPlan: ProjectProjectionChangePlan;
+      readonly blueprint: ProjectBlueprint;
+      readonly generationRecord: GenerationRecord<CreationInput>;
+      readonly projection: WorkspaceProjection<OwnerFacts> | null;
+    }
+  >();
+
+  function registerAdditionPlan(options_: {
+    readonly targetRoot: string;
+    readonly projectPlan: ProjectProjectionChangePlan;
+    readonly blueprint: ProjectBlueprint;
+    readonly generationRecord: GenerationRecord<CreationInput>;
+    readonly projection: WorkspaceProjection<OwnerFacts> | null;
+  }): GeneratorAdditionPlan {
+    const plan = options_.projectPlan;
+    pendingAdditionPlans.set(plan, options_);
+    return plan;
+  }
+
+  function plannedResult(options_: {
+    readonly targetRoot: string;
+    readonly projectPlan: ProjectProjectionChangePlan;
+    readonly blueprint: ProjectBlueprint;
+    readonly generationRecord: GenerationRecord<CreationInput>;
+    readonly projection: WorkspaceProjection<OwnerFacts> | null;
+  }): GeneratorPlanningResult<CreationInput, OwnerFacts> {
+    const plan = registerAdditionPlan(options_);
+    return {
+      status: "planned",
+      plan,
+      blueprint: options_.blueprint,
+      generationRecord: options_.generationRecord,
+      projection: options_.projection,
+      actions: plan.actions,
+    };
+  }
+
+  function sourceForNode(
+    node: PackageNode<Context, Contribution, CreationInput, Content>,
+  ): ProjectProjectionSource {
+    const packageId = node.record?.packageDefinitionId ?? node.definition.path;
+    return {
+      identity: `content:${contentIdentityKey(node.content.identity)}:${packageId}`,
+      label: `${contentIdentityLabel(node.content.identity)}（${node.definition.path}）`,
+    };
+  }
+
+  function mergeSources(
+    ...groups: readonly (readonly ProjectProjectionSource[] | undefined)[]
+  ): readonly ProjectProjectionSource[] {
+    const sources = new Map<string, ProjectProjectionSource>();
+    for (const group of groups) {
+      for (const source of group ?? []) {
+        if (!sources.has(source.identity)) {
+          sources.set(source.identity, source);
+        }
+      }
+    }
+    return [...sources.values()];
+  }
+
+  function declarationSources(
+    contributions: readonly unknown[],
+  ): readonly ProjectProjectionSource[] {
+    return contributions.flatMap((contribution) => {
+      if (!isRecord(contribution) || typeof contribution.source !== "string") {
+        return [];
+      }
+      return [
+        {
+          identity: `declaration:${contribution.source}`,
+          label: contribution.source,
+        },
+      ];
+    });
+  }
+
+  function annotateProjectionSources(options_: {
+    readonly projection: ProjectProjection;
+    readonly nodes: readonly PackageNode<
+      Context,
+      Contribution,
+      CreationInput,
+      Content
+    >[];
+    readonly contributions: readonly Contribution[];
+    readonly projectContributions: readonly unknown[];
+    readonly additionalSources?: readonly ProjectProjectionSource[];
+  }): ProjectProjection {
+    const sourcesByPath = new Map<string, readonly ProjectProjectionSource[]>();
+    const appendPathSource = (
+      outputPath: string,
+      source: ProjectProjectionSource,
+    ): void => {
+      sourcesByPath.set(
+        outputPath,
+        mergeSources(sourcesByPath.get(outputPath), [source]),
+      );
+    };
+    for (const [index, node] of options_.nodes.entries()) {
+      const source = sourceForNode(node);
+      for (const operation of options_.contributions[index]?.operations ?? []) {
+        appendPathSource(
+          operation.kind === "setExecutable" ? operation.path : operation.to,
+          source,
+        );
+      }
+    }
+    const nodeSources = options_.nodes.map(sourceForNode);
+    const rootSources = mergeSources(
+      nodeSources,
+      declarationSources(options_.projectContributions),
+    );
+    const metadataSources = mergeSources(
+      options_.additionalSources,
+      nodeSources,
+      rootSources,
+    );
+    for (const metadataPath of [
+      ".template/blueprint.json",
+      ".template/generation.json",
+    ]) {
+      for (const source of metadataSources)
+        appendPathSource(metadataPath, source);
+    }
+    const sourceForPath = (outputPath: string) =>
+      mergeSources(
+        sourcesByPath.get(outputPath),
+        sourcesByPath.has(outputPath) ? undefined : rootSources,
+      );
+    return {
+      entries: options_.projection.entries.map((entry) => {
+        const sources = mergeSources(entry.sources, sourceForPath(entry.path));
+        return sources.length === 0 ? entry : { ...entry, sources };
+      }),
+      reconciliation: options_.projection.reconciliation.map((policy) => {
+        const sources = mergeSources(
+          policy.sources,
+          sourceForPath(policy.path),
+        );
+        return sources.length === 0 ? policy : { ...policy, sources };
+      }),
+    };
+  }
+
   const contentIndex = createContentIndex(options.content);
   const contentMembers = contentIndex.members.filter(
     (member) => member.kind === "reference",
@@ -835,14 +1044,17 @@ export function createGenerator<
     contributions: readonly Contribution[],
     nodeInstances: GeneratorNodeInstanceIds,
     presetSelections: readonly ContentIdentity[],
+    suppliedProjectContributions?: readonly PresetProjectContribution[],
   ) {
     const resolvedNodeInstances = resolveNodeInstances(records, nodeInstances);
-    const presetProjectContributions = computePresetProjectContributions(
-      context,
-      contributions,
-      resolvedNodeInstances,
-      presetSelections,
-    );
+    const presetProjectContributions =
+      suppliedProjectContributions ??
+      computePresetProjectContributions(
+        context,
+        contributions,
+        resolvedNodeInstances,
+        presetSelections,
+      );
     const projection = options.strategy.project({
       context,
       state,
@@ -1237,20 +1449,34 @@ export function createGenerator<
   }
 
   async function restoreRepository(repositoryRoot: string) {
+    const current = await readProjectProjectionCurrent({
+      targetRoot: repositoryRoot,
+      before: emptyProjectProjection,
+      after: emptyProjectProjection,
+      additionalPaths: metadataPaths,
+    });
+    const invalidAncestor = current.facts.find(
+      (fact) =>
+        fact.observation === "ancestor" &&
+        fact.kind !== "missing" &&
+        fact.kind !== "directory",
+    );
+    if (invalidAncestor !== undefined) {
+      throw new Error(`生成元数据路径的祖先不是目录：${invalidAncestor.path}`);
+    }
+    const metadataFact = (metadataPath: string) =>
+      current.facts.find((fact) => fact.path === metadataPath);
+    const blueprintFact = metadataFact(".template/blueprint.json");
+    const generationFact = metadataFact(".template/generation.json");
+    if (blueprintFact?.kind !== "file" || generationFact?.kind !== "file") {
+      throw new Error("目标仓库缺少可读取的生成蓝图或生成记录");
+    }
     const blueprintValue = JSON.parse(
-      await readFile(
-        path.join(repositoryRoot, ".template/blueprint.json"),
-        "utf8",
-      ),
+      new TextDecoder().decode(blueprintFact.content),
     ) as unknown;
     const blueprint = assertProjectBlueprint(blueprintValue);
     const record = parseGenerationRecord<CreationInput>(
-      JSON.parse(
-        await readFile(
-          path.join(repositoryRoot, ".template/generation.json"),
-          "utf8",
-        ),
-      ) as unknown,
+      JSON.parse(new TextDecoder().decode(generationFact.content)) as unknown,
     );
     if (record.strategyIdentity !== options.strategy.identity) {
       throw new Error("目标仓库使用了不兼容的工作区策略");
@@ -1259,38 +1485,40 @@ export function createGenerator<
     const packageStates = resolvePackageStates(record.packages, blueprint);
     validateNodeInstances(packageStates, record.nodeInstances);
     validatePresetSelections(record.presetSelections);
-    return { blueprint, record, state, packageStates };
+    return {
+      blueprint,
+      record,
+      state,
+      packageStates,
+      readFacts: current.facts,
+    };
   }
 
-  async function add(
-    addOptions: {
-      readonly repositoryRoot: string;
-      readonly creationInput?: CreationInput;
-      readonly dryRun?: boolean;
-    } & (
-      | { readonly contentIdentity: ContentSelector }
-      | {
-          readonly preset:
-            | PresetDefinition<
-                Content["definition"] & PresetReference,
-                NodeLayout,
-                CreationInput,
-                PresetProjectOptions<Context, Contribution>,
-                PresetProjectContribution
-              >
-            | ContentSelector;
-        }
-    ),
-  ): Promise<GeneratorResult<CreationInput, OwnerFacts>> {
+  async function planAddition(
+    addOptions: GeneratorAddOptions<
+      Content["definition"] & PresetReference,
+      NodeLayout,
+      CreationInput,
+      Context,
+      Contribution,
+      PresetProjectContribution
+    >,
+  ): Promise<GeneratorPlanningResult<CreationInput, OwnerFacts>> {
     try {
       const repositoryRoot = path.resolve(addOptions.repositoryRoot);
       let blueprint: ProjectBlueprint;
       let record: GeneratorRecord<CreationInput>;
       let packageStates: GeneratorPackageState<CreationInput>[];
       let state: State;
+      let metadataReadFacts: readonly CurrentProjectProjectionEntry[];
       try {
-        ({ blueprint, record, state, packageStates } =
-          await restoreRepository(repositoryRoot));
+        ({
+          blueprint,
+          record,
+          state,
+          packageStates,
+          readFacts: metadataReadFacts,
+        } = await restoreRepository(repositoryRoot));
       } catch (error) {
         return fail(
           "metadata",
@@ -1526,7 +1754,7 @@ export function createGenerator<
         if (validation?.status === "conflict") {
           return {
             status: "conflict",
-            dryRun: addOptions.dryRun ?? false,
+            dryRun: false,
             reason: "工作区策略报告了包加法冲突。",
             conflicts: [],
             ownerConflict: validation.conflict,
@@ -1564,14 +1792,12 @@ export function createGenerator<
             selectionRoot.creationInput,
           )
         ) {
-          return {
-            status: "success",
-            dryRun: addOptions.dryRun ?? false,
+          return planUnchangedAddition({
+            repositoryRoot,
             blueprint,
             generationRecord: record,
-            projection: null,
-            actions: [],
-          };
+            readFacts: metadataReadFacts,
+          });
         }
         const samePackageIdentity =
           prior !== undefined &&
@@ -1581,7 +1807,7 @@ export function createGenerator<
           prior.definition.path === definition.path;
         return {
           status: "conflict",
-          dryRun: addOptions.dryRun ?? false,
+          dryRun: false,
           reason: samePackageIdentity
             ? "已存在的包实例不能接受不同的加包输入。"
             : "目标包名称或路径已被其他实例占用。",
@@ -1628,11 +1854,27 @@ export function createGenerator<
         currentNodeInstances,
       );
       const afterNodes = [...existingNodes, ...additions];
+      const afterNodeInstances = resolveNodeInstances(
+        allRecords,
+        afterNodeInstanceIds,
+      );
       const afterContributions = persistedContributions(
         afterNodes,
         context,
         allRecords,
-        resolveNodeInstances(allRecords, afterNodeInstanceIds),
+        afterNodeInstances,
+      );
+      const beforeProjectContributions = computePresetProjectContributions(
+        context,
+        beforeContributions,
+        currentNodeInstances,
+        record.presetSelections,
+      );
+      const afterProjectContributions = computePresetProjectContributions(
+        context,
+        afterContributions,
+        afterNodeInstances,
+        afterPresetSelections,
       );
       const before = project(
         context,
@@ -1642,6 +1884,7 @@ export function createGenerator<
         beforeContributions,
         record.nodeInstances,
         record.presetSelections,
+        beforeProjectContributions,
       );
       const after = project(
         context,
@@ -1651,6 +1894,7 @@ export function createGenerator<
         afterContributions,
         afterNodeInstanceIds,
         afterPresetSelections,
+        afterProjectContributions,
       );
       const projectedBlueprint = after.blueprint;
       const preconditions: ProjectProjectionPathPrecondition[] = additions.map(
@@ -1658,40 +1902,62 @@ export function createGenerator<
           path: node.definition.path,
           kind: "must-not-exist",
           reason: "新包路径已存在：" + node.definition.path,
+          sources: [sourceForNode(node)],
         }),
       );
-      const reconciliation = await reconcileAndApplyProjectProjections({
-        targetRoot: repositoryRoot,
-        before: {
+      const [unannotatedBefore, unannotatedAfter] = await Promise.all([
+        materializeProjectProjection({
           operations: before.operations,
           reconciliation: before.reconciliation,
-        },
-        after: {
+        }),
+        materializeProjectProjection({
           operations: after.operations,
           reconciliation: after.reconciliation,
-        },
-        preconditions,
-        ...(addOptions.dryRun === undefined
-          ? {}
-          : { dryRun: addOptions.dryRun }),
+        }),
+      ]);
+      const beforeProjection = annotateProjectionSources({
+        projection: unannotatedBefore,
+        nodes: existingNodes,
+        contributions: beforeContributions,
+        projectContributions: beforeProjectContributions,
       });
-      if (!reconciliation.ok) {
+      const afterProjection = annotateProjectionSources({
+        projection: unannotatedAfter,
+        nodes: afterNodes,
+        contributions: afterContributions,
+        projectContributions: afterProjectContributions,
+        additionalSources: additions.map(sourceForNode),
+      });
+      const current = await readProjectProjectionCurrent({
+        targetRoot: repositoryRoot,
+        before: beforeProjection,
+        after: afterProjection,
+        preconditions,
+        additionalPaths: metadataPaths,
+      });
+      const planning = planProjectProjections({
+        before: beforeProjection,
+        current,
+        after: afterProjection,
+        preconditions,
+        readFacts: metadataReadFacts,
+      });
+      if (!planning.ok) {
         return {
           status: "conflict",
-          dryRun: addOptions.dryRun ?? false,
+          dryRun: false,
           reason: "目标工作区的现行内容与新增投影发生冲突。",
-          conflicts: reconciliation.conflicts,
+          conflicts: planning.conflicts,
           actions: [],
         };
       }
-      return {
-        status: "success",
-        dryRun: addOptions.dryRun ?? false,
+      return plannedResult({
+        targetRoot: repositoryRoot,
+        projectPlan: planning.plan,
         blueprint: projectedBlueprint,
         generationRecord: after.generationRecord,
         projection: after,
-        actions: reconciliation.actions,
-      };
+      });
     } catch (error) {
       return fail(
         error instanceof AdditionPlanningFailure
@@ -1702,5 +1968,121 @@ export function createGenerator<
     }
   }
 
-  return { init, add };
+  async function planUnchangedAddition(options_: {
+    readonly repositoryRoot: string;
+    readonly blueprint: ProjectBlueprint;
+    readonly generationRecord: GenerationRecord<CreationInput>;
+    readonly readFacts: readonly CurrentProjectProjectionEntry[];
+  }): Promise<GeneratorPlanningResult<CreationInput, OwnerFacts>> {
+    const current = await readProjectProjectionCurrent({
+      targetRoot: options_.repositoryRoot,
+      before: emptyProjectProjection,
+      after: emptyProjectProjection,
+      additionalPaths: metadataPaths,
+    });
+    const planning = planProjectProjections({
+      before: emptyProjectProjection,
+      current,
+      after: emptyProjectProjection,
+      readFacts: options_.readFacts,
+    });
+    if (!planning.ok) {
+      return {
+        status: "conflict",
+        dryRun: false,
+        reason: "准备计算使用的生成元数据已发生变化。",
+        conflicts: planning.conflicts,
+        actions: [],
+      };
+    }
+    return plannedResult({
+      targetRoot: options_.repositoryRoot,
+      projectPlan: planning.plan,
+      blueprint: options_.blueprint,
+      generationRecord: options_.generationRecord,
+      projection: null,
+    });
+  }
+
+  async function planAdd(
+    options_: GeneratorAddOptions<
+      Content["definition"] & PresetReference,
+      NodeLayout,
+      CreationInput,
+      Context,
+      Contribution,
+      PresetProjectContribution
+    >,
+  ): Promise<GeneratorPlanningResult<CreationInput, OwnerFacts>> {
+    return planAddition(options_);
+  }
+
+  async function commitPlan(
+    plan: GeneratorAdditionPlan,
+  ): Promise<GeneratorResult<CreationInput, OwnerFacts>> {
+    const pending = pendingAdditionPlans.get(plan);
+    if (pending === undefined) {
+      return fail(
+        "reconciliation",
+        new Error("加包计划必须由当前生成器实例的 planAdd 创建"),
+      );
+    }
+    try {
+      const result = await commitProjectProjectionPlan({
+        targetRoot: pending.targetRoot,
+        plan: pending.projectPlan,
+      });
+      if (!result.ok) {
+        return {
+          status: "conflict",
+          dryRun: false,
+          reason: "规划后目标工作区相关事实已变化，计划未提交。",
+          conflicts: result.conflicts,
+          actions: [],
+        };
+      }
+      return {
+        status: "success",
+        dryRun: false,
+        blueprint: pending.blueprint,
+        generationRecord: pending.generationRecord,
+        projection: pending.projection,
+        actions: result.actions,
+      };
+    } catch (error) {
+      return fail("reconciliation", error);
+    }
+  }
+
+  async function add(
+    addOptions: GeneratorAddOptions<
+      Content["definition"] & PresetReference,
+      NodeLayout,
+      CreationInput,
+      Context,
+      Contribution,
+      PresetProjectContribution
+    > & { readonly dryRun?: boolean },
+  ): Promise<GeneratorResult<CreationInput, OwnerFacts>> {
+    const { dryRun = false, ...planningOptions } = addOptions;
+    const planning = await planAddition(planningOptions);
+    if (planning.status !== "planned") {
+      return planning.status === "conflict"
+        ? { ...planning, dryRun }
+        : planning;
+    }
+    if (dryRun) {
+      return {
+        status: "success",
+        dryRun: true,
+        blueprint: planning.blueprint,
+        generationRecord: planning.generationRecord,
+        projection: planning.projection,
+        actions: planning.actions,
+      };
+    }
+    return commitPlan(planning.plan);
+  }
+
+  return { init, add, planAdd, commitPlan };
 }

@@ -397,6 +397,11 @@ function createCliContract(runtime: CliRuntime) {
                         ...(conflict.attribute === undefined
                           ? []
                           : [`属性: ${conflict.attribute}`]),
+                        ...(conflict.sources === undefined
+                          ? []
+                          : [
+                              `来源: ${conflict.sources.map((source) => source.label).join("、")}`,
+                            ]),
                         `原因: ${conflict.reason}`,
                         `生成前: ${conflict.context.before}`,
                         `当前: ${conflict.context.current}`,

@@ -47,6 +47,10 @@ const packageIdentity = v.object({
   path: v.string(),
   role: v.string(),
 });
+const projectProjectionSource = v.object({
+  identity: v.string(),
+  label: v.string(),
+});
 const region = v.object({ startLine: v.number(), lineCount: v.number() });
 export const packageConflictSchema = standardSchema(
   v.object({
@@ -80,6 +84,7 @@ export const packageConflictSchema = standardSchema(
           region: v.optional(
             v.object({ before: region, current: region, after: region }),
           ),
+          sources: v.optional(v.array(projectProjectionSource)),
           reason: v.string(),
           context: v.object({
             before: v.string(),

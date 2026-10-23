@@ -1204,6 +1204,7 @@ void describe("template CLI command control", () => {
       );
       const conflicts = JSON.parse(output.stderr()).data.conflicts;
       assert.equal(conflicts.length, 1);
+      assert.match(conflicts[0].sources[0].label, /services\/existing/u);
       assert.equal(
         conflicts[0].reason.includes("新包路径已存在：services/existing"),
         true,
@@ -1268,8 +1269,8 @@ void describe("template CLI command control", () => {
       1,
     );
     const linkConflicts = JSON.parse(output.stderr()).data.conflicts;
-    assert.equal(linkConflicts.length, 1);
-    assert.ok(linkConflicts[0].reason.includes("existing symbolic-link"));
+    assert.equal(linkConflicts.length, 1, JSON.stringify(linkConflicts));
+    assert.ok(linkConflicts[0].reason.includes("当前为符号链接"));
     assertPartialDeepStrictEqual(JSON.parse(output.stderr()).data, {
       actions: [],
       conflicts: [
@@ -1330,8 +1331,8 @@ void describe("template CLI command control", () => {
       1,
     );
     const fileConflicts = JSON.parse(output.stderr()).data.conflicts;
-    assert.equal(fileConflicts.length, 1);
-    assert.ok(fileConflicts[0].reason.includes("existing file"));
+    assert.equal(fileConflicts.length, 1, JSON.stringify(fileConflicts));
+    assert.ok(fileConflicts[0].reason.includes("当前为文件"));
     assertPartialDeepStrictEqual(JSON.parse(output.stderr()).data, {
       actions: [],
       conflicts: [

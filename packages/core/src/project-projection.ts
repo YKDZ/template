@@ -6,6 +6,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   rmdir,
   writeFile,
@@ -23,13 +24,36 @@ export type ProjectProjectionEntry = {
   readonly content: Uint8Array;
   /** Only executable bits are relevant to generated-file reconciliation. */
   readonly mode: number;
+  readonly sources?: readonly ProjectProjectionSource[];
+};
+
+export type ProjectProjectionSource = {
+  readonly identity: string;
+  readonly label: string;
 };
 
 export type CurrentProjectProjectionEntry =
-  | ProjectProjectionEntry
+  | (ProjectProjectionEntry & {
+      readonly observation?: "ancestor" | "precondition";
+    })
   | {
       readonly path: string;
-      readonly kind: "directory" | "symbolic-link" | "other";
+      readonly kind: "file-kind";
+      readonly observation?: "ancestor" | "precondition";
+      readonly sources?: readonly ProjectProjectionSource[];
+    }
+  | {
+      readonly path: string;
+      readonly kind: "directory";
+      readonly empty?: boolean;
+      readonly observation?: "ancestor" | "precondition";
+      readonly sources?: readonly ProjectProjectionSource[];
+    }
+  | {
+      readonly path: string;
+      readonly kind: "symbolic-link" | "other" | "missing";
+      readonly observation?: "ancestor" | "precondition";
+      readonly sources?: readonly ProjectProjectionSource[];
     };
 
 export type StructuredIdentitySetPolicy = {
@@ -73,6 +97,7 @@ export type ProjectProjectionReconciliation =
   | {
       readonly path: string;
       readonly driver: "structured";
+      readonly sources?: readonly ProjectProjectionSource[];
       readonly identitySets?: readonly StructuredIdentitySetPolicy[];
       /** planner 拥有的根声明位置，在三向合并之前归一。 */
       readonly mirrorSlots?: readonly ProjectProjectionMirrorSlot[];
@@ -80,11 +105,13 @@ export type ProjectProjectionReconciliation =
   | {
       readonly path: string;
       readonly driver: "text";
+      readonly sources?: readonly ProjectProjectionSource[];
       readonly mirrorSlots?: readonly ProjectProjectionMirrorSlot[];
     }
   | {
       readonly path: string;
       readonly driver: "canonical";
+      readonly sources?: readonly ProjectProjectionSource[];
     };
 
 export type ProjectProjection = {
@@ -92,10 +119,23 @@ export type ProjectProjection = {
   readonly reconciliation: readonly ProjectProjectionReconciliation[];
 };
 
-export type ProjectProjectionPathPrecondition = {
-  readonly path: string;
-  readonly kind: "must-not-exist";
-  readonly reason: string;
+export type ProjectProjectionPathPrecondition =
+  | {
+      readonly path: string;
+      readonly kind: "must-not-exist";
+      readonly reason: string;
+      readonly sources?: readonly ProjectProjectionSource[];
+    }
+  | {
+      readonly path: string;
+      readonly kind: "directory-empty-or-missing";
+      readonly reason: string;
+      readonly sources?: readonly ProjectProjectionSource[];
+    };
+
+export type ProjectProjectionCurrent = {
+  readonly targetRoot: string;
+  readonly facts: readonly CurrentProjectProjectionEntry[];
 };
 
 export type ProjectProjectionConflictDriver =
@@ -115,6 +155,7 @@ export type ProjectProjectionConflict = {
     };
     readonly after: { readonly startLine: number; readonly lineCount: number };
   };
+  readonly sources?: readonly ProjectProjectionSource[];
   readonly reason: string;
   readonly before: string;
   readonly current: string;
@@ -130,10 +171,44 @@ class ProjectProjectionPathPreconditionError extends Error {
   }
 }
 
+class ProjectProjectionStalePlanError extends Error {
+  readonly conflicts: readonly ProjectProjectionConflict[];
+
+  constructor(conflicts: readonly ProjectProjectionConflict[]) {
+    super("规划后相关目标事实已变化");
+    this.conflicts = conflicts;
+  }
+}
+
 export type ProjectProjectionReconciliationResult =
   | {
       readonly ok: true;
       readonly mutations: readonly ProjectProjectionEntry[];
+    }
+  | {
+      readonly ok: false;
+      readonly conflicts: readonly ProjectProjectionConflict[];
+    };
+
+export type ProjectProjectionChangePlan = {
+  readonly mutations: readonly ProjectProjectionEntry[];
+  readonly observations: readonly CurrentProjectProjectionEntry[];
+  readonly preconditions: readonly ProjectProjectionPathPrecondition[];
+  readonly actions: readonly ProjectProjectionAction[];
+};
+
+export type ProjectProjectionPlanningResult =
+  | { readonly ok: true; readonly plan: ProjectProjectionChangePlan }
+  | {
+      readonly ok: false;
+      readonly conflicts: readonly ProjectProjectionConflict[];
+    };
+
+export type ProjectProjectionCommitResult =
+  | {
+      readonly ok: true;
+      readonly changedPaths: readonly string[];
+      readonly actions: readonly ProjectProjectionAction[];
     }
   | {
       readonly ok: false;
@@ -316,6 +391,28 @@ function entriesEqual(
     return left.kind === right.kind;
   }
   return left.mode === right.mode && bytesEqual(left.content, right.content);
+}
+
+function mergeProjectProjectionSources(
+  ...groups: readonly (readonly ProjectProjectionSource[] | undefined)[]
+): readonly ProjectProjectionSource[] {
+  const sources = new Map<string, ProjectProjectionSource>();
+  for (const group of groups) {
+    for (const source of group ?? []) {
+      if (!sources.has(source.identity)) {
+        sources.set(source.identity, { ...source });
+      }
+    }
+  }
+  return [...sources.values()];
+}
+
+function attachConflictSources(
+  conflict: ProjectProjectionConflict,
+  ...groups: readonly (readonly ProjectProjectionSource[] | undefined)[]
+): ProjectProjectionConflict {
+  const sources = mergeProjectProjectionSources(conflict.sources, ...groups);
+  return sources.length === 0 ? conflict : { ...conflict, sources };
 }
 
 function decodeText(content: Uint8Array): string | undefined {
@@ -1384,13 +1481,15 @@ function reconciliationPoliciesCompatible(
   left: ProjectProjectionReconciliation,
   right: ProjectProjectionReconciliation,
 ): boolean {
+  const { sources: _leftSources, ...leftPolicy } = left;
+  const { sources: _rightSources, ...rightPolicy } = right;
   if (
     left.path !== right.path ||
     left.driver !== right.driver ||
     left.driver !== "structured" ||
     right.driver !== "structured"
   ) {
-    return JSON.stringify(left) === JSON.stringify(right);
+    return JSON.stringify(leftPolicy) === JSON.stringify(rightPolicy);
   }
   const leftIdentitySets = left.identitySets ?? [];
   const rightIdentitySets = right.identitySets ?? [];
@@ -1580,20 +1679,17 @@ function declaredMirrorSlots(
   return policy.mirrorSlots ?? [];
 }
 
-export async function reconcileProjectProjections(options: {
-  readonly before: ProjectProjection;
-  readonly after: ProjectProjection;
-  readonly readCurrent: (
-    path: string,
-  ) => Promise<CurrentProjectProjectionEntry | undefined>;
-}): Promise<ProjectProjectionReconciliationResult> {
-  const beforePolicies = assertProjectionContract(options.before);
-  const afterPolicies = assertProjectionContract(options.after);
+function projectionObservationPaths(
+  before: ProjectProjection,
+  after: ProjectProjection,
+): readonly string[] {
+  const beforePolicies = assertProjectionContract(before);
+  const afterPolicies = assertProjectionContract(after);
   const beforeByPath = new Map(
-    options.before.entries.map((entry) => [entry.path, entry]),
+    before.entries.map((entry) => [entry.path, entry]),
   );
   const afterByPath = new Map(
-    options.after.entries.map((entry) => [entry.path, entry]),
+    after.entries.map((entry) => [entry.path, entry]),
   );
   for (const projectionPath of beforeByPath.keys()) {
     const beforePolicy = beforePolicies.get(projectionPath);
@@ -1613,6 +1709,206 @@ export async function reconcileProjectProjections(options: {
       );
     }
   }
+  const deltaPaths = [
+    ...new Set([...beforeByPath.keys(), ...afterByPath.keys()]),
+  ]
+    .filter(
+      (projectionPath) =>
+        !entriesEqual(
+          beforeByPath.get(projectionPath),
+          afterByPath.get(projectionPath),
+        ),
+    )
+    .toSorted();
+  const declaredMirrorPaths = new Set<string>();
+  for (const [projectionPath, policy] of afterPolicies) {
+    if (declaredMirrorSlots(policy).length > 0)
+      declaredMirrorPaths.add(projectionPath);
+  }
+  for (const [projectionPath, policy] of beforePolicies) {
+    if (declaredMirrorSlots(policy).length > 0)
+      declaredMirrorPaths.add(projectionPath);
+  }
+  return [...new Set([...deltaPaths, ...declaredMirrorPaths])].toSorted();
+}
+
+export function getProjectProjectionReconciliationPaths(options: {
+  readonly before: ProjectProjection;
+  readonly after: ProjectProjection;
+}): readonly string[] {
+  return projectionObservationPaths(options.before, options.after);
+}
+
+function assertUniquePreconditions(
+  preconditions: readonly ProjectProjectionPathPrecondition[],
+): void {
+  const paths = new Set<string>();
+  for (const precondition of preconditions) {
+    if (precondition.path === ".") {
+      if (precondition.kind !== "directory-empty-or-missing") {
+        throw new Error("文件路径前提不能使用点路径。");
+      }
+    } else {
+      assertNormalizedSafeRelativePath(precondition.path, "entry");
+    }
+    if (paths.has(precondition.path)) {
+      throw new Error(`投影路径前提必须唯一：${precondition.path}`);
+    }
+    paths.add(precondition.path);
+  }
+}
+
+export function getProjectProjectionObservationPaths(options: {
+  readonly before: ProjectProjection;
+  readonly after: ProjectProjection;
+  readonly preconditions?: readonly ProjectProjectionPathPrecondition[];
+  readonly additionalPaths?: readonly string[];
+}): readonly string[] {
+  const preconditions = options.preconditions ?? [];
+  assertUniquePreconditions(preconditions);
+  const additionalPaths = options.additionalPaths ?? [];
+  for (const additionalPath of additionalPaths) {
+    assertNormalizedSafeRelativePath(additionalPath, "entry");
+  }
+  const leaves = new Set([
+    ...projectionObservationPaths(options.before, options.after),
+    ...preconditions.map((precondition) => precondition.path),
+    ...additionalPaths,
+  ]);
+  const observations = new Set(leaves);
+  for (const leaf of leaves) {
+    for (
+      let parent = path.posix.dirname(leaf);
+      parent !== "." && parent !== "";
+      parent = path.posix.dirname(parent)
+    ) {
+      observations.add(parent);
+    }
+  }
+  return [...observations].toSorted();
+}
+
+export async function readProjectProjectionCurrent(options: {
+  readonly targetRoot: string;
+  readonly before: ProjectProjection;
+  readonly after: ProjectProjection;
+  readonly preconditions?: readonly ProjectProjectionPathPrecondition[];
+  readonly additionalPaths?: readonly string[];
+}): Promise<ProjectProjectionCurrent> {
+  const targetRoot = path.resolve(options.targetRoot);
+  const preconditions = options.preconditions ?? [];
+  const paths = getProjectProjectionObservationPaths({
+    before: options.before,
+    after: options.after,
+    preconditions,
+    ...(options.additionalPaths === undefined
+      ? {}
+      : { additionalPaths: options.additionalPaths }),
+  });
+  const leafPaths = new Set([
+    ...projectionObservationPaths(options.before, options.after),
+    ...(options.additionalPaths ?? []),
+  ]);
+  const preconditionPaths = new Set(
+    preconditions.map((precondition) => precondition.path),
+  );
+  const ancestorPaths = new Set<string>();
+  for (const leaf of [...leafPaths, ...preconditionPaths]) {
+    for (
+      let parent = path.posix.dirname(leaf);
+      parent !== "." && parent !== "";
+      parent = path.posix.dirname(parent)
+    ) {
+      ancestorPaths.add(parent);
+    }
+  }
+  const emptyDirectoryPaths = new Set(
+    preconditions
+      .filter(
+        (precondition) => precondition.kind === "directory-empty-or-missing",
+      )
+      .map((precondition) => precondition.path),
+  );
+  const facts = await Promise.all(
+    paths.map((projectionPath) =>
+      readCurrentProjectionEntry(targetRoot, projectionPath, {
+        includeDirectoryContents: emptyDirectoryPaths.has(projectionPath),
+        includeFileContents: leafPaths.has(projectionPath),
+        ...(ancestorPaths.has(projectionPath)
+          ? { observation: "ancestor" as const }
+          : preconditionPaths.has(projectionPath)
+            ? { observation: "precondition" as const }
+            : {}),
+      }),
+    ),
+  );
+  return { targetRoot, facts };
+}
+
+function explicitCurrentByPath(
+  current: readonly CurrentProjectProjectionEntry[],
+): Map<string, CurrentProjectProjectionEntry> {
+  const result = new Map<string, CurrentProjectProjectionEntry>();
+  for (const fact of current) {
+    if (result.has(fact.path)) {
+      throw new Error(`Current 事实路径必须唯一：${fact.path}`);
+    }
+    result.set(fact.path, fact);
+  }
+  return result;
+}
+
+function currentEntry(
+  fact: CurrentProjectProjectionEntry,
+): CurrentProjectProjectionEntry | undefined {
+  return fact.kind === "missing" ? undefined : fact;
+}
+
+function assertCurrentFactPaths(options: {
+  readonly facts: readonly CurrentProjectProjectionEntry[];
+  readonly preconditions: readonly ProjectProjectionPathPrecondition[];
+}): void {
+  const permitsRoot = options.preconditions.some(
+    (precondition) =>
+      precondition.path === "." &&
+      precondition.kind === "directory-empty-or-missing",
+  );
+  for (const fact of options.facts) {
+    if (fact.path === ".") {
+      if (!permitsRoot) {
+        throw new Error("点路径事实只能用于初始化目标前提。");
+      }
+      continue;
+    }
+    try {
+      assertNormalizedSafeRelativePath(fact.path, "entry");
+    } catch (error) {
+      throw new Error(
+        `Current 事实路径必须是安全的标准相对路径：${fact.path}`,
+        { cause: error },
+      );
+    }
+  }
+}
+
+export function reconcileProjectProjections(options: {
+  readonly before: ProjectProjection;
+  readonly current: readonly CurrentProjectProjectionEntry[];
+  readonly after: ProjectProjection;
+}): ProjectProjectionReconciliationResult {
+  const beforePolicies = assertProjectionContract(options.before);
+  const afterPolicies = assertProjectionContract(options.after);
+  const currentByPath = explicitCurrentByPath(options.current);
+  const beforeByPath = new Map(
+    options.before.entries.map((entry) => [entry.path, entry]),
+  );
+  const afterByPath = new Map(
+    options.after.entries.map((entry) => [entry.path, entry]),
+  );
+  const reconcilePaths = projectionObservationPaths(
+    options.before,
+    options.after,
+  );
   const deltaPathSet = new Set(
     [...new Set([...beforeByPath.keys(), ...afterByPath.keys()])]
       .filter(
@@ -1624,24 +1920,14 @@ export async function reconcileProjectProjections(options: {
       )
       .toSorted(),
   );
-  const declaredMirrorPaths = new Set<string>();
-  for (const [projectionPath, policy] of afterPolicies) {
-    if (declaredMirrorSlots(policy).length > 0) {
-      declaredMirrorPaths.add(projectionPath);
-    }
-  }
-  for (const [projectionPath, policy] of beforePolicies) {
-    if (declaredMirrorSlots(policy).length > 0) {
-      declaredMirrorPaths.add(projectionPath);
-    }
-  }
-  const reconcilePaths = [
-    ...new Set([...deltaPathSet, ...declaredMirrorPaths]),
-  ].toSorted();
   const mutations: ProjectProjectionEntry[] = [];
   const conflicts: ProjectProjectionConflict[] = [];
 
   for (const projectionPath of reconcilePaths) {
+    const currentFact = currentByPath.get(projectionPath);
+    if (currentFact === undefined) {
+      throw new Error(`Current 事实缺少必要路径：${projectionPath}`);
+    }
     const before = beforeByPath.get(projectionPath);
     const after = afterByPath.get(projectionPath)!;
     const beforePolicy = beforePolicies.get(projectionPath);
@@ -1650,7 +1936,7 @@ export async function reconcileProjectProjections(options: {
     const driver = policy.driver;
     const mirrorSlots = declaredMirrorSlots(policy);
     const isDeltaPath = deltaPathSet.has(projectionPath);
-    const current = await options.readCurrent(projectionPath);
+    const current = currentEntry(currentFact);
     if (entriesEqual(current, after)) continue;
     if (entriesEqual(current, before)) {
       mutations.push(after);
@@ -1760,24 +2046,495 @@ export async function reconcileProjectProjections(options: {
 
   return conflicts.length === 0
     ? { ok: true, mutations }
-    : { ok: false, conflicts };
+    : {
+        ok: false,
+        conflicts: conflicts.map((conflict) =>
+          attachConflictSources(
+            conflict,
+            beforeByPath.get(conflict.path)?.sources,
+            currentByPath.get(conflict.path)?.sources,
+            afterByPath.get(conflict.path)?.sources,
+            beforePolicies.get(conflict.path)?.sources,
+            afterPolicies.get(conflict.path)?.sources,
+          ),
+        ),
+      };
+}
+
+type StoredProjectProjectionPlan = {
+  readonly targetRoot: string;
+  readonly mutations: readonly ProjectProjectionEntry[];
+  readonly observations: readonly CurrentProjectProjectionEntry[];
+  readonly preconditions: readonly ProjectProjectionPathPrecondition[];
+  readonly actions: readonly ProjectProjectionAction[];
+  readonly drivers: ReadonlyMap<string, ProjectProjectionConflictDriver>;
+  readonly afterByPath: ReadonlyMap<string, ProjectProjectionEntry>;
+  readonly sourcesByPath: ReadonlyMap<
+    string,
+    readonly ProjectProjectionSource[]
+  >;
+};
+
+const storedProjectProjectionPlans = new WeakMap<
+  ProjectProjectionChangePlan,
+  StoredProjectProjectionPlan
+>();
+
+function cloneProjectionEntry(
+  entry: ProjectProjectionEntry,
+): ProjectProjectionEntry {
+  return {
+    ...entry,
+    content: new Uint8Array(entry.content),
+    ...(entry.sources === undefined
+      ? {}
+      : { sources: mergeProjectProjectionSources(entry.sources) }),
+  };
+}
+
+function cloneCurrentFact(
+  fact: CurrentProjectProjectionEntry,
+): CurrentProjectProjectionEntry {
+  return fact.kind === "file" ? cloneProjectionEntry(fact) : { ...fact };
+}
+
+function currentFactsEqual(
+  left: CurrentProjectProjectionEntry,
+  right: CurrentProjectProjectionEntry,
+): boolean {
+  if (left.path !== right.path || left.kind !== right.kind) return false;
+  if (left.kind === "file" && right.kind === "file") {
+    return (
+      left.mode === right.mode &&
+      left.observation === right.observation &&
+      bytesEqual(left.content, right.content)
+    );
+  }
+  if (left.kind === "directory" && right.kind === "directory") {
+    return left.empty === right.empty && left.observation === right.observation;
+  }
+  return left.observation === right.observation;
+}
+
+function preconditionConflict(
+  precondition: ProjectProjectionPathPrecondition,
+  fact: CurrentProjectProjectionEntry,
+): ProjectProjectionConflict | undefined {
+  if (precondition.kind === "must-not-exist" && fact.kind === "missing") {
+    return undefined;
+  }
+  if (
+    precondition.kind === "directory-empty-or-missing" &&
+    (fact.kind === "missing" || (fact.kind === "directory" && fact.empty))
+  ) {
+    return undefined;
+  }
+  const current =
+    fact.kind === "directory" && fact.empty === true
+      ? "空目录"
+      : fact.kind === "missing"
+        ? "缺失"
+        : fact.kind === "other"
+          ? "非普通文件"
+          : fact.kind === "symbolic-link"
+            ? "符号链接"
+            : fact.kind === "directory"
+              ? "目录"
+              : "文件";
+  return {
+    path: precondition.path,
+    driver: "precondition",
+    reason: `${precondition.reason}；当前为${current}`,
+    before: precondition.kind === "must-not-exist" ? "缺失" : "空目录或缺失",
+    current,
+    after: "为本次提交预留",
+    ...(precondition.sources === undefined
+      ? {}
+      : { sources: precondition.sources }),
+  };
+}
+
+function ancestorFactConflict(
+  fact: CurrentProjectProjectionEntry,
+): ProjectProjectionConflict | undefined {
+  if (
+    fact.observation !== "ancestor" ||
+    fact.kind === "missing" ||
+    fact.kind === "directory"
+  ) {
+    return undefined;
+  }
+  const current =
+    fact.kind === "other"
+      ? "非普通文件"
+      : fact.kind === "symbolic-link"
+        ? "符号链接"
+        : "文件";
+  return {
+    path: fact.path,
+    driver: "precondition",
+    reason: "输出路径的祖先必须是目录或缺失",
+    before: "目录或缺失",
+    current,
+    after: "目录或缺失",
+  };
+}
+
+function ancestorFactsRemainUsable(
+  expected: CurrentProjectProjectionEntry,
+  current: CurrentProjectProjectionEntry,
+): boolean {
+  return (
+    expected.observation === "ancestor" &&
+    current.observation === "ancestor" &&
+    (current.kind === "missing" || current.kind === "directory")
+  );
+}
+
+export function planProjectProjections(options: {
+  readonly before: ProjectProjection;
+  readonly current: ProjectProjectionCurrent;
+  readonly after: ProjectProjection;
+  readonly preconditions?: readonly ProjectProjectionPathPrecondition[];
+  readonly readFacts?: readonly CurrentProjectProjectionEntry[];
+}): ProjectProjectionPlanningResult {
+  if (!path.isAbsolute(options.current.targetRoot)) {
+    throw new Error("Current 事实的目标目录必须是绝对路径");
+  }
+  const preconditions = options.preconditions ?? [];
+  assertCurrentFactPaths({
+    facts: [...options.current.facts, ...(options.readFacts ?? [])],
+    preconditions,
+  });
+  const paths = getProjectProjectionObservationPaths({
+    before: options.before,
+    after: options.after,
+    preconditions,
+  });
+  const currentByPath = explicitCurrentByPath(options.current.facts);
+  const readFactConflicts: ProjectProjectionConflict[] = [];
+  const afterByPath = new Map(
+    options.after.entries.map((entry) => [entry.path, entry]),
+  );
+  const drivers = new Map<string, ProjectProjectionConflictDriver>([
+    ...options.after.reconciliation.map(
+      (policy) => [policy.path, policy.driver] as const,
+    ),
+    ...options.before.reconciliation.map(
+      (policy) => [policy.path, policy.driver] as const,
+    ),
+  ]);
+  for (const readFact of options.readFacts ?? []) {
+    const currentFact = currentByPath.get(readFact.path);
+    if (currentFact === undefined) {
+      currentByPath.set(readFact.path, cloneCurrentFact(readFact));
+      continue;
+    }
+    if (currentFactsEqual(readFact, currentFact)) continue;
+    readFactConflicts.push(
+      attachConflictSources(
+        {
+          path: readFact.path,
+          driver: drivers.get(readFact.path) ?? "precondition",
+          reason:
+            "准备计算使用的Current事实与规划时读取的事实不一致，请重新准备",
+          before: describeEntry(readFact),
+          current: describeEntry(currentFact),
+          after: afterByPath.has(readFact.path)
+            ? describeEntry(afterByPath.get(readFact.path))
+            : "保留准备时读取的事实",
+        },
+        readFact.sources,
+        currentFact.sources,
+        afterByPath.get(readFact.path)?.sources,
+      ),
+    );
+  }
+  for (const projectionPath of paths) {
+    const fact = currentByPath.get(projectionPath);
+    if (fact === undefined) {
+      throw new Error(`Current 事实缺少必要路径：${projectionPath}`);
+    }
+  }
+  const observations = [...currentByPath.values()].map(cloneCurrentFact);
+  const preconditionConflicts = preconditions.flatMap((precondition) => {
+    const fact = currentByPath.get(precondition.path)!;
+    const conflict = preconditionConflict(precondition, fact);
+    return conflict === undefined ? [] : [conflict];
+  });
+  const conflictingPreconditionPaths = new Set(
+    preconditionConflicts.map((conflict) => conflict.path),
+  );
+  const invalidAncestorFacts = observations.filter(
+    (fact) => ancestorFactConflict(fact) !== undefined,
+  );
+  const ancestorConflicts = invalidAncestorFacts.flatMap((fact) => {
+    if (
+      conflictingPreconditionPaths.has(fact.path) ||
+      invalidAncestorFacts.some(
+        (ancestor) =>
+          ancestor.path !== fact.path &&
+          fact.path.startsWith(`${ancestor.path}/`),
+      )
+    ) {
+      return [];
+    }
+    const conflict = ancestorFactConflict(fact);
+    return conflict === undefined ? [] : [conflict];
+  });
+  const inputConflicts = [
+    ...readFactConflicts,
+    ...preconditionConflicts,
+    ...ancestorConflicts,
+  ];
+  if (inputConflicts.length > 0) {
+    return { ok: false, conflicts: inputConflicts };
+  }
+  const reconciliation = reconcileProjectProjections({
+    before: options.before,
+    current: observations,
+    after: options.after,
+  });
+  if (!reconciliation.ok) return reconciliation;
+
+  const beforePaths = new Set(
+    options.before.entries.map((entry) => entry.path),
+  );
+  const afterPolicies = new Map(
+    options.after.reconciliation.map((policy) => [policy.path, policy.driver]),
+  );
+  const beforePolicies = new Map(
+    options.before.reconciliation.map((policy) => [policy.path, policy.driver]),
+  );
+  const actions = reconciliation.mutations.map((mutation) => ({
+    path: mutation.path,
+    driver:
+      afterPolicies.get(mutation.path) ?? beforePolicies.get(mutation.path)!,
+    action: beforePaths.has(mutation.path)
+      ? ("update" as const)
+      : ("create" as const),
+  }));
+  const changeDrivers = new Map<string, ProjectProjectionConflictDriver>([
+    ...afterPolicies,
+    ...beforePolicies,
+  ]);
+  for (const precondition of preconditions)
+    changeDrivers.set(precondition.path, "precondition");
+  const beforeEntries = new Map(
+    options.before.entries.map((entry) => [entry.path, entry]),
+  );
+  const preconditionsByPath = new Map(
+    preconditions.map((item) => [item.path, item]),
+  );
+  const sourcesByPath = new Map<string, readonly ProjectProjectionSource[]>();
+  for (const projectionPath of new Set([
+    ...beforeEntries.keys(),
+    ...currentByPath.keys(),
+    ...afterByPath.keys(),
+    ...preconditionsByPath.keys(),
+  ])) {
+    const sources = mergeProjectProjectionSources(
+      beforeEntries.get(projectionPath)?.sources,
+      currentByPath.get(projectionPath)?.sources,
+      afterByPath.get(projectionPath)?.sources,
+      options.before.reconciliation.find(
+        (policy) => policy.path === projectionPath,
+      )?.sources,
+      options.after.reconciliation.find(
+        (policy) => policy.path === projectionPath,
+      )?.sources,
+      preconditionsByPath.get(projectionPath)?.sources,
+    );
+    if (sources.length > 0) sourcesByPath.set(projectionPath, sources);
+  }
+  const publicPlan: ProjectProjectionChangePlan = Object.freeze({
+    mutations: Object.freeze(
+      reconciliation.mutations.map(cloneProjectionEntry),
+    ),
+    observations: Object.freeze(observations.map(cloneCurrentFact)),
+    preconditions: Object.freeze(
+      preconditions.map((precondition) => Object.freeze({ ...precondition })),
+    ),
+    actions: Object.freeze(
+      actions.map((action) => Object.freeze({ ...action })),
+    ),
+  });
+  storedProjectProjectionPlans.set(publicPlan, {
+    targetRoot: options.current.targetRoot,
+    mutations: reconciliation.mutations.map(cloneProjectionEntry),
+    observations: observations.map(cloneCurrentFact),
+    preconditions: preconditions.map((precondition) => ({ ...precondition })),
+    actions: actions.map((action) => ({ ...action })),
+    drivers: changeDrivers,
+    afterByPath: new Map(
+      options.after.entries.map((entry) => [
+        entry.path,
+        cloneProjectionEntry(entry),
+      ]),
+    ),
+    sourcesByPath,
+  });
+  return { ok: true, plan: publicPlan };
+}
+
+async function readStoredPlanObservations(options: {
+  readonly targetRoot: string;
+  readonly plan: StoredProjectProjectionPlan;
+}): Promise<readonly CurrentProjectProjectionEntry[]> {
+  const preconditions = new Map(
+    options.plan.preconditions.map((precondition) => [
+      precondition.path,
+      precondition,
+    ]),
+  );
+  return Promise.all(
+    options.plan.observations.map((fact) => {
+      const precondition = preconditions.get(fact.path);
+      return readCurrentProjectionEntry(options.targetRoot, fact.path, {
+        includeDirectoryContents:
+          precondition?.kind === "directory-empty-or-missing" &&
+          fact.kind === "directory",
+        includeFileContents: fact.kind === "file",
+        ...(fact.observation === undefined
+          ? {}
+          : { observation: fact.observation }),
+      });
+    }),
+  );
+}
+
+async function stalePlanConflicts(options: {
+  readonly targetRoot: string;
+  readonly plan: StoredProjectProjectionPlan;
+}): Promise<readonly ProjectProjectionConflict[]> {
+  const current = await readStoredPlanObservations(options);
+  const conflicts: ProjectProjectionConflict[] = [];
+  for (const [index, before] of options.plan.observations.entries()) {
+    const actual = current[index]!;
+    if (currentFactsEqual(before, actual)) continue;
+    if (ancestorFactsRemainUsable(before, actual)) continue;
+    const after = options.plan.afterByPath.get(before.path);
+    conflicts.push(
+      attachConflictSources(
+        {
+          path: before.path,
+          driver: options.plan.drivers.get(before.path) ?? "precondition",
+          reason: "规划后相关目标事实已变化，请重新规划",
+          before: describeEntry(before),
+          current: describeEntry(actual),
+          after:
+            after === undefined ? "保留已规划路径约束" : describeEntry(after),
+        },
+        options.plan.sourcesByPath.get(before.path),
+        actual.sources,
+        after?.sources,
+      ),
+    );
+  }
+  return conflicts;
+}
+
+export async function commitProjectProjectionPlan(options: {
+  readonly targetRoot: string;
+  readonly plan: ProjectProjectionChangePlan;
+  readonly dependencies?: ProjectProjectionReconcilerDependencies;
+}): Promise<ProjectProjectionCommitResult> {
+  const stored = storedProjectProjectionPlans.get(options.plan);
+  if (stored === undefined) {
+    throw new Error("计划必须在当前进程中由 planProjectProjections 创建");
+  }
+  const targetRoot = path.resolve(options.targetRoot);
+  if (targetRoot !== stored.targetRoot) {
+    return {
+      ok: false,
+      conflicts: [
+        {
+          path: ".",
+          driver: "precondition",
+          reason: "计划只能提交到原目标目录",
+          before: stored.targetRoot,
+          current: targetRoot,
+          after: stored.targetRoot,
+        },
+      ],
+    };
+  }
+  const checkFreshness = async (): Promise<void> => {
+    const conflicts = await stalePlanConflicts({ targetRoot, plan: stored });
+    if (conflicts.length > 0)
+      throw new ProjectProjectionStalePlanError(conflicts);
+  };
+
+  const staleConflicts = await stalePlanConflicts({ targetRoot, plan: stored });
+  if (staleConflicts.length > 0) {
+    return { ok: false, conflicts: staleConflicts };
+  }
+  if (stored.mutations.length === 0) {
+    return { ok: true, changedPaths: [], actions: [] };
+  }
+  try {
+    await applyProjectionMutationsAtomically({
+      targetRoot,
+      mutations: stored.mutations,
+      preconditions: stored.preconditions,
+      beforeCommit: async () => {
+        await options.dependencies?.beforeCommit?.();
+        await checkFreshness();
+      },
+      ...(options.dependencies?.commitMutation === undefined
+        ? {}
+        : { commitMutation: options.dependencies.commitMutation }),
+    });
+  } catch (error: unknown) {
+    if (
+      error instanceof ProjectProjectionPathPreconditionError ||
+      error instanceof ProjectProjectionStalePlanError
+    ) {
+      return { ok: false, conflicts: error.conflicts };
+    }
+    throw error;
+  }
+  return {
+    ok: true,
+    changedPaths: stored.mutations.map((mutation) => mutation.path),
+    actions: stored.actions,
+  };
 }
 
 async function readCurrentProjectionEntry(
   targetRoot: string,
   projectionPath: string,
-): Promise<CurrentProjectProjectionEntry | undefined> {
+  options: {
+    readonly includeDirectoryContents?: boolean;
+    readonly includeFileContents?: boolean;
+    readonly observation?: "ancestor" | "precondition";
+  } = {},
+): Promise<CurrentProjectProjectionEntry> {
   const filePath = path.join(targetRoot, projectionPath);
   try {
     const fileStat = await lstat(filePath);
     if (!fileStat.isFile()) {
+      const isDirectory = fileStat.isDirectory();
       return {
         path: projectionPath,
-        kind: fileStat.isDirectory()
+        kind: isDirectory
           ? "directory"
           : fileStat.isSymbolicLink()
             ? "symbolic-link"
             : "other",
+        ...(options.observation === undefined
+          ? {}
+          : { observation: options.observation }),
+        ...(isDirectory && options.includeDirectoryContents
+          ? { empty: (await readdir(filePath)).length === 0 }
+          : {}),
+      };
+    }
+    if (options.includeFileContents === false) {
+      return {
+        path: projectionPath,
+        kind: "file-kind",
+        observation: options.observation ?? "ancestor",
       };
     }
     const mode: ProjectProjectionEntry["mode"] = fileStat.mode & 0o111;
@@ -1786,75 +2543,52 @@ async function readCurrentProjectionEntry(
       kind: "file",
       content: new Uint8Array(await readFile(filePath)),
       mode,
+      ...(options.observation === undefined
+        ? {}
+        : { observation: options.observation }),
     };
   } catch (error: unknown) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return undefined;
+      return {
+        path: projectionPath,
+        kind: "missing",
+        ...(options.observation === undefined
+          ? {}
+          : { observation: options.observation }),
+      };
+    }
+    if (error instanceof Error && "code" in error && error.code === "ENOTDIR") {
+      return {
+        path: projectionPath,
+        kind: "other",
+        ...(options.observation === undefined
+          ? {}
+          : { observation: options.observation }),
+      };
     }
     throw error;
   }
-}
-
-type CurrentPathKind = CurrentProjectProjectionEntry["kind"];
-
-async function readCurrentPathKind(
-  targetRoot: string,
-  relativePath: string,
-): Promise<CurrentPathKind | undefined> {
-  try {
-    const fileStat = await lstat(path.join(targetRoot, relativePath));
-    return fileStat.isFile()
-      ? "file"
-      : fileStat.isDirectory()
-        ? "directory"
-        : fileStat.isSymbolicLink()
-          ? "symbolic-link"
-          : "other";
-  } catch (error: unknown) {
-    if (error instanceof Error && "code" in error) {
-      if (error.code === "ENOENT") return undefined;
-      if (error.code === "ENOTDIR") return "other";
-    }
-    throw error;
-  }
-}
-
-function pathPreconditionConflict(
-  precondition: ProjectProjectionPathPrecondition,
-  current: CurrentPathKind | "existing path",
-): ProjectProjectionConflict {
-  return {
-    path: precondition.path,
-    driver: "precondition",
-    reason: `${precondition.reason}; found ${
-      current === "existing path" ? current : `existing ${current}`
-    }`,
-    before: "missing",
-    current,
-    after: "reserved for transaction",
-  };
 }
 
 async function evaluatePathPreconditions(options: {
   readonly targetRoot: string;
   readonly preconditions: readonly ProjectProjectionPathPrecondition[];
 }): Promise<readonly ProjectProjectionConflict[]> {
-  const paths = new Set<string>();
+  assertUniquePreconditions(options.preconditions);
   const conflicts: ProjectProjectionConflict[] = [];
   for (const precondition of options.preconditions) {
-    assertNormalizedSafeRelativePath(precondition.path, "entry");
-    if (paths.has(precondition.path)) {
-      throw new Error(
-        `Project Projection Path Precondition paths must be unique: ${precondition.path}`,
-      );
-    }
-    paths.add(precondition.path);
-    const current = await readCurrentPathKind(
+    const fact = await readCurrentProjectionEntry(
       options.targetRoot,
       precondition.path,
+      {
+        includeDirectoryContents:
+          precondition.kind === "directory-empty-or-missing",
+        includeFileContents: false,
+        observation: "precondition",
+      },
     );
-    if (current === undefined) continue;
-    conflicts.push(pathPreconditionConflict(precondition, current));
+    const conflict = preconditionConflict(precondition, fact);
+    if (conflict !== undefined) conflicts.push(conflict);
   }
   return conflicts;
 }
@@ -1897,6 +2631,7 @@ async function acquirePathReservations(options: {
   readonly targetRoot: string;
   readonly preconditions: readonly ProjectProjectionPathPrecondition[];
 }): Promise<readonly AcquiredPathReservation[]> {
+  const targetRoot = path.resolve(options.targetRoot);
   const conflicts = await evaluatePathPreconditions(options);
   if (conflicts.length > 0) {
     throw new ProjectProjectionPathPreconditionError(conflicts);
@@ -1904,10 +2639,19 @@ async function acquirePathReservations(options: {
   const reservations: AcquiredPathReservation[] = [];
   try {
     for (const precondition of options.preconditions) {
-      const reservationPath = path.join(
-        path.resolve(options.targetRoot),
-        precondition.path,
-      );
+      if (precondition.kind === "directory-empty-or-missing") {
+        const current = await readCurrentProjectionEntry(
+          options.targetRoot,
+          precondition.path,
+          { includeDirectoryContents: true, includeFileContents: false },
+        );
+        if (current.kind === "directory" && current.empty === true) continue;
+        if (current.kind !== "missing") {
+          const conflict = preconditionConflict(precondition, current)!;
+          throw new ProjectProjectionPathPreconditionError([conflict]);
+        }
+      }
+      const reservationPath = path.join(targetRoot, precondition.path);
       let firstCreatedPath: string | undefined;
       try {
         firstCreatedPath = await mkdir(reservationPath, { recursive: true });
@@ -1921,9 +2665,24 @@ async function acquirePathReservations(options: {
         }
       }
       if (firstCreatedPath === undefined) {
-        throw new ProjectProjectionPathPreconditionError([
-          pathPreconditionConflict(precondition, "existing path"),
-        ]);
+        const current = await readCurrentProjectionEntry(
+          targetRoot,
+          precondition.path,
+          {
+            includeDirectoryContents:
+              precondition.kind === "directory-empty-or-missing",
+            includeFileContents: false,
+          },
+        );
+        const conflict = preconditionConflict(precondition, current) ?? {
+          path: precondition.path,
+          driver: "precondition" as const,
+          reason: `${precondition.reason}；路径在提交时已变化`,
+          before: "缺失",
+          current: current.kind,
+          after: "为本次提交预留",
+        };
+        throw new ProjectProjectionPathPreconditionError([conflict]);
       }
       reservations.push({
         path: precondition.path,
@@ -1966,6 +2725,7 @@ async function applyProjectionMutationsAtomically(options: {
   const stagingRoot = await mkdtemp(path.join(parent, `${prefix}stage-`));
   const backupRoot = await mkdtemp(path.join(parent, `${prefix}backup-`));
   const backedUpPaths = new Set<string>();
+  const backupModes = new Map<string, number>();
   const committedPaths: string[] = [];
   let reservations: readonly AcquiredPathReservation[] = [];
   try {
@@ -1977,9 +2737,16 @@ async function applyProjectionMutationsAtomically(options: {
 
       const targetPath = path.join(targetRoot, mutation.path);
       try {
+        const targetStat = await lstat(targetPath);
+        if (!targetStat.isFile()) {
+          throw new Error(`提交目标不是普通文件：${mutation.path}`);
+        }
         const backupPath = path.join(backupRoot, mutation.path);
         await mkdir(path.dirname(backupPath), { recursive: true });
         await copyFile(targetPath, backupPath);
+        const mode = targetStat.mode & 0o777;
+        await chmod(backupPath, mode);
+        backupModes.set(mutation.path, mode);
         backedUpPaths.add(mutation.path);
       } catch (error: unknown) {
         if (
@@ -2004,6 +2771,13 @@ async function applyProjectionMutationsAtomically(options: {
         committedPaths.push(mutation.path);
         const commit = async (): Promise<void> => {
           await copyFile(path.join(stagingRoot, mutation.path), targetPath);
+          const existingMode = backupModes.get(mutation.path);
+          await chmod(
+            targetPath,
+            existingMode === undefined
+              ? 0o644 | mutation.mode
+              : (existingMode & 0o666) | mutation.mode,
+          );
         };
         if (options.commitMutation === undefined) {
           await commit();
@@ -2022,6 +2796,7 @@ async function applyProjectionMutationsAtomically(options: {
         const targetPath = path.join(targetRoot, committedPath);
         if (backedUpPaths.has(committedPath)) {
           await copyFile(path.join(backupRoot, committedPath), targetPath);
+          await chmod(targetPath, backupModes.get(committedPath)!);
         } else {
           await rm(targetPath, { force: true });
         }
@@ -2081,59 +2856,45 @@ export function createProjectProjectionReconciler(
   return async (
     options: ReconcileAndApplyProjectProjectionsOptions,
   ): Promise<ReconcileAndApplyProjectProjectionsResult> => {
-    const preconditionConflicts = await evaluatePathPreconditions({
-      targetRoot: options.targetRoot,
-      preconditions: options.preconditions ?? [],
-    });
-    if (preconditionConflicts.length > 0) {
-      return { ok: false, conflicts: preconditionConflicts };
-    }
     const [before, after] = await Promise.all([
       materializeProjectProjection(options.before),
       materializeProjectProjection(options.after),
     ]);
-    const reconciliation = await reconcileProjectProjections({
+    const current = await readProjectProjectionCurrent({
+      targetRoot: options.targetRoot,
       before,
       after,
-      readCurrent: async (projectionPath) =>
-        readCurrentProjectionEntry(options.targetRoot, projectionPath),
+      ...(options.preconditions === undefined
+        ? {}
+        : { preconditions: options.preconditions }),
     });
-    if (!reconciliation.ok) return reconciliation;
-    const beforePaths = new Set(before.entries.map((entry) => entry.path));
-    const drivers = new Map(
-      after.reconciliation.map((policy) => [policy.path, policy.driver]),
-    );
-    const actions = reconciliation.mutations.map((mutation) => ({
-      path: mutation.path,
-      driver: drivers.get(mutation.path)!,
-      action: beforePaths.has(mutation.path)
-        ? ("update" as const)
-        : ("create" as const),
-    }));
-    if (!options.dryRun) {
-      try {
-        await applyProjectionMutationsAtomically({
-          targetRoot: options.targetRoot,
-          mutations: reconciliation.mutations,
-          preconditions: options.preconditions ?? [],
-          ...(dependencies.beforeCommit === undefined
-            ? {}
-            : { beforeCommit: dependencies.beforeCommit }),
-          ...(dependencies.commitMutation === undefined
-            ? {}
-            : { commitMutation: dependencies.commitMutation }),
-        });
-      } catch (error: unknown) {
-        if (error instanceof ProjectProjectionPathPreconditionError) {
-          return { ok: false, conflicts: error.conflicts };
+    const planning = planProjectProjections({
+      before,
+      current,
+      after,
+      ...(options.preconditions === undefined
+        ? {}
+        : { preconditions: options.preconditions }),
+    });
+    if (!planning.ok) return planning;
+    const result = options.dryRun
+      ? {
+          ok: true as const,
+          changedPaths: planning.plan.mutations.map(
+            (mutation) => mutation.path,
+          ),
+          actions: planning.plan.actions,
         }
-        throw error;
-      }
-    }
+      : await commitProjectProjectionPlan({
+          targetRoot: options.targetRoot,
+          plan: planning.plan,
+          dependencies,
+        });
+    if (!result.ok) return result;
     return {
       ok: true,
-      changedPaths: reconciliation.mutations.map((mutation) => mutation.path),
-      actions,
+      changedPaths: result.changedPaths,
+      actions: result.actions,
     };
   };
 }
