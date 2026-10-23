@@ -97,35 +97,50 @@ void it("正式安装后的中立内容在新进程中初始化非 npm 根目录
       driver,
       [
         'import assert from "node:assert/strict";',
-        'import { readFile, writeFile, access, readdir } from "node:fs/promises";',
-        'import { createDocumentationEngine, glossaryIdentity, guideIdentity, indexIdentity } from "./compiled/documentation.js";',
+        'import { access, chmod, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";',
+        'import { createDocumentationEngine, glossaryIdentity, guideIdentity, indexIdentity, presetIdentity } from "./compiled/documentation.js";',
         'import { commitProjectProjectionPlan, planProjectProjections, readProjectProjectionCurrent } from "@ykdz/template-core/project-projection";',
         "const [phase, root, forbidden] = process.argv.slice(2);",
-        "const target = `${root}-${phase}`;",
+        'const target = phase.includes("direct") ? `${root}-direct` : phase.includes("preset") ? `${root}-preset` : phase === "conflict" ? `${root}-conflict` : phase === "old-format" ? `${root}-old-format` : phase === "invalid-relations" ? `${root}-invalid-relations` : ["empty-target", "dry-run", "dry-run-empty-target", "dry-run-non-empty-target", "non-empty-target"].includes(phase) ? `${root}-${phase}` : `${root}-sdk`;',
         'await assert.rejects(readFile(forbidden), { code: "ERR_ACCESS_DENIED" });',
         'for (const specifier of ["@ykdz/template-generator", "@ykdz/template-core/content-identity"]) assert.ok(import.meta.resolve(specifier).startsWith(new URL("./", import.meta.url).href));',
-        'const engine = createDocumentationEngine({ author: "安装后作者" });',
-        'const input = { selection: { roots: [{ nodeIdentity: "index", contentIdentity: indexIdentity }, { nodeIdentity: "guide", contentIdentity: guideIdentity }, { nodeIdentity: "glossary", contentIdentity: glossaryIdentity }] }, conventions: { collection: "north", edition: "draft" }, operationFacts: { providerVersion: "current" } };',
-        'if (["empty-target", "dry-run-empty-target", "non-empty-target", "dry-run-non-empty-target"].includes(phase)) { await (await import("node:fs/promises")).mkdir(target); }',
-        'if (phase === "non-empty-target" || phase === "dry-run-non-empty-target") await writeFile(`${target}/keep.txt`, "用户文件\\n");',
-        'const dryRun = phase.startsWith("dry-run");',
-        'let result = { status: "success" };',
-        'if (phase === "sdk") { const prepared = await engine.prepareProject(input); const computed = engine.computeProject(prepared); const guideProjection = computed.projection.entries.find(({ path }) => path === "docs/overview/README.md"); assert.ok(guideProjection?.sources?.some(({ label }) => label.includes("@fixture/docs-guide"))); const before = { entries: [], reconciliation: [] }; const preconditions = [{ path: ".", kind: "directory-empty-or-missing", reason: "初始化目标必须为空或不存在" }]; const current = await readProjectProjectionCurrent({ targetRoot: target, before, after: computed.projection, preconditions }); const planning = planProjectProjections({ before, current, after: computed.projection, preconditions }); assert.equal(planning.ok, true, JSON.stringify(planning)); await assert.rejects(access(target), { code: "ENOENT" }); const committed = await commitProjectProjectionPlan({ targetRoot: target, plan: planning.plan }); assert.equal(committed.ok, true, JSON.stringify(committed)); } else { result = await engine.init({ targetRoot: target, ...input, ...(dryRun ? { dryRun: true } : {}) }); }',
-        'if (phase === "non-empty-target" || phase === "dry-run-non-empty-target") { assert.notEqual(result.status, "success", JSON.stringify(result)); assert.ok(result.conflicts.some(({ sources }) => sources?.length > 0)); assert.equal(await readFile(`${target}/keep.txt`, "utf8"), "用户文件\\n"); await assert.rejects(access(`${target}/INDEX.md`), { code: "ENOENT" }); }',
-        'else if (phase === "dry-run") { assert.equal(result.status, "success", JSON.stringify(result)); await assert.rejects(access(target), { code: "ENOENT" }); }',
-        'else if (phase === "dry-run-empty-target") { assert.equal(result.status, "success", JSON.stringify(result)); assert.deepEqual(await readdir(target), []); }',
-        'else { assert.equal(result.status, "success", JSON.stringify(result)); assert.equal(await readFile(`${target}/docs/overview/README.md`, "utf8"), "north/draft@current by 安装后作者: north:guide uses docs/glossary\\nGuide resource\\n"); assert.equal(await readFile(`${target}/docs/glossary/README.md`, "utf8"), "north/draft@current glossary by 安装后作者\\nGlossary resource\\n"); assert.equal((await readFile(`${target}/INDEX.md`, "utf8")).startsWith("3 packages\\n"), true); assert.equal(await access(`${target}/package.json`).then(() => true, () => false), false); const record = JSON.parse(await readFile(`${target}/.template/generation.json`, "utf8")); assert.equal(record.schemaVersion, 6); assert.equal(record.composition.identity.exportPath, "./composition"); assert.equal(record.packages.length, 3); const guide = record.packages.find(({ contentIdentity }) => contentIdentity.packageName === "@fixture/docs-guide"); const glossary = record.packages.find(({ contentIdentity }) => contentIdentity.packageName === "@fixture/docs-glossary"); assert.equal(glossary.createdBy, "initialization"); assert.equal(guide.dependencyBindings.glossary, glossary.packageDefinitionId); const blueprint = JSON.parse(await readFile(`${target}/.template/blueprint.json`, "utf8")); assert.equal(blueprint.schemaVersion, 4); assert.equal(blueprint.packages.find(({ path }) => path === ".").name, "north:index"); assert.deepEqual(blueprint.packageLinkIntents, [{ consumerId: guide.packageDefinitionId, providerId: glossary.packageDefinitionId }]); }',
+        'const createEngine = () => createDocumentationEngine({ author: "安装后作者" });',
+        'const directSelection = { roots: [{ nodeIdentity: "index", contentIdentity: indexIdentity }, { nodeIdentity: "guide", contentIdentity: guideIdentity, creationInput: { leafName: "overview" } }, { nodeIdentity: "glossary", contentIdentity: glossaryIdentity }] };',
+        "const presetSelection = { presets: [{ contentIdentity: presetIdentity }] };",
+        'const conventions = { collection: "north", edition: "draft" };',
+        "const operationFacts = (providerVersion) => ({ providerVersion });",
+        'const init = async (targetRoot, selection) => { const result = await createEngine().init({ targetRoot, selection, conventions, operationFacts: operationFacts("initial") }); assert.equal(result.status, "success", JSON.stringify(result)); return result; };',
+        'const add = async (targetRoot, creationInput) => createEngine().add({ repositoryRoot: targetRoot, contentIdentity: guideIdentity, creationInput, operationFacts: operationFacts("add-current") });',
+        'const recordAt = async (targetRoot) => JSON.parse(await readFile(`${targetRoot}/.template/generation.json`, "utf8"));',
+        'const verifyRecord = async (targetRoot, packageCount, guideCount) => { const record = await recordAt(targetRoot); assert.equal(record.schemaVersion, 6); assert.deepEqual(record.composition.conventions, conventions); assert.equal(record.packages.length, packageCount); const guides = record.packages.filter(({ contentIdentity }) => contentIdentity.packageName === "@fixture/docs-guide"); const glossaries = record.packages.filter(({ contentIdentity }) => contentIdentity.packageName === "@fixture/docs-glossary"); assert.equal(guides.length, guideCount); assert.equal(glossaries.length, 1); assert.ok(guides.every(({ dependencyBindings }) => dependencyBindings.glossary === glossaries[0].packageDefinitionId)); const blueprint = JSON.parse(await readFile(`${targetRoot}/.template/blueprint.json`, "utf8")); assert.equal(blueprint.schemaVersion, 4); assert.ok(blueprint.packageLinkIntents.some(({ consumerId, providerId }) => consumerId === guides.at(-1).packageDefinitionId && providerId === glossaries[0].packageDefinitionId)); return record; };',
+        'const assertStableInitialIds = async (targetRoot, record) => { const initialIds = JSON.parse(await readFile(`${targetRoot}.initial-ids.json`, "utf8")); assert.ok(initialIds.every((id) => record.packages.some(({ packageDefinitionId }) => packageDefinitionId === id))); };',
+        'if (phase === "sdk") { const engine = createEngine(); const prepared = await engine.prepareProject({ selection: { roots: [{ nodeIdentity: "index", contentIdentity: indexIdentity }] }, conventions, operationFacts: operationFacts("sdk") }); const computed = engine.computeProject(prepared); const before = { entries: [], reconciliation: [] }; const preconditions = [{ path: ".", kind: "directory-empty-or-missing", reason: "初始化目标必须为空或不存在" }]; const current = await readProjectProjectionCurrent({ targetRoot: target, before, after: computed.projection, preconditions }); const planning = planProjectProjections({ before, current, after: computed.projection, preconditions }); assert.equal(planning.ok, true, JSON.stringify(planning)); await assert.rejects(access(target), { code: "ENOENT" }); const committed = await commitProjectProjectionPlan({ targetRoot: target, plan: planning.plan }); assert.equal(committed.ok, true, JSON.stringify(committed)); }',
+        'else if (["empty-target", "dry-run", "dry-run-empty-target", "dry-run-non-empty-target", "non-empty-target"].includes(phase)) { const needsDirectory = phase !== "dry-run"; const nonEmpty = phase === "dry-run-non-empty-target" || phase === "non-empty-target"; if (needsDirectory) await mkdir(target); if (nonEmpty) await writeFile(`${target}/keep.txt`, "用户文件\\n"); const dryRun = phase.startsWith("dry-run"); const result = await createEngine().init({ targetRoot: target, selection: directSelection, conventions, operationFacts: operationFacts("initial"), ...(dryRun ? { dryRun: true } : {}) }); if (nonEmpty) { assert.notEqual(result.status, "success", JSON.stringify(result)); assert.ok(result.conflicts.some(({ sources }) => sources?.length > 0)); assert.equal(await readFile(`${target}/keep.txt`, "utf8"), "用户文件\\n"); await assert.rejects(access(`${target}/INDEX.md`), { code: "ENOENT" }); } else { assert.equal(result.status, "success", JSON.stringify(result)); if (dryRun && needsDirectory) assert.deepEqual(await readdir(target), []); else if (dryRun) await assert.rejects(access(target), { code: "ENOENT" }); else await access(`${target}/INDEX.md`); } }',
+        'else if (phase === "init-direct" || phase === "init-preset") { const result = await init(target, phase === "init-direct" ? directSelection : presetSelection); const record = await recordAt(target); await writeFile(`${target}.initial-ids.json`, JSON.stringify(record.packages.map(({ packageDefinitionId }) => packageDefinitionId))); assert.equal(record.packages.length, 3); assert.equal(record.selections.length, phase === "init-direct" ? 1 : 1); assert.equal(await readFile(`${target}/docs/glossary/README.md`, "utf8"), "north/draft@initial glossary by 安装后作者\\nGlossary resource\\n"); assert.equal(result.generationRecord.schemaVersion, 6); }',
+        'else if (phase === "add-direct-one") { const overview = `${target}/docs/overview/README.md`; await writeFile(overview, `${await readFile(overview, "utf8")}\\n用户定制\\n`); await chmod(overview, 0o755); await writeFile(`${target}/user-notes.txt`, "保留\\n"); const result = await add(target, { leafName: "appendix", packagePath: "docs/appendix" }); assert.equal(result.status, "success", JSON.stringify(result)); const record = await verifyRecord(target, 4, 2); await assertStableInitialIds(target, record); assert.equal(await readFile(`${target}/docs/appendix/README.md`, "utf8"), "north/draft@add-current by 安装后作者: north:appendix uses docs/glossary\\nGuide resource\\n"); }',
+        'else if (phase === "add-direct-two") { const result = await add(target, { leafName: "faq", packagePath: "docs/faq" }); assert.equal(result.status, "success", JSON.stringify(result)); const record = await verifyRecord(target, 5, 3); await assertStableInitialIds(target, record); assert.match(await readFile(`${target}/docs/overview/README.md`, "utf8"), /用户定制/u); assert.equal((await stat(`${target}/docs/overview/README.md`)).mode & 0o111, 0o111); assert.equal(await readFile(`${target}/user-notes.txt`, "utf8"), "保留\\n"); assert.match(await readFile(`${target}/INDEX.md`, "utf8"), /docs\\/appendix/u); assert.match(await readFile(`${target}/INDEX.md`, "utf8"), /docs\\/faq/u); }',
+        'else if (phase === "add-preset-one" || phase === "add-preset-two") { const input = phase === "add-preset-one" ? { leafName: "appendix", packagePath: "docs/appendix" } : { leafName: "faq", packagePath: "docs/faq" }; const result = await add(target, input); assert.equal(result.status, "success", JSON.stringify(result)); const record = await verifyRecord(target, phase === "add-preset-one" ? 4 : 5, phase === "add-preset-one" ? 2 : 3); await assertStableInitialIds(target, record); }',
+        'else if (phase === "conflict") { await init(target, directSelection); await mkdir(`${target}/docs/appendix`); await writeFile(`${target}/docs/appendix/keep.txt`, "用户文件\\n"); const metadataBefore = await readFile(`${target}/.template/generation.json`); const result = await add(target, { leafName: "appendix", packagePath: "docs/appendix" }); assert.equal(result.status, "conflict", JSON.stringify(result)); assert.deepEqual(result.actions, []); assert.deepEqual(await readFile(`${target}/.template/generation.json`), metadataBefore); assert.equal(await readFile(`${target}/docs/appendix/keep.txt`, "utf8"), "用户文件\\n"); await assert.rejects(access(`${target}/docs/appendix/README.md`), { code: "ENOENT" }); }',
+        'else { const initialized = await init(target, directSelection); const recordPath = `${target}/.template/generation.json`; const record = JSON.parse(await readFile(recordPath, "utf8")); if (phase === "old-format") record.schemaVersion = 5; else record.packages[0].dependencyBindings.invalid = `package-${"0".repeat(64)}`; await writeFile(recordPath, JSON.stringify(record)); const recordBefore = await readFile(recordPath); const indexBefore = await readFile(`${target}/INDEX.md`); const result = await add(target, { leafName: "rejected", packagePath: "docs/rejected" }); assert.equal(result.status, "operation-failure", JSON.stringify(result)); assert.equal(result.phase, "metadata"); assert.deepEqual(await readFile(recordPath), recordBefore); assert.deepEqual(await readFile(`${target}/INDEX.md`), indexBefore); assert.equal(initialized.status, "success"); await assert.rejects(access(`${target}/docs/rejected`), { code: "ENOENT" }); }',
       ].join("\n"),
     );
     await mkdir(path.join(consumer, "tmp"));
     for (const phase of [
-      "init",
       "sdk",
       "empty-target",
       "dry-run",
       "dry-run-empty-target",
       "dry-run-non-empty-target",
       "non-empty-target",
+      "init-direct",
+      "add-direct-one",
+      "add-direct-two",
+      "init-preset",
+      "add-preset-one",
+      "add-preset-two",
+      "conflict",
+      "old-format",
+      "invalid-relations",
     ]) {
       await run(
         process.execPath,
@@ -152,13 +167,16 @@ void it("正式安装后的中立内容在新进程中初始化非 npm 根目录
         },
       );
     }
-    const installedRecord = JSON.parse(
-      await readFile(
-        path.join(consumer, "project-init/.template/generation.json"),
-        "utf8",
-      ),
-    ) as { schemaVersion: number };
-    assert.equal(installedRecord.schemaVersion, 6);
+    for (const suffix of ["direct", "preset"]) {
+      const installedRecord = JSON.parse(
+        await readFile(
+          path.join(consumer, `project-${suffix}/.template/generation.json`),
+          "utf8",
+        ),
+      ) as { schemaVersion: number; packages: readonly unknown[] };
+      assert.equal(installedRecord.schemaVersion, 6);
+      assert.equal(installedRecord.packages.length, 5);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
