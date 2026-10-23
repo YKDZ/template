@@ -26,7 +26,10 @@ export type NativeContentArtifactFile = {
 };
 
 export type NativeContentArtifactResource = {
+  /** owner原生包内的资源坐标，随完整制品分发。 */
   readonly path: string;
+  /** 资源在当前模板包目标目录内的实际位置；用于排除嵌套owner作用域。 */
+  readonly targetPath?: string;
   readonly source: TemplateSourceHandle;
   readonly mode: number;
 };
@@ -360,11 +363,12 @@ export function defineNativeReferenceContentArtifact(
       const excludedPackagePaths = prepareOptions?.excludedPackagePaths ?? [];
       const resources = resourceSpecifications
         .filter(
-          ({ path: resourcePath }) =>
+          ({ targetPath }) =>
+            targetPath === undefined ||
             !excludedPackagePaths.some(
               (packagePath) =>
-                resourcePath === packagePath ||
-                resourcePath.startsWith(`${packagePath}/`),
+                targetPath === packagePath ||
+                targetPath.startsWith(`${packagePath}/`),
             ),
         )
         .map(({ path: resourcePath, source, mode }) => ({

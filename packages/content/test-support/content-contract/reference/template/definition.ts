@@ -135,6 +135,7 @@ export const referencePackage = defineNativeReferenceContentArtifact(
     resources: [
       {
         path: "resources/README.md",
+        targetPath: "README.md",
         source: createTemplateSourceHandle(
           fileURLToPath(new URL("../resources/README.md", import.meta.url)),
         ),
@@ -142,6 +143,7 @@ export const referencePackage = defineNativeReferenceContentArtifact(
       },
       {
         path: "resources/latent.txt",
+        targetPath: "docs/latent.txt",
         source: createTemplateSourceHandle(
           fileURLToPath(new URL("../resources/latent.txt", import.meta.url)),
         ),
