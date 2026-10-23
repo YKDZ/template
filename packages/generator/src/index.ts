@@ -86,6 +86,10 @@ export {
   generationRecordSchema,
   parseGenerationRecordStructure,
 } from "@ykdz/template-core/generation-record";
+export const generatorMetadataPaths = Object.freeze({
+  blueprint: ".template/blueprint.json",
+  generationRecord: ".template/generation.json",
+} as const);
 export type {
   ReferencePackage,
   ReferencePackageDefinition,
@@ -895,8 +899,8 @@ export function createGenerator<
     readonly readFacts: readonly CurrentProjectProjectionEntry[];
   }> => {
     const paths = [
-      ".template/blueprint.json",
-      ".template/generation.json",
+      generatorMetadataPaths.blueprint,
+      generatorMetadataPaths.generationRecord,
     ] as const;
     const readFacts = await Promise.all(
       paths.map((metadataPath) => readMetadataFact(targetRoot, metadataPath)),
@@ -2834,14 +2838,14 @@ export function createGenerator<
 
     const metadataEntries: ProjectProjectionEntry[] = [
       {
-        path: ".template/blueprint.json",
+        path: generatorMetadataPaths.blueprint,
         kind: "file",
         content: printCanonicalJson(blueprint),
         mode: 0,
         sources: metadataSources,
       },
       {
-        path: ".template/generation.json",
+        path: generatorMetadataPaths.generationRecord,
         kind: "file",
         content: printCanonicalJson(generationRecord),
         mode: 0,

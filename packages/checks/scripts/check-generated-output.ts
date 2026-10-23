@@ -2,9 +2,11 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 import formatterConfig from "@ykdz/reference-tooling-config/oxfmt";
 import { inspectTaskGate } from "@ykdz/reference-workspace-root/task-gates";
+import { generatorMetadataPaths } from "@ykdz/template-generator";
 import { format } from "oxfmt";
 import { parse as parseToml } from "smol-toml";
 
@@ -39,7 +41,30 @@ export async function validateGeneratedOutput(
     receipt,
     runtime: sourceGeneratedScenarioRuntime,
   });
+  const expectedMetadata = new Map<string, unknown>([
+    [generatorMetadataPaths.blueprint, receipt.result.blueprint],
+    [generatorMetadataPaths.generationRecord, receipt.result.generationRecord],
+  ]);
+  for (const [metadataPath, expectedValue] of expectedMetadata) {
+    const expectedEntry = receipt.result.projection.entries.find(
+      (entry) => entry.path === metadataPath,
+    );
+    if (expectedEntry?.kind !== "file")
+      throw new Error(`${metadataPath} 不在正式投影文件中`);
+    const actualBytes = await readFile(path.join(projectDir, metadataPath));
+    if (!Buffer.from(expectedEntry.content).equals(actualBytes))
+      throw new Error(`${metadataPath} 与正式 SDK 投影字节不一致`);
+    let actualValue: unknown;
+    try {
+      actualValue = JSON.parse(actualBytes.toString("utf8")) as unknown;
+    } catch (error) {
+      throw new Error(`${metadataPath} 不是有效 JSON`, { cause: error });
+    }
+    if (!isDeepStrictEqual(actualValue, expectedValue))
+      throw new Error(`${metadataPath} 与正式 SDK 结果不一致`);
+  }
   for (const file of await outputFiles(projectDir)) {
+    if (expectedMetadata.has(file)) continue;
     if (
       !/\.(?:[cm]?[jt]sx?|vue|jsonc?|ya?ml|toml|md|html|css)$/u.test(file) &&
       !file.endsWith("Cargo.lock")

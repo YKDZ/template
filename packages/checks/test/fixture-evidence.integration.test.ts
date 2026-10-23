@@ -4,7 +4,10 @@ import { contentIdentityKey } from "@ykdz/template-core/content-identity";
 import type { ContentIdentity } from "@ykdz/template-core/content-identity";
 
 import { findFixtureEvidenceArchitectureFindings } from "../src/check-fixture-evidence-architecture.ts";
-import { forEachGeneratedScenario } from "../src/generated-content.ts";
+import {
+  forEachGeneratedScenario,
+  materializeGeneratedScenario,
+} from "../src/generated-content.ts";
 import { sourceGeneratedScenarioRuntime } from "../src/source-generated-runtime.ts";
 import {
   FileFixtureEvidenceActivityLedger,
@@ -1897,6 +1900,20 @@ void describe("Fixture Verification Evidence", () => {
       },
     );
     try {
+      const scenarios = await generatedScenariosFor("package-addition-matrix");
+      for (const scenario of scenarios) {
+        const receipt = await materializeGeneratedScenario({
+          runtime: sourceGeneratedScenarioRuntime,
+          scenario,
+          workspace: path.join(workspace, "owner-facts"),
+        });
+        assert.notStrictEqual(receipt.status, "not-applicable");
+        if (receipt.status === "not-applicable") continue;
+        needsByScenario.set(
+          scenario.id,
+          receipt.result.ownerFacts.environmentNeeds,
+        );
+      }
       await runGeneratedScenarioSet("package-addition-matrix", {
         workspace,
         scheduling: { concurrency: 4 },
@@ -1906,21 +1923,14 @@ void describe("Fixture Verification Evidence", () => {
             return await execa(command, [...args], options);
           }
           if (args[0] === "install") {
-            const environmentNeeds = JSON.parse(
-              await readFile(
-                path.join(options.cwd, ".template/environment-needs.json"),
-                "utf8",
-              ),
-            ) as {
-              readonly check: readonly { readonly kind?: string }[];
-              readonly deployment: readonly { readonly kind?: string }[];
-            };
+            const scenarioId = path.basename(options.cwd);
+            const environmentNeeds = needsByScenario.get(scenarioId);
+            assert.notStrictEqual(environmentNeeds, undefined);
+            if (environmentNeeds === undefined) return {};
             const browser = environmentNeeds.check.some(
               (need) => need.kind === "playwright-browser-assets",
             );
-            const scenarioId = path.basename(options.cwd);
             installedScenarios.push(scenarioId);
-            needsByScenario.set(scenarioId, environmentNeeds);
             if (browser) {
               browserScenarios.add(scenarioId);
             } else {
@@ -1931,7 +1941,6 @@ void describe("Fixture Verification Evidence", () => {
         },
       });
 
-      const scenarios = await generatedScenariosFor("package-addition-matrix");
       const scenarioIds = scenarios.map(({ id }) => id).sort();
       assert.strictEqual(schedulerFactory.mock.callCount(), 1);
       assert.ok(
@@ -2165,9 +2174,10 @@ void describe("Fixture Verification Evidence", () => {
           ),
       );
       assert.ok(entry);
-      assert.deepEqual(
-        await readFile(path.join(rendered.receipt.projectDir, entry.path)),
-        entry.content,
+      assert.ok(
+        (
+          await readFile(path.join(rendered.receipt.projectDir, entry.path))
+        ).equals(Buffer.from(entry.content)),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
