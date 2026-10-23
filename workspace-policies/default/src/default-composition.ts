@@ -66,11 +66,13 @@ import {
   type EnvironmentNeedsMetadata,
 } from "./environment-needs.ts";
 import {
+  normalizeProjectCheckWorkflowJob,
   projectCheckWorkflow,
   prepareProjectGithubTemplates,
   projectDependabotConfig,
   projectNextStepsDocument,
 } from "./project-github.ts";
+import type { ProjectCheckWorkflowJob } from "./project-github.ts";
 import type {
   DefaultCompositionFile,
   DefaultNativeDocument,
@@ -225,6 +227,8 @@ export type DefaultCompositionOwnerFacts = {
   readonly dependencyCatalog: Readonly<Record<string, string>>;
   readonly environmentNeeds: EnvironmentNeedsMetadata;
   readonly ciDiagnosticArtifacts: readonly CiDiagnosticArtifactDeclaration[];
+  readonly dependencyMaintenance: DependencyMaintenancePolicy;
+  readonly checkWorkflowJob: ProjectCheckWorkflowJob;
   readonly container: {
     readonly dockerfileText: string;
     readonly buildArguments: ReturnType<
@@ -2029,6 +2033,8 @@ export function createDefaultComposition(options: {
           dependencyCatalog,
           environmentNeeds,
           ciDiagnosticArtifacts,
+          dependencyMaintenance,
+          checkWorkflowJob: normalizeProjectCheckWorkflowJob(ciJob),
           container: {
             dockerfileText,
             buildArguments: developmentContainer.buildArguments,

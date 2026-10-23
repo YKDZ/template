@@ -516,12 +516,12 @@ void it("同一份严格TypeScript消费代码通过源码和正式安装制品"
     });
     preparedRoots.push(prepared.root);
     assert.deepEqual(
-      prepared.members
-        .filter((member) => member.kind === "reference")
-        .map((member) => ({
+      prepared.owners
+        .filter(({ member }) => member.kind === "reference")
+        .map(({ member, artifact }) => ({
           namespace: member.identity.namespace,
           packageName: member.identity.packageName,
-          version: member.definition.prepareArtifact().coordinate.version,
+          version: artifact.coordinate.version,
         })),
       [
         {

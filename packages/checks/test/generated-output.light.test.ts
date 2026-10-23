@@ -22,7 +22,7 @@ await test("在真实生成目标上检查格式与依赖目录事实", async ()
       runtime: sourceGeneratedScenarioRuntime,
       scenario,
       workspace: root,
-      strategyInput: { defaultPackageScope: "custom" },
+      conventions: { defaultPackageScope: "custom" },
       initializationCreationInput: {
         leafName: "library",
         packagePath: "modules/library",

@@ -747,7 +747,7 @@ async function runScenario(
     ];
   const containerSession = createDevelopmentContainerFixtureSession({
     projectDir,
-    probes: finalResult.projection.ownerFacts.container.probes,
+    probes: finalResult.ownerFacts.container.probes,
     ...(options.cancelSignal === undefined
       ? {}
       : { cancelSignal: options.cancelSignal }),

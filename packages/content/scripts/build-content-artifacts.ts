@@ -13,11 +13,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  createContentIndex,
   contentIdentityLabel,
   contentIdentityKey,
   type ContentIdentity,
   type LoadedContentMember,
 } from "@ykdz/template-core/content-identity";
+import type { PresetSelectionDefinition } from "@ykdz/template-core/reference-package";
 import type { PreparedNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
 import { execa } from "execa";
 
@@ -169,19 +171,10 @@ function selectedMembers(
   const references = content.filter(
     (member): member is ReferenceMember => member.kind === "reference",
   );
+  const contentIndex = createContentIndex(content);
   const referencesByIdentity = new Map(
     references.map((member) => [contentIdentityKey(member.identity), member]),
   );
-  const referencesByDefinition = new Map<
-    ReferenceMember["definition"],
-    ReferenceMember[]
-  >();
-  for (const reference of references) {
-    const sameDefinition =
-      referencesByDefinition.get(reference.definition) ?? [];
-    sameDefinition.push(reference);
-    referencesByDefinition.set(reference.definition, sameDefinition);
-  }
   const selected = new Map<string, NativeMember>();
   const visited = new Set<string>();
   const visit = (member: ReferenceMember): void => {
@@ -204,28 +197,18 @@ function selectedMembers(
   };
 
   const includePresetReferences = (selectedPreset: PresetMember): void => {
-    const nodes = Object.values(
-      (selectedPreset.definition as { readonly nodes: unknown })
-        .nodes as Record<string, { readonly reference: unknown }>,
-    );
+    const definition = selectedPreset.definition as PresetSelectionDefinition;
+    const nodes = Object.values(definition.nodes);
     for (const node of nodes) {
-      const candidates = referencesByDefinition.get(
-        node.reference as ReferenceMember["definition"],
+      visit(
+        contentIndex.resolve(
+          {
+            alias: node.reference.alias,
+            namespace: selectedPreset.identity.namespace,
+          },
+          "reference",
+        ),
       );
-      const sameNamespace = candidates?.filter(
-        (candidate) =>
-          candidate.identity.namespace === selectedPreset.identity.namespace,
-      );
-      const matching =
-        sameNamespace !== undefined && sameNamespace.length > 0
-          ? sameNamespace
-          : candidates;
-      if (matching === undefined || matching.length !== 1) {
-        throw new Error(
-          `预设 ${selectedPreset.alias} 的引用未由当前集合唯一登记：${selectedPreset.identity.packageName}`,
-        );
-      }
-      visit(matching[0]!);
     }
   };
   for (const root of selectedRoots.values()) {

@@ -1,12 +1,17 @@
 import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
+import {
+  contentIdentityKey,
+  contentIdentityLabel,
+} from "@ykdz/template-core/content-identity";
 import {
   readProjectedMirrorSlotScalar,
   type ProjectProjectionEntry,
   type ProjectProjectionMirrorSlot,
+  type ProjectProjectionSource,
 } from "@ykdz/template-core/project-projection";
-import type { RenderOperation } from "@ykdz/template-core/renderer";
 import {
   loadTemplateDependencyCatalog,
   selectTemplateDependencyCatalogEntries,
@@ -20,91 +25,117 @@ import type {
   SuccessfulScenarioResult,
 } from "./generated-content.ts";
 
-type SourceBackedOperation = Extract<
-  RenderOperation,
-  {
-    readonly kind:
-      | "copyFile"
-      | "writeText"
-      | "writeTextTemplate"
-      | "writeTextFromFragments";
-  }
->;
-
 export type PlanSourceReference = {
   readonly scenarioId: string;
   readonly generatedPath: string;
-  readonly sourceFile: string;
+  readonly sourceIdentity: string;
+  readonly sourceLabel: string;
+  readonly sourceModuleURL?: string;
 };
 
-function outputPath(operation: RenderOperation): string | undefined {
-  if (operation.kind === "setExecutable") return operation.path;
-  return "to" in operation ? operation.to : undefined;
-}
-
-function operationReferences(
-  operation: SourceBackedOperation,
+function expectedProjectionSources(
+  result: SuccessfulScenarioResult,
   runtime: GeneratedScenarioRuntime,
-): readonly { readonly generatedPath: string; readonly sourceFile: string }[] {
-  if (operation.kind === "writeTextFromFragments") {
-    return operation.fragments.map((fragment) => ({
-      generatedPath: operation.to,
-      sourceFile: runtime.resolveTemplateSource(fragment.source, fragment.from),
-    }));
+): ReadonlyMap<
+  string,
+  ProjectProjectionSource & { readonly moduleURL: string }
+> {
+  const packages = new Map(
+    result.blueprint.packages.map((definition) => [
+      definition.packageDefinitionId,
+      definition,
+    ]),
+  );
+  const members = new Map(
+    runtime.content.map((member) => [
+      contentIdentityKey(member.identity),
+      member,
+    ]),
+  );
+  const sources = new Map<
+    string,
+    ProjectProjectionSource & { readonly moduleURL: string }
+  >();
+  for (const record of result.generationRecord.packages) {
+    const definition = packages.get(record.packageDefinitionId);
+    const member = members.get(contentIdentityKey(record.contentIdentity));
+    if (definition === undefined || member === undefined) {
+      throw new Error(
+        `生成记录中的内容来源无法对应到本次内容集合：${contentIdentityLabel(record.contentIdentity)}`,
+      );
+    }
+    const identity = `content:${contentIdentityKey(record.contentIdentity)}:${record.packageDefinitionId}`;
+    sources.set(identity, {
+      identity,
+      label: `${contentIdentityLabel(record.contentIdentity)}（${definition.path}）`,
+      moduleURL: member.source.moduleURL,
+    });
   }
-  if (operation.kind === "writeText") {
-    return operation.templateSource === undefined
-      ? []
-      : [
-          {
-            generatedPath: operation.to,
-            sourceFile: runtime.resolveTemplateSource(
-              operation.templateSource.handle,
-              operation.templateSource.path,
-            ),
-          },
-        ];
-  }
-  return [
-    {
-      generatedPath: operation.to,
-      sourceFile: runtime.resolveTemplateSource(
-        operation.source,
-        operation.from,
-      ),
-    },
-  ];
+  const compositionIdentity = result.generationRecord.composition.identity;
+  const identity = `composition:${contentIdentityKey(compositionIdentity)}`;
+  sources.set(identity, {
+    identity,
+    label: `组合${contentIdentityLabel(compositionIdentity)}`,
+    moduleURL: "",
+  });
+  return sources;
 }
 
-/** 检查正式投影操作中实际携带的来源句柄，不重新准备或渲染投影。 */
+function assertProjectionOwnership(
+  projection: SuccessfulScenarioResult["projection"],
+  result: SuccessfulScenarioResult,
+  scenarioId: string,
+): void {
+  for (const entry of projection.entries) {
+    const owners = result.blueprint.packages
+      .filter(
+        (definition) =>
+          definition.path === "." ||
+          entry.path.startsWith(`${definition.path}/`),
+      )
+      .toSorted((left, right) => right.path.length - left.path.length);
+    if (owners[0] === undefined) {
+      throw new Error(
+        `${scenarioId}: projected file ${entry.path} has no owning package in the blueprint`,
+      );
+    }
+    const sources = entry.sources;
+    if (sources === undefined || sources.length === 0) {
+      throw new Error(
+        `${scenarioId}: projected file ${entry.path} has no source provenance`,
+      );
+    }
+  }
+}
+
+/** 检查期望文件树公开携带的来源身份及包所有权。 */
 export function planSourceReferences(options: {
   readonly receipt: GeneratedScenarioReceipt;
   readonly runtime: GeneratedScenarioRuntime;
 }): readonly PlanSourceReference[] {
-  const projection = requireProjection(options.receipt.result);
-  return projection.operations.flatMap((operation) => {
-    if (
-      operation.kind !== "copyFile" &&
-      operation.kind !== "writeText" &&
-      operation.kind !== "writeTextTemplate" &&
-      operation.kind !== "writeTextFromFragments"
-    ) {
-      return [];
-    }
-    try {
-      return operationReferences(operation, options.runtime).map(
-        (reference) => ({
-          scenarioId: options.receipt.scenario.id,
-          ...reference,
-        }),
-      );
-    } catch (error) {
-      throw new Error(
-        `${options.receipt.scenario.id}: generated ${operation.to} has an invalid template source: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      );
-    }
-  });
+  const result = options.receipt.result;
+  const projection = requireProjection(result);
+  const expected = expectedProjectionSources(result, options.runtime);
+  assertProjectionOwnership(projection, result, options.receipt.scenario.id);
+  return projection.entries.flatMap((entry) =>
+    (entry.sources ?? []).map((source) => {
+      const known = expected.get(source.identity);
+      if (known === undefined || known.label !== source.label) {
+        throw new Error(
+          `${options.receipt.scenario.id}: generated ${entry.path} has unknown source provenance ${source.identity}`,
+        );
+      }
+      return {
+        scenarioId: options.receipt.scenario.id,
+        generatedPath: entry.path,
+        sourceIdentity: source.identity,
+        sourceLabel: source.label,
+        ...(known.moduleURL.length === 0
+          ? {}
+          : { sourceModuleURL: known.moduleURL }),
+      };
+    }),
+  );
 }
 
 export async function validatePlanSources(options: {
@@ -112,12 +143,16 @@ export async function validatePlanSources(options: {
   readonly runtime: GeneratedScenarioRuntime;
 }): Promise<readonly PlanSourceReference[]> {
   const references = planSourceReferences(options);
+  const inspectedModules = new Set<string>();
   for (const reference of references) {
+    const moduleURL = reference.sourceModuleURL;
+    if (moduleURL === undefined || inspectedModules.has(moduleURL)) continue;
+    inspectedModules.add(moduleURL);
     try {
-      await access(reference.sourceFile);
+      await access(new URL(moduleURL));
     } catch {
       throw new Error(
-        `${reference.scenarioId}: actual projection references missing template source ${reference.sourceFile} for generated ${reference.generatedPath}`,
+        `${reference.scenarioId}: actual projection source module ${moduleURL} is unavailable for generated ${reference.generatedPath}`,
       );
     }
   }
@@ -139,19 +174,31 @@ export async function validateGeneratedDevelopmentContainerProjection(options: {
   readonly receipt: GeneratedScenarioReceipt;
 }): Promise<void> {
   const projection = requireProjection(options.receipt.result);
-  const container = projection.ownerFacts?.container;
-  if (container === undefined) {
-    throw new Error(
-      `${options.receipt.scenario.id}: default workspace owner omitted container facts`,
+  const expectedFile = (filePath: string): ProjectProjectionEntry => {
+    const entry = projection.entries.find(
+      (candidate) => candidate.path === filePath,
     );
-  }
+    if (entry === undefined) {
+      throw new Error(
+        `${options.receipt.scenario.id}: expected file tree omitted ${filePath}`,
+      );
+    }
+    return entry;
+  };
   const dockerfilePath = path.join(
     options.receipt.projectDir,
     ".devcontainer",
     "Dockerfile",
   );
   const generatedDockerfile = await readFile(dockerfilePath, "utf8");
-  if (generatedDockerfile !== container.dockerfileText) {
+  const expectedDockerfile = new TextDecoder("utf-8", { fatal: true }).decode(
+    expectedFile(".devcontainer/Dockerfile").content,
+  );
+  if (
+    generatedDockerfile !== expectedDockerfile ||
+    generatedDockerfile !==
+      options.receipt.result.ownerFacts.container.dockerfileText
+  ) {
     throw new Error(
       `Generated Development Container projection ${dockerfilePath} does not match the default workspace owner facts`,
     );
@@ -163,42 +210,36 @@ export async function validateGeneratedDevelopmentContainerProjection(options: {
     "devcontainer.json",
   );
   const config = JSON.parse(await readFile(configPath, "utf8")) as {
-    readonly build?: { readonly args?: unknown };
-    readonly mounts?: unknown;
+    readonly [key: string]: unknown;
   };
-  const expectedBuildArguments = Object.fromEntries(
-    container.buildArguments.map((argument) => [argument.name, argument.value]),
-  );
-  const generatedBuildArguments = config.build?.args;
-  if (
-    !isRecord(generatedBuildArguments) ||
-    Object.entries(expectedBuildArguments).some(
-      ([name, value]) => generatedBuildArguments[name] !== value,
-    )
-  ) {
-    throw new Error(
-      `Generated Development Container projection ${configPath} build arguments do not match the default workspace owner facts`,
-    );
-  }
-  if (!Array.isArray(config.mounts)) {
-    throw new Error(
-      `Generated Development Container projection ${configPath} mounts do not match the default workspace owner facts`,
-    );
-  }
-  for (const { identity, ...expectedMount } of container.mounts) {
-    const matchingMounts = config.mounts.filter(
-      (mount) => isRecord(mount) && mount.target === expectedMount.target,
-    );
-    if (
-      matchingMounts.length !== 1 ||
-      Object.entries(expectedMount).some(
-        ([field, value]) => matchingMounts[0]?.[field] !== value,
-      )
-    ) {
+  const expectedConfig = JSON.parse(
+    new TextDecoder("utf-8", { fatal: true }).decode(
+      expectedFile(".devcontainer/devcontainer.json").content,
+    ),
+  ) as unknown;
+  const build = isRecord(config.build) ? config.build : {};
+  const buildArguments = isRecord(build.args) ? build.args : {};
+  for (const argument of options.receipt.result.ownerFacts.container
+    .buildArguments) {
+    if (buildArguments[argument.name] !== argument.value) {
       throw new Error(
-        `Generated Development Container projection ${configPath} mount ${identity} does not match the default workspace owner facts`,
+        `Generated Development Container build argument ${argument.name} does not match the default workspace owner facts`,
       );
     }
+  }
+  const mounts = Array.isArray(config.mounts) ? config.mounts : [];
+  for (const { identity: _identity, ...mount } of options.receipt.result
+    .ownerFacts.container.mounts) {
+    if (!mounts.some((candidate) => isDeepStrictEqual(candidate, mount))) {
+      throw new Error(
+        `Generated Development Container mount ${mount.target} does not match the default workspace owner facts`,
+      );
+    }
+  }
+  if (!isDeepStrictEqual(config, expectedConfig)) {
+    throw new Error(
+      `Generated Development Container projection ${configPath} does not match the expected file tree`,
+    );
   }
 }
 
@@ -244,6 +285,12 @@ export async function validatePlanDependencyCatalog(
   }
 
   const packageRecordById = recordByPackageId(result);
+  const packagePathById = new Map(
+    result.blueprint.packages.map((definition) => [
+      definition.packageDefinitionId,
+      definition.path,
+    ]),
+  );
   const packageRecordByPath = new Map(
     result.blueprint.packages.flatMap((definition) => {
       const record = packageRecordById.get(definition.packageDefinitionId);
@@ -280,20 +327,20 @@ export async function validatePlanDependencyCatalog(
         const isBoundReference =
           providerRecord !== undefined &&
           packageRecord !== undefined &&
-          Object.values(packageRecord.bindings).includes(
+          Object.values(packageRecord.dependencyBindings).includes(
             providerRecord.packageDefinitionId,
           );
         const isLinkIntent =
           field === "dependencies" &&
-          (result.blueprint.packageLinkIntents ?? []).some(
+          result.blueprint.packageLinkIntents.some(
             (intent) =>
-              intent.consumerPackagePath === packagePath &&
-              intent.providerPackagePath === provider?.path,
+              packagePathById.get(intent.consumerId) === packagePath &&
+              packagePathById.get(intent.providerId) === provider?.path,
           );
         const rootToolingDependency =
           manifestPath === "package.json" && field === "devDependencies";
         const internalWorkspace =
-          specifier === "workspace:*" &&
+          specifier.startsWith("workspace:") &&
           provider !== undefined &&
           (isBoundReference || isLinkIntent || rootToolingDependency);
         const internalConfiguration =
@@ -362,10 +409,6 @@ export async function assertGeneratedManifestDefaultsPrivate(options: {
   }
 }
 
-function operationOutputPath(operation: RenderOperation): string | undefined {
-  return outputPath(operation);
-}
-
 function escapeLocationName(value: string): string {
   return value.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
 }
@@ -391,11 +434,7 @@ function plannedMirrorSlots(result: SuccessfulScenarioResult): readonly {
   readonly slot: ProjectProjectionMirrorSlot;
 }[] {
   const projection = requireProjection(result);
-  const projectedPaths = new Set(
-    projection.operations
-      .map(operationOutputPath)
-      .filter((value): value is string => value !== undefined),
-  );
+  const projectedPaths = new Set(projection.entries.map((entry) => entry.path));
   return projection.reconciliation.flatMap((policy) => {
     if (policy.driver === "canonical" || !projectedPaths.has(policy.path)) {
       return [];

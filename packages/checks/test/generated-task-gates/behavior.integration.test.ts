@@ -5,10 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import { templateContent, templatePresets } from "@ykdz/template-content";
-import { createGenerator } from "@ykdz/template-generator";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 import { execa } from "execa";
 
 import {
@@ -24,10 +22,7 @@ function presetFor(packageName: string) {
 }
 
 function generator() {
-  return createGenerator({
-    content: templateContent,
-    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
-  });
+  return createDefaultGenerator({ content: templateContent });
 }
 
 void describe("生成任务公共入口", () => {
@@ -45,8 +40,10 @@ void describe("生成任务公共入口", () => {
       try {
         const initialized = await currentGenerator.init({
           targetRoot,
-          selection: { roots: [{ preset: preset.identity }] },
-          strategyInput: {
+          selection: {
+            presets: [{ contentIdentity: preset.identity }],
+          },
+          conventions: {
             repositoryName: "generated-library",
             defaultPackageScope: "generated",
           },
@@ -352,8 +349,10 @@ void describe("生成任务公共入口", () => {
       try {
         const initialized = await currentGenerator.init({
           targetRoot,
-          selection: { roots: [{ preset: preset.identity }] },
-          strategyInput: {
+          selection: {
+            presets: [{ contentIdentity: preset.identity }],
+          },
+          conventions: {
             repositoryName: "generated-rust",
             defaultPackageScope: "generated",
           },

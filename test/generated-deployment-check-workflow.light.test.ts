@@ -26,7 +26,7 @@ async function renderDeploymentWorkflow(): Promise<{
         repositoryName: "demo-app",
       });
       if (
-        !receipt.result.projection.ownerFacts.environmentNeeds.deployment.some(
+        !receipt.result.ownerFacts.environmentNeeds.deployment.some(
           (need) => need.kind === "docker-engine",
         )
       ) {

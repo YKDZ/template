@@ -4,26 +4,118 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import type {
-  TemplatePreset,
-  TemplateReferencePackage,
-} from "@ykdz/template-content";
-import { createContentIndex } from "@ykdz/template-core/content-identity";
 import { definePreset } from "@ykdz/template-core/preset-definition";
+import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 import {
   deriveFixtureMatrix,
   deriveFocusedProjectLinkScenarios,
   deriveInitializationScenarios,
   materializeGeneratedScenario,
-  type ChecksPreset,
-  type GeneratedScenarioRuntime,
 } from "../src/generated-content.ts";
 import { validateGeneratedScenarioReceipt } from "../src/registry-checks.ts";
 import { sourceGeneratedScenarioRuntime } from "../src/source-generated-runtime.ts";
 
+async function focusedProviderRuntime(withExports: boolean) {
+  const sourcePreset = sourceGeneratedScenarioRuntime.content.find(
+    (member) =>
+      member.kind === "preset" &&
+      member.identity.packageName === "@ykdz/preset-ts-lib",
+  );
+  const sourceReference = sourceGeneratedScenarioRuntime.content.find(
+    (member) =>
+      member.kind === "reference" &&
+      member.identity.packageName === "@ykdz/reference-ts-lib",
+  );
+  assert.ok(sourcePreset?.kind === "preset");
+  assert.ok(sourceReference?.kind === "reference");
+
+  const providerReference = defineReferencePackage({
+    manifest: {
+      name: "@fixture/focused-provider-reference",
+      version: "0.0.0",
+      private: true,
+      type: "module",
+    },
+    resourceRoot: new URL("./fixtures/focused-provider/", import.meta.url),
+    alias: "library",
+    instance: "independent",
+    defaultLeafName: "library",
+    role: "shared-library",
+    resources: [{ path: "src/index.ts" }],
+    transformManifest({ manifest }) {
+      return withExports
+        ? {
+            ...manifest,
+            exports: {
+              ".": {
+                source: "./src/index.ts",
+                types: "./dist/index.d.ts",
+                default: "./dist/index.js",
+              },
+            },
+          }
+        : manifest;
+    },
+  });
+  const providerPreset = definePreset({
+    metadata: {
+      alias: "focused-provider",
+      title: "Focused provider",
+      description: "以公开清单变换提供 source 条件导出。",
+    },
+    owner: {
+      packageName: "@fixture/focused-provider",
+      exportPath: "./template",
+    },
+    operations: ["add"],
+    nodes: { library: { reference: providerReference } },
+  });
+  const providerPresetMember = {
+    identity: {
+      namespace: "checks-fixture",
+      packageName: "@fixture/focused-provider",
+      exportPath: "./template",
+    },
+    kind: "preset" as const,
+    alias: providerPreset.metadata.alias,
+    definition: providerPreset,
+    source: {
+      specifier: import.meta.url,
+      moduleURL: import.meta.url,
+      manifestURL: import.meta.url,
+    },
+  };
+  const providerReferenceMember = {
+    identity: {
+      namespace: "checks-fixture",
+      packageName: "@fixture/focused-provider-reference",
+      exportPath: "./template",
+    },
+    kind: "reference" as const,
+    alias: providerReference.alias,
+    definition: providerReference,
+    source: {
+      specifier: import.meta.url,
+      moduleURL: new URL(
+        "./fixtures/focused-provider/src/index.ts",
+        import.meta.url,
+      ).href,
+      manifestURL: import.meta.url,
+    },
+  };
+  const content = [
+    ...sourceGeneratedScenarioRuntime.content.filter(
+      (member) => member !== sourcePreset && member !== sourceReference,
+    ),
+    providerReferenceMember,
+    providerPresetMember,
+  ];
+  return { ...sourceGeneratedScenarioRuntime, content };
+}
+
 void describe("唯一内容集合的真实生成检查场景", () => {
-  void it("按声明操作派生六种 init 与完整 6×4 实际 init/add 矩阵", async () => {
+  void it("按声明操作派生初始化和完整实际 init/add 矩阵", async () => {
     const initializations = deriveInitializationScenarios(
       sourceGeneratedScenarioRuntime,
     );
@@ -52,15 +144,17 @@ void describe("唯一内容集合的真实生成检查场景", () => {
         }
         assert.strictEqual(
           receipt.initialization.generationRecord.schemaVersion,
-          5,
+          6,
         );
-        assert.strictEqual(receipt.result.generationRecord.schemaVersion, 5);
+        assert.strictEqual(receipt.result.generationRecord.schemaVersion, 6);
+        assert.strictEqual(receipt.initialization.blueprint.schemaVersion, 4);
+        assert.strictEqual(receipt.result.blueprint.schemaVersion, 4);
+        assert.ok(receipt.initialization.projection.entries.length > 0);
+        assert.ok(receipt.result.projection.entries.length > 0);
         await validateGeneratedScenarioReceipt({
           receipt,
           runtime: sourceGeneratedScenarioRuntime,
         });
-        assert.ok(receipt.initialization.projection !== null);
-        assert.ok(receipt.result.projection !== null);
         assert.equal((await stat(receipt.projectDir)).isDirectory(), true);
         const persistedRecord = JSON.parse(
           await readFile(
@@ -68,7 +162,7 @@ void describe("唯一内容集合的真实生成检查场景", () => {
             "utf8",
           ),
         ) as { readonly schemaVersion: number };
-        assert.strictEqual(persistedRecord.schemaVersion, 5);
+        assert.strictEqual(persistedRecord.schemaVersion, 6);
         if (scenario.addition !== undefined) {
           const addition = receipt.result.generationRecord.packages.find(
             (record) => record.createdBy === "addition",
@@ -87,81 +181,8 @@ void describe("唯一内容集合的真实生成检查场景", () => {
     }
   });
 
-  void it("从实际加包贡献判断 focused provider 能力", async () => {
-    const libraryPreset = sourceGeneratedScenarioRuntime.content.find(
-      (member): member is ChecksPreset =>
-        "kind" in member &&
-        member.kind === "preset" &&
-        member.definition.metadata.alias === "ts-lib",
-    );
-    assert.ok(libraryPreset);
-    const [libraryNode] = Object.values(libraryPreset.definition.nodes);
-    assert.ok(libraryNode);
-    const libraryReference = libraryNode.reference;
-    const libraryReferenceMember = createContentIndex(
-      sourceGeneratedScenarioRuntime.content,
-    ).fromDefinition(libraryReference, "reference");
-    const nativeManifest = Object.fromEntries(
-      Object.entries(libraryReference.manifest).filter(
-        ([key]) => key !== "exports",
-      ),
-    ) as typeof libraryReference.manifest;
-    const providerReference = {
-      ...libraryReference,
-      manifest: nativeManifest,
-    };
-    const providerPreset = definePreset({
-      metadata: {
-        alias: "focused-provider-with-generated-exports",
-        title: "测试提供包",
-        description: "以实际贡献提供 Node package-name exports",
-      },
-      operations: ["add"],
-      nodes: { provider: { reference: providerReference } },
-    });
-    const providerReferenceMember: TemplateReferencePackage = {
-      ...libraryReferenceMember,
-      identity: {
-        namespace: "checks-fixture",
-        packageName: "@fixture/focused-provider-reference",
-        exportPath: "./template",
-      },
-      definition: providerReference,
-      source: {
-        specifier: "@fixture/focused-provider-reference/template",
-        moduleURL:
-          "file:///checks-fixture/focused-provider-reference/template.js",
-        manifestURL:
-          "file:///checks-fixture/focused-provider-reference/package.json",
-      },
-    };
-    const providerPresetMember: ChecksPreset = {
-      identity: {
-        namespace: "checks-fixture",
-        packageName: "@fixture/focused-provider",
-        exportPath: "./template",
-      },
-      kind: "preset",
-      alias: providerPreset.metadata.alias,
-      definition: providerPreset as TemplatePreset["definition"],
-      source: {
-        specifier: "@fixture/focused-provider/template",
-        moduleURL: "file:///checks-fixture/focused-provider/template.js",
-        manifestURL: "file:///checks-fixture/focused-provider/package.json",
-      },
-    };
-    const content = [
-      ...sourceGeneratedScenarioRuntime.content.filter(
-        (member) =>
-          member !== libraryPreset && member !== libraryReferenceMember,
-      ),
-      providerReferenceMember,
-      providerPresetMember,
-    ];
-    const runtime: GeneratedScenarioRuntime = {
-      ...sourceGeneratedScenarioRuntime,
-      content,
-    };
+  void it("按公开清单求值结果判断 focused provider 能力", async () => {
+    const runtime = await focusedProviderRuntime(true);
     const scenario = deriveFocusedProjectLinkScenarios(runtime).find(
       (candidate) =>
         candidate.base.identity.packageName === "@ykdz/preset-ts-cli" &&
@@ -171,7 +192,7 @@ void describe("唯一内容集合的真实生成检查场景", () => {
     assert.ok(scenario);
 
     const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-focused-provider-"),
+      path.join(tmpdir(), "template-focused-package-link-"),
     );
     try {
       const receipt = await materializeGeneratedScenario({
@@ -190,99 +211,45 @@ void describe("唯一内容集合的真实生成检查场景", () => {
         (definition) =>
           definition.packageDefinitionId === providerRecord.packageDefinitionId,
       );
+      const consumerDefinition = receipt.result.blueprint.packages.find(
+        (definition) => definition.path === "packages/cli",
+      );
       assert.ok(providerDefinition);
-      const providerManifest = JSON.parse(
+      assert.ok(consumerDefinition);
+      assert.ok(
+        receipt.result.blueprint.packageLinkIntents.some(
+          (intent) =>
+            intent.consumerId === consumerDefinition.packageDefinitionId &&
+            intent.providerId === providerDefinition.packageDefinitionId,
+        ),
+      );
+      const consumerManifest = JSON.parse(
         await readFile(
           path.join(
             receipt.projectDir,
-            providerDefinition.path,
+            consumerDefinition.path,
             "package.json",
           ),
           "utf8",
         ),
-      ) as {
-        readonly exports?: Readonly<Record<string, unknown>>;
-      };
-      assert.deepEqual(providerManifest.exports?.["."], {
-        source: "./src/index.ts",
-        types: "./dist/index.d.ts",
-        default: "./dist/index.js",
-      });
-      assert.ok(
-        receipt.result.blueprint.packageLinkIntents?.some(
-          (intent) =>
-            intent.consumerPackagePath === "packages/cli" &&
-            intent.providerPackagePath === providerDefinition.path,
-        ),
+      ) as { readonly dependencies?: Readonly<Record<string, string>> };
+      assert.equal(
+        consumerManifest.dependencies?.[providerDefinition.name],
+        "workspace:*",
       );
       await validateGeneratedScenarioReceipt({ receipt, runtime });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
 
-    const unsupportedReference = {
-      ...providerReference,
-      contribute: (
-        options: Parameters<typeof providerReference.contribute>[0],
-      ) => {
-        const contribution = providerReference.contribute(options);
-        const manifest = Object.fromEntries(
-          Object.entries(contribution.manifest).filter(
-            ([key]) => key !== "exports",
-          ),
-        ) as typeof contribution.manifest;
-        return { ...contribution, manifest };
-      },
-    };
-    const unsupportedPreset = definePreset({
-      metadata: {
-        alias: "focused-provider-without-generated-exports",
-        title: "未提供导出的测试包",
-        description: "实际贡献不支持 source 条件导入",
-      },
-      operations: ["add"],
-      nodes: { provider: { reference: unsupportedReference } },
-    });
-    const unsupportedReferenceMember: TemplateReferencePackage = {
-      ...providerReferenceMember,
-      definition: unsupportedReference,
-    };
-    const unsupportedPresetMember: ChecksPreset = {
-      identity: {
-        namespace: "checks-fixture",
-        packageName: "@fixture/focused-provider-without-exports",
-        exportPath: "./template",
-      },
-      kind: "preset",
-      alias: unsupportedPreset.metadata.alias,
-      definition: unsupportedPreset as TemplatePreset["definition"],
-      source: {
-        specifier: "@fixture/focused-provider-without-exports/template",
-        moduleURL:
-          "file:///checks-fixture/focused-provider-without-exports/template.js",
-        manifestURL:
-          "file:///checks-fixture/focused-provider-without-exports/package.json",
-      },
-    };
-    const unsupportedContent = [
-      ...sourceGeneratedScenarioRuntime.content.filter(
-        (member) =>
-          member !== libraryPreset && member !== libraryReferenceMember,
-      ),
-      unsupportedReferenceMember,
-      unsupportedPresetMember,
-    ];
-    const unsupportedRuntime: GeneratedScenarioRuntime = {
-      ...sourceGeneratedScenarioRuntime,
-      content: unsupportedContent,
-    };
+    const unsupportedRuntime = await focusedProviderRuntime(false);
     const unsupportedScenario = deriveFocusedProjectLinkScenarios(
       unsupportedRuntime,
     ).find(
       (candidate) =>
         candidate.base.identity.packageName === "@ykdz/preset-ts-cli" &&
         candidate.addition?.identity.packageName ===
-          "@fixture/focused-provider-without-exports",
+          "@fixture/focused-provider",
     );
     assert.ok(unsupportedScenario);
     const unsupportedWorkspace = await mkdtemp(

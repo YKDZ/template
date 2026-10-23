@@ -8,10 +8,17 @@ import type { DependencyMaintenancePolicy } from "./project-requirements.ts";
 export type ProjectCheckWorkflowDiagnosticOptions = {
   readonly packagePaths: readonly string[];
   readonly diagnosticArtifacts?: readonly unknown[] | undefined;
-  readonly job?: {
-    readonly name?: string;
-    readonly timeoutMinutes?: number;
-  };
+  readonly job?: ProjectCheckWorkflowJobOptions;
+};
+
+export type ProjectCheckWorkflowJobOptions = {
+  readonly name?: string;
+  readonly timeoutMinutes?: number;
+};
+
+export type ProjectCheckWorkflowJob = {
+  readonly name: string;
+  readonly timeoutMinutes: number;
 };
 
 export type PreparedProjectGithubTemplates = {
@@ -19,6 +26,16 @@ export type PreparedProjectGithubTemplates = {
   readonly dependabot: string;
   readonly nextSteps: string;
 };
+
+/** 根检查作业的默认值与显式声明共用同一规范化规则。 */
+export function normalizeProjectCheckWorkflowJob(
+  options?: ProjectCheckWorkflowJobOptions,
+): ProjectCheckWorkflowJob {
+  return {
+    name: options?.name ?? "Root Check",
+    timeoutMinutes: options?.timeoutMinutes ?? 30,
+  };
+}
 
 /** GitHub 与下一步文档的原生模板由工作区 owner 在准备阶段读取。 */
 export function prepareProjectGithubTemplates(): PreparedProjectGithubTemplates {
@@ -52,8 +69,9 @@ export function projectCheckWorkflow(
     declarations: options.diagnosticArtifacts ?? [],
   });
   const workflow = parseDocument(template);
-  workflow.setIn(["jobs", "check", "name"], "Root Check");
-  workflow.setIn(["jobs", "check", "timeout-minutes"], 30);
+  const job = normalizeProjectCheckWorkflowJob(options.job);
+  workflow.setIn(["jobs", "check", "name"], job.name);
+  workflow.setIn(["jobs", "check", "timeout-minutes"], job.timeoutMinutes);
   const steps = workflow.getIn(["jobs", "check", "steps"]) as YAMLSeq<
     YAMLMap<string>
   >;
@@ -71,16 +89,6 @@ export function projectCheckWorkflow(
         step.set("name", "Upload Root Check diagnostics");
         step.setIn(["with", "name"], "root-check-diagnostics");
       }
-    }
-  } else {
-    if (options.job.name !== undefined) {
-      workflow.setIn(["jobs", "check", "name"], options.job.name);
-    }
-    if (options.job.timeoutMinutes !== undefined) {
-      workflow.setIn(
-        ["jobs", "check", "timeout-minutes"],
-        options.job.timeoutMinutes,
-      );
     }
   }
   const staging = steps.items.find(

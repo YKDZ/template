@@ -84,7 +84,7 @@ export async function checkGeneratedOutputs(): Promise<void> {
         runtime: sourceGeneratedScenarioRuntime,
         workspace,
         scenario,
-        strategyInput: { defaultPackageScope: "output-audit" },
+        conventions: { defaultPackageScope: "output-audit" },
         ...(Object.keys(scenario.base.definition.nodes).length === 1
           ? {
               initializationCreationInput: {

@@ -226,14 +226,14 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
     );
     assert.strictEqual(
       finalWebManifest.devDependencies["@demo/tooling-config"],
-      "workspace:../../packages/tooling-config",
+      "workspace:*",
     );
     const finalApiManifest = JSON.parse(
       await readFile(path.join(targetRoot, "apps/api/package.json"), "utf8"),
     ) as { dependencies: Record<string, string> };
     assert.strictEqual(
       finalApiManifest.dependencies["@demo/tooling-config"],
-      "workspace:../../packages/tooling-config",
+      "workspace:*",
     );
     const finalTurbo = JSON.parse(
       await readFile(path.join(targetRoot, "turbo.json"), "utf8"),
@@ -258,7 +258,7 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
     };
     assert.strictEqual(
       vueManifest.devDependencies["@demo/tooling-config"],
-      "workspace:../../packages/tooling-config",
+      "workspace:*",
     );
     assert.strictEqual(
       await readFile(path.join(targetRoot, "playwright.config.ts"), "utf8"),

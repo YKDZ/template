@@ -15,15 +15,12 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import {
   templateContent,
   templatePresets,
   templateReferencePackages,
 } from "@ykdz/template-content";
-import { resolveTemplateSource } from "@ykdz/template-core/renderer";
-import { createGenerator } from "@ykdz/template-generator";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 import { execa } from "execa";
 import ts from "typescript";
 
@@ -165,13 +162,14 @@ void describe("Erasable TypeScript enforcement", () => {
       const generatedPresetTargets = await Promise.all(
         templatePresets.map(async (preset) => {
           const targetDir = path.join(projectRoot, preset.identity.packageName);
-          const initialized = await createGenerator({
+          const initialized = await createDefaultGenerator({
             content: templateContent,
-            strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
           }).init({
             targetRoot: targetDir,
-            selection: { roots: [{ preset: preset.identity }] },
-            strategyInput: {
+            selection: {
+              presets: [{ contentIdentity: preset.identity }],
+            },
+            conventions: {
               repositoryName: path.basename(targetDir),
               defaultPackageScope: "erasable",
             },
@@ -195,13 +193,9 @@ void describe("Erasable TypeScript enforcement", () => {
               reference.identity.packageName === "@ykdz/reference-vue-app",
           );
           assert.ok(sharedConfiguration);
-          const sourceConfiguration = resolveTemplateSource(
-            sharedConfiguration.definition.source("tsconfig.app.json"),
-            ".",
-          );
-          const vueConfiguration = createRequire(sourceConfiguration).resolve(
-            "@vue/tsconfig/tsconfig.dom.json",
-          );
+          const vueConfiguration = createRequire(
+            sharedConfiguration.source.moduleURL,
+          ).resolve("@vue/tsconfig/tsconfig.dom.json");
           await symlink(
             path.dirname(vueConfiguration),
             path.join(targetDir, "node_modules/@vue/tsconfig"),
@@ -343,13 +337,14 @@ void describe("Erasable TypeScript enforcement", () => {
     const generatedProjects = await Promise.all(
       templatePresets.map(async (preset) => {
         const targetDir = path.join(generatedRoot, preset.identity.packageName);
-        const initialized = await createGenerator({
+        const initialized = await createDefaultGenerator({
           content: templateContent,
-          strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
         }).init({
           targetRoot: targetDir,
-          selection: { roots: [{ preset: preset.identity }] },
-          strategyInput: {
+          selection: {
+            presets: [{ contentIdentity: preset.identity }],
+          },
+          conventions: {
             repositoryName: path.basename(targetDir),
             defaultPackageScope: "manifest-truth",
           },

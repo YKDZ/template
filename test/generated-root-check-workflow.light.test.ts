@@ -29,7 +29,7 @@ async function renderRootCheckWorkflow(): Promise<{
         repositoryName: "demo-cli",
       });
       if (
-        receipt.result.projection.ownerFacts.environmentNeeds.deployment.some(
+        receipt.result.ownerFacts.environmentNeeds.deployment.some(
           (need) => need.kind === "docker-engine",
         )
       ) {

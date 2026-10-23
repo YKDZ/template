@@ -2553,10 +2553,9 @@ void describe("Fixture Verification Evidence", () => {
         (await generatedScenariosFor("init")).map(async (scenario) => {
           const rendered = await renderMatrixScenario({ scenario, workspace });
           const result = rendered.receipt.result;
-          const hasBrowserNeed =
-            result.projection.ownerFacts.environmentNeeds.check.some(
-              (need) => need.kind === "playwright-browser-assets",
-            );
+          const hasBrowserNeed = result.ownerFacts.environmentNeeds.check.some(
+            (need) => need.kind === "playwright-browser-assets",
+          );
           return {
             hasBrowserNeed,
             resources: generatedRootQualityExecutionResources(result),

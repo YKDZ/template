@@ -1752,14 +1752,18 @@ void describe("Fixture Verification Evidence", () => {
               readonly createdBy: string;
               readonly packageDefinitionId: string;
             }[];
-            readonly presetSelections: readonly ContentIdentity[];
+            readonly selections: readonly {
+              readonly presetIdentity: ContentIdentity | null;
+            }[];
           };
           assert.ok(
-            generation.presetSelections.some((selection) =>
-              isDeepStrictEqual(
-                selection,
-                scenario.addition?.identity ?? scenario.base.identity,
-              ),
+            generation.selections.some(
+              ({ presetIdentity: selection }) =>
+                selection !== null &&
+                isDeepStrictEqual(
+                  selection,
+                  scenario.addition?.identity ?? scenario.base.identity,
+                ),
             ),
           );
           assert.strictEqual(
@@ -2142,7 +2146,7 @@ void describe("Fixture Verification Evidence", () => {
     },
   );
 
-  void it("checks copied bytes against the actual projection source handle", async () => {
+  void it("checks generated source bytes against expected tree provenance", async () => {
     const root = await temporaryRepository("fixture-source-handle-");
     try {
       const scenario = (
@@ -2153,20 +2157,17 @@ void describe("Fixture Verification Evidence", () => {
         scenario,
         workspace: path.join(root, "generated"),
       });
-      const copy = rendered.receipt.result.projection.operations.find(
-        (operation) =>
-          operation.kind === "copyFile" && operation.to.endsWith(".ts"),
+      const entry = rendered.receipt.result.projection.entries.find(
+        (candidate) =>
+          candidate.path.endsWith(".ts") &&
+          candidate.sources?.some((source) =>
+            source.identity.startsWith("content:"),
+          ),
       );
-      assert.ok(copy?.kind === "copyFile");
-      const original = await readFile(
-        sourceGeneratedScenarioRuntime.resolveTemplateSource(
-          copy.source,
-          copy.from,
-        ),
-      );
+      assert.ok(entry);
       assert.deepEqual(
-        await readFile(path.join(rendered.receipt.projectDir, copy.to)),
-        original,
+        await readFile(path.join(rendered.receipt.projectDir, entry.path)),
+        entry.content,
       );
     } finally {
       await rm(root, { recursive: true, force: true });

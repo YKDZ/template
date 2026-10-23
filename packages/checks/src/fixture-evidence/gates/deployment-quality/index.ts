@@ -17,7 +17,7 @@ export function deriveDeploymentQualityPlanInput(
   scenarioId: string,
 ): DeploymentQualityPlanInput | undefined {
   const executionResources: FixtureEvidenceExecutionResource[] =
-    result.projection.ownerFacts.environmentNeeds.deployment.some(
+    result.ownerFacts.environmentNeeds.deployment.some(
       (need) => need.kind === "docker-engine",
     )
       ? ["docker"]

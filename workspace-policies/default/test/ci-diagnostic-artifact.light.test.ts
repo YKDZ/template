@@ -123,6 +123,13 @@ void describe("CI 诊断产物合同", () => {
       projectCheckWorkflow({ packagePaths }, checkWorkflowTemplate),
       /name: Root Check\n    runs-on: ubuntu-latest\n    timeout-minutes: 30/u,
     );
+    assert.match(
+      projectCheckWorkflow(
+        { packagePaths, job: { name: "Full Check" } },
+        checkWorkflowTemplate,
+      ),
+      /name: Full Check\n    runs-on: ubuntu-latest\n    timeout-minutes: 30/u,
+    );
   });
 
   void it("拒绝不安全的诊断所有者", () => {

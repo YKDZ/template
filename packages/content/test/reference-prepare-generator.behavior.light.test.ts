@@ -1,64 +1,119 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, it } from "node:test";
+import { it, type TestContext } from "node:test";
+import { pathToFileURL } from "node:url";
 
-import { referencePackage as honoApi } from "@ykdz/reference-hono-api/template";
-import { referencePackage as rustBin } from "@ykdz/reference-rust-bin/template";
-import { referenceDefinition as configurationDefinition } from "@ykdz/reference-tooling-config/template";
-import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
-import { referencePackage as vueApp } from "@ykdz/reference-vue-app/template";
-import type { LoadedContentMember } from "@ykdz/template-core/content-identity";
-import type {
-  GeneratorContent,
-  PackageCreationInput,
-} from "@ykdz/template-core/workspace-strategy";
-import { createGenerator } from "@ykdz/template-generator";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
-import type { GenerationContext } from "@ykdz/template-workspace/generation-context";
-import type { PackageContribution } from "@ykdz/template-workspace/package-contribution";
 import {
-  defineReferencePackage,
-  type ReferencePackage,
-} from "@ykdz/template-workspace/reference-package";
+  templateContent,
+  templatePresets,
+  templateReferencePackages,
+} from "@ykdz/template-content";
+import type { LoadedContentMember } from "@ykdz/template-core/content-identity";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
+import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
-const configuration = defineReferencePackage(configurationDefinition);
-const namespace = "ticket-15-first-party";
+type TestReference = ReturnType<typeof defineReferencePackage>;
 
-function resourceRoot(packageName: string): URL {
-  return new URL("../", import.meta.resolve(`${packageName}/template`));
-}
-
-function loadedReference(
-  definition: ReferencePackage,
-): GeneratorContent<
-  GenerationContext,
-  PackageContribution,
-  PackageCreationInput
-> {
-  const packageName = definition.manifest.name;
-  const specifier = `${packageName}/template`;
-  const member: LoadedContentMember<ReferencePackage, "reference"> = {
-    identity: {
-      namespace,
-      packageName,
-      exportPath: "./template",
+async function packageFixture(
+  context: TestContext,
+  options: {
+    readonly alias: string;
+    readonly packageName: string;
+    readonly resources: readonly { readonly path: string }[];
+    readonly manifest?: Readonly<Record<string, unknown>>;
+    readonly templateDependencies?: Parameters<
+      typeof defineReferencePackage
+    >[0]["templateDependencies"];
+    readonly dependencies?: Parameters<
+      typeof defineReferencePackage
+    >[0]["dependencies"];
+    readonly executionDependencies?: readonly string[];
+    readonly prepareFacts?: Parameters<
+      typeof defineReferencePackage
+    >[0]["prepareFacts"];
+  },
+): Promise<{
+  readonly root: string;
+  readonly identity: LoadedContentMember["identity"];
+  readonly member: LoadedContentMember;
+  readonly definition: TestReference;
+}> {
+  const root = await mkdtemp(path.join(tmpdir(), "reference-prepare-owner-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "src"), { recursive: true });
+  const manifest = {
+    name: options.packageName,
+    private: true,
+    type: "module",
+    exports: {
+      ".": {
+        source: "./src/index.ts",
+        types: "./dist/index.d.ts",
+        default: "./dist/index.js",
+      },
+      "./reference": "./package.json",
+      "./template": { default: "./dist/template.js" },
     },
+    ...options.manifest,
+  };
+  await writeFile(
+    path.join(root, "package.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(root, "src/index.ts"),
+    "export const ownerResource = true;\n",
+  );
+  await writeFile(path.join(root, "README.md"), "不属于资源快照\n");
+
+  const definition = defineReferencePackage({
+    manifest,
+    resourceRoot: pathToFileURL(`${root}${path.sep}`),
+    alias: options.alias,
+    instance: "independent",
+    defaultLeafName: options.alias,
+    role: "shared-library",
+    resources: options.resources,
+    ...(options.dependencies === undefined
+      ? {}
+      : { dependencies: options.dependencies }),
+    ...(options.templateDependencies === undefined
+      ? {}
+      : { templateDependencies: options.templateDependencies }),
+    ...(options.executionDependencies === undefined
+      ? {}
+      : { executionDependencies: options.executionDependencies }),
+    ...(options.prepareFacts === undefined
+      ? {}
+      : { prepareFacts: options.prepareFacts }),
+  });
+  const identity = {
+    namespace: "reference-prepare-fixture",
+    packageName: options.packageName,
+    exportPath: "./template",
+  } as const;
+  const member: LoadedContentMember = {
+    identity,
     kind: "reference",
-    alias: definition.alias,
+    alias: options.alias,
     definition,
     source: {
-      specifier,
-      moduleURL: import.meta.resolve(specifier),
-      manifestURL: import.meta.resolve(`${packageName}/reference`),
+      specifier: import.meta.url,
+      moduleURL: import.meta.url,
+      manifestURL: pathToFileURL(path.join(root, "package.json")).href,
     },
   };
-  return member as GeneratorContent<
-    GenerationContext,
-    PackageContribution,
-    PackageCreationInput
-  >;
+  return { root, identity, member, definition };
 }
 
 async function snapshotTree(root: string): Promise<unknown> {
@@ -87,306 +142,207 @@ async function snapshotTree(root: string): Promise<unknown> {
   return entries;
 }
 
-function simpleFoundation(): PackageContribution["foundation"] {
-  return {
-    toolchains: {},
-    editorCapabilities: [],
-    dependencyMaintenance: { ecosystems: [], interval: "weekly" },
-  };
+function presetIdentity(alias: string) {
+  const preset = templatePresets.find((member) => member.alias === alias);
+  assert.ok(preset, `内容集合缺少预设：${alias}`);
+  return preset.identity;
 }
 
-void describe("参考包 owner prepare 的公开生成器生命周期", () => {
-  void it("ts-lib init 通过准备资源和共享配置依赖完成正式渲染", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-reference-prepare-init-"),
-    );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const libraryMember = loadedReference(library);
-    const configurationMember = loadedReference(configuration);
-    const generator = createGenerator({
-      content: [libraryMember, configurationMember],
-      strategy: createDefaultWorkspaceStrategy(),
-    });
-    const result = await generator.init({
-      targetRoot,
-      selection: {
-        roots: [
-          {
-            nodeIdentity: "library",
-            contentIdentity: libraryMember.identity,
-          },
-        ],
-      },
-      strategyInput: {
-        repositoryName: "demo",
-        defaultPackageScope: "demo",
-      },
-    });
+function referenceMember(packageName: string) {
+  const member = templateReferencePackages.find(
+    (candidate) => candidate.identity.packageName === packageName,
+  );
+  assert.ok(member, `内容集合缺少参考包：${packageName}`);
+  return member;
+}
 
-    assert.equal(result.status, "success", JSON.stringify(result));
-    assert.equal(
-      await readFile(
-        path.join(targetRoot, "packages/lib/src/index.ts"),
-        "utf8",
-      ),
-      await readFile(
-        new URL("../../../references/ts-lib/src/index.ts", import.meta.url),
-        "utf8",
-      ),
-    );
-    const generatedMode =
-      (await stat(path.join(targetRoot, "packages/lib/src/index.ts"))).mode &
-      0o777;
-    const sourceMode =
-      (
-        await stat(
-          new URL("../../../references/ts-lib/src/index.ts", import.meta.url),
-        )
-      ).mode & 0o777;
-    assert.equal(generatedMode, sourceMode);
+void it("ts-lib预设通过所属资源快照生成源码并绑定共享配置", async (context) => {
+  const temporaryRoot = await mkdtemp(
+    path.join(tmpdir(), "template-reference-prepare-init-"),
+  );
+  context.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const targetRoot = path.join(temporaryRoot, "demo");
+  const result = await createDefaultGenerator({
+    content: templateContent,
+  }).init({
+    targetRoot,
+    selection: { presets: [{ contentIdentity: presetIdentity("ts-lib") }] },
+    conventions: {
+      repositoryName: "demo",
+      defaultPackageScope: "demo",
+    },
   });
 
-  void it("Rust owner prepare 返回的 Cargo 事实由项目贡献消费", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-reference-prepare-rust-"),
-    );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const rustMember = loadedReference(rustBin);
-    const configurationMember = loadedReference(configuration);
-    const generator = createGenerator({
-      content: [rustMember, configurationMember],
-      strategy: createDefaultWorkspaceStrategy(),
-    });
-    const result = await generator.init({
-      targetRoot,
-      selection: {
-        roots: [
-          { nodeIdentity: "binary", contentIdentity: rustMember.identity },
-        ],
-      },
-      strategyInput: { defaultPackageScope: "demo" },
-    });
+  assert.equal(result.status, "success", JSON.stringify(result));
+  if (result.status !== "success") return;
+  const library = referenceMember("@ykdz/reference-ts-lib");
+  const prepared = library.definition.prepare({ excludedPackagePaths: [] });
+  const source = prepared.resources.find(
+    (resource) => resource.path === "src/index.ts",
+  );
+  assert.ok(source);
+  assert.equal(
+    await readFile(path.join(targetRoot, "packages/lib/src/index.ts"), "utf8"),
+    new TextDecoder("utf-8", { fatal: true }).decode(source.content),
+  );
+  const libraryPackage = result.generationRecord.packages.find(
+    ({ contentIdentity }) =>
+      contentIdentity.packageName === "@ykdz/reference-ts-lib",
+  );
+  assert.ok(libraryPackage);
+  const toolingConfigId = libraryPackage.dependencyBindings["tooling-config"];
+  assert.ok(toolingConfigId);
+  assert.equal(
+    result.generationRecord.packages.find(
+      ({ packageDefinitionId }) => packageDefinitionId === toolingConfigId,
+    )?.contentIdentity.packageName,
+    "@ykdz/reference-tooling-config",
+  );
+  assert.equal(
+    (await stat(path.join(targetRoot, "packages/lib/src/index.ts"))).mode &
+      0o111,
+    source.mode,
+  );
+});
 
-    assert.equal(result.status, "success", JSON.stringify(result));
-    const manifest = await readFile(
-      path.join(targetRoot, "packages/app/Cargo.toml"),
-      "utf8",
-    );
-    const lock = await readFile(
-      path.join(targetRoot, "packages/app/Cargo.lock"),
-      "utf8",
-    );
-    assert.match(manifest, /name = "app"/u);
-    assert.match(lock, /name = "app"/u);
+void it("Rust预设生成所属Cargo声明和锁文件", async (context) => {
+  const temporaryRoot = await mkdtemp(
+    path.join(tmpdir(), "template-reference-prepare-rust-"),
+  );
+  context.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const targetRoot = path.join(temporaryRoot, "demo");
+  const result = await createDefaultGenerator({
+    content: templateContent,
+  }).init({
+    targetRoot,
+    selection: { presets: [{ contentIdentity: presetIdentity("rust-bin") }] },
+    conventions: {
+      repositoryName: "demo",
+      defaultPackageScope: "demo",
+    },
   });
 
-  void it("init 缺少已声明资源时在规划阶段失败且不创建目标", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-reference-prepare-missing-init-"),
-    );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const missingResource = defineReferencePackage({
-      packageName: library.manifest.name,
-      resolve: (specifier) => import.meta.resolve(specifier),
-      resourceRoot: resourceRoot(library.manifest.name),
-      alias: library.alias,
-      instance: library.instance,
-      defaultLeafName: library.defaultLeafName,
-      defaultPath: library.defaultPath,
-      role: library.role,
-      resources: ["__missing-ts-lib-resource__.ts"],
-      template: {
-        dependencies: library.templateDependencies,
-        scripts: ["build:template"],
-        resources: ["template", "tsconfig.template.json"],
-      },
-      foundation: simpleFoundation(),
-      environmentNeeds: [],
-    });
-    const member = loadedReference(missingResource);
-    const generator = createGenerator({
-      content: [member],
-      strategy: createDefaultWorkspaceStrategy(),
-    });
-    const result = await generator.init({
-      targetRoot,
-      selection: {
-        roots: [{ nodeIdentity: "library", contentIdentity: member.identity }],
-      },
-      strategyInput: { defaultPackageScope: "demo" },
-    });
+  assert.equal(result.status, "success", JSON.stringify(result));
+  assert.match(
+    await readFile(path.join(targetRoot, "packages/app/Cargo.toml"), "utf8"),
+    /name = "app"/u,
+  );
+  assert.match(
+    await readFile(path.join(targetRoot, "packages/app/Cargo.lock"), "utf8"),
+    /name = "app"/u,
+  );
+});
 
-    assert.equal(result.status, "operation-failure");
-    if (result.status !== "operation-failure") return;
-    assert.equal(result.phase, "planning");
-    assert.match(
-      result.error.message,
-      /@ykdz\/reference-ts-lib.*prepare 阶段失败/u,
-    );
-    await assert.rejects(stat(targetRoot), { code: "ENOENT" });
+void it("缺少已声明资源时add规划失败且不写入项目", async (context) => {
+  const temporaryRoot = await mkdtemp(
+    path.join(tmpdir(), "template-reference-prepare-missing-add-"),
+  );
+  context.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const targetRoot = path.join(temporaryRoot, "demo");
+  const generator = createDefaultGenerator({ content: templateContent });
+  const initialized = await generator.init({
+    targetRoot,
+    selection: { presets: [{ contentIdentity: presetIdentity("ts-lib") }] },
+    conventions: {
+      repositoryName: "demo",
+      defaultPackageScope: "demo",
+    },
+  });
+  assert.equal(initialized.status, "success", JSON.stringify(initialized));
+
+  const missing = await packageFixture(context, {
+    alias: "missing-resource",
+    packageName: "@fixture/missing-resource",
+    resources: [{ path: "src/index.ts" }, { path: "src/missing.ts" }],
+  });
+  const freshGenerator = createDefaultGenerator({
+    content: [...templateContent, missing.member],
+  });
+  const before = await snapshotTree(targetRoot);
+  const result = await freshGenerator.planAdd({
+    repositoryRoot: targetRoot,
+    contentIdentity: missing.identity,
+    creationInput: { packagePath: "packages/missing-resource" },
   });
 
-  void it("作者模板排除规则不要求作者源码作为生成资源存在", () => {
-    const packageDefinition = defineReferencePackage({
-      packageName: library.manifest.name,
-      resolve: (specifier) => import.meta.resolve(specifier),
-      resourceRoot: resourceRoot(library.manifest.name),
-      alias: library.alias,
-      instance: library.instance,
-      defaultLeafName: library.defaultLeafName,
-      defaultPath: library.defaultPath,
-      role: library.role,
-      resources: ["."],
-      template: {
-        dependencies: library.templateDependencies,
-        scripts: ["build:template"],
-        resources: [
-          "template/__author-only-source__",
-          "tsconfig.template.json",
-        ],
-      },
-      foundation: simpleFoundation(),
-      environmentNeeds: [],
-    });
+  assert.equal(result.status, "operation-failure");
+  if (result.status !== "operation-failure") return;
+  assert.equal(result.phase, "preparation");
+  assert.match(result.error.message, /src\/missing\.ts/u);
+  assert.deepEqual(await snapshotTree(targetRoot), before);
+});
 
-    assert.doesNotThrow(() => packageDefinition.prepare());
-    assert.deepEqual(
-      packageDefinition
-        .prepare()
-        .resources.map((resource) => resource.path)
-        .filter((resource) =>
-          resource.startsWith("template/__author-only-source__"),
-        ),
-      [],
-    );
+void it("资源准备只读取显式声明的文件", async (context) => {
+  const fixture = await packageFixture(context, {
+    alias: "scoped-resource",
+    packageName: "@fixture/scoped-resource",
+    resources: [{ path: "src/index.ts" }],
+    prepareFacts(resources) {
+      return { paths: resources.map(({ path: resourcePath }) => resourcePath) };
+    },
+  });
+  const prepared = fixture.definition.prepare({ excludedPackagePaths: [] });
+  assert.deepEqual(
+    prepared.resources.map(({ path: resourcePath }) => resourcePath),
+    ["src/index.ts"],
+  );
+  assert.deepEqual(prepared.facts.ownerFacts, { paths: ["src/index.ts"] });
+});
+
+void it("fresh add解析缺失的owner依赖时不改写项目", async (context) => {
+  const temporaryRoot = await mkdtemp(
+    path.join(tmpdir(), "template-reference-prepare-missing-dependency-"),
+  );
+  context.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const targetRoot = path.join(temporaryRoot, "demo");
+  const initialized = await createDefaultGenerator({
+    content: templateContent,
+  }).init({
+    targetRoot,
+    selection: { presets: [{ contentIdentity: presetIdentity("ts-lib") }] },
+    conventions: {
+      repositoryName: "demo",
+      defaultPackageScope: "demo",
+    },
+  });
+  assert.equal(initialized.status, "success", JSON.stringify(initialized));
+
+  const missing = await packageFixture(context, {
+    alias: "missing-runtime",
+    packageName: "@fixture/missing-runtime-owner",
+    resources: [{ path: "src/index.ts" }],
+    manifest: {
+      dependencies: { "@fixture/missing-template-runtime": "workspace:*" },
+    },
+    dependencies: [
+      {
+        key: "missing-runtime",
+        ownerLocal: {
+          specifier: "@fixture/missing-template-runtime/template",
+          resolve: (specifier) => import.meta.resolve(specifier),
+        },
+      },
+    ],
+    templateDependencies: [
+      {
+        name: "@fixture/missing-template-runtime",
+        purpose: "template-execution",
+      },
+    ],
+    executionDependencies: ["@fixture/missing-template-runtime"],
+  });
+  const generator = createDefaultGenerator({
+    content: [...templateContent, missing.member],
+  });
+  const before = await snapshotTree(targetRoot);
+  const result = await generator.planAdd({
+    repositoryRoot: targetRoot,
+    contentIdentity: missing.identity,
   });
 
-  void it("所属准备不能读取资源声明范围外的文本", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-reference-prepare-out-of-scope-"),
-    );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const outOfScope = defineReferencePackage({
-      packageName: library.manifest.name,
-      resolve: (specifier) => import.meta.resolve(specifier),
-      resourceRoot: resourceRoot(library.manifest.name),
-      alias: library.alias,
-      instance: library.instance,
-      defaultLeafName: library.defaultLeafName,
-      defaultPath: library.defaultPath,
-      role: library.role,
-      resources: ["src"],
-      template: {
-        dependencies: library.templateDependencies,
-        scripts: ["build:template"],
-        resources: [],
-      },
-      prepare(input) {
-        return input.readText("README.md");
-      },
-      foundation: simpleFoundation(),
-      environmentNeeds: [],
-    });
-    const member = loadedReference(outOfScope);
-    const generator = createGenerator({
-      content: [member],
-      strategy: createDefaultWorkspaceStrategy(),
-    });
-    const result = await generator.init({
-      targetRoot,
-      selection: {
-        roots: [{ nodeIdentity: "library", contentIdentity: member.identity }],
-      },
-      strategyInput: { defaultPackageScope: "demo" },
-    });
-
-    assert.equal(result.status, "operation-failure");
-    if (result.status !== "operation-failure") return;
-    assert.equal(result.phase, "planning");
-    assert.match(
-      result.error.message,
-      /@ykdz\/reference-ts-lib.*prepare 阶段失败.*未声明或缺失的文本资源：README\.md/u,
-    );
-    await assert.rejects(stat(targetRoot), { code: "ENOENT" });
-  });
-
-  void it("add 的 fresh engine 会先回放 owner 准备，未声明模板依赖不写目标", async (context) => {
-    const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "template-reference-prepare-missing-add-"),
-    );
-    context.after(async () =>
-      rm(temporaryRoot, { recursive: true, force: true }),
-    );
-    const targetRoot = path.join(temporaryRoot, "demo");
-    const apiMember = loadedReference(honoApi);
-    const configurationMember = loadedReference(configuration);
-    const initialGenerator = createGenerator({
-      content: [apiMember, configurationMember],
-      strategy: createDefaultWorkspaceStrategy(),
-    });
-    const initialized = await initialGenerator.init({
-      targetRoot,
-      selection: {
-        roots: [{ nodeIdentity: "api", contentIdentity: apiMember.identity }],
-      },
-      strategyInput: { defaultPackageScope: "demo" },
-    });
-    assert.equal(initialized.status, "success", JSON.stringify(initialized));
-    const before = await snapshotTree(targetRoot);
-
-    const missingDependency = defineReferencePackage({
-      packageName: vueApp.manifest.name,
-      resolve: (specifier) => import.meta.resolve(specifier),
-      resourceRoot: resourceRoot(vueApp.manifest.name),
-      alias: vueApp.alias,
-      instance: vueApp.instance,
-      defaultLeafName: vueApp.defaultLeafName,
-      defaultPath: vueApp.defaultPath,
-      role: vueApp.role,
-      resources: ["."],
-      template: {
-        dependencies: [
-          ...vueApp.templateDependencies,
-          {
-            name: "@ykdz/missing-template-runtime",
-            purpose: "template-execution",
-          },
-        ],
-        scripts: ["build:template"],
-        resources: ["template", "tsconfig.template.json"],
-      },
-      foundation: simpleFoundation(),
-      environmentNeeds: [],
-    });
-    const vueMember = loadedReference(missingDependency);
-    const freshGenerator = createGenerator({
-      content: [apiMember, configurationMember, vueMember],
-      strategy: createDefaultWorkspaceStrategy(),
-    });
-    const result = await freshGenerator.add({
-      repositoryRoot: targetRoot,
-      contentIdentity: vueMember.identity,
-    });
-
-    assert.equal(result.status, "operation-failure");
-    if (result.status !== "operation-failure") return;
-    assert.equal(result.phase, "planning");
-    assert.match(
-      result.error.message,
-      /@ykdz\/reference-vue-app.*prepare 阶段失败.*@ykdz\/missing-template-runtime/u,
-    );
-    assert.deepEqual(await snapshotTree(targetRoot), before);
-  });
+  assert.equal(result.status, "operation-failure");
+  if (result.status !== "operation-failure") return;
+  assert.equal(result.phase, "preparation");
+  assert.match(result.error.message, /missing-template-runtime/u);
+  assert.deepEqual(await snapshotTree(targetRoot), before);
 });

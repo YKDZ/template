@@ -13,8 +13,6 @@ const sdkPackageEntries = {
   "@ykdz/template-core": "@ykdz/template-core/content-identity",
   "@ykdz/template-generator": "@ykdz/template-generator/content-source",
   "@ykdz/template-workspace": "@ykdz/template-workspace/reference-package",
-  "@ykdz/template-workspace-authoring":
-    "@ykdz/template-workspace-authoring/content-artifact",
 } as const;
 
 function localSdkPackageRoots(): ReadonlyMap<string, string> {
@@ -128,36 +126,46 @@ function referenceDefinition(options: {
   readonly defaultLeafName: string;
   readonly instance: "shared" | "independent";
   readonly resourcePath: string;
+  readonly dependencies?: Readonly<Record<string, string>>;
   readonly templateDependencies?: readonly ReferenceTemplateDependency[];
   readonly templatePrelude?: readonly string[];
 }): string {
-  const resourceDirectory = path.posix.dirname(options.resourcePath);
+  const templateDependencies = [
+    ...(options.templateDependencies ?? [
+      {
+        name: "@ykdz/template-workspace",
+        purpose: "template-execution" as const,
+      },
+    ]),
+  ];
+  const referenceDependencies = [
+    '{ key: "base-workspace", contentIdentity: { namespace: "ykdz", packageName: "@ykdz/reference-workspace-root", exportPath: "./template" } }',
+    ...Object.keys(options.dependencies ?? {}).map((name) => {
+      const key = name.slice(name.lastIndexOf("/") + 1);
+      return `{ key: ${JSON.stringify(key)}, ownerLocal: { specifier: ${JSON.stringify(`${name}/template`)}, resolve: (specifier) => import.meta.resolve(specifier) } }`;
+    }),
+  ];
   return [
     ...(options.templatePrelude ?? []),
     "",
-    'import { defineReferencePackage, type ReferencePackage } from "@ykdz/template-workspace/reference-package";',
+    'import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";',
+    'import manifest from "../package.json" with { type: "json" };',
     "",
-    "export const referencePackage: ReferencePackage = defineReferencePackage({",
-    `  packageName: ${JSON.stringify(options.packageName)},`,
-    "  resolve: (specifier) => import.meta.resolve(specifier),",
+    "export const referencePackage = defineReferencePackage({",
+    "  manifest,",
     '  resourceRoot: new URL("../", import.meta.url),',
     `  alias: ${JSON.stringify(options.alias)},`,
     `  instance: ${JSON.stringify(options.instance)},`,
     `  defaultLeafName: ${JSON.stringify(options.defaultLeafName)},`,
     '  role: "shared-library",',
-    `  resources: [${JSON.stringify(resourceDirectory)}],`,
-    "  template: {",
-    `    dependencies: ${JSON.stringify(
-      options.templateDependencies ?? [
-        {
-          name: "@ykdz/template-workspace",
-          purpose: "template-execution",
-        },
-      ],
+    `  resources: [{ path: ${JSON.stringify(options.resourcePath)} }],`,
+    `  dependencies: [${referenceDependencies.join(", ")}],`,
+    `  templateDependencies: ${JSON.stringify(templateDependencies)},`,
+    `  executionDependencies: ${JSON.stringify(
+      templateDependencies
+        .filter(({ purpose }) => purpose === "template-execution")
+        .map(({ name }) => name),
     )},`,
-    "    scripts: [],",
-    "    resources: [],",
-    "  },",
     "  foundation: {",
     "    toolchains: {},",
     "    editorCapabilities: [],",
@@ -212,6 +220,9 @@ async function writeReferencePackage(options: {
       defaultLeafName: options.defaultLeafName ?? options.alias,
       instance: options.instance,
       resourcePath: options.resourcePath,
+      ...(options.dependencies === undefined
+        ? {}
+        : { dependencies: options.dependencies }),
       ...(options.templatePrelude === undefined
         ? {}
         : { templatePrelude: options.templatePrelude }),
@@ -282,25 +293,15 @@ async function writePresetPackage(options: {
   await writeFile(
     path.join(packageRoot, "template", "definition.ts"),
     [
-      `import { referencePackage as feature } from ${JSON.stringify(`${options.featurePackageName}/template`)};`,
       'import { definePreset, presetOwnerFromManifest } from "@ykdz/template-core/preset-definition";',
-      'import { defineNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";',
       'import presetManifest from "../package.json" with { type: "json" };',
       "",
-      "export const preset = defineNativeContentArtifact(",
-      "  definePreset({",
+      "export const preset = definePreset({",
       '  metadata: { alias: "authored", title: "Authored fixture", description: "An external package fixture." },',
       '  operations: ["init"],',
       '  owner: presetOwnerFromManifest(presetManifest, "./template"),',
-      "  nodes: { feature: { reference: feature } },",
-      "  }),",
-      "  {",
-      "    manifest: presetManifest,",
-      '    resourceRoot: new URL("../", import.meta.url),',
-      '    exportPath: "./template",',
-      '    executionDependencies: ["@ykdz/template-workspace-authoring"],',
-      "  },",
-      ");",
+      '  nodes: { feature: { reference: { alias: "feature", instance: "independent" } } },',
+      "});",
       "",
     ].join("\n"),
   );
@@ -370,7 +371,7 @@ export async function createAuthoredContentFixture(
     sdkVersions,
     marker: `${options.marker}:theme`,
     alias: "theme",
-    defaultLeafName: "tooling-config",
+    defaultLeafName: "fixture-tooling-config",
     instance: "shared",
     resourcePath: "src/theme.ts",
   });

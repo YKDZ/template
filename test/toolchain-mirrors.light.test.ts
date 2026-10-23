@@ -12,10 +12,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 
-import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import { templateContent, templatePresets } from "@ykdz/template-content";
-import { createGenerator } from "@ykdz/template-generator";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 
 const temporaryDirectories: string[] = [];
 
@@ -28,10 +26,7 @@ function presetFor(packageName: string) {
 }
 
 function workspaceGenerator() {
-  return createGenerator({
-    content: templateContent,
-    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
-  });
+  return createDefaultGenerator({ content: templateContent });
 }
 
 async function createWorkspace() {
@@ -44,9 +39,9 @@ async function createWorkspace() {
   const initialized = await generator.init({
     targetRoot: repositoryRoot,
     selection: {
-      roots: [{ preset: presetFor("@ykdz/preset-ts-lib").identity }],
+      presets: [{ contentIdentity: presetFor("@ykdz/preset-ts-lib").identity }],
     },
-    strategyInput: {
+    conventions: {
       repositoryName: "demo",
       defaultPackageScope: "demo",
     },
@@ -156,53 +151,33 @@ void it("公开加包提交会拒绝规划后变化的相关事实", async () =>
   assert.deepEqual(await readdir(packagePath), ["package.json"]);
 });
 
-void it("加包规划保留恢复记录时实际读取的生成元数据", async () => {
-  const directory = await mkdtemp(
-    path.join(tmpdir(), "template-toolchain-read-facts-"),
-  );
-  temporaryDirectories.push(directory);
-  const targetRoot = path.join(directory, "demo");
-  const baseStrategy = createDefaultWorkspaceStrategy<TsCliCreationInput>();
-  const strategy: typeof baseStrategy = {
-    ...baseStrategy,
-    async prepareUpdate(update) {
-      const context = await baseStrategy.prepareUpdate(update);
-      await writeFile(
-        path.join(targetRoot, ".template/generation.json"),
-        "generation record changed after restore\n",
-      );
-      return context;
-    },
-  };
-  const generator = createGenerator({ content: templateContent, strategy });
-  const initialized = await generator.init({
-    targetRoot,
-    selection: {
-      roots: [{ preset: presetFor("@ykdz/preset-ts-lib").identity }],
-    },
-    strategyInput: { repositoryName: "read-facts" },
-  });
-  assert.equal(initialized.status, "success", JSON.stringify(initialized));
-
+void it("加包计划提交会拒绝规划后变化的生成元数据", async () => {
+  const { generator, repositoryRoot: targetRoot } = await createWorkspace();
   const planned = await generator.planAdd({
     repositoryRoot: targetRoot,
     preset: presetFor("@ykdz/preset-ts-lib").identity,
-    creationInput: { leafName: "stale", packagePath: "packages/stale" },
+    creationInput: { leafName: "second", packagePath: "packages/second" },
   });
-
-  assert.equal(planned.status, "conflict", JSON.stringify(planned));
-  if (planned.status !== "conflict") return;
+  assert.equal(planned.status, "planned", JSON.stringify(planned));
+  if (planned.status !== "planned") return;
+  await writeFile(
+    path.join(targetRoot, ".template/generation.json"),
+    "generation record changed after planning\n",
+  );
+  const committed = await generator.commitPlan(planned.plan);
+  assert.equal(committed.status, "conflict", JSON.stringify(committed));
+  if (committed.status !== "conflict") return;
   assert.ok(
-    planned.conflicts.some(
+    committed.conflicts.some(
       (conflict) => conflict.path === ".template/generation.json",
     ),
   );
   assert.equal(
     await readFile(path.join(targetRoot, ".template/generation.json"), "utf8"),
-    "generation record changed after restore\n",
+    "generation record changed after planning\n",
   );
   await assert.rejects(
-    readFile(path.join(targetRoot, "packages/stale/package.json")),
+    readFile(path.join(targetRoot, "packages/second/package.json")),
     { code: "ENOENT" },
   );
 });

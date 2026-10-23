@@ -31,7 +31,7 @@ export async function registryCapabilityProbes(root: string) {
         workspace,
       });
       if (receipt.status === "not-applicable") continue;
-      probes.push(...receipt.result.projection.ownerFacts.container.probes);
+      probes.push(...receipt.result.ownerFacts.container.probes);
     }
     return probes.filter((probe) =>
       requiredCapabilityProbeIdentities.has(probe.identity),

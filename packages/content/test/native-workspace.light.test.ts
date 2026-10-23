@@ -153,7 +153,7 @@ await it("直接参考生成原生根并连续添加ts-lib与显式provider连�
     assert.equal(libraryManifest.private, true);
     assert.equal(
       libraryManifest.devDependencies["@demo/tooling-config"],
-      "workspace:../tooling-config",
+      "workspace:*",
     );
     assert.deepEqual(Object.keys(libraryManifest.exports["."]), [
       "source",

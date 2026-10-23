@@ -1,11 +1,6 @@
-import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import type { assertWorkflowContract } from "@ykdz/template-checks/workflow-contract";
 import { templateContent } from "@ykdz/template-content";
-import { createGenerator } from "@ykdz/template-generator";
-import {
-  createDefaultWorkspaceStrategy,
-  type DefaultWorkspaceCreationInput,
-} from "@ykdz/template-workspace/default-workspace-strategy";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 
 export type GeneratedPresetReceipt = Parameters<
   typeof assertWorkflowContract
@@ -14,8 +9,6 @@ export type GeneratedPreset = Extract<
   (typeof templateContent)[number],
   { readonly kind: "preset" }
 >;
-type CreationInput = DefaultWorkspaceCreationInput<TsCliCreationInput>;
-
 /** 用同一次公开生成调用返回的收据检查正式投影。 */
 export async function initializePreset(options: {
   readonly preset: GeneratedPreset;
@@ -23,29 +16,23 @@ export async function initializePreset(options: {
   readonly repositoryName: string;
   readonly defaultPackageScope?: string;
 }): Promise<GeneratedPresetReceipt> {
-  const generator = createGenerator({
-    content: templateContent,
-    strategy: createDefaultWorkspaceStrategy<CreationInput>(),
-  });
+  const generator = createDefaultGenerator({ content: templateContent });
   const result = await generator.init({
     targetRoot: options.targetRoot,
-    selection: { roots: [{ preset: options.preset.identity }] },
-    strategyInput: {
+    selection: {
+      presets: [{ contentIdentity: options.preset.identity }],
+    },
+    conventions: {
       repositoryName: options.repositoryName,
       defaultPackageScope: options.defaultPackageScope ?? "demo",
     },
   });
-  if (
-    result.status !== "success" ||
-    result.projection === null ||
-    result.projection.blueprint === undefined ||
-    result.projection.ownerFacts === undefined
-  ) {
+  if (result.status !== "success") {
     throw new Error(
       `${options.preset.definition.metadata.alias}: 公开生成器未返回成功收据：${JSON.stringify(result)}`,
     );
   }
-  const receiptResult = result as GeneratedPresetReceipt["result"];
+  const receiptResult: GeneratedPresetReceipt["result"] = result;
   return {
     status: "generated",
     scenario: {

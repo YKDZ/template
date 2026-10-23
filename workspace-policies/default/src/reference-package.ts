@@ -466,6 +466,13 @@ function reconciliationDriver(resourcePath: string): "text" | "canonical" {
     : "canonical";
 }
 
+function isNativeDocumentPath(resourcePath: string): boolean {
+  return (
+    /(?:^|\/)tsconfig[^/]*\.jsonc?$/u.test(resourcePath) ||
+    /(?:^|\/)turbo\.jsonc?$/u.test(resourcePath)
+  );
+}
+
 function packageNameMapping(options: {
   readonly ownerPackageName: string;
   readonly definition: { readonly name: string; readonly path: string };
@@ -559,6 +566,14 @@ function outputManifest(options: {
       }
       if (typeof specifier !== "string") {
         throw new Error(`原生依赖版本必须是字符串：${sourceName}`);
+      }
+      if (
+        !specifier.startsWith("link:") &&
+        !specifier.startsWith("workspace:./") &&
+        !specifier.startsWith("workspace:../")
+      ) {
+        dependencies[targetName] = specifier;
+        continue;
       }
       const relative = path.posix.relative(
         options.definition.path,
@@ -1160,7 +1175,7 @@ export function defineReferencePackage<
         },
       ];
       for (const resource of snapshot) {
-        if (!/\.jsonc?$/u.test(resource.path)) continue;
+        if (!isNativeDocumentPath(resource.path)) continue;
         const mapping = mappingsBySourcePath.get(resource.path);
         if (mapping === undefined) {
           throw new Error(`原生配置没有资源映射：${resource.path}`);

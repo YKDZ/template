@@ -29,7 +29,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@ykdz/reference-tooling-config": "workspace:*",
+    "@ykdz/reference-tooling-config": "workspace:../tooling-config",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",

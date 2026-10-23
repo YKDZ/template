@@ -3,7 +3,10 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+import type {
+  PackageDefinition,
+  PersistedPackageDefinition,
+} from "@ykdz/template-core/project-blueprint";
 
 import type { GeneratedScenarioReceipt } from "../../../generated-content.ts";
 import {
@@ -20,8 +23,8 @@ type FocusedProviderManifest = {
 
 export type FocusedPackageLinkPlanInput = {
   readonly scenarioId: string;
-  readonly consumer: PackageDefinition;
-  readonly provider: PackageDefinition;
+  readonly consumer: PersistedPackageDefinition;
+  readonly provider: PersistedPackageDefinition;
   readonly consumerManifest: Readonly<Record<string, unknown>>;
   readonly providerManifest: Readonly<Record<string, unknown>>;
 };
@@ -32,20 +35,21 @@ export async function deriveFocusedPackageLinkPlanInput(options: {
 }): Promise<FocusedPackageLinkPlanInput> {
   const consumerPackagePath = options.consumerPackagePaths[0];
   const finalResult = options.receipt.result;
+  const packagePathById = new Map(
+    finalResult.blueprint.packages.map((definition) => [
+      definition.packageDefinitionId,
+      definition.path,
+    ]),
+  );
   const initialIntents = new Set(
-    (options.receipt.initialization.blueprint.packageLinkIntents ?? []).map(
-      (intent) =>
-        `${intent.consumerPackagePath}\u0000${intent.providerPackagePath}`,
+    options.receipt.initialization.blueprint.packageLinkIntents.map(
+      (intent) => `${intent.consumerId}\u0000${intent.providerId}`,
     ),
   );
-  const matchingIntents = (
-    finalResult.blueprint.packageLinkIntents ?? []
-  ).filter(
+  const matchingIntents = finalResult.blueprint.packageLinkIntents.filter(
     (intent) =>
-      intent.consumerPackagePath === consumerPackagePath &&
-      !initialIntents.has(
-        `${intent.consumerPackagePath}\u0000${intent.providerPackagePath}`,
-      ),
+      packagePathById.get(intent.consumerId) === consumerPackagePath &&
+      !initialIntents.has(`${intent.consumerId}\u0000${intent.providerId}`),
   );
   if (
     consumerPackagePath === undefined ||
@@ -59,7 +63,9 @@ export async function deriveFocusedPackageLinkPlanInput(options: {
   const consumer = finalResult.blueprint.packages.find(
     (candidate) => candidate.path === consumerPackagePath,
   );
-  const providerPackagePath = matchingIntents[0]!.providerPackagePath;
+  const providerPackagePath = packagePathById.get(
+    matchingIntents[0]!.providerId,
+  );
   const provider = finalResult.blueprint.packages.find(
     (candidate) => candidate.path === providerPackagePath,
   );
