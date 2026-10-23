@@ -933,6 +933,9 @@ importers:
       '@ykdz/reference-ts-lib':
         specifier: workspace:*
         version: link:../../references/ts-lib
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../../references/workspace-root
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../../packages/generator
@@ -1028,6 +1031,9 @@ importers:
       '@ykdz/reference-ts-lib':
         specifier: workspace:*
         version: link:../../references/ts-lib
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../../references/workspace-root
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../../packages/generator
