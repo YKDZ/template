@@ -3,6 +3,10 @@ export type CliCommandIdentity = {
   readonly version: string;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export function validateCliCommandName(
   commandName: string,
   occupiedCommandNames: readonly string[] = [],
@@ -40,23 +44,47 @@ export function validateCliCommandName(
   return commandName;
 }
 
+/** 将 CLI 原生清单按目标命令名和工作区 Node 大版本投影。 */
+export function projectCliPackageManifest(options: {
+  readonly manifest: unknown;
+  readonly commandName: string;
+  readonly nodeLtsMajor: string;
+}): Readonly<Record<string, unknown>> {
+  if (!isRecord(options.manifest)) {
+    throw new Error("CLI package manifest must be an object");
+  }
+  const bin = options.manifest.bin;
+  if (!isRecord(bin)) {
+    throw new Error("CLI package manifest must declare exactly one bin");
+  }
+  const entries = Object.entries(bin);
+  const entry = entries[0];
+  if (
+    entries.length !== 1 ||
+    entry === undefined ||
+    typeof entry[1] !== "string"
+  ) {
+    throw new Error("CLI package manifest must declare exactly one bin");
+  }
+
+  return {
+    ...options.manifest,
+    bin: {
+      [validateCliCommandName(options.commandName)]: entry[1],
+    },
+    engines: { node: `>=${options.nodeLtsMajor}` },
+  };
+}
+
 export function cliCommandIdentity(
   manifest: unknown,
   occupiedCommandNames: readonly string[] = [],
 ): CliCommandIdentity {
-  if (
-    typeof manifest !== "object" ||
-    manifest === null ||
-    Array.isArray(manifest)
-  ) {
+  if (!isRecord(manifest)) {
     throw new Error("CLI package manifest must be an object");
   }
-  const manifestFacts = manifest as Readonly<Record<string, unknown>>;
-  if (
-    typeof manifestFacts.bin !== "object" ||
-    manifestFacts.bin === null ||
-    Array.isArray(manifestFacts.bin)
-  ) {
+  const manifestFacts = manifest;
+  if (!isRecord(manifestFacts.bin)) {
     throw new Error("CLI package manifest must declare exactly one bin");
   }
   const binEntries = Object.entries(manifestFacts.bin);

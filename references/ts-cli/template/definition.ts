@@ -1,5 +1,5 @@
+import { projectCliPackageManifest } from "@ykdz/reference-ts-cli/command-identity";
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
-import { validateCliCommandName } from "@ykdz/template-workspace/package-contribution";
 import type { PackageLinkRequirement } from "@ykdz/template-workspace/project-requirements";
 import {
   defineReferencePackage,
@@ -52,10 +52,13 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
       const creationInput = input.creationInput as
         | TsCliCreationInput
         | undefined;
-      const commandName = validateCliCommandName(
-        input.definition.name.slice(input.definition.name.lastIndexOf("/") + 1),
-      );
-      const bin = contribution.manifest.bin as Readonly<Record<string, string>>;
+      const manifest = projectCliPackageManifest({
+        manifest: contribution.manifest,
+        commandName: input.definition.name.slice(
+          input.definition.name.lastIndexOf("/") + 1,
+        ),
+        nodeLtsMajor: input.context.toolchain.nodeLtsMajor,
+      });
       let packageLinkRequirement: PackageLinkRequirement | undefined;
       if (creationInput?.linkToNodeIdentity !== undefined) {
         if (creationInput.linkToNodeIdentity.length === 0) {
@@ -77,11 +80,7 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
       }
       return {
         ...contribution,
-        manifest: {
-          ...contribution.manifest,
-          bin: { [commandName]: Object.values(bin)[0]! },
-          engines: { node: `>=${input.context.toolchain.nodeLtsMajor}` },
-        },
+        manifest,
         ...(packageLinkRequirement === undefined
           ? {}
           : {
