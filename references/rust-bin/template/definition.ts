@@ -1,5 +1,4 @@
 import type { RenderOperation } from "@ykdz/template-core/renderer";
-import { projectTomlStringValues } from "@ykdz/template-core/toml";
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
 import {
   rustDevelopmentContainerToolLayer,
@@ -9,13 +8,22 @@ import {
   defineReferencePackage,
   type ReferencePackage,
 } from "@ykdz/template-workspace/reference-package";
-import { parse, type TomlTable } from "smol-toml";
+import { parse } from "smol-toml";
 
-type CargoFile = { readonly source: string; readonly data: TomlTable };
+import {
+  projectRustCargoFiles,
+  projectRustPackageScripts,
+  projectRustTurboTasks,
+  type CargoFileSnapshot,
+} from "./rust-package-projection.ts";
+import { parseRustToolchainDeclaration } from "./rust-toolchain-projection.ts";
+
 type RustReferenceFacts = {
-  readonly cargoManifest: CargoFile;
-  readonly cargoLock: CargoFile;
-  readonly toolchainConfiguration: string;
+  readonly cargoManifest: CargoFileSnapshot;
+  readonly cargoLock: CargoFileSnapshot;
+  readonly toolchainConfiguration: ReturnType<
+    typeof parseRustToolchainDeclaration
+  >;
 };
 
 export const referencePackage: ReferencePackage<
@@ -46,14 +54,16 @@ export const referencePackage: ReferencePackage<
     executionData: ["Cargo.toml", "Cargo.lock", "template/rust-toolchain.toml"],
   },
   prepare(input) {
-    const source = (file: string): CargoFile => {
+    const source = (file: string): CargoFileSnapshot => {
       const text = input.readText(file);
       return { source: text, data: parse(text) };
     };
     return {
       cargoManifest: source("Cargo.toml"),
       cargoLock: source("Cargo.lock"),
-      toolchainConfiguration: input.readText("template/rust-toolchain.toml"),
+      toolchainConfiguration: parseRustToolchainDeclaration(
+        input.readText("template/rust-toolchain.toml"),
+      ),
     };
   },
   environmentNeeds: ({ definition }) => [
@@ -94,27 +104,24 @@ export const referencePackage: ReferencePackage<
     if (rustToolchain === undefined) {
       throw new Error("Rust 参考包缺少所属工具链能力");
     }
-    const cargoPackage = cargoManifest.data.package as Record<string, unknown>;
-    const nativeName = cargoPackage.name;
     const targetName = definition.name.slice(
       definition.name.lastIndexOf("/") + 1,
     );
-    const scripts: Record<string, string> = {
-      ...(contribution.manifest.scripts as Record<string, string>),
-      lint: "cargo clippy --workspace --all-targets -- -D warnings",
-    };
-    delete scripts["lint:fix"];
-    delete scripts.typecheck;
-    const lockedPackages = cargoLock.data.package as Record<string, unknown>[];
+    const cargoFiles = projectRustCargoFiles({
+      cargoManifest,
+      cargoLock,
+      targetName,
+    });
+    const scripts = projectRustPackageScripts(
+      contribution.manifest.scripts as Record<string, string>,
+    );
     const replacements = new Map<string, RenderOperation>([
       [
         `${definition.path}/Cargo.toml`,
         {
           kind: "writeText",
           to: `${definition.path}/Cargo.toml`,
-          text: projectTomlStringValues(cargoManifest.source, [
-            { path: ["package", "name"], value: targetName },
-          ]),
+          text: cargoFiles.manifestText,
         },
       ],
       [
@@ -122,15 +129,7 @@ export const referencePackage: ReferencePackage<
         {
           kind: "writeText",
           to: `${definition.path}/Cargo.lock`,
-          text: projectTomlStringValues(
-            cargoLock.source,
-            lockedPackages.flatMap((lockedPackage, index) =>
-              lockedPackage.name === nativeName &&
-              lockedPackage.source === undefined
-                ? [{ path: ["package", index, "name"], value: targetName }]
-                : [],
-            ),
-          ),
+          text: cargoFiles.lockText,
         },
       ],
     ]);
@@ -143,7 +142,8 @@ export const referencePackage: ReferencePackage<
           ...contribution.foundation.toolchains,
           rust: {
             ...rustToolchain,
-            configurationText: preparation.ownerFacts.toolchainConfiguration,
+            configurationText:
+              preparation.ownerFacts.toolchainConfiguration.declaration,
           },
         },
       },
@@ -162,20 +162,21 @@ export const referencePackage: ReferencePackage<
         const turbo = projected.value as {
           readonly tasks: Record<string, unknown>;
         };
-        const tasks = { ...turbo.tasks };
-        delete tasks["lint:fix"];
-        delete tasks.typecheck;
-        const formatWrite = tasks["format:write"] as {
-          readonly dependsOn: readonly string[];
+        return {
+          ...projected,
+          value: { ...turbo, tasks: projectRustTurboTasks(turbo.tasks) },
         };
-        tasks["format:write"] = {
-          ...formatWrite,
-          dependsOn: formatWrite.dependsOn.filter(
-            (task) => task !== "lint:fix",
-          ),
-        };
-        return { ...projected, value: { ...turbo, tasks } };
       }),
     };
   },
 });
+
+export {
+  parseRustToolchainDeclaration,
+  projectRustToolchainDeclaration,
+  resolveRustToolchainRequirements,
+} from "./rust-toolchain-projection.ts";
+export type {
+  PreparedRustToolchainDeclaration,
+  RustToolchainRequirement,
+} from "./rust-toolchain-projection.ts";

@@ -18,7 +18,7 @@
     "format:write": "cargo fmt --all && oxfmt --write .",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings && oxlint --quiet --format=unix --ignore-pattern node_modules --ignore-pattern target .",
     "lint:fix": "oxlint --format=unix --ignore-pattern node_modules --ignore-pattern target . --fix",
-    "test": "cargo test --workspace",
+    "test": "cargo test --workspace && node --conditions=source --experimental-strip-types --test --test-reporter=spec 'test/**/*.light.test.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "devDependencies": {

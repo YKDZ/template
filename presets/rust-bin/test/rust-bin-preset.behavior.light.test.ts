@@ -155,6 +155,29 @@ void describe("Rust 二进制公开组合预设", () => {
       await readFile(path.join(targetRoot, "packages/app/Cargo.toml"), "utf8"),
       /name = "app"/u,
     );
+    const appManifest = JSON.parse(
+      await readFile(
+        path.join(targetRoot, "packages/app/package.json"),
+        "utf8",
+      ),
+    ) as { scripts: Record<string, string> };
+    assert.strictEqual(
+      appManifest.scripts.lint,
+      "cargo clippy --workspace --all-targets -- -D warnings",
+    );
+    assert.strictEqual(appManifest.scripts.test, "cargo test --workspace");
+    assert.strictEqual(appManifest.scripts.typecheck, undefined);
+    assert.strictEqual(appManifest.scripts["lint:fix"], undefined);
+    const appTurbo = JSON.parse(
+      await readFile(path.join(targetRoot, "packages/app/turbo.json"), "utf8"),
+    ) as { tasks: Record<string, { dependsOn?: readonly string[] }> };
+    assert.strictEqual(appTurbo.tasks.typecheck, undefined);
+    assert.strictEqual(appTurbo.tasks["lint:fix"], undefined);
+    assert.ok(!appTurbo.tasks["format:write"]?.dependsOn?.includes("lint:fix"));
+    assert.match(
+      await readFile(path.join(targetRoot, "packages/app/Cargo.lock"), "utf8"),
+      /name = "anyhow"\nversion = "1\.0\.104"\nsource = "registry\+/u,
+    );
     const initialToolchain = await readFile(
       path.join(targetRoot, "rust-toolchain.toml"),
       "utf8",
@@ -179,6 +202,13 @@ void describe("Rust 二进制公开组合预设", () => {
     assert.match(
       await readFile(
         path.join(targetRoot, "packages/second-native/Cargo.toml"),
+        "utf8",
+      ),
+      /name = "second-native"/u,
+    );
+    assert.match(
+      await readFile(
+        path.join(targetRoot, "packages/second-native/Cargo.lock"),
         "utf8",
       ),
       /name = "second-native"/u,
