@@ -2181,6 +2181,34 @@ function ancestorFactConflict(
   };
 }
 
+function sourcesForBlockedDescendants(options: {
+  readonly path: string;
+  readonly before: ProjectProjection;
+  readonly after: ProjectProjection;
+  readonly preconditions: readonly ProjectProjectionPathPrecondition[];
+}): readonly ProjectProjectionSource[] {
+  const prefix = options.path === "." ? "" : `${options.path}/`;
+  const isDescendant = (candidate: string) =>
+    candidate !== options.path && candidate.startsWith(prefix);
+  const groups: (readonly ProjectProjectionSource[] | undefined)[] = [];
+  for (const entry of options.before.entries) {
+    if (isDescendant(entry.path)) groups.push(entry.sources);
+  }
+  for (const policy of options.before.reconciliation) {
+    if (isDescendant(policy.path)) groups.push(policy.sources);
+  }
+  for (const entry of options.after.entries) {
+    if (isDescendant(entry.path)) groups.push(entry.sources);
+  }
+  for (const policy of options.after.reconciliation) {
+    if (isDescendant(policy.path)) groups.push(policy.sources);
+  }
+  for (const precondition of options.preconditions) {
+    if (isDescendant(precondition.path)) groups.push(precondition.sources);
+  }
+  return mergeProjectProjectionSources(...groups);
+}
+
 function ancestorFactsRemainUsable(
   expected: CurrentProjectProjectionEntry,
   current: CurrentProjectProjectionEntry,
@@ -2281,7 +2309,19 @@ export function planProjectProjections(options: {
       return [];
     }
     const conflict = ancestorFactConflict(fact);
-    return conflict === undefined ? [] : [conflict];
+    return conflict === undefined
+      ? []
+      : [
+          attachConflictSources(
+            conflict,
+            sourcesForBlockedDescendants({
+              path: fact.path,
+              before: options.before,
+              after: options.after,
+              preconditions,
+            }),
+          ),
+        ];
   });
   const inputConflicts = [
     ...readFactConflicts,
@@ -2347,6 +2387,20 @@ export function planProjectProjections(options: {
       preconditionsByPath.get(projectionPath)?.sources,
     );
     if (sources.length > 0) sourcesByPath.set(projectionPath, sources);
+  }
+  for (const fact of observations) {
+    if (fact.observation !== "ancestor") continue;
+    const sources = sourcesForBlockedDescendants({
+      path: fact.path,
+      before: options.before,
+      after: options.after,
+      preconditions,
+    });
+    if (sources.length === 0) continue;
+    sourcesByPath.set(
+      fact.path,
+      mergeProjectProjectionSources(sourcesByPath.get(fact.path), sources),
+    );
   }
   const publicPlan: ProjectProjectionChangePlan = Object.freeze({
     mutations: Object.freeze(
