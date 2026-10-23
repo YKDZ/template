@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import {
   createContentIndex,
@@ -75,6 +76,114 @@ after(async () => {
       rm(directory, { recursive: true, force: true }),
     ),
   );
+});
+
+void describe("类型化来源公开入口", () => {
+  void it("保留具体参考包、预设定义和作者扩展类型", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "template-content-typed-"));
+    temporaryDirectories.push(root);
+    const manifests = new Map([
+      ["@example/shared", "@example/shared"],
+      ["@example/preset", "@example/preset"],
+    ]);
+    for (const packageName of manifests.values()) {
+      const packageRoot = path.join(root, packageName.replaceAll("/", "+"));
+      await mkdir(packageRoot, { recursive: true });
+      await writeFile(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({
+          name: packageName,
+          exports: { "./template": {}, "./reference": "./package.json" },
+        }),
+      );
+    }
+    const referenceURL = import.meta
+      .resolve("./content-source-reference.fixture.ts");
+    const presetURL = import.meta.resolve("./content-source-preset.fixture.ts");
+    const members = await loadContentSource({
+      namespace: "typed",
+      resolve(specifier) {
+        const parts = specifier.split("/");
+        const packageName = parts.slice(0, 2).join("/");
+        const exportPath = parts.slice(2).join("/");
+        const packageRoot = path.join(root, packageName!.replaceAll("/", "+"));
+        return pathToFileURL(
+          exportPath === "reference"
+            ? path.join(packageRoot, "package.json")
+            : fileURLToPath(
+                packageName === "@example/shared" ? referenceURL : presetURL,
+              ),
+        ).href;
+      },
+      members: [
+        {
+          specifier: "@example/shared/template",
+          load: () => import("./content-source-reference.fixture.ts"),
+        },
+        {
+          specifier: "@example/preset/template",
+          load: () => import("./content-source-preset.fixture.ts"),
+        },
+      ],
+    });
+
+    const reference = members[0];
+    if (reference.kind === "reference") {
+      const extension: "from-reference" = reference.definition.externalMarker;
+      const preparedFacts: "prepared-reference" =
+        reference.definition.prepare().facts.phase;
+      assert.equal(extension, "from-reference");
+      assert.equal(preparedFacts, "prepared-reference");
+      // @ts-expect-error 参考包专有字段不属于其他成员种类。
+      const invalid: number = reference.definition.externalMarker;
+      void invalid;
+    }
+
+    const preset = members[1];
+    if (preset.kind === "preset") {
+      const presetField: 42 = preset.definition.externalPresetField;
+      assert.equal(presetField, 42);
+      // @ts-expect-error 预设定义保留自身元数据类型。
+      const invalid: string = preset.definition.externalPresetField;
+      void invalid;
+    }
+  });
+
+  void it("拒绝类型回调与 resolver 指向不同的公开模块", async () => {
+    const alpha = await createSource({ namespace: "alpha", body: "alpha" });
+    assert.ok(alpha[0]);
+    const root = await mkdtemp(
+      path.join(tmpdir(), "template-content-mismatch-"),
+    );
+    temporaryDirectories.push(root);
+    const packageRoot = path.join(root, "package");
+    await mkdir(packageRoot, { recursive: true });
+    const manifest = {
+      name: "@example/shared",
+      exports: { "./template": {}, "./reference": "./package.json" },
+    };
+    await writeFile(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify(manifest),
+    );
+    await assert.rejects(
+      loadContentSource({
+        namespace: "mismatch",
+        resolve(specifier) {
+          return specifier.endsWith("/reference")
+            ? pathToFileURL(path.join(packageRoot, "package.json")).href
+            : import.meta.resolve("./content-source-reference.fixture.ts");
+        },
+        members: [
+          {
+            specifier: "@example/shared/template",
+            load: async () => await import(alpha[0]!.source.moduleURL),
+          },
+        ],
+      }),
+      /类型回调.*公开代码入口不一致/u,
+    );
+  });
 });
 
 void describe("来源公开入口装载", () => {
