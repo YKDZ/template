@@ -1,0 +1,37 @@
+{
+  "extends": ["//"],
+  "tags": ["native"],
+  "tasks": {
+    "build": {
+      "dependsOn": [],
+      "inputs": [],
+      "outputs": [],
+      "tags": []
+    },
+    "format:check": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "format:write": {
+      "dependsOn": ["lint:fix"],
+      "outputs": [],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "lint": {
+      "dependsOn": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "lint:fix": {
+      "outputs": [],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "typecheck": {
+      "dependsOn": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    }
+  }
+}

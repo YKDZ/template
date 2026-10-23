@@ -32,7 +32,7 @@
   "devDependencies": {
     "@types/eslint": "catalog:",
     "@types/node": "catalog:",
-    "@ykdz/reference-tooling-config": "workspace:*",
+    "@ykdz/tooling-config": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

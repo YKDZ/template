@@ -4,9 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
-import formatterConfig from "@ykdz/reference-tooling-config/oxfmt";
 import { inspectTaskGate } from "@ykdz/reference-workspace-root/task-gates";
 import { generatorMetadataPaths } from "@ykdz/template-generator";
+import formatterConfig from "@ykdz/tooling-config/oxfmt";
 import { format } from "oxfmt";
 import { parse as parseToml } from "smol-toml";
 

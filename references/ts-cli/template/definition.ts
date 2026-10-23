@@ -80,6 +80,7 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
     { path: "turbo.json" },
   ],
   templateDependencies: [
+    { name: "@ykdz/tooling-config", purpose: "template-build" },
     {
       name: "@ykdz/reference-tooling-config",
       purpose: "target",

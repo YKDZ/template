@@ -1,5 +1,5 @@
 {
-  "extends": "@ykdz/reference-tooling-config/base.json",
+  "extends": "@ykdz/tooling-config/base.json",
   "compilerOptions": {
     "composite": true,
     "customConditions": [],

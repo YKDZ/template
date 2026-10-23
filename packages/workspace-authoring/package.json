@@ -42,8 +42,8 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/template-core": "workspace:*",
+    "@ykdz/tooling-config": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

@@ -37,6 +37,7 @@ const templateDependencies = [
     name: "@ykdz/reference-tooling-config",
     purpose: "template-execution",
   },
+  { name: "@ykdz/tooling-config", purpose: "template-build" },
   {
     name: "@ykdz/reference-workspace-root",
     purpose: "template-execution",

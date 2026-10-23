@@ -1,5 +1,5 @@
 {
-  "extends": "./node.json",
+  "extends": "@ykdz/tooling-config/node.json",
   "compilerOptions": {
     "types": ["node"],
     "noEmit": true,

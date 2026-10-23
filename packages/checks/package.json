@@ -47,8 +47,8 @@
   "devDependencies": {
     "@devcontainers/cli": "catalog:",
     "@types/node": "catalog:",
-    "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/reference-workspace-root": "workspace:*",
+    "@ykdz/tooling-config": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

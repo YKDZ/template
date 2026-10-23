@@ -73,6 +73,7 @@
     "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
+    "@ykdz/tooling-config": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

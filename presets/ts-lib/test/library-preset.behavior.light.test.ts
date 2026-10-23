@@ -134,6 +134,51 @@ void describe("TypeScript 库公开预设", () => {
       "success",
       JSON.stringify(initialized),
     );
+    const rootConfig = JSON.parse(
+      await readFile(path.join(targetRoot, "tsconfig.config.json"), "utf8"),
+    ) as { readonly extends: string };
+    const libraryConfig = JSON.parse(
+      await readFile(
+        path.join(targetRoot, "packages/lib/tsconfig.node.json"),
+        "utf8",
+      ),
+    ) as { readonly extends: string };
+    const generatedToolingManifest = JSON.parse(
+      await readFile(
+        path.join(targetRoot, "packages/tooling-config/package.json"),
+        "utf8",
+      ),
+    ) as {
+      readonly exports: Readonly<Record<string, unknown>>;
+      readonly devDependencies: Readonly<Record<string, string>>;
+    };
+    const generatedRootManifest = JSON.parse(
+      await readFile(path.join(targetRoot, "package.json"), "utf8"),
+    ) as { readonly devDependencies: Readonly<Record<string, string>> };
+    assert.equal(rootConfig.extends, "@demo/tooling-config/node.json");
+    assert.equal(libraryConfig.extends, "@demo/tooling-config/node.json");
+    assert.deepEqual(Object.keys(generatedToolingManifest.exports).toSorted(), [
+      "./base.json",
+      "./node.json",
+      "./oxfmt",
+      "./oxlint",
+    ]);
+    assert.equal(
+      generatedToolingManifest.devDependencies["@ykdz/tooling-config"],
+      undefined,
+    );
+    assert.equal(
+      generatedRootManifest.devDependencies["@ykdz/tooling-config"],
+      undefined,
+    );
+    assert.match(
+      await readFile(path.join(targetRoot, "oxlint.config.ts"), "utf8"),
+      /@demo\/tooling-config\/oxlint/u,
+    );
+    assert.match(
+      await readFile(path.join(targetRoot, "oxfmt.config.ts"), "utf8"),
+      /@demo\/tooling-config\/oxfmt/u,
+    );
     const initialRecord = JSON.parse(
       await readFile(
         path.join(targetRoot, ".template/generation.json"),

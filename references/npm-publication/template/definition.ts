@@ -71,6 +71,7 @@ export const referencePackage = defineReferencePackage<
     { path: "resources/release.yml" },
   ],
   templateDependencies: [
+    { name: "@ykdz/tooling-config", purpose: "template-build" },
     { name: "@ykdz/template-core", purpose: "template-build" },
     { name: "@ykdz/template-workspace", purpose: "template-execution" },
   ],

@@ -37,6 +37,7 @@
     "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*",
+    "@ykdz/tooling-config": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
