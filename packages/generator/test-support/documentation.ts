@@ -40,6 +40,11 @@ export const boundApiIdentity: ContentIdentity = {
   packageName: "@fixture/docs-bound-api",
   exportPath: "./template",
 };
+export const extensionIdentity: ContentIdentity = {
+  namespace: "test-docs",
+  packageName: "@fixture/docs-extension",
+  exportPath: "./template",
+};
 export const boundPresetIdentity: ContentIdentity = {
   namespace: "test-docs",
   packageName: "@fixture/docs-bound-preset",
@@ -228,6 +233,7 @@ function makeReference(options: {
 export function createDocumentationEngine(options: {
   readonly author: string;
   readonly includeGlossary?: boolean;
+  readonly omitGuideGlossaryDependency?: boolean;
 }) {
   const glossary = makeReference({
     identity: glossaryIdentity,
@@ -244,6 +250,21 @@ export function createDocumentationEngine(options: {
     defaultPath: "docs/overview",
     author: options.author,
     text: "Guide resource\n",
+    ...(options.omitGuideGlossaryDependency === true
+      ? {}
+      : {
+          dependencies: [
+            { key: "glossary", contentIdentity: glossaryIdentity },
+          ],
+        }),
+  });
+  const extension = makeReference({
+    identity: extensionIdentity,
+    alias: "extension",
+    instance: "independent",
+    defaultPath: "docs/extension",
+    author: options.author,
+    text: "Extension resource\n",
     dependencies: [{ key: "glossary", contentIdentity: glossaryIdentity }],
   });
   const index = makeReference({
@@ -380,6 +401,7 @@ export function createDocumentationEngine(options: {
   const content = [
     index,
     guide,
+    extension,
     boundWeb,
     boundApi,
     ...(options.includeGlossary === false ? [] : [glossary]),

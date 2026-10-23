@@ -1042,6 +1042,10 @@ export function createGenerator<
       PackageDefinitionId,
       PackageNodeDraft<ContentCreationInput<Members>>
     >;
+    readonly existingSelection?: {
+      readonly selectionId: string;
+      readonly recordedNodeIds?: Readonly<Record<string, PackageDefinitionId>>;
+    };
     readonly dependencyBindings?: Readonly<
       Record<string, SelectionDependencyBindingTarget>
     >;
@@ -1086,6 +1090,15 @@ export function createGenerator<
     const populated: PackageNodeDraft<
       ContentCreationInput<Members>
     >["dependencies"] = [];
+    const restoredDependencies =
+      draft.restored === undefined
+        ? new Map<string, PackageNodeDraft<ContentCreationInput<Members>>>()
+        : new Map(
+            draft.dependencies.map((dependency) => [
+              dependency.key,
+              dependency.package,
+            ]),
+          );
     for (const dependency of dependencies) {
       if (
         dependency.key.trim().length === 0 ||
@@ -1099,6 +1112,7 @@ export function createGenerator<
         dependency,
         options.dependencyIdentities,
       );
+      const restoredDependency = restoredDependencies.get(dependency.key);
       const bindingTarget = bindings[dependency.key];
       if (bindingTarget !== undefined) {
         const selectedTarget =
@@ -1134,7 +1148,58 @@ export function createGenerator<
             );
           }
         }
-        populated.push({ key: dependency.key, package: selectedTarget });
+        const selectedTargetNode = selectedTarget.explicitRoot;
+        const existingSelection = options.existingSelection;
+        const selectedTargetId =
+          selectedTarget.restored?.packageDefinitionId ??
+          (selectedTargetNode !== undefined &&
+          existingSelection !== undefined &&
+          selectedTargetNode.selectionId === existingSelection.selectionId
+            ? existingSelection.recordedNodeIds?.[
+                selectedTargetNode.nodeIdentity
+              ]
+            : undefined);
+        if (
+          restoredDependency !== undefined &&
+          selectedTargetId !== restoredDependency.restored?.packageDefinitionId
+        ) {
+          throw new Error(
+            `生成记录中的依赖绑定不一致：${draft.nodeIdentity} → ${dependency.key}`,
+          );
+        }
+        populated.push({
+          key: dependency.key,
+          package: restoredDependency ?? selectedTarget,
+        });
+        continue;
+      }
+
+      if (restoredDependency !== undefined) {
+        if (
+          contentIdentityKey(restoredDependency.content.identity) !==
+          contentIdentityKey(providerIdentity)
+        ) {
+          throw new Error(
+            `生成记录包含无效依赖绑定：${draft.nodeIdentity} → ${dependency.key}`,
+          );
+        }
+        if (dependency.creationInput !== undefined) {
+          const expectedInput = requireParsedCreationInput(
+            restoredDependency.content,
+            dependency.creationInput,
+          ) as ContentCreationInput<Members> | undefined;
+          if (
+            !isDeepStrictEqual(
+              restoredDependency.creationInput ?? null,
+              expectedInput ?? null,
+            )
+          ) {
+            throw new Error(
+              `生成记录中的依赖创建事实不一致：${draft.nodeIdentity} → ${dependency.key}`,
+            );
+          }
+        }
+        populated.push({ key: dependency.key, package: restoredDependency });
         continue;
       }
 
@@ -1163,8 +1228,16 @@ export function createGenerator<
         ancestry: [...options.ancestry, identityKey],
         sharedDrafts: options.sharedDrafts,
         dependencyIdentities: options.dependencyIdentities,
+        ...(options.existingSelection === undefined
+          ? {}
+          : { existingSelection: options.existingSelection }),
       });
       populated.push({ key: dependency.key, package: providerNode });
+    }
+    if (draft.restored !== undefined) {
+      for (const dependency of draft.dependencies) {
+        if (!dependencyKeys.has(dependency.key)) populated.push(dependency);
+      }
     }
     for (const [key] of bindingEntries) {
       if (!dependencyKeys.has(key)) {
@@ -1464,23 +1537,14 @@ export function createGenerator<
         declaredKeys.add(dependency.key);
       }
       const recordedBindings = Object.entries(item.dependencyBindings);
-      if (
-        recordedBindings.length !== declarations.length ||
-        recordedBindings.some(([key]) => !declaredKeys.has(key))
-      ) {
+      if (recordedBindings.some(([key]) => key.trim().length === 0)) {
         throw new Error(`生成记录中的依赖绑定与当前参考包不一致：${id}`);
       }
-      const dependencies = declarations.map((dependency) => {
-        const consumer = contentsById.get(id);
-        if (consumer === undefined) {
-          throw new Error(`生成记录引用了未知内容实例：${id}`);
-        }
-        const declaredIdentity = normalizeDependencyIdentity(
-          consumer,
-          dependency,
-          dependencyIdentities,
-        );
-        const providerId = item.dependencyBindings[dependency.key];
+      const recordedKeys = new Set(recordedBindings.map(([key]) => key));
+      if (declarations.some(({ key }) => !recordedKeys.has(key))) {
+        throw new Error(`生成记录中的依赖绑定与当前参考包不一致：${id}`);
+      }
+      const dependencies = recordedBindings.map(([key, providerId]) => {
         const providerRecord =
           providerId === undefined ? undefined : recordsById.get(providerId);
         const providerContent =
@@ -1488,41 +1552,53 @@ export function createGenerator<
         if (
           providerId === undefined ||
           providerRecord === undefined ||
-          providerContent === undefined ||
-          contentIdentityKey(providerContent.identity) !==
+          providerContent === undefined
+        ) {
+          throw new Error(`生成记录包含无效依赖绑定：${id} → ${key}`);
+        }
+        const dependency = declarations.find((item) => item.key === key);
+        if (dependency !== undefined) {
+          const consumer = contentsById.get(id);
+          if (consumer === undefined) {
+            throw new Error(`生成记录引用了未知内容实例：${id}`);
+          }
+          const declaredIdentity = normalizeDependencyIdentity(
+            consumer,
+            dependency,
+            dependencyIdentities,
+          );
+          if (
+            contentIdentityKey(providerContent.identity) !==
             contentIdentityKey(declaredIdentity)
-        ) {
-          throw new Error(
-            `生成记录包含无效依赖绑定：${id} → ${dependency.key}`,
+          ) {
+            throw new Error(`生成记录包含无效依赖绑定：${id} → ${key}`);
+          }
+          const explicitProviderId = explicitBindingsByConsumer
+            .get(id)
+            ?.get(key);
+          if (
+            explicitProviderId !== undefined &&
+            providerId !== explicitProviderId
+          ) {
+            throw new Error(
+              `生成记录中的预设节点依赖绑定不一致：${id} → ${key}`,
+            );
+          }
+          const expectedInput = requireParsedCreationInput(
+            providerContent,
+            dependency.creationInput,
           );
+          if (
+            dependency.creationInput !== undefined &&
+            !isDeepStrictEqual(
+              inputsById.get(providerId) ?? null,
+              expectedInput ?? null,
+            )
+          ) {
+            throw new Error(`生成记录中的依赖创建事实不一致：${id} → ${key}`);
+          }
         }
-        const explicitProviderId = explicitBindingsByConsumer
-          .get(id)
-          ?.get(dependency.key);
-        if (
-          explicitProviderId !== undefined &&
-          providerId !== explicitProviderId
-        ) {
-          throw new Error(
-            `生成记录中的预设节点依赖绑定不一致：${id} → ${dependency.key}`,
-          );
-        }
-        const expectedInput = requireParsedCreationInput(
-          providerContent,
-          dependency.creationInput,
-        );
-        if (
-          dependency.creationInput !== undefined &&
-          !isDeepStrictEqual(
-            inputsById.get(providerId) ?? null,
-            expectedInput ?? null,
-          )
-        ) {
-          throw new Error(
-            `生成记录中的依赖创建事实不一致：${id} → ${dependency.key}`,
-          );
-        }
-        return { key: dependency.key, package: buildDraft(providerId) };
+        return { key, package: buildDraft(providerId) };
       });
       visiting.delete(id);
 
@@ -1727,80 +1803,86 @@ export function createGenerator<
     const selectionRootFacts = (
       root: PackageNodeDraft<ContentCreationInput<Members>>,
       existingSelection: PackageSelectionDraft<ContentCreationInput<Members>>,
-    ) => ({
-      nodeIdentity: root.nodeIdentity,
-      identity: contentIdentityKey(root.content.identity),
-      creationInput: root.creationInput ?? null,
-      definition: root.definition,
-      dependencies: root.dependencies
-        .map(({ key, package: dependency }) => {
-          if (dependency.restored !== undefined) {
+    ) => {
+      const declaredKeys = new Set(
+        (root.content.definition.dependencies ?? []).map(({ key }) => key),
+      );
+      return {
+        nodeIdentity: root.nodeIdentity,
+        identity: contentIdentityKey(root.content.identity),
+        creationInput: root.creationInput ?? null,
+        definition: root.definition,
+        dependencies: root.dependencies
+          .filter(({ key }) => declaredKeys.has(key))
+          .map(({ key, package: dependency }) => {
+            if (dependency.restored !== undefined) {
+              return {
+                key,
+                target: {
+                  packageDefinitionId: dependency.restored.packageDefinitionId,
+                },
+              };
+            }
+            if (dependency.explicitRoot !== undefined) {
+              const packageDefinitionId =
+                dependency.explicitRoot.selectionId ===
+                existingSelection.selectionId
+                  ? existingSelection.recordedNodeIds?.[
+                      dependency.explicitRoot.nodeIdentity
+                    ]
+                  : undefined;
+              return {
+                key,
+                target:
+                  packageDefinitionId === undefined
+                    ? {
+                        selectionId: dependency.explicitRoot.selectionId,
+                        nodeIdentity: dependency.explicitRoot.nodeIdentity,
+                      }
+                    : { packageDefinitionId },
+              };
+            }
+            const existingRoot = existingSelection.roots.find(
+              (candidate) => candidate.nodeIdentity === root.nodeIdentity,
+            );
+            const existingDependency = existingRoot?.dependencies.find(
+              (candidate) => candidate.key === key,
+            )?.package;
+            const recordedPackageDefinitionId =
+              existingDependency?.restored?.packageDefinitionId;
+            if (
+              existingDependency !== undefined &&
+              recordedPackageDefinitionId !== undefined &&
+              contentIdentityKey(existingDependency.content.identity) ===
+                contentIdentityKey(dependency.content.identity) &&
+              isDeepStrictEqual(
+                existingDependency.creationInput ?? null,
+                dependency.creationInput ?? null,
+              ) &&
+              isDeepStrictEqual(
+                existingDependency.definition,
+                dependency.definition,
+              )
+            ) {
+              return {
+                key,
+                target: { packageDefinitionId: recordedPackageDefinitionId },
+              };
+            }
             return {
               key,
               target: {
-                packageDefinitionId: dependency.restored.packageDefinitionId,
+                identity: contentIdentityKey(dependency.content.identity),
+                creationInput: dependency.creationInput ?? null,
+                definition: dependency.definition,
               },
             };
-          }
-          if (dependency.explicitRoot !== undefined) {
-            const packageDefinitionId =
-              dependency.explicitRoot.selectionId ===
-              existingSelection.selectionId
-                ? existingSelection.recordedNodeIds?.[
-                    dependency.explicitRoot.nodeIdentity
-                  ]
-                : undefined;
-            return {
-              key,
-              target:
-                packageDefinitionId === undefined
-                  ? {
-                      selectionId: dependency.explicitRoot.selectionId,
-                      nodeIdentity: dependency.explicitRoot.nodeIdentity,
-                    }
-                  : { packageDefinitionId },
-            };
-          }
-          const existingRoot = existingSelection.roots.find(
-            (candidate) => candidate.nodeIdentity === root.nodeIdentity,
-          );
-          const existingDependency = existingRoot?.dependencies.find(
-            (candidate) => candidate.key === key,
-          )?.package;
-          const recordedPackageDefinitionId =
-            existingDependency?.restored?.packageDefinitionId;
-          if (
-            existingDependency !== undefined &&
-            recordedPackageDefinitionId !== undefined &&
-            contentIdentityKey(existingDependency.content.identity) ===
-              contentIdentityKey(dependency.content.identity) &&
-            isDeepStrictEqual(
-              existingDependency.creationInput ?? null,
-              dependency.creationInput ?? null,
-            ) &&
-            isDeepStrictEqual(
-              existingDependency.definition,
-              dependency.definition,
-            )
-          ) {
-            return {
-              key,
-              target: { packageDefinitionId: recordedPackageDefinitionId },
-            };
-          }
-          return {
-            key,
-            target: {
-              identity: contentIdentityKey(dependency.content.identity),
-              creationInput: dependency.creationInput ?? null,
-              definition: dependency.definition,
-            },
-          };
-        })
-        .toSorted((left, right) =>
-          left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
-        ),
-    });
+          })
+          .toSorted((left, right) =>
+            left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
+          ),
+      };
+    };
 
     const appendSelection = (
       group: PackageSelectionDraft<ContentCreationInput<Members>>,
@@ -1874,6 +1956,18 @@ export function createGenerator<
         };
       });
       const id = identifyDraftSelection(null, preparedRoots);
+      const matchedSelection = selectionDrafts.find(
+        (candidate) => candidate.selectionId === id,
+      );
+      const existingSelection =
+        matchedSelection?.selectionId === undefined
+          ? undefined
+          : {
+              selectionId: matchedSelection.selectionId,
+              ...(matchedSelection.recordedNodeIds === undefined
+                ? {}
+                : { recordedNodeIds: matchedSelection.recordedNodeIds }),
+            };
       const roots = preparedRoots.map((root) => {
         const explicitRoot =
           root.content.definition.instance === "independent"
@@ -1908,6 +2002,7 @@ export function createGenerator<
           dependencyIdentities,
           explicitTargets: rootsByIdentity,
           restoredTargets: restoredTargetsById,
+          ...(existingSelection === undefined ? {} : { existingSelection }),
           ...(dependencyBindings === undefined ? {} : { dependencyBindings }),
         });
       }
@@ -1986,6 +2081,18 @@ export function createGenerator<
         };
       });
       const id = identifyDraftSelection(presetMember.identity, preparedRoots);
+      const matchedSelection = selectionDrafts.find(
+        (candidate) => candidate.selectionId === id,
+      );
+      const existingSelection =
+        matchedSelection?.selectionId === undefined
+          ? undefined
+          : {
+              selectionId: matchedSelection.selectionId,
+              ...(matchedSelection.recordedNodeIds === undefined
+                ? {}
+                : { recordedNodeIds: matchedSelection.recordedNodeIds }),
+            };
       const rootsByIdentity = new Map<
         string,
         PackageNodeDraft<ContentCreationInput<Members>>
@@ -2029,6 +2136,7 @@ export function createGenerator<
           sharedDrafts,
           dependencyIdentities,
           explicitTargets: rootsByIdentity,
+          ...(existingSelection === undefined ? {} : { existingSelection }),
           ...(dependencyBindings === undefined ? {} : { dependencyBindings }),
         });
       }
@@ -2501,7 +2609,11 @@ export function createGenerator<
       node: PackageNode,
     ): ReadonlyMap<string, PackageBinding> => {
       const bindings = new Map<string, PackageBinding>();
-      for (const [key, provider] of node.dependencies) {
+      for (const { key } of node.content.definition.dependencies ?? []) {
+        const provider = node.dependencies.get(key);
+        if (provider === undefined) {
+          throw new Error(`参考包依赖尚未绑定：${node.id} → ${key}`);
+        }
         if (provider.contribution === undefined) {
           throw new Error(`依赖包尚未求值：${provider.id}`);
         }
