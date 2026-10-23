@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   mkdtemp,
+  mkdir,
   readFile,
   readdir,
   rm,
@@ -103,6 +104,108 @@ async function addTsLibrary(
     },
   });
 }
+
+void it("公开加包规划不写入，并可在同进程提交", async () => {
+  const { generator, repositoryRoot } = await createWorkspace();
+  const before = await snapshotTree(repositoryRoot);
+  const planned = await generator.planAdd({
+    repositoryRoot,
+    preset: presetFor("@ykdz/preset-ts-lib").identity,
+    creationInput: { leafName: "planned", packagePath: "packages/planned" },
+  });
+
+  assert.equal(planned.status, "planned", JSON.stringify(planned));
+  assert.deepEqual(await snapshotTree(repositoryRoot), before);
+  assert.ok(planned.plan.mutations.length > 0);
+  const manifestMutation = planned.plan.mutations.find(
+    (mutation) => mutation.path === "packages/planned/package.json",
+  );
+  assert.ok(manifestMutation);
+  assert.match(
+    new TextDecoder().decode(manifestMutation.content),
+    /@demo\/planned/u,
+  );
+
+  const committed = await generator.commitPlan(planned.plan);
+  assert.equal(committed.status, "success", JSON.stringify(committed));
+  assert.notDeepEqual(await snapshotTree(repositoryRoot), before);
+});
+
+void it("公开加包提交会拒绝规划后变化的相关事实", async () => {
+  const { generator, repositoryRoot } = await createWorkspace();
+  const planned = await generator.planAdd({
+    repositoryRoot,
+    preset: presetFor("@ykdz/preset-ts-lib").identity,
+    creationInput: { leafName: "stale", packagePath: "packages/stale" },
+  });
+
+  assert.equal(planned.status, "planned", JSON.stringify(planned));
+  const packagePath = path.join(repositoryRoot, "packages/stale");
+  await mkdir(packagePath);
+  await writeFile(path.join(packagePath, "package.json"), "consumer\n");
+
+  const committed = await generator.commitPlan(planned.plan);
+
+  assert.equal(committed.status, "conflict", JSON.stringify(committed));
+  assert.match(JSON.stringify(committed), /规划后相关目标事实已变化/u);
+  assert.match(JSON.stringify(committed), /@ykdz\/reference-ts-lib/u);
+  assert.equal(
+    await readFile(path.join(packagePath, "package.json"), "utf8"),
+    "consumer\n",
+  );
+  assert.deepEqual(await readdir(packagePath), ["package.json"]);
+});
+
+void it("加包规划保留恢复记录时实际读取的生成元数据", async () => {
+  const directory = await mkdtemp(
+    path.join(tmpdir(), "template-toolchain-read-facts-"),
+  );
+  temporaryDirectories.push(directory);
+  const targetRoot = path.join(directory, "demo");
+  const baseStrategy = createDefaultWorkspaceStrategy<TsCliCreationInput>();
+  const strategy: typeof baseStrategy = {
+    ...baseStrategy,
+    async prepareUpdate(update) {
+      const context = await baseStrategy.prepareUpdate(update);
+      await writeFile(
+        path.join(targetRoot, ".template/generation.json"),
+        "generation record changed after restore\n",
+      );
+      return context;
+    },
+  };
+  const generator = createGenerator({ content: templateContent, strategy });
+  const initialized = await generator.init({
+    targetRoot,
+    selection: {
+      roots: [{ preset: presetFor("@ykdz/preset-ts-lib").identity }],
+    },
+    strategyInput: { repositoryName: "read-facts" },
+  });
+  assert.equal(initialized.status, "success", JSON.stringify(initialized));
+
+  const planned = await generator.planAdd({
+    repositoryRoot: targetRoot,
+    preset: presetFor("@ykdz/preset-ts-lib").identity,
+    creationInput: { leafName: "stale", packagePath: "packages/stale" },
+  });
+
+  assert.equal(planned.status, "conflict", JSON.stringify(planned));
+  if (planned.status !== "conflict") return;
+  assert.ok(
+    planned.conflicts.some(
+      (conflict) => conflict.path === ".template/generation.json",
+    ),
+  );
+  assert.equal(
+    await readFile(path.join(targetRoot, ".template/generation.json"), "utf8"),
+    "generation record changed after restore\n",
+  );
+  await assert.rejects(
+    readFile(path.join(targetRoot, "packages/stale/package.json")),
+    { code: "ENOENT" },
+  );
+});
 
 afterEach(async () => {
   await Promise.all(
