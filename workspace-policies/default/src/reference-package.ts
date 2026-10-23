@@ -156,6 +156,31 @@ export type DefaultReferenceEvaluationContext<
   readonly ownerFacts: OwnerFacts;
 };
 
+export type DefaultReferenceManifestTransformOptions<
+  CreationInput extends JsonValue,
+  OwnerFacts,
+> = {
+  /** 由原生清单和明确包绑定投影的目标清单。 */
+  readonly manifest: Readonly<Record<string, unknown>>;
+  readonly definition: PackageDefinition;
+  readonly conventions: DefaultWorkspaceConventions;
+  readonly creationInput: CreationInput | undefined;
+  readonly bindings: ReadonlyMap<string, PackageBinding>;
+  readonly stableCommon: unknown;
+  readonly ownerFacts: OwnerFacts;
+};
+
+export type DefaultReferenceDocumentTransformOptions<
+  CreationInput extends JsonValue,
+  OwnerFacts,
+> = Omit<
+  DefaultReferenceManifestTransformOptions<CreationInput, OwnerFacts>,
+  "manifest"
+> & {
+  readonly path: string;
+  readonly value: Readonly<Record<string, unknown>>;
+};
+
 const dependencyPurposeOrder: readonly ReferenceTemplateDependencyPurpose[] = [
   "target",
   "template-execution",
@@ -664,6 +689,20 @@ export function defineReferencePackage<
     resources: readonly ResourceFileSnapshot[],
     options: Readonly<{ readonly excludedPackagePaths: readonly string[] }>,
   ) => OwnerFacts;
+  /** 在默认原生清单投影后应用本包的纯清单规则。 */
+  readonly transformManifest?: (
+    options: DefaultReferenceManifestTransformOptions<
+      CreationInput,
+      OwnerFacts
+    >,
+  ) => Readonly<Record<string, unknown>>;
+  /** 在所属原生 JSON 文档投影后应用本包的纯变换。 */
+  readonly transformDocument?: (
+    options: DefaultReferenceDocumentTransformOptions<
+      CreationInput,
+      OwnerFacts
+    >,
+  ) => Readonly<Record<string, unknown>>;
 }): ReturnType<
   typeof defineNativeReferenceContentArtifact<
     ReferencePackageDefinition<
@@ -845,7 +884,7 @@ export function defineReferencePackage<
         dependencies: contentDependencies,
         bindings: input.bindings,
       });
-      const manifest = outputManifest({
+      const defaultManifest = outputManifest({
         manifest: options.manifest,
         definition: input.definition,
         conventions: input.conventions,
@@ -857,6 +896,16 @@ export function defineReferencePackage<
         templateExports,
         names,
       });
+      const manifest =
+        options.transformManifest?.({
+          manifest: defaultManifest,
+          definition: input.definition,
+          conventions: input.conventions,
+          creationInput: input.creationInput,
+          bindings: input.bindings,
+          stableCommon: input.stableCommon,
+          ownerFacts: input.prepared.facts.ownerFacts,
+        }) ?? defaultManifest;
       const sourceDocuments = input.prepared.facts.nativeDocuments;
       const nativeDocuments = sourceDocuments.map((document) => {
         if (document.path === "package.json" && document.scope === "package") {
@@ -877,9 +926,20 @@ export function defineReferencePackage<
           }
           value.tasks = tasks;
         }
+        const transformedDocument =
+          options.transformDocument?.({
+            path: document.path,
+            value,
+            definition: input.definition,
+            conventions: input.conventions,
+            creationInput: input.creationInput,
+            bindings: input.bindings,
+            stableCommon: input.stableCommon,
+            ownerFacts: input.prepared.facts.ownerFacts,
+          }) ?? value;
         return {
           ...document,
-          value,
+          value: transformedDocument,
         };
       });
       const documentBySourcePath = new Map(
@@ -1045,6 +1105,7 @@ export function defineReferencePackage<
     manifest: options.manifest,
     resourceRoot: options.resourceRoot,
     exportPath: "./template",
+    templateExports,
     ...(options.artifactVersion === undefined
       ? {}
       : { artifactVersion: options.artifactVersion }),

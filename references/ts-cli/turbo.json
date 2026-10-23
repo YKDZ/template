@@ -6,14 +6,17 @@
       "dependsOn": [
         "@ykdz/template-core#build",
         "@ykdz/template-workspace#build",
-        "@ykdz/reference-npm-publication#build:template"
+        "@ykdz/reference-npm-publication#build:template",
+        "@ykdz/reference-workspace-root#build:template",
+        "@ykdz/reference-tooling-config#build:template",
+        "@ykdz/reference-ts-cli#build"
       ],
       "inputs": [],
       "outputs": ["template-dist/**"],
       "tags": ["quality:light"]
     },
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": [],
       "inputs": [],
       "outputs": ["dist/**"],
       "cache": false,
