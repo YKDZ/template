@@ -42,8 +42,10 @@
       "tags": ["work:repair"]
     },
     "typecheck": {
+      "dependsOn": [],
       "outputs": [],
-      "tags": ["quality:conditional"]
+      "inputs": ["$TURBO_DEFAULT$"],
+      "tags": ["quality:light"]
     },
     "typecheck:owner": {
       "outputs": [],
