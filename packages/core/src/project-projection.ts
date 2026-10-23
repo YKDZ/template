@@ -7,6 +7,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   rmdir,
   writeFile,
@@ -2776,6 +2777,7 @@ async function applyProjectionMutationsAtomically(options: {
   const targetRoot = path.resolve(options.targetRoot);
   const parent = path.dirname(targetRoot);
   const prefix = `.${path.basename(targetRoot)}.template-projection-`;
+  await mkdir(parent, { recursive: true });
   const stagingRoot = await mkdtemp(path.join(parent, `${prefix}stage-`));
   const backupRoot = await mkdtemp(path.join(parent, `${prefix}backup-`));
   const backedUpPaths = new Set<string>();
@@ -2815,33 +2817,54 @@ async function applyProjectionMutationsAtomically(options: {
 
     try {
       await options.beforeCommit?.();
-      reservations = await acquirePathReservations({
-        targetRoot,
-        preconditions: options.preconditions,
-      });
-      for (const mutation of options.mutations) {
-        const targetPath = path.join(targetRoot, mutation.path);
-        await mkdir(path.dirname(targetPath), { recursive: true });
-        committedPaths.push(mutation.path);
-        const commit = async (): Promise<void> => {
-          await copyFile(path.join(stagingRoot, mutation.path), targetPath);
-          const existingMode = backupModes.get(mutation.path);
-          await chmod(
-            targetPath,
-            existingMode === undefined
-              ? 0o644 | mutation.mode
-              : (existingMode & 0o666) | mutation.mode,
-          );
-        };
-        if (options.commitMutation === undefined) {
-          await commit();
-        } else {
-          await options.commitMutation({
-            relativePath: mutation.path,
-            stagingRoot,
-            targetRoot,
-            commit,
-          });
+      const initializationPrecondition = options.preconditions.find(
+        (precondition) =>
+          precondition.path === "." &&
+          precondition.kind === "directory-empty-or-missing",
+      );
+      if (initializationPrecondition !== undefined) {
+        const conflicts = await evaluatePathPreconditions({
+          targetRoot,
+          preconditions: options.preconditions,
+        });
+        if (conflicts.length > 0) {
+          throw new ProjectProjectionPathPreconditionError(conflicts);
+        }
+        try {
+          await rename(stagingRoot, targetRoot);
+        } catch (error) {
+          await options.beforeCommit?.();
+          throw error;
+        }
+      } else {
+        reservations = await acquirePathReservations({
+          targetRoot,
+          preconditions: options.preconditions,
+        });
+        for (const mutation of options.mutations) {
+          const targetPath = path.join(targetRoot, mutation.path);
+          await mkdir(path.dirname(targetPath), { recursive: true });
+          committedPaths.push(mutation.path);
+          const commit = async (): Promise<void> => {
+            await copyFile(path.join(stagingRoot, mutation.path), targetPath);
+            const existingMode = backupModes.get(mutation.path);
+            await chmod(
+              targetPath,
+              existingMode === undefined
+                ? 0o644 | mutation.mode
+                : (existingMode & 0o666) | mutation.mode,
+            );
+          };
+          if (options.commitMutation === undefined) {
+            await commit();
+          } else {
+            await options.commitMutation({
+              relativePath: mutation.path,
+              stagingRoot,
+              targetRoot,
+              commit,
+            });
+          }
         }
       }
       reservations = [];

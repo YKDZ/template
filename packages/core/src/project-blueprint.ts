@@ -2,40 +2,36 @@ import path from "node:path";
 
 import * as v from "valibot";
 
-/**
- * The durable, preset-agnostic topology used by local template follow-up
- * operations. Preset provenance deliberately belongs in Generation Record.
- */
-/** 角色含义由所选工作区策略解释。 */
+/** 角色由内容与所属组合解释；它不决定包目录的输出权限。 */
 export type PackageRole = string;
 
 export type PackageDefinition = {
   readonly name: string;
+  /** 规范包目录；`.` 表示目标根目录。 */
   readonly path: string;
   readonly role: PackageRole;
 };
 
-/** Opaque durable identity assigned once when a Package Definition is created. */
 export type PackageDefinitionId = `package-${string}`;
 
 export type PersistedPackageDefinition = PackageDefinition & {
   readonly packageDefinitionId: PackageDefinitionId;
 };
 
+/** 蓝图只通过持续实例身份表达包连接。 */
 export type PackageLinkIntent = {
-  readonly consumerPackagePath: string;
-  readonly providerPackagePath: string;
+  readonly consumerId: PackageDefinitionId;
+  readonly providerId: PackageDefinitionId;
 };
 
 export type ProjectBlueprint = {
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 4;
   readonly packages: readonly PersistedPackageDefinition[];
-  readonly packageLinkIntents?: readonly PackageLinkIntent[];
+  readonly packageLinkIntents: readonly PackageLinkIntent[];
 };
 
-/** Preset-owned topology before Foundation assigns durable package identities. */
 export type ProjectBlueprintDraft = {
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 4;
   readonly packages: readonly PackageDefinition[];
   readonly packageLinkIntents?: readonly PackageLinkIntent[];
 };
@@ -52,67 +48,26 @@ export type BlueprintValidationResult =
       readonly issues: readonly BlueprintValidationIssue[];
     };
 
-const unknownBlueprintField = "Unknown Blueprint v3 field";
+const packageDefinitionSchema = v.strictObject({
+  packageDefinitionId: v.pipe(v.string(), v.regex(/^package-[a-f0-9]{64}$/)),
+  name: v.string(),
+  path: v.string(),
+  role: v.string(),
+});
 
-const packageDefinitionEntries = {
-  name: v.string("Package name must be a string"),
-  path: v.string("Package Path must be a string"),
-  role: v.string("Package Role must be a string"),
-} as const;
+const packageLinkIntentSchema = v.strictObject({
+  consumerId: v.pipe(v.string(), v.regex(/^package-[a-f0-9]{64}$/)),
+  providerId: v.pipe(v.string(), v.regex(/^package-[a-f0-9]{64}$/)),
+});
 
-function packageDefinitionMessage(issue: v.BaseIssue<unknown>): string {
-  return issue.path?.at(-1)?.origin === "key" && issue.input !== undefined
-    ? unknownBlueprintField
-    : "Package Definition must be an object";
-}
+export const projectBlueprintSchema = v.strictObject({
+  schemaVersion: v.literal(4),
+  packages: v.array(packageDefinitionSchema),
+  packageLinkIntents: v.array(packageLinkIntentSchema),
+});
 
-const packageDefinitionSchema = v.strictObject(
-  {
-    packageDefinitionId: v.string(
-      "Package Definition ID must use the package-<sha256> format",
-    ),
-    ...packageDefinitionEntries,
-  },
-  packageDefinitionMessage,
-);
-
-const packageLinkIntentSchema = v.strictObject(
-  {
-    consumerPackagePath: v.string(
-      "Package Link Intent consumer Package Path must be a string",
-    ),
-    providerPackagePath: v.string(
-      "Package Link Intent provider Package Path must be a string",
-    ),
-  },
-  (issue) =>
-    issue.path?.at(-1)?.origin === "key" && issue.input !== undefined
-      ? unknownBlueprintField
-      : "Package Link Intent must be an object",
-);
-
-export const projectBlueprintSchema = v.strictObject(
-  {
-    schemaVersion: v.literal(
-      3,
-      (issue) =>
-        `Unsupported Local Template Metadata schema version ${String(issue.input)}; expected 3`,
-    ),
-    packages: v.array(
-      packageDefinitionSchema,
-      "Package Definitions must be an array",
-    ),
-    packageLinkIntents: v.optional(
-      v.array(packageLinkIntentSchema, "Package Link Intents must be an array"),
-    ),
-  },
-  (issue) =>
-    issue.path?.at(-1)?.origin === "key" && issue.input !== undefined
-      ? unknownBlueprintField
-      : "Local Template Metadata must be an object",
-);
-
-function isNormalizedSafeRelativePath(value: string): boolean {
+function isNormalizedPackagePath(value: string): boolean {
+  if (value === ".") return true;
   const normalized = path.posix.normalize(value);
   return (
     value.length > 0 &&
@@ -140,65 +95,37 @@ function blueprintIssuePath(issue: v.BaseIssue<unknown>): string {
   return result;
 }
 
-function blueprintStructureMessage(issue: v.BaseIssue<unknown>): string {
-  if (
-    issue.type !== "strict_object" ||
-    issue.path?.at(-1)?.origin !== "key" ||
-    issue.input !== undefined
-  ) {
-    return issue.message;
-  }
-  const path = blueprintIssuePath(issue);
-  if (path === ".schemaVersion") {
-    return "Unsupported Local Template Metadata schema version undefined; expected 3";
-  }
-  if (path === ".packages") return "Package Definitions must be an array";
-  if (path.endsWith(".name")) return "Package name must be a string";
-  if (path.endsWith(".packageDefinitionId")) {
-    return "Package Definition ID must use the package-<sha256> format";
-  }
-  if (path.endsWith(".path")) return "Package Path must be a string";
-  if (path.endsWith(".role")) return "Package Role must be a string";
-  if (path === ".packageLinkIntents") {
-    return "Package Link Intents must be an array";
-  }
-  if (path.endsWith(".consumerPackagePath")) {
-    return "Package Link Intent consumer Package Path must be a string";
-  }
-  if (path.endsWith(".providerPackagePath")) {
-    return "Package Link Intent provider Package Path must be a string";
-  }
-  return issue.message;
-}
-
-function validateBlueprintTopologySemantics(
-  blueprint: ProjectBlueprintDraft,
+function validateBlueprintSemantics(
+  blueprint: Omit<ProjectBlueprint, "packages"> & {
+    readonly packages: readonly PackageDefinition[];
+  },
 ): BlueprintValidationIssue[] {
   const issues: BlueprintValidationIssue[] = [];
   for (const [index, definition] of blueprint.packages.entries()) {
     const itemPath = `.packages[${index}]`;
-    if (definition.name.length === 0) {
+    if (definition.name.trim().length === 0) {
       issues.push({
         path: `${itemPath}.name`,
-        message: "Package name must not be empty",
+        message: "软件包名称不能为空",
       });
     }
-    if (definition.role.length === 0) {
+    if (definition.role.trim().length === 0) {
       issues.push({
         path: `${itemPath}.role`,
-        message: "Package Role must not be empty",
+        message: "软件包角色不能为空",
       });
     }
-    if (!isNormalizedSafeRelativePath(definition.path)) {
+    if (!isNormalizedPackagePath(definition.path)) {
       issues.push({
         path: `${itemPath}.path`,
-        message: "Package Path must be a normalized safe relative path",
+        message: "软件包路径必须是规范化的安全相对路径",
       });
     }
   }
+
   for (const [property, label] of [
-    ["name", "Package name"],
-    ["path", "Package Path"],
+    ["name", "软件包名称"],
+    ["path", "软件包路径"],
   ] as const) {
     const seen = new Set<string>();
     for (const definition of blueprint.packages) {
@@ -206,44 +133,54 @@ function validateBlueprintTopologySemantics(
       if (seen.has(member)) {
         issues.push({
           path: ".packages",
-          message: `${label} must be unique: ${member}`,
+          message: `${label}必须唯一：${member}`,
         });
       }
       seen.add(member);
     }
   }
 
-  const paths = new Set(
-    blueprint.packages.map((definition) => definition.path),
-  );
+  const ids = new Set<PackageDefinitionId>();
+  for (const [index, definition] of blueprint.packages.entries()) {
+    if (!("packageDefinitionId" in definition)) continue;
+    const id = definition.packageDefinitionId;
+    if (typeof id !== "string") continue;
+    const packageId = id as PackageDefinitionId;
+    if (ids.has(packageId)) {
+      issues.push({
+        path: `.packages[${index}].packageDefinitionId`,
+        message: `包实例标识必须唯一：${packageId}`,
+      });
+    }
+    ids.add(packageId);
+  }
+
   const links = new Set<string>();
-  for (const [index, intent] of (
-    blueprint.packageLinkIntents ?? []
-  ).entries()) {
+  for (const [index, intent] of blueprint.packageLinkIntents.entries()) {
     const itemPath = `.packageLinkIntents[${index}]`;
-    if (!paths.has(intent.consumerPackagePath)) {
+    if (!ids.has(intent.consumerId)) {
       issues.push({
-        path: `${itemPath}.consumerPackagePath`,
-        message: "Package Link Intent references an unknown consumer package",
+        path: `${itemPath}.consumerId`,
+        message: "包连接引用了不存在的使用方实例",
       });
     }
-    if (!paths.has(intent.providerPackagePath)) {
+    if (!ids.has(intent.providerId)) {
       issues.push({
-        path: `${itemPath}.providerPackagePath`,
-        message: "Package Link Intent references an unknown provider package",
+        path: `${itemPath}.providerId`,
+        message: "包连接引用了不存在的提供方实例",
       });
     }
-    if (intent.consumerPackagePath === intent.providerPackagePath) {
+    if (intent.consumerId === intent.providerId) {
       issues.push({
         path: itemPath,
-        message: "Package Link Intent cannot link a package to itself",
+        message: "包连接不能指向自身",
       });
     }
-    const key = `${intent.consumerPackagePath}\u0000${intent.providerPackagePath}`;
+    const key = `${intent.consumerId}\0${intent.providerId}`;
     if (links.has(key)) {
       issues.push({
         path: itemPath,
-        message: "Package Link Intent must be unique",
+        message: "包连接不能重复",
       });
     }
     links.add(key);
@@ -251,64 +188,61 @@ function validateBlueprintTopologySemantics(
   return issues;
 }
 
-function validatePersistedPackageIds(
-  blueprint: ProjectBlueprint,
-): BlueprintValidationIssue[] {
-  const issues: BlueprintValidationIssue[] = [];
-  const seen = new Set<PackageDefinitionId>();
-  for (const [index, definition] of blueprint.packages.entries()) {
-    if (!/^package-[a-f0-9]{64}$/.test(definition.packageDefinitionId)) {
-      issues.push({
-        path: `.packages[${index}].packageDefinitionId`,
-        message: "Package Definition ID must use the package-<sha256> format",
-      });
+function structureIssues(value: unknown): BlueprintValidationIssue[] {
+  const parsed = v.safeParse(projectBlueprintSchema, value);
+  if (parsed.success) return [];
+  return parsed.issues.map((issue) => {
+    const issuePath = blueprintIssuePath(issue);
+    if (issuePath === ".schemaVersion") {
+      return {
+        path: issuePath,
+        message: `不支持的本地模板元数据版本 ${String(isObject(value) ? value.schemaVersion : undefined)}；当前只支持 schema4`,
+      };
     }
-    if (seen.has(definition.packageDefinitionId)) {
-      issues.push({
-        path: ".packages",
-        message: `Package Definition ID must be unique: ${definition.packageDefinitionId}`,
-      });
+    if (
+      issue.type === "strict_object" &&
+      issue.path?.at(-1)?.origin === "key"
+    ) {
+      return { path: issuePath, message: "蓝图 v4 包含未知字段" };
     }
-    seen.add(definition.packageDefinitionId);
-  }
-  return issues;
+    return { path: issuePath, message: "字段类型或结构不符合蓝图要求" };
+  });
 }
 
-/** Validates persisted metadata before it is used to plan or render changes. */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export function validateProjectBlueprint(
   value: unknown,
 ): BlueprintValidationResult {
-  const parsed = v.safeParse(projectBlueprintSchema, value);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      issues: parsed.issues.map((issue) => ({
-        path: blueprintIssuePath(issue),
-        message: blueprintStructureMessage(issue),
-      })),
-    };
-  }
+  const structure = structureIssues(value);
+  if (structure.length > 0) return { ok: false, issues: structure };
+
+  const parsed = v.parse(projectBlueprintSchema, value);
   const blueprint: ProjectBlueprint = {
-    schemaVersion: parsed.output.schemaVersion,
-    packages: parsed.output.packages as readonly PersistedPackageDefinition[],
-    ...(parsed.output.packageLinkIntents === undefined
-      ? {}
-      : { packageLinkIntents: parsed.output.packageLinkIntents }),
+    schemaVersion: parsed.schemaVersion,
+    packages: parsed.packages as readonly PersistedPackageDefinition[],
+    packageLinkIntents:
+      parsed.packageLinkIntents as readonly PackageLinkIntent[],
   };
-  const issues = [
-    ...validateBlueprintTopologySemantics(blueprint),
-    ...validatePersistedPackageIds(blueprint),
-  ];
+  const issues = validateBlueprintSemantics(blueprint);
   return issues.length === 0
     ? { ok: true, value: blueprint }
     : { ok: false, issues };
 }
 
-/** Validates preset-owned topology before any persisted identity is assigned. */
 export function assertProjectBlueprintDraft(
   value: ProjectBlueprintDraft,
 ): ProjectBlueprintDraft {
-  const issues = validateBlueprintTopologySemantics(value);
+  if (value.schemaVersion !== 4) {
+    throw new Error("项目蓝图草稿必须使用 schema4");
+  }
+  const issues = validateBlueprintSemantics({
+    schemaVersion: value.schemaVersion,
+    packages: value.packages,
+    packageLinkIntents: value.packageLinkIntents ?? [],
+  });
   if (issues.length > 0) {
     throw new Error(
       issues.map((issue) => `${issue.path}: ${issue.message}`).join("\n"),

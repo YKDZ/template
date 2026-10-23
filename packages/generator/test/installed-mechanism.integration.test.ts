@@ -17,7 +17,7 @@ import { promisify } from "node:util";
 const run = promisify(execFile);
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 
-void it("正式机制制品独立安装后复用文档策略完成初始化、新进程加包与真实冲突", async () => {
+void it("正式安装后的中立内容在新进程中初始化非 npm 根目录与子包", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "installed-mechanism-"));
   const archives = path.join(root, "archives");
   const consumer = path.join(root, "consumer");
@@ -97,36 +97,36 @@ void it("正式机制制品独立安装后复用文档策略完成初始化、�
       driver,
       [
         'import assert from "node:assert/strict";',
-        'import { readFile, writeFile, access } from "node:fs/promises";',
-        'import { createDocumentationEngine, guideIdentity } from "./compiled/documentation.js";',
+        'import { readFile, writeFile, access, readdir } from "node:fs/promises";',
+        'import { createDocumentationEngine, glossaryIdentity, guideIdentity, indexIdentity } from "./compiled/documentation.js";',
+        'import { commitProjectProjectionPlan, planProjectProjections, readProjectProjectionCurrent } from "@ykdz/template-core/project-projection";',
         "const [phase, root, forbidden] = process.argv.slice(2);",
+        "const target = `${root}-${phase}`;",
         'await assert.rejects(readFile(forbidden), { code: "ERR_ACCESS_DENIED" });',
         'for (const specifier of ["@ykdz/template-generator", "@ykdz/template-core/content-identity"]) assert.ok(import.meta.resolve(specifier).startsWith(new URL("./", import.meta.url).href));',
-        'assert.throws(() => import.meta.resolve("@ykdz/template-workspace/default-workspace-strategy"), { code: "ERR_MODULE_NOT_FOUND" });',
-        'const engine = createDocumentationEngine({ policyId: "test-policy:installed", author: "安装后作者" });',
-        'if (phase === "init") {',
-        '  const result = await engine.init({ targetRoot: root, selection: { roots: [{ nodeIdentity: "guide", contentIdentity: guideIdentity }] }, strategyInput: { collection: "north", edition: "draft" } });',
-        '  assert.equal(result.status, "success", JSON.stringify(result));',
-        '  assert.equal(await readFile(`${root}/docs/overview/README.md`, "utf8"), "north/draft by 安装后作者: north:overview uses docs/glossary\\n");',
-        '} else if (phase === "add") {',
-        '  const result = await engine.add({ repositoryRoot: root, contentIdentity: guideIdentity, creationInput: { leafName: "appendix" } });',
-        '  assert.equal(result.status, "success", JSON.stringify(result));',
-        "  assert.equal(result.generationRecord.packages.length, 3);",
-        '  assert.equal(await readFile(`${root}/docs/appendix/README.md`, "utf8"), "north/draft by 安装后作者: north:appendix uses docs/glossary\\n");',
-        '  assert.equal(result.blueprint.packages.filter(({ path }) => path === "docs/glossary").length, 1);',
-        "} else {",
-        '  await writeFile(`${root}/INDEX.md`, "# 用户编辑\\n");',
-        '  const before = await readFile(`${root}/.template/generation.json`, "utf8");',
-        '  const result = await engine.add({ repositoryRoot: root, contentIdentity: guideIdentity, creationInput: { leafName: "late" } });',
-        '  assert.equal(result.status, "conflict", JSON.stringify(result));',
-        '  assert.equal(await readFile(`${root}/.template/generation.json`, "utf8"), before);',
-        '  assert.equal(await readFile(`${root}/INDEX.md`, "utf8"), "# 用户编辑\\n");',
-        '  await assert.rejects(access(`${root}/docs/late`), { code: "ENOENT" });',
-        "}",
+        'const engine = createDocumentationEngine({ author: "安装后作者" });',
+        'const input = { selection: { roots: [{ nodeIdentity: "index", contentIdentity: indexIdentity }, { nodeIdentity: "guide", contentIdentity: guideIdentity }, { nodeIdentity: "glossary", contentIdentity: glossaryIdentity }] }, conventions: { collection: "north", edition: "draft" }, operationFacts: { providerVersion: "current" } };',
+        'if (["empty-target", "dry-run-empty-target", "non-empty-target", "dry-run-non-empty-target"].includes(phase)) { await (await import("node:fs/promises")).mkdir(target); }',
+        'if (phase === "non-empty-target" || phase === "dry-run-non-empty-target") await writeFile(`${target}/keep.txt`, "用户文件\\n");',
+        'const dryRun = phase.startsWith("dry-run");',
+        'let result = { status: "success" };',
+        'if (phase === "sdk") { const prepared = await engine.prepareProject(input); const computed = engine.computeProject(prepared); const guideProjection = computed.projection.entries.find(({ path }) => path === "docs/overview/README.md"); assert.ok(guideProjection?.sources?.some(({ label }) => label.includes("@fixture/docs-guide"))); const before = { entries: [], reconciliation: [] }; const preconditions = [{ path: ".", kind: "directory-empty-or-missing", reason: "初始化目标必须为空或不存在" }]; const current = await readProjectProjectionCurrent({ targetRoot: target, before, after: computed.projection, preconditions }); const planning = planProjectProjections({ before, current, after: computed.projection, preconditions }); assert.equal(planning.ok, true, JSON.stringify(planning)); await assert.rejects(access(target), { code: "ENOENT" }); const committed = await commitProjectProjectionPlan({ targetRoot: target, plan: planning.plan }); assert.equal(committed.ok, true, JSON.stringify(committed)); } else { result = await engine.init({ targetRoot: target, ...input, ...(dryRun ? { dryRun: true } : {}) }); }',
+        'if (phase === "non-empty-target" || phase === "dry-run-non-empty-target") { assert.notEqual(result.status, "success", JSON.stringify(result)); assert.ok(result.conflicts.some(({ sources }) => sources?.length > 0)); assert.equal(await readFile(`${target}/keep.txt`, "utf8"), "用户文件\\n"); await assert.rejects(access(`${target}/INDEX.md`), { code: "ENOENT" }); }',
+        'else if (phase === "dry-run") { assert.equal(result.status, "success", JSON.stringify(result)); await assert.rejects(access(target), { code: "ENOENT" }); }',
+        'else if (phase === "dry-run-empty-target") { assert.equal(result.status, "success", JSON.stringify(result)); assert.deepEqual(await readdir(target), []); }',
+        'else { assert.equal(result.status, "success", JSON.stringify(result)); assert.equal(await readFile(`${target}/docs/overview/README.md`, "utf8"), "north/draft@current by 安装后作者: north:guide uses docs/glossary\\nGuide resource\\n"); assert.equal(await readFile(`${target}/docs/glossary/README.md`, "utf8"), "north/draft@current glossary by 安装后作者\\nGlossary resource\\n"); assert.equal((await readFile(`${target}/INDEX.md`, "utf8")).startsWith("3 packages\\n"), true); assert.equal(await access(`${target}/package.json`).then(() => true, () => false), false); const record = JSON.parse(await readFile(`${target}/.template/generation.json`, "utf8")); assert.equal(record.schemaVersion, 6); assert.equal(record.composition.identity.exportPath, "./composition"); assert.equal(record.packages.length, 3); const guide = record.packages.find(({ contentIdentity }) => contentIdentity.packageName === "@fixture/docs-guide"); const glossary = record.packages.find(({ contentIdentity }) => contentIdentity.packageName === "@fixture/docs-glossary"); assert.equal(glossary.createdBy, "initialization"); assert.equal(guide.dependencyBindings.glossary, glossary.packageDefinitionId); const blueprint = JSON.parse(await readFile(`${target}/.template/blueprint.json`, "utf8")); assert.equal(blueprint.schemaVersion, 4); assert.equal(blueprint.packages.find(({ path }) => path === ".").name, "north:index"); assert.deepEqual(blueprint.packageLinkIntents, [{ consumerId: guide.packageDefinitionId, providerId: glossary.packageDefinitionId }]); }',
       ].join("\n"),
     );
     await mkdir(path.join(consumer, "tmp"));
-    for (const phase of ["init", "add", "conflict"]) {
+    for (const phase of [
+      "init",
+      "sdk",
+      "empty-target",
+      "dry-run",
+      "dry-run-empty-target",
+      "dry-run-non-empty-target",
+      "non-empty-target",
+    ]) {
       await run(
         process.execPath,
         [
@@ -152,14 +152,13 @@ void it("正式机制制品独立安装后复用文档策略完成初始化、�
         },
       );
     }
-    const record = JSON.parse(
+    const installedRecord = JSON.parse(
       await readFile(
-        path.join(consumer, "project/.template/generation.json"),
+        path.join(consumer, "project-init/.template/generation.json"),
         "utf8",
       ),
-    ) as { schemaVersion: number; strategyIdentity: string };
-    assert.equal(record.schemaVersion, 5);
-    assert.equal(record.strategyIdentity, "test-policy:installed");
+    ) as { schemaVersion: number };
+    assert.equal(installedRecord.schemaVersion, 6);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
