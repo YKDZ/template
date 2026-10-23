@@ -373,18 +373,26 @@ void describe("owner-local内容依赖", () => {
       if (initialized.status !== "success") return;
 
       const originalFeature = initialized.generationRecord.packages.find(
-        (item) => item.contentIdentity.packageName === featureIdentity.packageName,
+        (item) =>
+          item.contentIdentity.packageName === featureIdentity.packageName,
       );
       const originalTheme = initialized.generationRecord.packages.find(
-        (item) => item.contentIdentity.packageName === themeIdentity.packageName,
+        (item) =>
+          item.contentIdentity.packageName === themeIdentity.packageName,
       );
       const originalPalette = initialized.generationRecord.packages.find(
         (item) =>
           item.contentIdentity.packageName === paletteIdentity.packageName,
       );
       assert.ok(originalFeature && originalTheme && originalPalette);
-      assert.equal(originalFeature.dependencyBindings.theme, originalTheme.packageDefinitionId);
-      assert.equal(originalTheme.dependencyBindings.palette, originalPalette.packageDefinitionId);
+      assert.equal(
+        originalFeature.dependencyBindings.theme,
+        originalTheme.packageDefinitionId,
+      );
+      assert.equal(
+        originalTheme.dependencyBindings.palette,
+        originalPalette.packageDefinitionId,
+      );
       assert.equal(originalTheme.createdBy, "shared-dependency");
 
       const themeDefinition = initialized.blueprint.packages.find(
@@ -433,18 +441,37 @@ void describe("owner-local内容依赖", () => {
         );
         assert.ok(feature && theme && palette);
         assert.equal(generationRecord.packages.length, expectedPackageCount);
-        assert.equal(feature.packageDefinitionId, originalFeature.packageDefinitionId);
-        assert.deepEqual(feature.dependencyBindings, originalFeature.dependencyBindings);
-        assert.equal(theme.packageDefinitionId, originalTheme.packageDefinitionId);
+        assert.equal(
+          feature.packageDefinitionId,
+          originalFeature.packageDefinitionId,
+        );
+        assert.deepEqual(
+          feature.dependencyBindings,
+          originalFeature.dependencyBindings,
+        );
+        assert.equal(
+          theme.packageDefinitionId,
+          originalTheme.packageDefinitionId,
+        );
         assert.equal(theme.createdBy, "shared-dependency");
-        assert.deepEqual(theme.dependencyBindings, originalTheme.dependencyBindings);
-        assert.equal(palette.packageDefinitionId, originalPalette.packageDefinitionId);
+        assert.deepEqual(
+          theme.dependencyBindings,
+          originalTheme.dependencyBindings,
+        );
+        assert.equal(
+          palette.packageDefinitionId,
+          originalPalette.packageDefinitionId,
+        );
       };
       expectRetainedGraph(firstAddition.generationRecord, 4);
       const firstAddon = firstAddition.generationRecord.packages.find(
-        (item) => item.contentIdentity.packageName === addonIdentity.packageName,
+        (item) =>
+          item.contentIdentity.packageName === addonIdentity.packageName,
       );
-      assert.equal(firstAddon?.dependencyBindings.theme, originalTheme.packageDefinitionId);
+      assert.equal(
+        firstAddon?.dependencyBindings.theme,
+        originalTheme.packageDefinitionId,
+      );
       assert.deepEqual(
         firstAddition.ownerFacts.evaluations.find(
           ({ packageName }) => packageName === "apps/feature",
@@ -473,7 +500,11 @@ void describe("owner-local内容依赖", () => {
         creationInput: { path: "apps/feature" },
         operationFacts: null,
       });
-      assert.equal(sameSelection.status, "success", JSON.stringify(sameSelection));
+      assert.equal(
+        sameSelection.status,
+        "success",
+        JSON.stringify(sameSelection),
+      );
       if (sameSelection.status !== "success") return;
       expectRetainedGraph(sameSelection.generationRecord, 4);
 
@@ -484,18 +515,29 @@ void describe("owner-local内容依赖", () => {
         creationInput: { path: "apps/addon-two" },
         operationFacts: null,
       });
-      assert.equal(secondAddition.status, "success", JSON.stringify(secondAddition));
+      assert.equal(
+        secondAddition.status,
+        "success",
+        JSON.stringify(secondAddition),
+      );
       if (secondAddition.status !== "success") return;
       expectRetainedGraph(secondAddition.generationRecord, 5);
+      const addonOneId = secondAddition.blueprint.packages.find(
+        (item) => item.path === "apps/addon-one",
+      )?.packageDefinitionId;
+      const addonTwoId = secondAddition.blueprint.packages.find(
+        (item) => item.path === "apps/addon-two",
+      )?.packageDefinitionId;
+      assert.ok(addonOneId && addonTwoId);
       assert.equal(
         secondAddition.generationRecord.packages.find(
-          (item) => item.contentIdentity.packageName === addonIdentity.packageName && item.definition.path === "apps/addon-one",
+          (item) => item.packageDefinitionId === addonOneId,
         )?.dependencyBindings.theme,
         originalTheme.packageDefinitionId,
       );
       assert.equal(
         secondAddition.generationRecord.packages.find(
-          (item) => item.contentIdentity.packageName === addonIdentity.packageName && item.definition.path === "apps/addon-two",
+          (item) => item.packageDefinitionId === addonTwoId,
         )?.dependencyBindings.theme,
         originalTheme.packageDefinitionId,
       );
