@@ -123,8 +123,8 @@ const nativeReference = defineReferencePackage<
     },
   ],
   resources: [
-    { path: ".gitignore" },
-    { path: ".npmignore" },
+    { path: "resources/gitignore", targetPath: ".gitignore" },
+    { path: "resources/npmignore", targetPath: ".npmignore" },
     { path: "Cargo.toml" },
     { path: "Cargo.lock" },
     { path: "rustfmt.toml" },
