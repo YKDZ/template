@@ -15,7 +15,7 @@ import type {
   ReferencePackageDefinition,
   ResourceFileSnapshot,
 } from "@ykdz/template-core/reference-package";
-import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
+import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
 import {
   defineNativeReferenceContentArtifact,
   type NativeContentArtifactResource,

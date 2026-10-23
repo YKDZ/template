@@ -1634,7 +1634,6 @@ export function createDefaultComposition(options: {
         manifest: {},
         turboTasks: {},
         typescript: { compilerOptions: {}, include: [] },
-        packagePaths,
         declarations: declarations.map((declaration) => ({
           kind: "shared-root-files" as const,
           source: sourceLabel(declaration.sourceIdentity),
@@ -1860,15 +1859,12 @@ export function createDefaultComposition(options: {
           sourcePath: "devcontainer/workspace-template.json",
         },
       );
-      const dockerfile = developmentContainer.dockerfileOperation;
-      if (dockerfile.kind === "writeText") {
-        baseRootFiles.push({
-          path: dockerfile.to,
-          content: new TextEncoder().encode(dockerfile.text),
-          mode: dockerfile.mode ?? 0,
-          sourcePath: "devcontainer/Dockerfile",
-        });
-      }
+      baseRootFiles.push({
+        path: ".devcontainer/Dockerfile",
+        content: new TextEncoder().encode(developmentContainer.dockerfile),
+        mode: 0,
+        sourcePath: "devcontainer/Dockerfile",
+      });
       if (combineOptions.conventions.todo === true) {
         baseRootFiles.push({
           path: "TODO.md",
@@ -2039,8 +2035,7 @@ export function createDefaultComposition(options: {
         }
       }
 
-      const dockerfileText =
-        dockerfile.kind === "writeText" ? dockerfile.text : "";
+      const dockerfileText = developmentContainer.dockerfile;
 
       return {
         files: [...rootFileComposition, ...nonRootDocuments],

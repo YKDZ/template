@@ -97,7 +97,7 @@ void describe("预设声明", () => {
     assert.equal(boundNode, "api");
   });
 
-  void it("接受所属包的根公开导出作为预设项目身份", () => {
+  void it("接受所属包的根公开导出作为预设身份", () => {
     const preset = definePreset({
       metadata: {
         alias: "application",
@@ -111,7 +111,6 @@ void describe("预设声明", () => {
         },
       },
       owner: { packageName: "@demo/application-preset", exportPath: "." },
-      project: () => [],
     });
 
     assert.deepStrictEqual(preset.owner, {

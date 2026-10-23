@@ -73,13 +73,6 @@ const resourceIgnoreSnapshot = await formattedSource(
 export const resourceIgnoreSnapshot = ${JSON.stringify(ignore)};
 `,
 );
-const rendererPolicySnapshot = await formattedSource(
-  "renderer-policy-snapshot.ts",
-  `// 由根 sync:workspace-policy 从格式化器原生配置派生，请修改事实源后显式同步。
-export const generatedJsonPrintWidth = ${formatterConfig.printWidth};
-`,
-);
-
 const declarations = await readTemplateToolchainDeclarations(
   fileURLToPath(root),
 );
@@ -110,10 +103,5 @@ await Promise.all([
     "@ykdz/template-workspace-authoring",
     "sync:resource-ignore-snapshot",
     resourceIgnoreSnapshot,
-  ),
-  sendToOwner(
-    "@ykdz/template-core",
-    "sync:renderer-policy-snapshot",
-    rendererPolicySnapshot,
   ),
 ]);

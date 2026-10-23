@@ -16,7 +16,7 @@ import {
   installContentCollection,
   prepareContentCollection,
 } from "@ykdz/template-content/artifact-builder";
-import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
+import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { defineNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
 import { execa } from "execa";
