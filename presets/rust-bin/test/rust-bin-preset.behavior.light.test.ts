@@ -11,6 +11,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 
+import type { LoadedContentMember } from "@ykdz/template-core/content-identity";
+import { definePreset } from "@ykdz/template-core/preset-definition";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
@@ -37,6 +39,35 @@ const member = (kind: "preset" | "reference", packageName: string) => {
 const rust = member("reference", "@ykdz/reference-rust-bin");
 const root = member("reference", "@ykdz/reference-workspace-root");
 const rustPreset = member("preset", "@ykdz/preset-rust-bin");
+const aliasOnlyRustPresetDefinition = definePreset({
+  metadata: {
+    alias: "rust-alias-only",
+    title: "Rust 别名预设",
+    description: "仅通过参考包公开别名选择 Rust 内容。",
+  },
+  operations: ["init", "add"],
+  nodes: {
+    binary: { reference: { alias: "binary", instance: "independent" } },
+  },
+});
+const aliasOnlyRustPreset: LoadedContentMember<
+  typeof aliasOnlyRustPresetDefinition,
+  "preset"
+> = {
+  identity: {
+    namespace: "ykdz",
+    packageName: "@ykdz/preset-rust-alias-only",
+    exportPath: "./template",
+  },
+  kind: "preset",
+  alias: aliasOnlyRustPresetDefinition.metadata.alias,
+  definition: aliasOnlyRustPresetDefinition,
+  source: {
+    specifier: "@ykdz/preset-rust-alias-only/template",
+    moduleURL: import.meta.url,
+    manifestURL: import.meta.url,
+  },
+};
 const conventions = { repositoryName: "demo", defaultPackageScope: "demo" };
 const temporaryRoots = new Set<string>();
 
@@ -280,6 +311,62 @@ void describe("Rust 原生内容公开组合行为", () => {
     );
     await assert.rejects(
       access(path.join(targetRoot, "packages/native/Cargo.toml")),
+      { code: "ENOENT" },
+    );
+  });
+
+  void it("通过别名节点加Rust时沿正式预设图读取并锁定根工具链", async () => {
+    const targetRoot = await createTargetRoot("template-rust-bin-alias-add-");
+    const generator = createDefaultGenerator({
+      content: [...content, aliasOnlyRustPreset],
+    });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: {
+        roots: [{ nodeIdentity: "root", contentIdentity: root.identity }],
+      },
+      conventions,
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+
+    const customDeclaration =
+      '# local setting\n[toolchain]\nchannel = "nightly-2026-10-01"\ncomponents = ["rustfmt", "clippy"]\nprofile = "minimal"\n';
+    const declarationPath = path.join(targetRoot, "rust-toolchain.toml");
+    await writeFile(declarationPath, customDeclaration);
+
+    const added = await generator.add({
+      repositoryRoot: targetRoot,
+      preset: aliasOnlyRustPreset.identity,
+    });
+    assert.strictEqual(added.status, "success", JSON.stringify(added));
+    assert.strictEqual(
+      await readFile(declarationPath, "utf8"),
+      customDeclaration,
+    );
+
+    const planned = await generator.planAdd({
+      repositoryRoot: targetRoot,
+      preset: aliasOnlyRustPreset.identity,
+      creationInput: { leafName: "second", packagePath: "packages/second" },
+    });
+    assert.strictEqual(planned.status, "planned", JSON.stringify(planned));
+    if (planned.status !== "planned") return;
+
+    const changedDeclaration =
+      '[toolchain]\nchannel = "nightly-2026-10-02"\ncomponents = ["rustfmt", "clippy"]\nprofile = "minimal"\n';
+    await writeFile(declarationPath, changedDeclaration);
+    const committed = await generator.commitPlan(planned.plan);
+    assert.notStrictEqual(committed.status, "success");
+    assert.strictEqual(
+      await readFile(declarationPath, "utf8"),
+      changedDeclaration,
+    );
+    await assert.rejects(
+      access(path.join(targetRoot, "packages/second/Cargo.toml")),
       { code: "ENOENT" },
     );
   });
