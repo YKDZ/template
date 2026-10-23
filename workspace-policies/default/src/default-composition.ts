@@ -26,12 +26,17 @@ import type {
 } from "@ykdz/template-core/project-blueprint";
 import type { CurrentProjectProjectionEntry } from "@ykdz/template-core/project-projection";
 import type { ReferenceDependency } from "@ykdz/template-core/reference-package";
+import type { DevelopmentContainerToolLayer } from "@ykdz/template-environment/development-container-tool-layer";
 import { resolveReferenceDependencyIdentity } from "@ykdz/template-generator";
 import { stringify as stringifyYaml } from "yaml";
 
 import {
+  composeApplicationRequirements,
   projectDependencyMaintenancePolicy,
+  resolveApplicationRequirements,
+  type ApplicationRequirements,
   type DependencyMaintenancePolicy,
+  type RustToolchainTarget,
 } from "./application-requirements.ts";
 import {
   composeCiDiagnosticArtifacts,
@@ -173,6 +178,8 @@ export type DefaultOperationFacts = {
   /** init使用release pin；add使用当前root packageManager。 */
   readonly packageManagerPin: string;
   readonly resources: DefaultCompositionResources;
+  /** 本次 add 读取到的根 Rust 声明；init 使用发行快照。 */
+  readonly rustToolchainTarget?: RustToolchainTarget;
   readonly rootDeclarations: readonly DefaultRootDeclaration[];
   readonly rootAttachmentDependencies: readonly DefaultRootAttachmentDependencyFact[];
   /** 现存创建输入中的一次性连接已由蓝图固定为实例ID。 */
@@ -191,6 +198,7 @@ export type DefaultStableCommon = {
   readonly nodeDeclaration: string;
   readonly packageManagerPin: string;
   readonly resources: DefaultCompositionResources;
+  readonly applicationRequirements: ApplicationRequirements;
   readonly rootDeclarations: readonly DefaultRootDeclaration[];
   readonly rootAttachmentIdentities: readonly ContentIdentity[];
   readonly presetRootContributions: readonly PreparedDefaultPresetRootContribution[];
@@ -215,6 +223,18 @@ export type DefaultCompositionOwnerFacts = {
   readonly dependencyCatalog: Readonly<Record<string, string>>;
   readonly environmentNeeds: EnvironmentNeedsMetadata;
   readonly ciDiagnosticArtifacts: readonly CiDiagnosticArtifactDeclaration[];
+  readonly container: {
+    readonly dockerfileText: string;
+    readonly buildArguments: ReturnType<
+      typeof projectBuiltInDevelopmentContainer
+    >["buildArguments"];
+    readonly mounts: ReturnType<
+      typeof projectBuiltInDevelopmentContainer
+    >["mounts"];
+    readonly probes: ReturnType<
+      typeof projectBuiltInDevelopmentContainer
+    >["probes"];
+  };
 };
 
 type DefaultContribution = DefaultReferenceContributionFacts<unknown>;
@@ -387,6 +407,7 @@ export function prepareDefaultCompositionResources(): DefaultCompositionResource
 
 export function prepareDefaultInitOperationFacts(
   options: {
+    readonly rustToolchainTarget?: RustToolchainTarget;
     readonly rootDeclarations?: readonly DefaultRootDeclaration[];
     readonly rootAttachmentDependencies?: readonly DefaultRootAttachmentDependencyFact[];
     readonly presetRootContributions?: readonly PreparedDefaultPresetRootContribution[];
@@ -397,6 +418,9 @@ export function prepareDefaultInitOperationFacts(
   return Object.freeze({
     nodeDeclaration: releaseToolchainSnapshot.nodeVersion,
     packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+    ...(options.rustToolchainTarget === undefined
+      ? {}
+      : { rustToolchainTarget: options.rustToolchainTarget }),
     resources: options.resources ?? prepareDefaultCompositionResources(),
     rootDeclarations: options.rootDeclarations ?? [],
     rootAttachmentDependencies: options.rootAttachmentDependencies ?? [],
@@ -1282,11 +1306,39 @@ export function createDefaultComposition(options: {
         content: options.content,
         operationFacts: resolveOptions.operationFacts,
       });
+      const selectedContent = new Set(
+        resolveOptions.packages.map(({ contentIdentity }) =>
+          contentIdentityKey(contentIdentity),
+        ),
+      );
+      const declaredApplicationRequirements = composeApplicationRequirements(
+        resolveOptions.operationFacts.rootDeclarations
+          .filter((declaration) =>
+            selectedContent.has(contentIdentityKey(declaration.sourceIdentity)),
+          )
+          .map((declaration) => ({
+            source: contentIdentityLabel(declaration.sourceIdentity),
+            ...(declaration.applicationRequirements === undefined
+              ? {}
+              : { requirements: declaration.applicationRequirements }),
+          })),
+      );
+      const applicationRequirements = resolveApplicationRequirements({
+        declared: declaredApplicationRequirements,
+        ...(resolveOptions.operationFacts.rustToolchainTarget === undefined
+          ? {}
+          : {
+              rustToolchainTarget:
+                resolveOptions.operationFacts.rustToolchainTarget,
+            }),
+        defaultRustToolchain: releaseToolchainSnapshot.rustVersion,
+      });
       return {
         stableCommon: Object.freeze({
           nodeDeclaration: resolveOptions.operationFacts.nodeDeclaration,
           packageManagerPin: resolveOptions.operationFacts.packageManagerPin,
           resources: resolveOptions.operationFacts.resources,
+          applicationRequirements,
           rootDeclarations: resolveOptions.operationFacts.rootDeclarations,
           rootAttachmentIdentities,
           presetRootContributions:
@@ -1354,6 +1406,11 @@ export function createDefaultComposition(options: {
           contentIdentityKey,
         ),
       );
+      const selectedContentIdentities = new Set(
+        combineOptions.packages.map(({ package: item }) =>
+          contentIdentityKey(item.contentIdentity),
+        ),
+      );
       const declarations = reuseEquivalentRootDeclarations([
         ...combineOptions.packages.flatMap(({ package: item, contribution }) =>
           contribution.facts.rootDeclaration === undefined
@@ -1368,6 +1425,9 @@ export function createDefaultComposition(options: {
         ...combineOptions.stableCommon.rootDeclarations.filter(
           (declaration) =>
             declaration.requiredTemplateDependency === undefined ||
+            selectedContentIdentities.has(
+              contentIdentityKey(declaration.sourceIdentity),
+            ) ||
             (requiredTemplateDependencies.has(
               declaration.requiredTemplateDependency,
             ) &&
@@ -1626,8 +1686,15 @@ export function createDefaultComposition(options: {
         }),
         combineOptions.stableCommon.resources.editor,
       );
+      const developmentContainerLayers = allFacts.flatMap((facts) => {
+        const layers = facts.foundation.developmentContainerToolLayers;
+        return Array.isArray(layers)
+          ? (layers as DevelopmentContainerToolLayer[])
+          : [];
+      });
       const developmentContainer = projectBuiltInDevelopmentContainer({
         nodeVersion: combineOptions.stableCommon.nodeDeclaration,
+        layers: developmentContainerLayers,
         resources: combineOptions.stableCommon.resources.developmentContainer,
       });
       const dependencyMaintenance = ownerDependencies(
@@ -1667,6 +1734,33 @@ export function createDefaultComposition(options: {
         combineOptions.stableCommon.resources.github.dependabot,
       );
       const baseRootFiles = [...rootResources];
+      const developmentContainerConfiguration = structuredClone(
+        developmentContainer.configuration,
+      ) as Record<string, unknown>;
+      const baseBuild = isRecord(developmentContainerConfiguration.build)
+        ? developmentContainerConfiguration.build
+        : {};
+      const baseBuildArguments = isRecord(baseBuild.args) ? baseBuild.args : {};
+      const baseMounts = Array.isArray(developmentContainerConfiguration.mounts)
+        ? developmentContainerConfiguration.mounts
+        : [];
+      const generatedBuildArguments = Object.fromEntries(
+        developmentContainer.buildArguments.map(({ name, value }) => [
+          name,
+          value,
+        ]),
+      );
+      const generatedMounts = developmentContainer.mounts.map(
+        ({ identity: _identity, ...mount }) => mount,
+      );
+      developmentContainerConfiguration.build = {
+        ...baseBuild,
+        args: { ...baseBuildArguments, ...generatedBuildArguments },
+      };
+      developmentContainerConfiguration.mounts = [
+        ...baseMounts,
+        ...generatedMounts,
+      ];
       baseRootFiles.push(
         {
           path: ".github/workflows/check.yml",
@@ -1695,7 +1789,7 @@ export function createDefaultComposition(options: {
         {
           path: ".devcontainer/devcontainer.json",
           content: json({
-            ...developmentContainer.configuration,
+            ...developmentContainerConfiguration,
             name: combineOptions.conventions.repositoryName,
           }),
           mode: 0,
@@ -1738,6 +1832,50 @@ export function createDefaultComposition(options: {
           path: file.path,
           content: file.content,
           mode: file.mode,
+          ...(file.path === ".devcontainer/devcontainer.json"
+            ? {
+                reconciliation: {
+                  path: file.path,
+                  driver: "structured" as const,
+                  identitySets: [
+                    {
+                      location: "/mounts",
+                      identity: {
+                        kind: "projection" as const,
+                        members: developmentContainer.mounts.map(
+                          ({ identity, target }) => ({
+                            identity,
+                            match: { target },
+                          }),
+                        ),
+                        fallback: { fields: ["target"] },
+                      },
+                    },
+                  ],
+                  mirrorSlots: [
+                    {
+                      id: "node-version-build-arg",
+                      location: {
+                        kind: "json-pointer" as const,
+                        pointer: "/build/args/NODE_VERSION",
+                      },
+                    },
+                    ...(combineOptions.stableCommon.applicationRequirements
+                      .rustToolchain === undefined
+                      ? []
+                      : [
+                          {
+                            id: "rust-toolchain-build-arg",
+                            location: {
+                              kind: "json-pointer" as const,
+                              pointer: "/build/args/RUST_TOOLCHAIN",
+                            },
+                          },
+                        ]),
+                  ],
+                },
+              }
+            : {}),
           packageDefinitionId: rootPackage.package.packageDefinitionId,
         });
       });
@@ -1851,6 +1989,8 @@ export function createDefaultComposition(options: {
         check: checkNeeds,
         deployment: deploymentNeeds,
       });
+      const dockerfileText =
+        dockerfile.kind === "writeText" ? dockerfile.text : "";
 
       return {
         files: [...rootFileComposition, ...nonRootDocuments],
@@ -1862,6 +2002,12 @@ export function createDefaultComposition(options: {
           dependencyCatalog,
           environmentNeeds,
           ciDiagnosticArtifacts,
+          container: {
+            dockerfileText,
+            buildArguments: developmentContainer.buildArguments,
+            mounts: developmentContainer.mounts,
+            probes: developmentContainer.probes,
+          },
         },
       };
     },
