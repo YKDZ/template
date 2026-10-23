@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { CliJourney } from "../journey.ts";
@@ -31,6 +31,7 @@ const journey: CliJourney = {
     const project = path.join(context.workDir, "project");
     const sourcePath = path.join(project, consumerPath, "src/index.ts");
     const manifestPath = path.join(project, consumerPath, "package.json");
+    const installedRoot = path.join(context.workDir, "installed-consumer");
     const addArgs = [
       "add",
       "package",
@@ -42,6 +43,7 @@ const journey: CliJourney = {
       providerPath,
       "--link-from",
       consumerPath,
+      "--publication",
     ];
     return [
       {
@@ -57,6 +59,7 @@ const journey: CliJourney = {
           "acme",
           "--path",
           consumerPath,
+          "--publication",
         ],
       },
       {
@@ -106,6 +109,64 @@ const journey: CliJourney = {
             "dry-run 不应改写用户源码",
           );
         },
+      },
+      {
+        name: "安装生成项目的依赖",
+        executable: "pnpm",
+        cwd: project,
+        args: ["install"],
+      },
+      {
+        name: "通过正式发布入口构建并打包库",
+        executable: "pnpm",
+        cwd: project,
+        args: ["run", "publication:pack"],
+      },
+      {
+        name: "独立安装生成的库归档",
+        executable: "npm",
+        cwd: installedRoot,
+        args: ["install", "--no-audit", "--no-fund"],
+        async prepare() {
+          const packedRoot = path.join(project, ".changeset/packed");
+          const plan = JSON.parse(
+            await readFile(path.join(packedRoot, "publish-plan.json"), "utf8"),
+          ) as {
+            plan: readonly (readonly {
+              name: string;
+              tarball: { path: string };
+            }[])[];
+          };
+          const provider = plan.plan
+            .flat()
+            .find(({ name }) => name === "@acme/utilities");
+          assert.ok(provider, "发布计划应包含提供方库");
+          await mkdir(installedRoot);
+          await writeFile(
+            path.join(installedRoot, "package.json"),
+            JSON.stringify({
+              private: true,
+              dependencies: {
+                [provider.name]: `file:${path.join(packedRoot, provider.tarball.path)}`,
+              },
+            }),
+          );
+        },
+      },
+      {
+        name: "运行安装后库的公开导出与输入校验",
+        executable: process.execPath,
+        cwd: installedRoot,
+        args: [
+          "--input-type=module",
+          "--eval",
+          [
+            'import assert from "node:assert/strict";',
+            'import { greet } from "@acme/utilities";',
+            'assert.deepEqual(greet("Ada"), { message: "Hello, Ada" });',
+            'assert.throws(() => greet(""));',
+          ].join("\n"),
+        ],
       },
     ];
   },
