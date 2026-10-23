@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { materializeProjectProjection } from "@ykdz/template-core/project-projection";
-import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
+import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
 import type { DevelopmentContainerToolLayerProbe } from "@ykdz/template-environment/development-container-tool-layer";
 import {
   prepareBuiltInDevelopmentContainerResources,
@@ -97,15 +96,9 @@ export async function repositoryDevelopmentEnvironment(
     "[rust]": { "editor.defaultFormatter": "rust-lang.rust-analyzer" },
     "[toml]": { "editor.defaultFormatter": "tamasfe.even-better-toml" },
   };
-  const projection = await materializeProjectProjection({
-    operations: [container.dockerfileOperation],
-  });
-  const files: Record<string, string> = Object.fromEntries(
-    projection.entries.map((entry) => [
-      entry.path,
-      Buffer.from(entry.content).toString("utf8"),
-    ]),
-  );
+  const files: Record<string, string> = {
+    ".devcontainer/Dockerfile": container.dockerfile,
+  };
   const structuredFiles: Record<string, unknown> = {
     ".devcontainer/devcontainer.json": {
       name: "Template",

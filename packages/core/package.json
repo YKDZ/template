@@ -19,9 +19,8 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix --ignore-pattern dist .",
     "lint:fix": "oxlint --format=unix --ignore-pattern dist . --fix",
-    "sync:renderer-policy-snapshot": "node scripts/sync-renderer-policy-snapshot.ts",
     "test": "node --conditions=source --test --test-reporter=spec 'test/**/*.light.test.ts'",
-    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false && tsc -p tsconfig.scripts.json --noEmit --pretty false"
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false"
   },
   "dependencies": {
     "ignore": "catalog:",

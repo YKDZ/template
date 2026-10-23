@@ -23,8 +23,9 @@ const webId = "package-web" as PackageDefinitionId;
 const apiId = "package-api" as PackageDefinitionId;
 const otherApiId = "package-other-api" as PackageDefinitionId;
 
-function resources() {
-  return prepareJointE2eResources().ownerFacts.resources;
+async function resources() {
+  return (await prepareJointE2eResources({ ownerIdentity })).ownerFacts
+    .resources;
 }
 
 function packageInstance(options: {
@@ -128,14 +129,15 @@ function validSelection() {
 }
 
 void describe("Vue-Hono 预设联合验收组合", () => {
-  void it("按持久选择的节点绑定生成根文件和共享声明", () => {
+  void it("按持久选择的节点绑定生成根文件和共享声明", async () => {
     const { root, web, api, selection } = validSelection();
+    const ownerFacts = { resources: await resources() };
     const result = composeVueHonoJointE2e({
       ownerIdentity,
       selection,
       rootPackage: root,
       selectedPackages: selectedPackages(["web", web], ["api", api]),
-      ownerFacts: { resources: resources() },
+      ownerFacts,
     });
 
     assert.deepStrictEqual(
@@ -187,9 +189,10 @@ void describe("Vue-Hono 预设联合验收组合", () => {
     ]);
   });
 
-  void it("拒绝身份、选择节点、服务角色或API绑定不匹配", () => {
+  void it("拒绝身份、选择节点、服务角色或API绑定不匹配", async () => {
     const { root, web, api, selection } = validSelection();
     const validPackages = selectedPackages(["web", web], ["api", api]);
+    const ownerFacts = { resources: await resources() };
 
     assert.throws(
       () =>
@@ -198,7 +201,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
           selection,
           rootPackage: root,
           selectedPackages: validPackages,
-          ownerFacts: { resources: resources() },
+          ownerFacts,
         }),
       /预设身份/u,
     );
@@ -209,7 +212,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
           selection: { ...selection, nodes: { web: webId } },
           rootPackage: root,
           selectedPackages: validPackages,
-          ownerFacts: { resources: resources() },
+          ownerFacts,
         }),
       /节点 api/u,
     );
@@ -229,7 +232,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
             ],
             ["api", api],
           ),
-          ownerFacts: { resources: resources() },
+          ownerFacts,
         }),
       /web.*runtime-service/u,
     );
@@ -243,7 +246,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
             ["web", { ...web, dependencyBindings: { "hono-api": otherApiId } }],
             ["api", api],
           ),
-          ownerFacts: { resources: resources() },
+          ownerFacts,
         }),
       /绑定.*API/u,
     );
@@ -266,14 +269,14 @@ void describe("Vue-Hono 预设联合验收组合", () => {
             ],
             ["api", api],
           ),
-          ownerFacts: { resources: resources() },
+          ownerFacts,
         }),
       /Web 原生包名/u,
     );
   });
 
-  void it("外层准备联合配置与两个测试资源", () => {
-    const prepared = resources();
+  void it("外层准备联合配置与两个测试资源", async () => {
+    const prepared = await resources();
     assert.match(
       new TextDecoder().decode(
         prepared.find(

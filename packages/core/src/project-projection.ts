@@ -12,12 +12,9 @@ import {
   rmdir,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { diff3Merge } from "node-diff3";
-
-import { renderProject, type RenderOperation } from "./renderer.ts";
 
 export type ProjectProjectionEntry = {
   readonly path: string;
@@ -221,160 +218,6 @@ export type ProjectProjectionAction = {
   readonly driver: ProjectProjectionReconciliation["driver"];
   readonly action: "create" | "update";
 };
-
-export type MaterializeProjectProjectionOptions = {
-  readonly operations: readonly RenderOperation[];
-  readonly reconciliation?: readonly ProjectProjectionReconciliation[];
-};
-
-function normalizedOutputPath(operation: RenderOperation): string {
-  const operationPath =
-    operation.kind === "setExecutable" ? operation.path : operation.to;
-  if (path.isAbsolute(operationPath)) {
-    throw new Error(
-      `Project Projection paths must be relative: ${operationPath}`,
-    );
-  }
-  const normalized = path.posix.normalize(
-    operationPath.split(path.sep).join("/"),
-  );
-  if (
-    normalized === "." ||
-    normalized === ".." ||
-    normalized.startsWith("../")
-  ) {
-    throw new Error(
-      `Project Projection path escapes its root: ${operationPath}`,
-    );
-  }
-  return normalized;
-}
-
-function operationDriver(
-  operation: RenderOperation,
-): ProjectProjectionReconciliation["driver"] | undefined {
-  switch (operation.kind) {
-    case "mergeJson":
-    case "mergeJsonTemplate":
-    case "writeJson":
-      return "structured";
-    case "copyFile":
-    case "writeText":
-    case "writeTextFromFragments":
-    case "writeTextTemplate":
-      return "text";
-    case "setExecutable":
-      return undefined;
-  }
-}
-
-/** Pure structural preflight for a renderer-facing Project Projection plan. */
-export function validateProjectProjectionPlan(
-  options: MaterializeProjectProjectionOptions,
-): readonly string[] {
-  const diagnostics: string[] = [];
-  const contentKindByPath = new Map<string, RenderOperation["kind"]>();
-  const contentTypeByPath = new Map<string, "json" | "text" | "unknown">();
-  const transformationKindByPath = new Map<string, "setExecutable">();
-  const finalPaths = new Set<string>();
-  for (const operation of options.operations) {
-    let outputPath: string;
-    try {
-      outputPath = normalizedOutputPath(operation);
-    } catch (error) {
-      diagnostics.push(error instanceof Error ? error.message : String(error));
-      continue;
-    }
-    finalPaths.add(outputPath);
-    const precedingKind = contentKindByPath.get(outputPath);
-    if (operation.kind === "setExecutable") {
-      if (precedingKind === undefined) {
-        diagnostics.push(
-          `Project Projection ${operation.kind} requires a preceding content-producing operation: ${outputPath}`,
-        );
-      }
-      if (precedingKind !== undefined) {
-        transformationKindByPath.set(outputPath, operation.kind);
-      }
-      continue;
-    }
-    if (
-      operation.kind === "mergeJson" ||
-      operation.kind === "mergeJsonTemplate"
-    ) {
-      const transformationKind = transformationKindByPath.get(outputPath);
-      if (transformationKind !== undefined) {
-        diagnostics.push(
-          `Project Projection ${operation.kind} may not overwrite content after ${transformationKind}: ${outputPath}`,
-        );
-      }
-      if (contentTypeByPath.get(outputPath) === "text") {
-        diagnostics.push(
-          `Project Projection ${operation.kind} requires JSON-compatible content: ${outputPath} follows ${precedingKind}`,
-        );
-      }
-      if (precedingKind === undefined) {
-        contentKindByPath.set(outputPath, operation.kind);
-      }
-      contentTypeByPath.set(outputPath, "json");
-      transformationKindByPath.delete(outputPath);
-      continue;
-    }
-    const overwrite = "overwrite" in operation && operation.overwrite;
-    const transformationKind = transformationKindByPath.get(outputPath);
-    if (overwrite && transformationKind !== undefined) {
-      diagnostics.push(
-        `Project Projection ${operation.kind} may not overwrite content after ${transformationKind}: ${outputPath}`,
-      );
-    }
-    if (precedingKind !== undefined && !overwrite) {
-      diagnostics.push(
-        `Project Projection collision at ${outputPath}: ${operation.kind} follows ${precedingKind} without overwrite`,
-      );
-    }
-    contentKindByPath.set(outputPath, operation.kind);
-    if (operation.kind === "writeJson") {
-      contentTypeByPath.set(outputPath, "json");
-    } else if (operation.kind === "writeText") {
-      try {
-        JSON.parse(operation.text);
-        contentTypeByPath.set(outputPath, "json");
-      } catch {
-        contentTypeByPath.set(outputPath, "text");
-      }
-    } else {
-      contentTypeByPath.set(outputPath, "unknown");
-    }
-    transformationKindByPath.delete(outputPath);
-  }
-
-  const orderedPaths = [...finalPaths].toSorted();
-  for (const candidate of orderedPaths) {
-    const ancestor = orderedPaths.find(
-      (other) => other !== candidate && candidate.startsWith(`${other}/`),
-    );
-    if (ancestor !== undefined) {
-      diagnostics.push(
-        `Project Projection path collision: file ${ancestor} is an ancestor of ${candidate}`,
-      );
-    }
-  }
-
-  const reconciliationPaths = new Set<string>();
-  for (const reconciliation of options.reconciliation ?? []) {
-    if (reconciliationPaths.has(reconciliation.path)) {
-      diagnostics.push(
-        `Project Projection reconciliation paths must be unique: ${reconciliation.path}`,
-      );
-    } else if (!finalPaths.has(reconciliation.path)) {
-      diagnostics.push(
-        `Project Projection reconciliation references an unknown path: ${reconciliation.path}`,
-      );
-    }
-    reconciliationPaths.add(reconciliation.path);
-  }
-  return diagnostics;
-}
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return (
@@ -2492,7 +2335,7 @@ async function stalePlanConflicts(options: {
 export async function commitProjectProjectionPlan(options: {
   readonly targetRoot: string;
   readonly plan: ProjectProjectionChangePlan;
-  readonly dependencies?: ProjectProjectionReconcilerDependencies;
+  readonly dependencies?: ProjectProjectionCommitDependencies;
 }): Promise<ProjectProjectionCommitResult> {
   const stored = storedProjectProjectionPlans.get(options.plan);
   if (stored === undefined) {
@@ -2760,7 +2603,7 @@ async function applyProjectionMutationsAtomically(options: {
   readonly preconditions: readonly ProjectProjectionPathPrecondition[];
   readonly beforeCommit?: () => Promise<void>;
   readonly commitMutation?: (
-    options: ProjectProjectionMutationCommitOptions,
+    options: ProjectProjectionCommitMutationOptions,
   ) => Promise<void>;
 }): Promise<void> {
   if (options.mutations.length === 0) return;
@@ -2892,170 +2735,16 @@ async function applyProjectionMutationsAtomically(options: {
   }
 }
 
-export type ProjectProjectionMutationCommitOptions = {
+export type ProjectProjectionCommitMutationOptions = {
   readonly relativePath: string;
   readonly stagingRoot: string;
   readonly targetRoot: string;
   readonly commit: () => Promise<void>;
 };
 
-export type ProjectProjectionReconcilerDependencies = {
+export type ProjectProjectionCommitDependencies = {
   readonly beforeCommit?: () => Promise<void>;
   readonly commitMutation?: (
-    options: ProjectProjectionMutationCommitOptions,
+    options: ProjectProjectionCommitMutationOptions,
   ) => Promise<void>;
 };
-
-type ReconcileAndApplyProjectProjectionsOptions = {
-  readonly targetRoot: string;
-  readonly before: MaterializeProjectProjectionOptions;
-  readonly after: MaterializeProjectProjectionOptions;
-  readonly preconditions?: readonly ProjectProjectionPathPrecondition[];
-  readonly dryRun?: boolean;
-};
-
-type ReconcileAndApplyProjectProjectionsResult =
-  | {
-      readonly ok: true;
-      readonly changedPaths: readonly string[];
-      readonly actions: readonly ProjectProjectionAction[];
-    }
-  | {
-      readonly ok: false;
-      readonly conflicts: readonly ProjectProjectionConflict[];
-    };
-
-export function createProjectProjectionReconciler(
-  dependencies: ProjectProjectionReconcilerDependencies = {},
-): (
-  options: ReconcileAndApplyProjectProjectionsOptions,
-) => Promise<ReconcileAndApplyProjectProjectionsResult> {
-  return async (
-    options: ReconcileAndApplyProjectProjectionsOptions,
-  ): Promise<ReconcileAndApplyProjectProjectionsResult> => {
-    const [before, after] = await Promise.all([
-      materializeProjectProjection(options.before),
-      materializeProjectProjection(options.after),
-    ]);
-    const current = await readProjectProjectionCurrent({
-      targetRoot: options.targetRoot,
-      before,
-      after,
-      ...(options.preconditions === undefined
-        ? {}
-        : { preconditions: options.preconditions }),
-    });
-    const planning = planProjectProjections({
-      before,
-      current,
-      after,
-      ...(options.preconditions === undefined
-        ? {}
-        : { preconditions: options.preconditions }),
-    });
-    if (!planning.ok) return planning;
-    const result = options.dryRun
-      ? {
-          ok: true as const,
-          changedPaths: planning.plan.mutations.map(
-            (mutation) => mutation.path,
-          ),
-          actions: planning.plan.actions,
-        }
-      : await commitProjectProjectionPlan({
-          targetRoot: options.targetRoot,
-          plan: planning.plan,
-          dependencies,
-        });
-    if (!result.ok) return result;
-    return {
-      ok: true,
-      changedPaths: result.changedPaths,
-      actions: result.actions,
-    };
-  };
-}
-
-export const reconcileAndApplyProjectProjections =
-  createProjectProjectionReconciler();
-
-export async function materializeProjectProjection(
-  options: MaterializeProjectProjectionOptions,
-): Promise<ProjectProjection> {
-  const planDiagnostics = validateProjectProjectionPlan(options);
-  if (planDiagnostics.length > 0) {
-    throw new Error(planDiagnostics.join("\n"));
-  }
-  const finalPaths = new Set<string>();
-  const contentPaths = new Set<string>();
-  const policies = new Map<string, ProjectProjectionReconciliation>();
-  for (const operation of options.operations) {
-    const outputPath = normalizedOutputPath(operation);
-    finalPaths.add(outputPath);
-    if (operation.kind === "setExecutable") {
-      if (!contentPaths.has(outputPath)) {
-        throw new Error(
-          `Project Projection setExecutable requires a preceding content-producing operation: ${outputPath}`,
-        );
-      }
-    } else {
-      contentPaths.add(outputPath);
-    }
-    const driver = operationDriver(operation);
-    if (driver !== undefined) {
-      policies.set(outputPath, { path: outputPath, driver });
-    }
-  }
-  const declaredReconciliationPaths = new Set<string>();
-  for (const reconciliation of options.reconciliation ?? []) {
-    assertNormalizedSafeRelativePath(reconciliation.path, "reconciliation");
-    if (declaredReconciliationPaths.has(reconciliation.path)) {
-      throw new Error(
-        `Project Projection reconciliation paths must be unique: ${reconciliation.path}`,
-      );
-    }
-    if (!finalPaths.has(reconciliation.path)) {
-      throw new Error(
-        `Project Projection reconciliation references an unknown path: ${reconciliation.path}`,
-      );
-    }
-    declaredReconciliationPaths.add(reconciliation.path);
-    policies.set(reconciliation.path, reconciliation);
-  }
-
-  const targetRoot = await mkdtemp(
-    path.join(tmpdir(), "template-project-projection-"),
-  );
-  try {
-    await renderProject({
-      targetRoot,
-      operations: [...options.operations],
-    });
-    const entries = await Promise.all(
-      [...finalPaths].toSorted().map(async (relativePath) => {
-        const filePath = path.join(targetRoot, relativePath);
-        const fileStat = await lstat(filePath);
-        if (!fileStat.isFile()) {
-          throw new Error(
-            `Project Projection output must be a file: ${relativePath}`,
-          );
-        }
-        const mode: ProjectProjectionEntry["mode"] = fileStat.mode & 0o111;
-        return {
-          path: relativePath,
-          kind: "file" as const,
-          content: new Uint8Array(await readFile(filePath)),
-          mode,
-        };
-      }),
-    );
-    return {
-      entries,
-      reconciliation: [...policies.values()].toSorted((left, right) =>
-        left.path.localeCompare(right.path),
-      ),
-    };
-  } finally {
-    await rm(targetRoot, { recursive: true, force: true });
-  }
-}

@@ -9,7 +9,7 @@ import type {
 import {
   resolveTemplateSource,
   type TemplateSourceHandle,
-} from "@ykdz/template-core/renderer";
+} from "@ykdz/template-core/template-source";
 
 export type NativeContentManifest = Readonly<Record<string, unknown>> & {
   readonly name: string;

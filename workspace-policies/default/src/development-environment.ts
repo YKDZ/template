@@ -1,9 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import {
-  resolveTemplateSource,
-  type WriteTextOperation,
-} from "@ykdz/template-core/renderer";
+import { resolveTemplateSource } from "@ykdz/template-core/template-source";
 import {
   developmentContainerDockerfileFromText,
   planDevelopmentContainerToolLayersFromTexts,
@@ -187,7 +184,7 @@ function completeBuiltInDevelopmentContainer(options: {
 }): DevelopmentContainerToolLayerPlan & {
   readonly configuration: PreparedBuiltInDevelopmentContainerResources["configuration"];
   readonly features: Readonly<Record<string, Record<string, unknown>>>;
-  readonly dockerfileOperation: WriteTextOperation;
+  readonly dockerfile: string;
 } {
   const layers = [
     githubCliDevelopmentContainerToolLayer(),
@@ -202,7 +199,7 @@ function completeBuiltInDevelopmentContainer(options: {
     ...plan,
     configuration: options.resources.configuration,
     features: options.resources.configuration.features,
-    dockerfileOperation: developmentContainerDockerfileFromText({
+    dockerfile: developmentContainerDockerfileFromText({
       layers: plan.layers,
       fragmentTexts: options.resources.dockerfileFragments,
     }),

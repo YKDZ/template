@@ -9,7 +9,7 @@ import type { Composition } from "@ykdz/template-core/composition";
 import type { LoadedContentMember } from "@ykdz/template-core/content-identity";
 import type { PackageDefinitionId } from "@ykdz/template-core/project-blueprint";
 import type { ReferencePackageDefinition } from "@ykdz/template-core/reference-package";
-import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
+import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
 import { createGenerator } from "@ykdz/template-generator";
 import { defineNativeReferenceContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
 

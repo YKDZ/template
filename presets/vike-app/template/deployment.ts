@@ -17,7 +17,7 @@ import type { ResourceFileSnapshot } from "@ykdz/template-core/reference-package
 import {
   resolveTemplateSource,
   createTemplateSourceHandle,
-} from "@ykdz/template-core/renderer";
+} from "@ykdz/template-core/template-source";
 import type { NativeContentArtifactResource } from "@ykdz/template-workspace-authoring/content-artifact";
 import type {
   DefaultPresetPackageEvaluation,

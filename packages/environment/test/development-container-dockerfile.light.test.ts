@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { it } from "node:test";
 
-import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
+import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
 
 import {
   developmentContainerDockerfileFromText,
@@ -12,7 +12,7 @@ import {
   prepareDevelopmentContainerToolLayerTexts,
 } from "../src/development-container-tool-layer.ts";
 
-void it("校验开发容器资源后返回普通文本操作", async () => {
+void it("校验开发容器资源并返回 Dockerfile 内容", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "environment-dockerfile-"));
   const sourceRoot = path.join(root, "source");
   await mkdir(sourceRoot);
@@ -45,16 +45,15 @@ void it("校验开发容器资源后返回普通文本操作", async () => {
       layers,
       fragmentTexts,
     });
-    const operation = developmentContainerDockerfileFromText({
+    const dockerfile = developmentContainerDockerfileFromText({
       layers: plan.layers,
       fragmentTexts,
     });
 
-    assert.deepStrictEqual(operation, {
-      kind: "writeText",
-      to: ".devcontainer/Dockerfile",
-      text: "FROM node:24\nENV CI=true\n\nRUN corepack enable\n",
-    });
+    assert.equal(
+      dockerfile,
+      "FROM node:24\nENV CI=true\n\nRUN corepack enable\n",
+    );
 
     await writeFile(
       path.join(sourceRoot, "optional.Dockerfile"),

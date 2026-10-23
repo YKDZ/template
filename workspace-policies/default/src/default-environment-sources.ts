@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 
-import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
+import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
 
 const source = (name: string) =>
   createTemplateSourceHandle(

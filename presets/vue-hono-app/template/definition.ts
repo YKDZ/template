@@ -13,7 +13,7 @@ import {
 import {
   createTemplateSourceHandle,
   resolveTemplateSource,
-} from "@ykdz/template-core/renderer";
+} from "@ykdz/template-core/template-source";
 import { defineNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
 import type { DefaultPresetRootContributionOwner } from "@ykdz/template-workspace/default-composition";
 

@@ -15,7 +15,6 @@ function compose(declarations: readonly SharedRootContribution[]) {
     turboTasks: {},
     typescript: { compilerOptions: {}, include: [] },
     declarations,
-    packagePaths: ["packages/library"],
   });
 }
 
@@ -64,21 +63,12 @@ void it("共享声明冲突指出字段与双方来源", () => {
   );
 });
 
-void it("保留声明顺序并组合独占资源、CI步骤和部分作业设置", () => {
+void it("组合独占CI步骤和部分作业设置", () => {
   const result = compose([
     {
       kind: "shared-root-files",
       source: "文档拥有者",
       ciJob: { name: "检查" },
-      resources: [
-        {
-          operation: {
-            kind: "writeText",
-            to: "docs.config.ts",
-            text: "export {};\n",
-          },
-        },
-      ],
       ciSteps: [{ steps: [{ id: "docs-check", run: "pnpm run docs:check" }] }],
     },
     {
@@ -92,9 +82,6 @@ void it("保留声明顺序并组合独占资源、CI步骤和部分作业设置
   ]);
 
   assert.deepEqual(result.ciJob, { name: "检查", timeoutMinutes: 30 });
-  assert.deepEqual(result.operations, [
-    { kind: "writeText", to: "docs.config.ts", text: "export {};\n" },
-  ]);
   assert.deepEqual(
     result.ciSteps.map(({ source, steps }) => ({
       source,
@@ -132,7 +119,7 @@ void it("保留声明顺序并组合独占资源、CI步骤和部分作业设置
   );
 });
 
-void it("拒绝共享CI身份冲突和指向真实包的根资源", () => {
+void it("拒绝共享CI身份冲突", () => {
   const duplicateStep = compose([
     {
       kind: "shared-root-files",
@@ -153,25 +140,5 @@ void it("拒绝共享CI身份冲突和指向真实包的根资源", () => {
         duplicateStep.ciSteps,
       ),
     /same-step.*文档拥有者.*检查拥有者/u,
-  );
-
-  assert.throws(
-    () =>
-      compose([
-        {
-          kind: "shared-root-files",
-          source: "真实包拥有者",
-          resources: [
-            {
-              operation: {
-                kind: "writeText",
-                to: "packages/library/owned.txt",
-                text: "不能写入包目录\n",
-              },
-            },
-          ],
-        },
-      ]),
-    /真实包拥有者.*不得写入真实包/u,
   );
 });

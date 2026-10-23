@@ -4,8 +4,7 @@ import path from "node:path";
 import {
   resolveTemplateSource,
   type TemplateSourceHandle,
-  type WriteTextOperation,
-} from "@ykdz/template-core/renderer";
+} from "@ykdz/template-core/template-source";
 
 export type DevelopmentContainerToolLayerBuildArgument = {
   readonly name: string;
@@ -578,8 +577,7 @@ export function planDevelopmentContainerToolLayersFromTexts(options: {
 export function developmentContainerDockerfileFromText(options: {
   readonly layers: readonly PlannedDevelopmentContainerToolLayer[];
   readonly fragmentTexts: Readonly<Record<string, string>>;
-  readonly to?: string;
-}): WriteTextOperation {
+}): string {
   const [baseLayer, ...optionalLayers] = options.layers;
   if (baseLayer?.kind !== "base") {
     throw new Error("Development Container Dockerfile requires a base layer.");
@@ -610,11 +608,7 @@ export function developmentContainerDockerfileFromText(options: {
     baseFragment,
     fragments: optionalFragments,
   });
-  return {
-    kind: "writeText",
-    to: options.to ?? ".devcontainer/Dockerfile",
-    text: fragments.map(({ text }) => text.trimEnd()).join("\n\n") + "\n",
-  };
+  return fragments.map(({ text }) => text.trimEnd()).join("\n\n") + "\n";
 }
 
 /** 所属资源 owner 在准备阶段读取所选层文本，planner 只消费该快照。 */

@@ -61,7 +61,11 @@
       "tags": ["quality:heavy"]
     },
     "typecheck": {
-      "dependsOn": ["@ykdz/reference-vike-db#build"],
+      "dependsOn": [
+        "@ykdz/reference-vike-db#build",
+        "@ykdz/template-core#build",
+        "@ykdz/template-workspace#build"
+      ],
       "outputs": [],
       "tags": ["quality:light"]
     },

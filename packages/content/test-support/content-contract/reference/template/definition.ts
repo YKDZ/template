@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type { ReferencePackageDefinition } from "@ykdz/template-core/reference-package";
-import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
+import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
 import { defineNativeReferenceContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
 
 import manifest from "../package.json" with { type: "json" };

@@ -1,11 +1,5 @@
-import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import type { ProjectProjectionReconciliation } from "@ykdz/template-core/project-projection";
-import type {
-  RenderOperation,
-  WriteTextFromFragmentsOperation,
-} from "@ykdz/template-core/renderer";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
 
 import type { CiDiagnosticArtifactDeclaration } from "./ci-diagnostic-artifact.ts";
@@ -14,17 +8,6 @@ import type {
   DeploymentEnvironmentNeed,
 } from "./environment-needs.ts";
 import type { DependencyMaintenancePolicy } from "./project-requirements.ts";
-
-export type RootResourceOperation = Extract<
-  RenderOperation,
-  {
-    readonly kind:
-      | "copyFile"
-      | "writeText"
-      | "writeJson"
-      | "writeTextFromFragments";
-  }
->;
 
 type SharedRootCiStep =
   | (Readonly<Record<string, unknown>> & { readonly id: string })
@@ -59,8 +42,6 @@ export type SharedRootContribution = {
     readonly compilerOptions?: Readonly<Record<string, unknown>>;
     readonly include?: readonly string[];
   };
-  /** 按声明顺序连接，保留忽略规则及其反向规则的语义。 */
-  readonly gitignoreFragments?: WriteTextFromFragmentsOperation["fragments"];
   /** 每个步骤必须有独占的 id；before 引用已存在的步骤。 */
   readonly ciSteps?: readonly {
     readonly before?: string;
@@ -79,12 +60,6 @@ export type SharedRootContribution = {
   readonly dependencyMaintenance?: DependencyMaintenancePolicy;
   /** 由所属内容声明的 CI 失败诊断制品。 */
   readonly ciDiagnosticArtifacts?: readonly CiDiagnosticArtifactDeclaration[];
-  /** 外层拥有者的完整独占资源；禁止对共享文件或真实包范围打补丁。 */
-  readonly resources?: readonly {
-    readonly operation: RootResourceOperation;
-    readonly reconciliation?: ProjectProjectionReconciliation;
-    readonly executable?: boolean;
-  }[];
 };
 
 function pointer(value: string): string {
@@ -129,7 +104,6 @@ export function composeSharedRootFiles(options: {
     readonly include: readonly string[];
   };
   readonly declarations: readonly SharedRootContribution[];
-  readonly packagePaths: readonly string[];
 }) {
   const declarations = options.declarations;
   const manifest = { ...options.manifest };
@@ -175,44 +149,10 @@ export function composeSharedRootFiles(options: {
       values: declaration.ciJob ?? {},
     })),
   ) as NonNullable<SharedRootContribution["ciJob"]>;
-  const owners = new Map<string, string>();
-  for (const declaration of declarations) {
-    for (const resource of declaration.resources ?? []) {
-      const file = resource.operation.to;
-      if (
-        path.posix.normalize(file) !== file ||
-        file.startsWith("../") ||
-        path.posix.isAbsolute(file) ||
-        file.includes("\\") ||
-        options.packagePaths.some(
-          (packagePath) =>
-            file === packagePath || file.startsWith(`${packagePath}/`),
-        )
-      ) {
-        throw new Error(
-          `${declaration.source} 的根资源不得写入真实包或无效路径：${file}`,
-        );
-      }
-      const owner = owners.get(file);
-      if (owner !== undefined) conflict(file, owner, declaration.source);
-      owners.set(file, declaration.source);
-      if (
-        resource.reconciliation !== undefined &&
-        resource.reconciliation.path !== file
-      ) {
-        throw new Error(
-          `${declaration.source} 的资源协调路径必须匹配：${file}`,
-        );
-      }
-    }
-  }
   return {
     manifest,
     turboTasks,
     typescript: { compilerOptions, include },
-    gitignoreFragments: declarations.flatMap(
-      (declaration) => declaration.gitignoreFragments ?? [],
-    ),
     ciSteps: declarations.flatMap((declaration) =>
       (declaration.ciSteps ?? []).map((insertion) => ({
         ...insertion,
@@ -232,26 +172,6 @@ export function composeSharedRootFiles(options: {
       declaration.dependencyMaintenance === undefined
         ? []
         : [declaration.dependencyMaintenance],
-    ),
-    operations: declarations.flatMap((declaration) =>
-      (declaration.resources ?? []).flatMap((resource): RenderOperation[] => [
-        resource.operation,
-        ...(resource.executable === undefined
-          ? []
-          : [
-              {
-                kind: "setExecutable" as const,
-                path: resource.operation.to,
-                executable: resource.executable,
-              },
-            ]),
-      ]),
-    ),
-    resourceOwners: owners,
-    reconciliation: declarations.flatMap((declaration) =>
-      (declaration.resources ?? []).flatMap((resource) =>
-        resource.reconciliation === undefined ? [] : [resource.reconciliation],
-      ),
     ),
   };
 }
@@ -306,17 +226,4 @@ export function composeCheckWorkflow(
     );
   }
   return workflow.toString();
-}
-
-/** 从实际基础输出检查独占资源，避免平行维护一份根文件清单。 */
-export function assertExclusiveRootResources(
-  baseOperations: readonly RenderOperation[],
-  source: string,
-  owners: ReadonlyMap<string, string>,
-): void {
-  for (const operation of baseOperations) {
-    const file = "to" in operation ? operation.to : operation.path;
-    const owner = owners.get(file);
-    if (owner !== undefined) conflict(file, source, owner);
-  }
 }
