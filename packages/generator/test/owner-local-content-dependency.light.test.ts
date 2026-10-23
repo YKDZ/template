@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -16,6 +16,7 @@ import type {
 } from "@ykdz/template-core/project-blueprint";
 import type {
   PackageBinding,
+  PresetSelectionDefinition,
   ReferenceDependency,
 } from "@ykdz/template-core/reference-package";
 
@@ -162,6 +163,23 @@ function createEngine(content: readonly LoadedContentMember[]) {
   return createGenerator({ content, composition });
 }
 
+function loadedPreset(
+  identity: ContentIdentity,
+  nodes: PresetSelectionDefinition<CreationInput>["nodes"],
+): LoadedContentMember<PresetSelectionDefinition<CreationInput>, "preset"> {
+  return {
+    identity,
+    kind: "preset",
+    alias: "bound-web-api",
+    source: {
+      specifier: `${identity.packageName}/preset`,
+      moduleURL: `file:///fixture/${identity.packageName}/preset.js`,
+      manifestURL: `file:///fixture/${identity.packageName}/package.json`,
+    },
+    definition: { kind: "preset", operations: ["init", "add"], nodes },
+  };
+}
+
 async function prepareOne(
   engine: ReturnType<typeof createEngine>,
   identity: ContentIdentity,
@@ -195,6 +213,440 @@ async function withTemporaryTarget(
 }
 
 void describe("owner-local内容依赖", () => {
+  void it("将独立 provider 绑定到显式预设节点并在恢复后保留关系", async () => {
+    const consumerIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/web",
+      exportPath: "./template",
+    };
+    const providerIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/api",
+      exportPath: "./template",
+    };
+    const presetIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/web-api",
+      exportPath: "./preset",
+    };
+    const consumer = referenceDefinition("web", {
+      key: "api",
+      contentIdentity: providerIdentity,
+    } satisfies ReferenceDependency<CreationInput>);
+    const provider = referenceDefinition("api");
+    const nodes = [
+      [
+        "web",
+        {
+          reference: { alias: "web", instance: "independent" as const },
+          creationInput: {
+            init: { path: "apps/web" },
+            add: { path: "apps/web" },
+          },
+          dependencyBindings: { api: "api" },
+        },
+      ],
+      [
+        "api",
+        {
+          reference: { alias: "api", instance: "independent" as const },
+          creationInput: {
+            init: { path: "packages/custom-api" },
+            add: { path: "packages/custom-api" },
+          },
+        },
+      ],
+    ] as const;
+
+    for (const orderedNodes of [nodes, [...nodes].reverse()]) {
+      const content = [
+        loadedReference(
+          "source",
+          consumerIdentity.packageName,
+          consumerIdentity.exportPath,
+          "file:///fixture/web/template.js",
+          consumer,
+        ),
+        loadedReference(
+          "source",
+          providerIdentity.packageName,
+          providerIdentity.exportPath,
+          "file:///fixture/api/template.js",
+          provider,
+        ),
+        loadedPreset(presetIdentity, Object.fromEntries(orderedNodes)),
+      ];
+      const engine = createEngine(content);
+      const directConsumer = referenceDefinition("web", {
+        key: "api",
+        contentIdentity: providerIdentity,
+        creationInput: { path: "packages/default-api" },
+      } satisfies ReferenceDependency<CreationInput>);
+      const directEngine = createEngine([
+        loadedReference(
+          "source",
+          consumerIdentity.packageName,
+          consumerIdentity.exportPath,
+          "file:///fixture/web/template.js",
+          directConsumer,
+        ),
+        loadedReference(
+          "source",
+          providerIdentity.packageName,
+          providerIdentity.exportPath,
+          "file:///fixture/api/template.js",
+          provider,
+        ),
+      ]);
+      const direct = directEngine.computeProject(
+        await directEngine.prepareProject({
+          selection: {
+            roots: [
+              {
+                nodeIdentity: "web",
+                contentIdentity: consumerIdentity,
+                creationInput: { path: "apps/direct-web" },
+              },
+            ],
+          },
+          conventions: { edition: "stable" },
+          operationFacts: null,
+        }),
+      );
+      assert.equal(direct.generationRecord.packages.length, 2);
+      assert.equal(
+        direct.generationRecord.packages.find(
+          (item) =>
+            item.contentIdentity.packageName === providerIdentity.packageName,
+        )?.createdBy,
+        "shared-dependency",
+      );
+
+      const equalInputConsumer = referenceDefinition("web", {
+        key: "api",
+        contentIdentity: providerIdentity,
+        creationInput: { path: "packages/custom-api" },
+      } satisfies ReferenceDependency<CreationInput>);
+      const equalInputEngine = createEngine([
+        loadedReference(
+          "source",
+          consumerIdentity.packageName,
+          consumerIdentity.exportPath,
+          "file:///fixture/web/template.js",
+          equalInputConsumer,
+        ),
+        loadedReference(
+          "source",
+          providerIdentity.packageName,
+          providerIdentity.exportPath,
+          "file:///fixture/api/template.js",
+          provider,
+        ),
+        loadedPreset(presetIdentity, Object.fromEntries(orderedNodes)),
+      ]);
+      const equalInput = equalInputEngine.computeProject(
+        await equalInputEngine.prepareProject({
+          selection: { presets: [{ contentIdentity: presetIdentity }] },
+          conventions: { edition: "stable" },
+          operationFacts: null,
+        }),
+      );
+      assert.equal(equalInput.generationRecord.packages.length, 2);
+
+      await withTemporaryTarget(async (targetRoot) => {
+        const initialized = await engine.init({
+          targetRoot,
+          selection: { presets: [{ contentIdentity: presetIdentity }] },
+          conventions: { edition: "stable" },
+          operationFacts: null,
+        });
+        assert.equal(
+          initialized.status,
+          "success",
+          JSON.stringify(initialized),
+        );
+        if (initialized.status !== "success") return;
+
+        const selection = initialized.generationRecord.selections[0];
+        const webId = selection?.nodes.web;
+        const apiId = selection?.nodes.api;
+        assert.ok(webId);
+        assert.ok(apiId);
+        assert.equal(initialized.generationRecord.packages.length, 2);
+        const webRecord = initialized.generationRecord.packages.find(
+          (item) => item.packageDefinitionId === webId,
+        );
+        const apiRecord = initialized.generationRecord.packages.find(
+          (item) => item.packageDefinitionId === apiId,
+        );
+        assert.equal(webRecord?.dependencyBindings.api, apiId);
+        assert.equal(apiRecord?.createdBy, "initialization");
+        assert.deepEqual(apiRecord?.creationInput, {
+          path: "packages/custom-api",
+        });
+
+        const restored = createEngine(content);
+        const project = await restored.restoreProject({
+          repositoryRoot: targetRoot,
+        });
+        const before = restored.computeProject(
+          await restored
+            .prepareAddProject({
+              restored: project,
+              selection: {
+                contentIdentity: providerIdentity,
+                creationInput: { path: "packages/another-api" },
+              },
+              operationFacts: null,
+            })
+            .then((preparation) => preparation.before),
+        );
+        assert.ok(
+          [webId, apiId].every((id) =>
+            before.generationRecord.packages.some(
+              (item) => item.packageDefinitionId === id,
+            ),
+          ),
+        );
+        const restoredWeb = before.generationRecord.packages.find(
+          (item) => item.packageDefinitionId === webId,
+        );
+        assert.equal(restoredWeb?.dependencyBindings.api, apiId);
+      });
+    }
+  });
+
+  void it("拒绝错误身份、冲突输入和预设实例循环", async () => {
+    const consumerIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/web",
+      exportPath: "./template",
+    };
+    const providerIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/api",
+      exportPath: "./template",
+    };
+    const otherIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/other",
+      exportPath: "./template",
+    };
+    const presetIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/web-api",
+      exportPath: "./preset",
+    };
+    const webNode = {
+      reference: { alias: "web", instance: "independent" as const },
+      creationInput: { init: { path: "apps/web" } },
+      dependencyBindings: { api: "api" },
+    };
+    const apiNode = {
+      reference: { alias: "api", instance: "independent" as const },
+      creationInput: { init: { path: "packages/custom-api" } },
+    };
+    const baseContent = [
+      loadedReference(
+        "source",
+        consumerIdentity.packageName,
+        consumerIdentity.exportPath,
+        "file:///fixture/web/template.js",
+        referenceDefinition("web", {
+          key: "api",
+          contentIdentity: providerIdentity,
+          creationInput: { path: "packages/expected-api" },
+        }),
+      ),
+      loadedReference(
+        "source",
+        providerIdentity.packageName,
+        providerIdentity.exportPath,
+        "file:///fixture/api/template.js",
+        referenceDefinition("api"),
+      ),
+    ];
+    const inputMismatchEngine = createEngine([
+      ...baseContent,
+      loadedPreset(presetIdentity, { web: webNode, api: apiNode }),
+    ]);
+    await withTemporaryTarget(async (targetRoot) => {
+      const result = await inputMismatchEngine.init({
+        targetRoot,
+        selection: { presets: [{ contentIdentity: presetIdentity }] },
+        conventions: { edition: "stable" },
+        operationFacts: null,
+      });
+      assert.notEqual(result.status, "success");
+      await assert.rejects(access(targetRoot), { code: "ENOENT" });
+    });
+
+    const wrongIdentityEngine = createEngine([
+      loadedReference(
+        "source",
+        consumerIdentity.packageName,
+        consumerIdentity.exportPath,
+        "file:///fixture/web/template.js",
+        referenceDefinition("web", {
+          key: "api",
+          contentIdentity: providerIdentity,
+        }),
+      ),
+      loadedReference(
+        "source",
+        otherIdentity.packageName,
+        otherIdentity.exportPath,
+        "file:///fixture/other/template.js",
+        referenceDefinition("other"),
+      ),
+      loadedPreset(presetIdentity, {
+        web: webNode,
+        api: {
+          reference: { alias: "other", instance: "independent" },
+          creationInput: { init: { path: "packages/other" } },
+        },
+      }),
+    ]);
+    await assert.rejects(
+      wrongIdentityEngine.prepareProject({
+        selection: { presets: [{ contentIdentity: presetIdentity }] },
+        conventions: { edition: "stable" },
+        operationFacts: null,
+      }),
+      /依赖绑定身份不一致/u,
+    );
+
+    const cyclePresetIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/cycle",
+      exportPath: "./preset",
+    };
+    const cycleEngine = createEngine([
+      loadedReference(
+        "source",
+        consumerIdentity.packageName,
+        consumerIdentity.exportPath,
+        "file:///fixture/web/template.js",
+        referenceDefinition("web", {
+          key: "api",
+          contentIdentity: providerIdentity,
+        }),
+      ),
+      loadedReference(
+        "source",
+        providerIdentity.packageName,
+        providerIdentity.exportPath,
+        "file:///fixture/api/template.js",
+        referenceDefinition("api", {
+          key: "web",
+          contentIdentity: consumerIdentity,
+        }),
+      ),
+      loadedPreset(cyclePresetIdentity, {
+        web: webNode,
+        api: {
+          ...apiNode,
+          dependencyBindings: { web: "web" },
+        },
+      }),
+    ]);
+    await assert.rejects(
+      cycleEngine.prepareProject({
+        selection: { presets: [{ contentIdentity: cyclePresetIdentity }] },
+        conventions: { edition: "stable" },
+        operationFacts: null,
+      }),
+      /依赖形成循环/u,
+    );
+  });
+
+  void it("恢复时拒绝改绑到同内容的另一个 independent 实例", async () => {
+    const consumerIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/web",
+      exportPath: "./template",
+    };
+    const providerIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/api",
+      exportPath: "./template",
+    };
+    const presetIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/web-api",
+      exportPath: "./preset",
+    };
+    const content = [
+      loadedReference(
+        "source",
+        consumerIdentity.packageName,
+        consumerIdentity.exportPath,
+        "file:///fixture/web/template.js",
+        referenceDefinition("web", {
+          key: "api",
+          contentIdentity: providerIdentity,
+        }),
+      ),
+      loadedReference(
+        "source",
+        providerIdentity.packageName,
+        providerIdentity.exportPath,
+        "file:///fixture/api/template.js",
+        referenceDefinition("api"),
+      ),
+      loadedPreset(presetIdentity, {
+        web: {
+          reference: { alias: "web", instance: "independent" },
+          creationInput: { init: { path: "apps/web" } },
+          dependencyBindings: { api: "api" },
+        },
+        api: {
+          reference: { alias: "api", instance: "independent" },
+          creationInput: { init: { path: "packages/api" } },
+        },
+        "other-api": {
+          reference: { alias: "api", instance: "independent" },
+          creationInput: { init: { path: "packages/other-api" } },
+        },
+      }),
+    ];
+    await withTemporaryTarget(async (targetRoot) => {
+      const initialized = await createEngine(content).init({
+        targetRoot,
+        selection: { presets: [{ contentIdentity: presetIdentity }] },
+        conventions: { edition: "stable" },
+        operationFacts: null,
+      });
+      assert.equal(initialized.status, "success", JSON.stringify(initialized));
+      if (initialized.status !== "success") return;
+      const selection = initialized.generationRecord.selections[0];
+      const webId = selection?.nodes.web;
+      const otherApiId = selection?.nodes["other-api"];
+      assert.ok(webId);
+      assert.ok(otherApiId);
+      const recordPath = path.join(targetRoot, ".template/generation.json");
+      const record = JSON.parse(await readFile(recordPath, "utf8")) as {
+        packages: {
+          packageDefinitionId: string;
+          dependencyBindings: Record<string, string>;
+        }[];
+      };
+      const webRecord = record.packages.find(
+        (item) => item.packageDefinitionId === webId,
+      );
+      assert.ok(webRecord);
+      webRecord.dependencyBindings.api = otherApiId;
+      await writeFile(recordPath, JSON.stringify(record));
+      const corruptedRecord = await readFile(recordPath);
+
+      await assert.rejects(
+        createEngine(content).restoreProject({ repositoryRoot: targetRoot }),
+        /预设节点依赖绑定不一致/u,
+      );
+      assert.deepEqual(await readFile(recordPath), corruptedRecord);
+    });
+  });
+
   void it("按所属命名空间、公开入口与owner解析结果绑定", async () => {
     let firstResolutionCount = 0;
     const providerIdentity = {

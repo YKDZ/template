@@ -9,7 +9,7 @@ import type { PackageBinding } from "@ykdz/template-core/reference-package";
 
 import { defineReferencePackage } from "../src/reference-package.ts";
 
-test("原生作者factory只准备快照并把完整原生文档留给组合", async () => {
+await test("原生作者factory只准备快照并把完整原生文档留给组合", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "native-reference-"));
   try {
     await mkdir(path.join(root, "src"), { recursive: true });

@@ -110,6 +110,7 @@ void describe("规范内容身份索引", () => {
       beta,
     );
     assert.strictEqual(index.resolve(beta.identity, "reference"), beta);
+    assert.throws(() => index.resolve("shared", "reference"), /歧义/u);
   });
 
   void it("拒绝未限定歧义、错误种类与重复规范身份", () => {
@@ -122,8 +123,8 @@ void describe("规范内容身份索引", () => {
       value: "first",
     });
     const sameAlias = member({
-      namespace: "second",
-      packageName: "@example/content",
+      namespace: "first",
+      packageName: "@example/content-preset",
       exportPath: "./template",
       alias: "content",
       kind: "preset",
@@ -131,7 +132,8 @@ void describe("规范内容身份索引", () => {
     });
     const index = createContentIndex([reference, sameAlias]);
 
-    assert.throws(() => index.resolve("content", "reference"), /歧义/u);
+    assert.strictEqual(index.resolve("content", "reference"), reference);
+    assert.strictEqual(index.resolve("content", "preset"), sameAlias);
     assert.throws(
       () => index.resolve(sameAlias.identity, "reference"),
       /种类不符/u,

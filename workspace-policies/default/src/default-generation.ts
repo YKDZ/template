@@ -13,6 +13,7 @@ import { createGenerator } from "@ykdz/template-generator";
 import {
   createDefaultComposition,
   prepareDefaultInitOperationFacts,
+  prepareDefaultRootAttachmentDependencies,
   prepareDefaultRootDeclarations,
   type DefaultContentMember,
   type DefaultOperationFacts,
@@ -50,6 +51,8 @@ async function initOperationFacts(
 ): Promise<DefaultOperationFacts> {
   return prepareDefaultInitOperationFacts({
     rootDeclarations: await prepareDefaultRootDeclarations(content),
+    rootAttachmentDependencies:
+      prepareDefaultRootAttachmentDependencies(content),
   });
 }
 

@@ -64,6 +64,39 @@ void describe("预设声明", () => {
     assert.deepStrictEqual(preset.operations, ["init", "add"]);
   });
 
+  void it("保留并冻结同次选择的节点依赖绑定", () => {
+    const dependencyBindings = { api: "api" } as const;
+    const preset = definePreset({
+      metadata: {
+        alias: "web-api",
+        title: "Web 与 API",
+        description: "将 Web 的 API 依赖绑定到同次选择的节点。",
+      },
+      operations: ["init"],
+      nodes: {
+        web: {
+          reference: { alias: "web", instance: "independent" },
+          dependencyBindings,
+        },
+        api: {
+          reference: { alias: "api", instance: "independent" },
+        },
+      },
+    });
+    const boundNode: "api" | undefined =
+      preset.nodes.web?.dependencyBindings?.api;
+
+    assert.deepStrictEqual(preset.nodes.web?.dependencyBindings, {
+      api: "api",
+    });
+    assert.notStrictEqual(
+      preset.nodes.web?.dependencyBindings,
+      dependencyBindings,
+    );
+    assert.ok(Object.isFrozen(preset.nodes.web?.dependencyBindings));
+    assert.equal(boundNode, "api");
+  });
+
   void it("接受所属包的根公开导出作为预设项目身份", () => {
     const preset = definePreset({
       metadata: {
@@ -131,6 +164,37 @@ void describe("预设声明", () => {
           },
         }),
       /重复选择独立参考/u,
+    );
+    assert.throws(
+      () =>
+        definePreset({
+          metadata,
+          operations: ["init"],
+          nodes: {
+            consumer: {
+              reference: { alias: "consumer", instance: "independent" },
+              dependencyBindings: { provider: "missing" },
+            },
+            provider: {
+              reference: { alias: "provider", instance: "independent" },
+            },
+          },
+        }),
+      /绑定目标不存在/u,
+    );
+    assert.throws(
+      () =>
+        definePreset({
+          metadata,
+          operations: ["init"],
+          nodes: {
+            consumer: {
+              reference: { alias: "consumer", instance: "independent" },
+              dependencyBindings: { "": "consumer" },
+            },
+          },
+        }),
+      /依赖绑定无效/u,
     );
     assert.throws(
       () =>

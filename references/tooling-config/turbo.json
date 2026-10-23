@@ -2,6 +2,12 @@
   "extends": ["//"],
   "tags": ["library"],
   "tasks": {
+    "build": {
+      "dependsOn": [],
+      "inputs": [],
+      "outputs": [],
+      "tags": []
+    },
     "format:check": {
       "inputs": [],
       "outputs": [],
@@ -21,7 +27,7 @@
       "tags": ["work:repair"]
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"],
+      "dependsOn": [],
       "inputs": [],
       "outputs": [],
       "tags": ["quality:light"]
