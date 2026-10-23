@@ -3,9 +3,11 @@ import {
   chmod,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,13 +15,19 @@ import path from "node:path";
 import { describe, it } from "node:test";
 
 import {
+  commitProjectProjectionPlan,
   createProjectProjectionReconciler,
   materializeProjectProjection,
+  planProjectProjections,
+  readProjectProjectionCurrent,
+  getProjectProjectionReconciliationPaths,
   reconcileAndApplyProjectProjections,
   reconcileProjectProjections,
   validateProjectProjectionPlan,
   type ProjectProjection,
   type ProjectProjectionEntry,
+  type ProjectProjectionSource,
+  type CurrentProjectProjectionEntry,
   type ProjectProjectionMirrorSlot,
 } from "@ykdz/template-core/project-projection";
 import {
@@ -63,6 +71,30 @@ function structuredProjection(
     entries: [textEntry(projectionPath, `${JSON.stringify(value, null, 2)}\n`)],
     reconciliation: [{ path: projectionPath, driver: "structured" }],
   };
+}
+
+async function reconcileWithCurrent(options: {
+  readonly before: ProjectProjection;
+  readonly after: ProjectProjection;
+  readonly readCurrent: (
+    path: string,
+  ) => Promise<CurrentProjectProjectionEntry | undefined>;
+}) {
+  const current = await Promise.all(
+    getProjectProjectionReconciliationPaths(options).map(
+      async (projectionPath) => {
+        const fact = await options.readCurrent(projectionPath);
+        return fact === undefined
+          ? { path: projectionPath, kind: "missing" as const }
+          : { ...fact, path: projectionPath };
+      },
+    ),
+  );
+  return reconcileProjectProjections({
+    before: options.before,
+    current,
+    after: options.after,
+  });
 }
 
 void describe("Project Projection materialization", () => {
@@ -285,7 +317,7 @@ void describe("Project Projection materialization", () => {
     assert.strictEqual(before.entries[0]?.mode, 0);
     assert.strictEqual(after.entries[0]?.mode, 0o111);
 
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before,
       after,
       async readCurrent() {
@@ -348,6 +380,365 @@ void describe("Project Projection materialization", () => {
     }
   });
 
+  void it("显式事实可纯预览，过期计划提交前拒绝且不写入", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-explicit-plan-"),
+    );
+    const before = {
+      entries: [textEntry("README.md", "before\n")],
+      reconciliation: [{ path: "README.md", driver: "text" as const }],
+    };
+    const after = {
+      entries: [
+        textEntry("README.md", "after\n"),
+        textEntry("packages/docs/README.md", "new package\n"),
+      ],
+      reconciliation: [
+        { path: "README.md", driver: "text" as const },
+        { path: "packages/docs/README.md", driver: "text" as const },
+      ],
+    };
+
+    try {
+      await writeFile(path.join(targetRoot, "README.md"), "before\n");
+      const preconditions = [
+        {
+          path: "packages/docs",
+          kind: "must-not-exist" as const,
+          reason: "新包路径已被占用",
+        },
+      ];
+      const current = await readProjectProjectionCurrent({
+        targetRoot,
+        before,
+        after,
+        preconditions,
+      });
+      const planning = planProjectProjections({
+        before,
+        current,
+        after,
+        preconditions,
+      });
+
+      assert.strictEqual(planning.ok, true);
+      if (!planning.ok) return;
+      assert.deepStrictEqual(planning.plan.actions, [
+        { path: "README.md", driver: "text", action: "update" },
+        {
+          path: "packages/docs/README.md",
+          driver: "text",
+          action: "create",
+        },
+      ]);
+      await assert.rejects(stat(path.join(targetRoot, "packages/docs")), {
+        code: "ENOENT",
+      });
+
+      await writeFile(path.join(targetRoot, "README.md"), "latest user edit\n");
+      const committed = await commitProjectProjectionPlan({
+        targetRoot,
+        plan: planning.plan,
+      });
+
+      assert.strictEqual(committed.ok, false);
+      if (committed.ok) return;
+      assert.ok(
+        committed.conflicts.some((conflict) => conflict.path === "README.md"),
+      );
+      assert.strictEqual(
+        await readFile(path.join(targetRoot, "README.md"), "utf8"),
+        "latest user edit\n",
+      );
+      await assert.rejects(
+        stat(path.join(targetRoot, "packages/docs/README.md")),
+        {
+          code: "ENOENT",
+        },
+      );
+    } finally {
+      await rm(targetRoot, { recursive: true, force: true });
+    }
+  });
+
+  void it("投影冲突保留相关来源", () => {
+    const beforeSource: ProjectProjectionSource = {
+      identity: "content:before",
+      label: "前置内容",
+    };
+    const afterSource: ProjectProjectionSource = {
+      identity: "content:after",
+      label: "新增内容",
+    };
+    const currentSource: ProjectProjectionSource = {
+      identity: "workspace:current",
+      label: "工作区声明",
+    };
+    const result = reconcileProjectProjections({
+      before: {
+        entries: [
+          { ...textEntry("README.md", "before\n"), sources: [beforeSource] },
+        ],
+        reconciliation: [
+          { path: "README.md", driver: "text", sources: [beforeSource] },
+        ],
+      },
+      current: [
+        {
+          ...textEntry("README.md", "consumer\n"),
+          sources: [currentSource],
+        },
+      ],
+      after: {
+        entries: [
+          { ...textEntry("README.md", "after\n"), sources: [afterSource] },
+        ],
+        reconciliation: [
+          { path: "README.md", driver: "text", sources: [afterSource] },
+        ],
+      },
+    });
+
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.deepEqual(
+      result.conflicts[0]?.sources?.map((source) => source.label),
+      ["前置内容", "工作区声明", "新增内容"],
+    );
+  });
+
+  void it("提交复查规划实际读取的只读事实并忽略无关变化", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-read-facts-"),
+    );
+    const before = textProjection("README.md", "before\n");
+    const after = textProjection("README.md", "after\n");
+
+    try {
+      await writeFile(path.join(targetRoot, "README.md"), "before\n");
+      await writeFile(path.join(targetRoot, "project-input.json"), "first\n");
+      const current = await readProjectProjectionCurrent({
+        targetRoot,
+        before,
+        after,
+        additionalPaths: ["project-input.json"],
+      });
+      const planning = planProjectProjections({ before, current, after });
+      assert.equal(planning.ok, true);
+      if (!planning.ok) return;
+
+      await writeFile(path.join(targetRoot, "project-input.json"), "changed\n");
+      const stale = await commitProjectProjectionPlan({
+        targetRoot,
+        plan: planning.plan,
+      });
+      assert.equal(stale.ok, false);
+      if (stale.ok) return;
+      assert.ok(
+        stale.conflicts.some(
+          (conflict) => conflict.path === "project-input.json",
+        ),
+      );
+      assert.equal(
+        await readFile(path.join(targetRoot, "README.md"), "utf8"),
+        "before\n",
+      );
+
+      const freshCurrent = await readProjectProjectionCurrent({
+        targetRoot,
+        before,
+        after,
+        additionalPaths: ["project-input.json"],
+      });
+      const freshPlanning = planProjectProjections({
+        before,
+        current: freshCurrent,
+        after,
+      });
+      assert.equal(freshPlanning.ok, true);
+      if (!freshPlanning.ok) return;
+      await writeFile(path.join(targetRoot, "unrelated.txt"), "unrelated\n");
+      const committed = await commitProjectProjectionPlan({
+        targetRoot,
+        plan: freshPlanning.plan,
+      });
+      assert.equal(committed.ok, true);
+      assert.equal(
+        await readFile(path.join(targetRoot, "README.md"), "utf8"),
+        "after\n",
+      );
+      assert.equal(
+        await readFile(path.join(targetRoot, "unrelated.txt"), "utf8"),
+        "unrelated\n",
+      );
+    } finally {
+      await rm(targetRoot, { recursive: true, force: true });
+    }
+  });
+
+  void it("拒绝会让提交读取仓库外路径的 Current 事实", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-invalid-fact-"),
+    );
+    const before = textProjection("README.md", "before\n");
+    const after = textProjection("README.md", "after\n");
+
+    try {
+      await writeFile(path.join(targetRoot, "README.md"), "before\n");
+      const current = await readProjectProjectionCurrent({
+        targetRoot,
+        before,
+        after,
+      });
+      assert.throws(
+        () =>
+          planProjectProjections({
+            before,
+            current,
+            after,
+            readFacts: [textEntry("../outside", "untrusted\n")],
+          }),
+        (error) =>
+          error instanceof Error &&
+          error.message.startsWith(
+            "Current 事实路径必须是安全的标准相对路径：",
+          ),
+      );
+    } finally {
+      await rm(targetRoot, { recursive: true, force: true });
+    }
+  });
+
+  void it("复查祖先种类并允许缺失祖先变为目录", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-ancestor-facts-"),
+    );
+    const outsideRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-ancestor-target-"),
+    );
+    const before: ProjectProjection = { entries: [], reconciliation: [] };
+    const after = textProjection("nested/README.md", "generated\n");
+
+    try {
+      const current = await readProjectProjectionCurrent({
+        targetRoot,
+        before,
+        after,
+      });
+      const planning = planProjectProjections({ before, current, after });
+      assert.equal(planning.ok, true);
+      if (!planning.ok) return;
+
+      await mkdir(path.join(targetRoot, "nested"));
+      const committed = await commitProjectProjectionPlan({
+        targetRoot,
+        plan: planning.plan,
+      });
+      assert.equal(committed.ok, true);
+      assert.equal(
+        await readFile(path.join(targetRoot, "nested/README.md"), "utf8"),
+        "generated\n",
+      );
+
+      const secondTarget = path.join(targetRoot, "second");
+      await mkdir(secondTarget);
+      const secondAfter = textProjection("linked/README.md", "generated\n");
+      const secondCurrent = await readProjectProjectionCurrent({
+        targetRoot: secondTarget,
+        before,
+        after: secondAfter,
+      });
+      const secondPlanning = planProjectProjections({
+        before,
+        current: secondCurrent,
+        after: secondAfter,
+      });
+      assert.equal(secondPlanning.ok, true);
+      if (!secondPlanning.ok) return;
+
+      await symlink(outsideRoot, path.join(secondTarget, "linked"));
+      const stale = await commitProjectProjectionPlan({
+        targetRoot: secondTarget,
+        plan: secondPlanning.plan,
+      });
+      assert.equal(stale.ok, false);
+      if (stale.ok) return;
+      assert.ok(stale.conflicts.some((conflict) => conflict.path === "linked"));
+      await assert.rejects(stat(path.join(outsideRoot, "README.md")), {
+        code: "ENOENT",
+      });
+    } finally {
+      await Promise.all([
+        rm(targetRoot, { recursive: true, force: true }),
+        rm(outsideRoot, { recursive: true, force: true }),
+      ]);
+    }
+  });
+
+  void it("初始化计划复查目标的空目录或缺失状态", async () => {
+    const parentRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-init-precondition-"),
+    );
+    const before: ProjectProjection = { entries: [], reconciliation: [] };
+    const after = textProjection("README.md", "generated\n");
+    const preconditions = [
+      {
+        path: ".",
+        kind: "directory-empty-or-missing" as const,
+        reason: "初始化目标必须为空或不存在",
+      },
+    ];
+
+    try {
+      for (const initial of ["empty-directory", "missing-directory"] as const) {
+        const targetRoot = path.join(parentRoot, initial);
+        if (initial === "empty-directory") await mkdir(targetRoot);
+        const current = await readProjectProjectionCurrent({
+          targetRoot,
+          before,
+          after,
+          preconditions,
+        });
+        const planning = planProjectProjections({
+          before,
+          current,
+          after,
+          preconditions,
+        });
+        assert.equal(planning.ok, true);
+        if (!planning.ok) return;
+
+        if (initial === "empty-directory") {
+          await writeFile(path.join(targetRoot, "OWNER"), "user\n");
+        } else {
+          await mkdir(targetRoot);
+        }
+        const committed = await commitProjectProjectionPlan({
+          targetRoot,
+          plan: planning.plan,
+        });
+        assert.equal(committed.ok, false);
+        if (committed.ok) return;
+        assert.ok(
+          committed.conflicts.some((conflict) => conflict.path === "."),
+        );
+        await assert.rejects(stat(path.join(targetRoot, "README.md")), {
+          code: "ENOENT",
+        });
+        if (initial === "empty-directory") {
+          assert.equal(
+            await readFile(path.join(targetRoot, "OWNER"), "utf8"),
+            "user\n",
+          );
+        } else {
+          assert.deepEqual(await readdir(targetRoot), []);
+        }
+      }
+    } finally {
+      await rm(parentRoot, { recursive: true, force: true });
+    }
+  });
+
   void it("reads only the Addition Delta so equal Before/After template output cannot upgrade Current", async () => {
     const unchanged = textEntry("unchanged.txt", "projected\n");
     const before: ProjectProjection = {
@@ -369,7 +760,7 @@ void describe("Project Projection materialization", () => {
     };
     const reads: string[] = [];
 
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before,
       after,
       async readCurrent(projectionPath) {
@@ -402,7 +793,7 @@ void describe("Project Projection materialization", () => {
       settings: { obsolete: true, timeout: 10 },
     });
 
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before,
       after,
       async readCurrent() {
@@ -435,7 +826,7 @@ void describe("Project Projection materialization", () => {
   });
 
   void it("reports an incompatible concurrent scalar change at its structured location", async () => {
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: structuredProjection("config.json", {
         settings: { timeout: 10 },
       }),
@@ -485,7 +876,7 @@ void describe("Project Projection materialization", () => {
   }[]) {
     void it(`conflicts when explicit ${scenario.beforeKind} is concurrently replaced by different objects`, async () => {
       const { beforeValue, beforeDiagnostic } = scenario;
-      const result = await reconcileProjectProjections({
+      const result = await reconcileWithCurrent({
         before: structuredProjection("config.json", {
           setting: beforeValue,
         }),
@@ -519,7 +910,7 @@ void describe("Project Projection materialization", () => {
   }
 
   void it("recursively combines concurrent object additions only at a missing location", async () => {
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: structuredProjection("config.json", {}),
       after: structuredProjection("config.json", {
         setting: { generated: true },
@@ -540,7 +931,7 @@ void describe("Project Projection materialization", () => {
   });
 
   void it("rejects undefined because it is not a JSON structured value", async () => {
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: {
         entries: [textEntry("config.json", '{"setting":undefined}\n')],
         reconciliation: [{ path: "config.json", driver: "structured" }],
@@ -570,7 +961,7 @@ void describe("Project Projection materialization", () => {
   });
 
   void it("returns a structured parse diagnostic for invalid Current JSON", async () => {
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: structuredProjection("config.json", { enabled: false }),
       after: structuredProjection("config.json", { enabled: true }),
       async readCurrent() {
@@ -597,7 +988,7 @@ void describe("Project Projection materialization", () => {
   });
 
   void it("uses the root pointer for a structured file-level conflict", async () => {
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: structuredProjection("config.json", { enabled: false }),
       after: structuredProjection("config.json", { enabled: true }),
       async readCurrent() {
@@ -626,7 +1017,7 @@ void describe("Project Projection materialization", () => {
         identitySets: [{ location: "", identity: { kind: "self" as const } }],
       },
     ];
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: {
         ...structuredProjection("config.json", ["base"]),
         reconciliation: identitySetReconciliation,
@@ -661,7 +1052,7 @@ void describe("Project Projection materialization", () => {
         ],
       },
     ];
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: {
         ...structuredProjection("config.json", {
           members: [{ id: "base", settings: { timeout: 10 } }],
@@ -753,7 +1144,7 @@ void describe("Project Projection materialization", () => {
         ],
       },
     ];
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: {
         ...structuredProjection("config.json", {
           mounts: [
@@ -836,7 +1227,7 @@ void describe("Project Projection materialization", () => {
         ],
       },
     ];
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: {
         ...structuredProjection("config.json", {
           members: [{ owner: "base", name: "shared" }],
@@ -892,7 +1283,7 @@ void describe("Project Projection materialization", () => {
         ],
       },
     ];
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: {
         ...structuredProjection("config.json", {
           members: [{ id: "shared", value: 1 }],
@@ -944,7 +1335,7 @@ void describe("Project Projection materialization", () => {
         ],
       },
     ];
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: {
         ...structuredProjection("config.json", {
           [escapedKey]: [{ id: "shared", value: 1 }],
@@ -994,7 +1385,7 @@ void describe("Project Projection materialization", () => {
     ];
 
     await assert.rejects(
-      reconcileProjectProjections({
+      reconcileWithCurrent({
         before: {
           ...structuredProjection("config.json", { members: {} }),
           reconciliation,
@@ -1032,7 +1423,7 @@ void describe("Project Projection materialization", () => {
       ];
 
       await assert.rejects(
-        reconcileProjectProjections({
+        reconcileWithCurrent({
           before: {
             ...structuredProjection("config.json", { members: ["base"] }),
             reconciliation,
@@ -1085,7 +1476,7 @@ void describe("Project Projection materialization", () => {
           ],
         },
       ];
-      const result = await reconcileProjectProjections({
+      const result = await reconcileWithCurrent({
         before: {
           ...structuredProjection("config.json", {
             members: [{ id: "base" }],
@@ -1120,7 +1511,7 @@ void describe("Project Projection materialization", () => {
   }
 
   void it("keeps undeclared arrays atomic", async () => {
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: structuredProjection("config.json", {
         members: ["base"],
       }),
@@ -1156,7 +1547,7 @@ void describe("Project Projection materialization", () => {
       schemaVersion: 1,
       value: "after",
     });
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: {
         ...before,
         reconciliation: canonicalReconciliation,
@@ -1208,7 +1599,7 @@ void describe("Project Projection materialization", () => {
       const canonicalReconciliation = [
         { path: "state.json", driver: "canonical" as const },
       ];
-      const result = await reconcileProjectProjections({
+      const result = await reconcileWithCurrent({
         before: {
           ...structuredProjection("state.json", {
             schemaVersion: 1,
@@ -1255,7 +1646,7 @@ void describe("Project Projection materialization", () => {
     };
 
     await assert.rejects(
-      reconcileProjectProjections({
+      reconcileWithCurrent({
         before: duplicateBefore,
         after: {
           entries: [textEntry("same.txt", "after\n")],
@@ -1277,7 +1668,7 @@ void describe("Project Projection materialization", () => {
     let reads = 0;
 
     await assert.rejects(
-      reconcileProjectProjections({
+      reconcileWithCurrent({
         before: textProjection("../escape.txt", "before\n"),
         after: textProjection("../escape.txt", "after\n"),
         async readCurrent() {
@@ -1298,7 +1689,7 @@ void describe("Project Projection materialization", () => {
     let reads = 0;
 
     await assert.rejects(
-      reconcileProjectProjections({
+      reconcileWithCurrent({
         before: {
           entries: [textEntry("policy.txt", "before\n")],
           reconciliation: [{ path: "./policy.txt", driver: "text" }],
@@ -1331,7 +1722,7 @@ void describe("Project Projection materialization", () => {
       let reads = 0;
 
       await assert.rejects(
-        reconcileProjectProjections({
+        reconcileWithCurrent({
           before: textProjection(projectionPath, "before\n"),
           after: textProjection(projectionPath, "after\n"),
           async readCurrent() {
@@ -1388,7 +1779,7 @@ void describe("Project Projection materialization", () => {
 
   void it("requires one stable reconciliation driver per projected path before reading Current", async () => {
     await assert.rejects(
-      reconcileProjectProjections({
+      reconcileWithCurrent({
         before: textProjection("same.txt", "before\n"),
         after: {
           entries: [textEntry("same.txt", "after\n")],
@@ -1411,7 +1802,7 @@ void describe("Project Projection materialization", () => {
     const entry = textEntry("config.json", '{"members":["base"]}\n');
 
     await assert.rejects(
-      reconcileProjectProjections({
+      reconcileWithCurrent({
         before: {
           entries: [entry],
           reconciliation: [
@@ -1450,7 +1841,7 @@ void describe("Project Projection materialization", () => {
   void it("obeys the basic three-way laws and repeated application is idempotent", async () => {
     const before = textProjection("alpha.txt", "before\n");
     const after = textProjection("alpha.txt", "after\n");
-    const first = await reconcileProjectProjections({
+    const first = await reconcileWithCurrent({
       before,
       after,
       async readCurrent() {
@@ -1463,7 +1854,7 @@ void describe("Project Projection materialization", () => {
       mutations: [textEntry("alpha.txt", "after\n")],
     });
     if (!first.ok) return;
-    const repeated = await reconcileProjectProjections({
+    const repeated = await reconcileWithCurrent({
       before,
       after,
       async readCurrent() {
@@ -1474,7 +1865,7 @@ void describe("Project Projection materialization", () => {
 
     const unchangedProjection = textProjection("stable.txt", "projected\n");
     assert.deepStrictEqual(
-      await reconcileProjectProjections({
+      await reconcileWithCurrent({
         before: unchangedProjection,
         after: unchangedProjection,
         async readCurrent(projectionPath) {
@@ -1486,7 +1877,7 @@ void describe("Project Projection materialization", () => {
   });
 
   void it("returns conflicts without a partial mutation result", async () => {
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: textProjection("alpha.txt", "shared\n"),
       after: textProjection("alpha.txt", "generated\n"),
       async readCurrent() {
@@ -1508,7 +1899,7 @@ void describe("Project Projection materialization", () => {
   });
 
   void it("reports each text conflict as a concise line region", async () => {
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: textProjection(
         "policy.txt",
         "retained header\nbefore policy\nretained footer\n",
@@ -1560,7 +1951,7 @@ void describe("Project Projection materialization", () => {
       reconciliation: [{ path: "asset.bin", driver: "text" }],
     });
 
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: binaryProjection([0xff, 0x00]),
       after: binaryProjection([0xfe, 0x00]),
       async readCurrent() {
@@ -1602,7 +1993,7 @@ void describe("Project Projection materialization", () => {
       entries: [{ ...before.entries[0]!, mode: 0o111 }],
     };
 
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before,
       after,
       async readCurrent() {
@@ -1716,6 +2107,8 @@ void describe("Project Projection materialization", () => {
           '{\n  "state": "before"\n}\n',
         ),
       ]);
+      await chmod(path.join(targetRoot, "alpha.md"), 0o751);
+      await chmod(path.join(targetRoot, ".template/state.json"), 0o640);
 
       await assert.rejects(
         reconcile({
@@ -1734,6 +2127,15 @@ void describe("Project Projection materialization", () => {
       assert.strictEqual(
         await readFile(path.join(targetRoot, ".template/state.json"), "utf8"),
         '{\n  "state": "before"\n}\n',
+      );
+      assert.strictEqual(
+        (await stat(path.join(targetRoot, "alpha.md"))).mode & 0o777,
+        0o751,
+      );
+      assert.strictEqual(
+        (await stat(path.join(targetRoot, ".template/state.json"))).mode &
+          0o777,
+        0o640,
       );
       assert.strictEqual(committedPaths.length, 2);
     } finally {
@@ -1819,7 +2221,7 @@ void describe("Project Projection materialization", () => {
     const reads: string[] = [];
 
     await assert.rejects(
-      reconcileProjectProjections({
+      reconcileWithCurrent({
         before: {
           entries: [
             textEntry("changed.txt", "before\n"),
@@ -1946,7 +2348,7 @@ void describe("Declared mirror-slot coordination", () => {
     };
     const reads: string[] = [];
 
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: projection,
       after: projection,
       async readCurrent(projectionPath) {
@@ -2109,7 +2511,7 @@ void describe("Declared mirror-slot coordination", () => {
   });
 
   void it("adds a slot value that only After declares", async () => {
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: mirrorStructuredProjection({ env: { OTHER: "keep" } }),
       after: mirrorStructuredProjection({
         env: { OTHER: "keep", TOOL_VERSION: rootValue },
@@ -2144,7 +2546,7 @@ void describe("Declared mirror-slot coordination", () => {
       });
 
       assert.deepStrictEqual(
-        await reconcileProjectProjections({
+        await reconcileWithCurrent({
           before: projection,
           after: projection,
           async readCurrent() {
@@ -2157,7 +2559,7 @@ void describe("Declared mirror-slot coordination", () => {
   }
 
   void it("keeps the presence conflict when a declared path also carries a delta", async () => {
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: mirrorStructuredProjection({ env: { TOOL_VERSION: rootValue } }),
       after: mirrorStructuredProjection({
         env: { TOOL_VERSION: rootValue },
@@ -2305,7 +2707,7 @@ void describe("Declared mirror-slot coordination", () => {
 
   void it("restores the anchored default while preserving out-of-region bytes exactly", async () => {
     const projection = mirrorTextProjection(anchoredText(rootValue));
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: projection,
       after: projection,
       async readCurrent() {
@@ -2331,7 +2733,7 @@ void describe("Declared mirror-slot coordination", () => {
   });
 
   void it("replaces the owned block when Before has no block and keeps bytes outside it", async () => {
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: mirrorTextProjection("FROM base:1\nRUN existing step\n"),
       after: mirrorTextProjection(anchoredText(rootValue)),
       async readCurrent() {
@@ -2358,7 +2760,7 @@ void describe("Declared mirror-slot coordination", () => {
   });
 
   void it("fails atomically when Before holds the anchor more than once", async () => {
-    const result = await reconcileProjectProjections({
+    const result = await reconcileWithCurrent({
       before: mirrorTextProjection(
         anchoredText(rootValue) + anchoredText(rootValue),
       ),
@@ -2452,7 +2854,7 @@ void describe("Declared mirror-slot coordination", () => {
     void it(`fails when ${scenario.brokenAnchor} while the carrier or reference is still present`, async () => {
       const { current } = scenario;
       const projection = mirrorTextProjection(anchoredText(rootValue));
-      const result = await reconcileProjectProjections({
+      const result = await reconcileWithCurrent({
         before: projection,
         after: projection,
         async readCurrent() {
@@ -2480,7 +2882,7 @@ void describe("Declared mirror-slot coordination", () => {
     const projection = mirrorTextProjection(anchoredText(rootValue));
 
     assert.deepStrictEqual(
-      await reconcileProjectProjections({
+      await reconcileWithCurrent({
         before: projection,
         after: projection,
         async readCurrent() {
@@ -2610,7 +3012,7 @@ void describe("Declared mirror-slot coordination", () => {
       };
 
       await assert.rejects(
-        reconcileProjectProjections({
+        reconcileWithCurrent({
           before: projection,
           after: projection,
           async readCurrent() {

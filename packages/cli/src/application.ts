@@ -8,6 +8,7 @@ import {
 import {
   type ProjectProjectionAction,
   type ProjectProjectionConflict,
+  type ProjectProjectionSource,
 } from "@ykdz/template-core/project-projection";
 import type { GenerationRecord } from "@ykdz/template-generator";
 import { isDefaultWorkspaceMissingLinkConflict } from "@ykdz/template-workspace/default-workspace-strategy";
@@ -133,8 +134,9 @@ export type BlueprintValidationCommandResult =
 
 type PackageAdditionCoreConflict = Omit<
   ProjectProjectionConflict,
-  "before" | "current" | "after"
+  "before" | "current" | "after" | "sources"
 > & {
+  readonly sources?: ProjectProjectionSource[];
   readonly context: {
     readonly before: string;
     readonly current: string;
@@ -209,9 +211,10 @@ function toolchainReport() {
 function packageAdditionConflict(
   conflict: ProjectProjectionConflict,
 ): PackageAdditionCoreConflict {
-  const { before, current, after, ...details } = conflict;
+  const { before, current, after, sources, ...details } = conflict;
   return {
     ...details,
+    ...(sources === undefined ? {} : { sources: [...sources] }),
     context: { before, current, after },
   };
 }

@@ -42,6 +42,7 @@ export type Composition<
   ContributionFacts = unknown,
   OwnerFacts = unknown,
   CreationInput extends JsonValue = JsonValue,
+  OperationFacts = null,
 > = {
   readonly identity: ContentIdentity;
   parseConventions(value: unknown): Conventions;
@@ -51,6 +52,8 @@ export type Composition<
     readonly blueprint: ProjectBlueprint;
     readonly selections: readonly GenerationRecordSelection[];
     readonly packages: readonly CompositionPackage<CreationInput>[];
+    /** 本次准备的外围快照，不写入持续记录。 */
+    readonly operationFacts: OperationFacts;
   }): CompositionResolution<StableCommon, PackageInput>;
   /** 只合成已经求得的贡献及明确组合声明。 */
   combine(options: {

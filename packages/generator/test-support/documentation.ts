@@ -34,6 +34,12 @@ export type DocumentationConventions = {
   readonly collection: string;
   readonly edition: string;
 };
+export type DocumentationOperationFacts = {
+  readonly providerVersion: string;
+};
+export type DocumentationStableCommon = DocumentationConventions & {
+  readonly providerVersion: string;
+};
 export type DocumentationCreationInput = {
   readonly leafName?: string;
   readonly packagePath?: string;
@@ -47,11 +53,12 @@ export type DocumentationFacts = {
 };
 export type DocumentationComposition = Composition<
   DocumentationConventions,
-  DocumentationConventions,
+  DocumentationStableCommon,
   unknown,
   DocumentationContribution["facts"],
   DocumentationFacts,
-  DocumentationCreationInput
+  DocumentationCreationInput,
+  DocumentationOperationFacts
 >;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -148,7 +155,7 @@ function makeReference(options: {
           }[];
         };
         readonly bindings: ReadonlyMap<string, PackageBinding>;
-        readonly stableCommon: DocumentationConventions;
+        readonly stableCommon: DocumentationStableCommon;
       }): DocumentationContribution {
         const resource = prepared.resources.find(
           (item) => item.path === "README.md",
@@ -158,8 +165,8 @@ function makeReference(options: {
         const provider = bindings.get("glossary");
         const body =
           options.alias === "guide"
-            ? `${stableCommon.collection}/${stableCommon.edition} by ${options.author}: ${definition.name} uses ${provider?.definition.path ?? "no glossary"}`
-            : `${stableCommon.collection}/${stableCommon.edition} ${options.alias} by ${options.author}`;
+            ? `${stableCommon.collection}/${stableCommon.edition}@${stableCommon.providerVersion} by ${options.author}: ${definition.name} uses ${provider?.definition.path ?? "no glossary"}`
+            : `${stableCommon.collection}/${stableCommon.edition}@${stableCommon.providerVersion} ${options.alias} by ${options.author}`;
         const files =
           options.alias === "index"
             ? []
@@ -240,9 +247,9 @@ export function createDocumentationEngine(options: {
       }
       return { collection: value.collection, edition: value.edition };
     },
-    resolve({ conventions, packages }) {
+    resolve({ conventions, operationFacts, packages }) {
       return {
-        stableCommon: conventions,
+        stableCommon: { ...conventions, ...operationFacts },
         packageInputs: new Map<PackageDefinitionId, unknown>(),
         packageLinkIntents: packages.flatMap((item) =>
           Object.values(item.dependencyBindings).map((providerId) => ({

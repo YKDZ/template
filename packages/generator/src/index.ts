@@ -37,10 +37,18 @@ import type {
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
 import { assertProjectBlueprint } from "@ykdz/template-core/project-blueprint";
-import type {
-  ProjectProjection,
-  ProjectProjectionEntry,
-  ProjectProjectionReconciliation,
+import {
+  commitProjectProjectionPlan,
+  planProjectProjections,
+  readProjectProjectionCurrent,
+  type ProjectProjection,
+  type ProjectProjectionAction,
+  type ProjectProjectionChangePlan,
+  type ProjectProjectionConflict,
+  type ProjectProjectionEntry,
+  type ProjectProjectionPathPrecondition,
+  type ProjectProjectionReconciliation,
+  type ProjectProjectionSource,
 } from "@ykdz/template-core/project-projection";
 import type {
   PreparedReference,
@@ -50,6 +58,16 @@ import type {
   PresetSelectionDefinition,
   PresetSelectionRequest,
 } from "@ykdz/template-core/reference-package";
+
+type CompositionDefinitionLike = Composition<
+  JsonValue,
+  unknown,
+  unknown,
+  unknown,
+  unknown,
+  JsonValue,
+  unknown
+>;
 
 export type { GenerationRecord } from "@ykdz/template-core/generation-record";
 export {
@@ -98,11 +116,14 @@ type PreparedSelection<CreationInput extends JsonValue = JsonValue> = {
 export type PreparedProject<
   Conventions extends JsonValue = JsonValue,
   CreationInput extends JsonValue = JsonValue,
-  CompositionDefinition extends Composition = Composition,
+  CompositionDefinition extends CompositionDefinitionLike =
+    CompositionDefinitionLike,
+  OperationFacts = null,
 > = {
   readonly conventions: Conventions;
   readonly composition: CompositionDefinition;
   readonly selections: readonly PreparedSelection<CreationInput>[];
+  readonly operationFacts: OperationFacts;
 };
 
 export type ComputedPackage<ContributionFacts = unknown> = {
@@ -129,24 +150,129 @@ export type GeneratorSelection<CreationInput extends JsonValue = JsonValue> = {
   readonly presets?: readonly PresetSelectionRequest<CreationInput>[];
 };
 
+type CompositionOperationFacts<Definition> =
+  Definition extends Composition<
+    JsonValue,
+    unknown,
+    unknown,
+    unknown,
+    unknown,
+    JsonValue,
+    infer OperationFacts
+  >
+    ? OperationFacts
+    : undefined;
+
+type OperationFactsInput<OperationFacts> = {
+  readonly operationFacts: OperationFacts;
+};
+
+export type GeneratorInitializationOptions<
+  CreationInput extends JsonValue = JsonValue,
+  OperationFacts = null,
+> = {
+  readonly targetRoot: string;
+  readonly selection: GeneratorSelection<CreationInput>;
+  readonly conventions: unknown;
+} & OperationFactsInput<OperationFacts>;
+
+export type GeneratorResult<
+  OwnerFacts = unknown,
+  Conventions extends JsonValue = JsonValue,
+  CreationInput extends JsonValue = JsonValue,
+> =
+  | {
+      readonly status: "success";
+      readonly dryRun: boolean;
+      readonly blueprint: ProjectBlueprint;
+      readonly generationRecord: GenerationRecord<Conventions, CreationInput>;
+      readonly projection: ProjectProjection;
+      readonly ownerFacts: OwnerFacts;
+      readonly actions: readonly ProjectProjectionAction[];
+    }
+  | {
+      readonly status: "conflict";
+      readonly dryRun: boolean;
+      readonly reason: string;
+      readonly conflicts: readonly ProjectProjectionConflict[];
+      readonly actions: readonly [];
+    }
+  | {
+      readonly status: "operation-failure";
+      readonly phase: "preparation" | "calculation" | "planning" | "commit";
+      readonly error: { readonly message: string };
+    };
+
+export type GeneratorPlanningResult<
+  OwnerFacts = unknown,
+  Conventions extends JsonValue = JsonValue,
+  CreationInput extends JsonValue = JsonValue,
+> =
+  | {
+      readonly status: "planned";
+      readonly plan: ProjectProjectionChangePlan;
+      readonly blueprint: ProjectBlueprint;
+      readonly generationRecord: GenerationRecord<Conventions, CreationInput>;
+      readonly projection: ProjectProjection;
+      readonly ownerFacts: OwnerFacts;
+      readonly actions: readonly ProjectProjectionAction[];
+    }
+  | {
+      readonly status: "conflict";
+      readonly reason: string;
+      readonly conflicts: readonly ProjectProjectionConflict[];
+      readonly actions: readonly [];
+    }
+  | {
+      readonly status: "operation-failure";
+      readonly phase: "preparation" | "calculation" | "planning" | "commit";
+      readonly error: { readonly message: string };
+    };
+
 export type Generator<
   OwnerFacts = unknown,
   Conventions extends JsonValue = JsonValue,
   CreationInput extends JsonValue = JsonValue,
   ContributionFacts = unknown,
-  CompositionDefinition extends Composition = Composition,
+  CompositionDefinition extends CompositionDefinitionLike =
+    CompositionDefinitionLike,
 > = {
-  prepareProject(options: {
-    readonly selection: GeneratorSelection<CreationInput>;
-    readonly conventions: unknown;
-  }): Promise<
-    PreparedProject<Conventions, CreationInput, CompositionDefinition>
+  init(
+    options: GeneratorInitializationOptions<
+      CreationInput,
+      CompositionOperationFacts<CompositionDefinition>
+    > & {
+      readonly dryRun?: boolean;
+    },
+  ): Promise<GeneratorResult<OwnerFacts, Conventions, CreationInput>>;
+  planInit(
+    options: GeneratorInitializationOptions<
+      CreationInput,
+      CompositionOperationFacts<CompositionDefinition>
+    >,
+  ): Promise<GeneratorPlanningResult<OwnerFacts, Conventions, CreationInput>>;
+  commitPlan(
+    plan: ProjectProjectionChangePlan,
+  ): Promise<GeneratorResult<OwnerFacts, Conventions, CreationInput>>;
+  prepareProject(
+    options: {
+      readonly selection: GeneratorSelection<CreationInput>;
+      readonly conventions: unknown;
+    } & OperationFactsInput<CompositionOperationFacts<CompositionDefinition>>,
+  ): Promise<
+    PreparedProject<
+      Conventions,
+      CreationInput,
+      CompositionDefinition,
+      CompositionOperationFacts<CompositionDefinition>
+    >
   >;
   computeProject(
     prepared: PreparedProject<
       Conventions,
       CreationInput,
-      CompositionDefinition
+      CompositionDefinition,
+      CompositionOperationFacts<CompositionDefinition>
     >,
   ): ComputedProject<OwnerFacts, Conventions, CreationInput, ContributionFacts>;
 };
@@ -182,6 +308,34 @@ function selectionId(value: unknown): string {
 
 function comparePaths(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function mergeProjectionSources(
+  ...groups: readonly (readonly ProjectProjectionSource[] | undefined)[]
+): readonly ProjectProjectionSource[] {
+  const sources = new Map<string, ProjectProjectionSource>();
+  for (const group of groups) {
+    for (const source of group ?? []) {
+      if (!sources.has(source.identity)) {
+        sources.set(source.identity, { ...source });
+      }
+    }
+  }
+  return [...sources.values()];
+}
+
+function projectionPath(packagePath: string, relativePath: string): string {
+  return packagePath === "." ? relativePath : `${packagePath}/${relativePath}`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function conflictReason(
+  conflicts: readonly ProjectProjectionConflict[],
+): string {
+  return conflicts.map((conflict) => conflict.reason).join("\n");
 }
 
 function isCanonicalRelativeFilePath(value: string): boolean {
@@ -319,7 +473,8 @@ type CompositionOwnerFacts<Definition> =
     unknown,
     unknown,
     infer OwnerFacts,
-    JsonValue
+    JsonValue,
+    unknown
   >
     ? OwnerFacts
     : unknown;
@@ -330,7 +485,8 @@ type CompositionContributionFacts<Definition> =
     unknown,
     infer ContributionFacts,
     unknown,
-    JsonValue
+    JsonValue,
+    unknown
   >
     ? ContributionFacts
     : unknown;
@@ -351,7 +507,7 @@ type ContentCreationInput<Members extends readonly LoadedContentMember[]> =
 
 export function createGenerator<
   const Members extends readonly LoadedContentMember[],
-  const CompositionDefinition extends Composition,
+  const CompositionDefinition extends CompositionDefinitionLike,
 >(options: {
   readonly content: Members;
   readonly composition: CompositionDefinition;
@@ -362,9 +518,24 @@ export function createGenerator<
   CompositionContributionFacts<CompositionDefinition>,
   CompositionDefinition
 > {
+  type InitializedProject = ComputedProject<
+    CompositionOwnerFacts<CompositionDefinition>,
+    CompositionConventions<CompositionDefinition>,
+    ContentCreationInput<Members>,
+    CompositionContributionFacts<CompositionDefinition>
+  >;
   assertContentIdentity(options.composition.identity);
   const contentIndex = createContentIndex(options.content);
-  const composition = options.composition as unknown as Composition;
+  const composition =
+    options.composition as unknown as CompositionDefinitionLike;
+  const emptyProjectProjection: ProjectProjection = {
+    entries: [],
+    reconciliation: [],
+  };
+  const pendingInitializationPlans = new WeakMap<
+    ProjectProjectionChangePlan,
+    { readonly targetRoot: string; readonly computed: InitializedProject }
+  >();
 
   const resolveReference = (selector: ContentSelector): RuntimeReference =>
     contentIndex.resolve(selector, "reference") as RuntimeReference;
@@ -372,13 +543,13 @@ export function createGenerator<
   const makePreparedNode = async (request: {
     readonly content: RuntimeReference;
     readonly nodeIdentity: string;
-    readonly creationInput: JsonValue | undefined;
+    readonly creationInput: ContentCreationInput<Members> | undefined;
     readonly definition: PackageDefinition;
     readonly layout?: unknown;
-    readonly conventions: JsonValue;
+    readonly conventions: CompositionConventions<CompositionDefinition>;
     readonly selectedPaths: readonly string[];
     readonly ancestry: readonly string[];
-  }): Promise<PreparedNode> => {
+  }): Promise<PreparedNode<ContentCreationInput<Members>>> => {
     const identityKey = contentIdentityKey(request.content.identity);
     if (request.ancestry.includes(identityKey)) {
       throw new Error(
@@ -387,7 +558,10 @@ export function createGenerator<
     }
     const dependencies = request.content.definition.dependencies ?? [];
     const dependencyKeys = new Set<string>();
-    const preparedDependencies: { key: string; package: PreparedNode }[] = [];
+    const preparedDependencies: {
+      key: string;
+      package: PreparedNode<ContentCreationInput<Members>>;
+    }[] = [];
     for (const dependency of dependencies) {
       assertContentIdentity(dependency.contentIdentity);
       if (
@@ -401,7 +575,7 @@ export function createGenerator<
       const providerCreationInput = requireParsedCreationInput(
         provider,
         dependency.creationInput,
-      );
+      ) as ContentCreationInput<Members> | undefined;
       const providerDefinition = packageDefinition(
         provider.definition.createDefinition({
           conventions: request.conventions,
@@ -441,18 +615,24 @@ export function createGenerator<
     };
   };
 
-  async function prepareProject(prepareOptions: {
-    readonly selection: GeneratorSelection;
-    readonly conventions: unknown;
-  }): Promise<PreparedProject> {
+  async function prepareProject(
+    prepareOptions: {
+      readonly selection: GeneratorSelection<ContentCreationInput<Members>>;
+      readonly conventions: unknown;
+    } & OperationFactsInput<CompositionOperationFacts<CompositionDefinition>>,
+  ): Promise<
+    PreparedProject<
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>,
+      CompositionDefinition,
+      CompositionOperationFacts<CompositionDefinition>
+    >
+  > {
     const conventions = composition.parseConventions(
       prepareOptions.conventions,
-    );
+    ) as CompositionConventions<CompositionDefinition>;
     assertJsonValue(conventions, "组合约定");
-    const selections: {
-      readonly presetIdentity: ContentIdentity | null;
-      readonly roots: PreparedNode[];
-    }[] = [];
+    const selections: PreparedSelection<ContentCreationInput<Members>>[] = [];
     const directRoots = prepareOptions.selection.roots ?? [];
     if (directRoots.length > 0) {
       const selectedRoots = directRoots.map((root) => ({
@@ -465,7 +645,7 @@ export function createGenerator<
         const creationInput = requireParsedCreationInput(
           root.content,
           root.rawCreationInput,
-        );
+        ) as ContentCreationInput<Members> | undefined;
         return {
           ...root,
           creationInput,
@@ -478,7 +658,10 @@ export function createGenerator<
           ),
         };
       });
-      const group = { presetIdentity: null, roots: [] as PreparedNode[] };
+      const group = {
+        presetIdentity: null,
+        roots: [] as PreparedNode<ContentCreationInput<Members>>[],
+      };
       selections.push(group);
       const selectedPaths = preparedRoots.map((root) => root.definition.path);
       for (const root of preparedRoots) {
@@ -523,7 +706,7 @@ export function createGenerator<
       }
       const group = {
         presetIdentity: presetMember.identity,
-        roots: [] as PreparedNode[],
+        roots: [] as PreparedNode<ContentCreationInput<Members>>[],
       };
       selections.push(group);
       const presetRoots: {
@@ -552,7 +735,7 @@ export function createGenerator<
         const creationInput = requireParsedCreationInput(
           root.content,
           root.rawCreationInput,
-        );
+        ) as ContentCreationInput<Members> | undefined;
         return {
           ...root,
           creationInput,
@@ -584,12 +767,21 @@ export function createGenerator<
     }
     return {
       conventions,
-      composition,
+      composition: options.composition,
       selections,
+      operationFacts:
+        prepareOptions.operationFacts as CompositionOperationFacts<CompositionDefinition>,
     };
   }
 
-  function computeProject(preparedProject: PreparedProject): ComputedProject {
+  function computeProject(
+    preparedProject: PreparedProject<
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>,
+      CompositionDefinition,
+      CompositionOperationFacts<CompositionDefinition>
+    >,
+  ): InitializedProject {
     if (preparedProject.composition !== composition) {
       throw new Error("准备结果属于另一个组合定义");
     }
@@ -620,7 +812,14 @@ export function createGenerator<
         const existing = sharedNodes.get(sharedKey);
         if (existing !== undefined) {
           if (
-            !isDeepStrictEqual(existing.definition, prepared.definition) ||
+            !isDeepStrictEqual(
+              {
+                name: existing.definition.name,
+                path: existing.definition.path,
+                role: existing.definition.role,
+              },
+              prepared.definition,
+            ) ||
             !isDeepStrictEqual(
               existing.creationInput,
               prepared.creationInput ?? null,
@@ -755,6 +954,7 @@ export function createGenerator<
       blueprint: provisionalBlueprint,
       selections: selectionRecords,
       packages,
+      operationFacts: preparedProject.operationFacts,
     });
     for (const id of resolution.packageInputs.keys()) {
       if (!nodes.some((node) => node.id === id)) {
@@ -825,6 +1025,87 @@ export function createGenerator<
         ? {}
         : { compositionReconciliation: combined.reconciliation }),
     });
+    const sourcesByPackage = new Map(
+      nodes.map((node) => [
+        node.id,
+        {
+          identity: `content:${contentIdentityKey(node.content.identity)}:${node.id}`,
+          label: `${contentIdentityLabel(node.content.identity)}（${node.definition.path}）`,
+        } satisfies ProjectProjectionSource,
+      ]),
+    );
+    const packageSources = [...sourcesByPackage.values()];
+    const compositionSource: ProjectProjectionSource = {
+      identity: `composition:${contentIdentityKey(composition.identity)}`,
+      label: `组合${contentIdentityLabel(composition.identity)}`,
+    };
+    const sourcesByPath = new Map<string, readonly ProjectProjectionSource[]>();
+    const addPathSources = (
+      targetPath: string,
+      sources: readonly (ProjectProjectionSource | undefined)[],
+    ): void => {
+      const existing = sourcesByPath.get(targetPath) ?? [];
+      const definedSources = sources.filter(
+        (source): source is ProjectProjectionSource => source !== undefined,
+      );
+      sourcesByPath.set(
+        targetPath,
+        mergeProjectionSources(existing, definedSources),
+      );
+    };
+    for (const node of nodes) {
+      const source = sourcesByPackage.get(node.id)!;
+      for (const file of node.contribution!.files) {
+        addPathSources(projectionPath(node.definition.path, file.path), [
+          source,
+        ]);
+      }
+      for (const policy of node.contribution!.reconciliation ?? []) {
+        addPathSources(projectionPath(node.definition.path, policy.path), [
+          source,
+        ]);
+      }
+    }
+    const combinedSources = [compositionSource, ...packageSources];
+    for (const item of combined.files ?? []) {
+      const definition = blueprint.packages.find(
+        (candidate) =>
+          candidate.packageDefinitionId === item.packageDefinitionId,
+      )!;
+      addPathSources(
+        projectionPath(definition.path, item.file.path),
+        combinedSources,
+      );
+    }
+    for (const item of combined.reconciliation ?? []) {
+      const definition = blueprint.packages.find(
+        (candidate) =>
+          candidate.packageDefinitionId === item.packageDefinitionId,
+      )!;
+      addPathSources(
+        projectionPath(definition.path, item.reconciliation.path),
+        combinedSources,
+      );
+    }
+    const annotatedProjection: ProjectProjection = {
+      entries: projection.entries.map((entry) => {
+        const sources = mergeProjectionSources(
+          entry.sources,
+          sourcesByPath.get(entry.path),
+        );
+        return sources.length === 0 ? entry : { ...entry, sources };
+      }),
+      reconciliation: projection.reconciliation.map((policy) => {
+        const sources = mergeProjectionSources(
+          policy.sources,
+          sourcesByPath.get(policy.path),
+        );
+        return sources.length === 0 ? policy : { ...policy, sources };
+      }),
+    };
+    const metadataSources = mergeProjectionSources(packageSources, [
+      compositionSource,
+    ]);
     const generationRecord: GenerationRecord<JsonValue, JsonValue> = {
       schemaVersion: 6,
       composition: {
@@ -842,25 +1123,28 @@ export function createGenerator<
         kind: "file",
         content: printCanonicalJson(blueprint),
         mode: 0,
+        sources: metadataSources,
       },
       {
         path: ".template/generation.json",
         kind: "file",
         content: printCanonicalJson(generationRecord),
         mode: 0,
+        sources: metadataSources,
       },
     ];
     const metadataReconciliation: ProjectProjectionReconciliation[] =
       metadataEntries.map((entry) => ({
         path: entry.path,
         driver: "canonical",
+        ...(entry.sources === undefined ? {} : { sources: entry.sources }),
       }));
     const finalProjection: ProjectProjection = {
-      entries: [...projection.entries, ...metadataEntries].toSorted(
+      entries: [...annotatedProjection.entries, ...metadataEntries].toSorted(
         (left, right) => comparePaths(left.path, right.path),
       ),
       reconciliation: [
-        ...projection.reconciliation,
+        ...annotatedProjection.reconciliation,
         ...metadataReconciliation,
       ].toSorted((left, right) => comparePaths(left.path, right.path)),
     };
@@ -874,10 +1158,205 @@ export function createGenerator<
         contribution: node.contribution!,
       })),
       ownerFacts: combined.facts,
+    } as unknown as InitializedProject;
+  }
+
+  async function planInit(
+    initOptions: GeneratorInitializationOptions<
+      ContentCreationInput<Members>,
+      CompositionOperationFacts<CompositionDefinition>
+    >,
+  ): Promise<
+    GeneratorPlanningResult<
+      CompositionOwnerFacts<CompositionDefinition>,
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>
+    >
+  > {
+    let prepared: PreparedProject<
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>,
+      CompositionDefinition,
+      CompositionOperationFacts<CompositionDefinition>
+    >;
+    try {
+      prepared = await prepareProject({
+        selection: initOptions.selection,
+        conventions: initOptions.conventions,
+        operationFacts: initOptions.operationFacts,
+      });
+    } catch (error) {
+      return {
+        status: "operation-failure",
+        phase: "preparation",
+        error: { message: errorMessage(error) },
+      };
+    }
+
+    let computed: ComputedProject<
+      CompositionOwnerFacts<CompositionDefinition>,
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>,
+      CompositionContributionFacts<CompositionDefinition>
+    >;
+    try {
+      computed = computeProject(prepared);
+    } catch (error) {
+      return {
+        status: "operation-failure",
+        phase: "calculation",
+        error: { message: errorMessage(error) },
+      };
+    }
+
+    try {
+      const sources = mergeProjectionSources(
+        ...computed.projection.entries.map((entry) => entry.sources),
+        ...computed.projection.reconciliation.map((policy) => policy.sources),
+      );
+      const preconditions: readonly ProjectProjectionPathPrecondition[] = [
+        {
+          path: ".",
+          kind: "directory-empty-or-missing",
+          reason: "初始化要求目标目录为空或不存在",
+          ...(sources.length === 0 ? {} : { sources }),
+        },
+      ];
+      const current = await readProjectProjectionCurrent({
+        targetRoot: initOptions.targetRoot,
+        before: emptyProjectProjection,
+        after: computed.projection,
+        preconditions,
+      });
+      const planning = planProjectProjections({
+        before: emptyProjectProjection,
+        current,
+        after: computed.projection,
+        preconditions,
+      });
+      if (!planning.ok) {
+        return {
+          status: "conflict",
+          reason: conflictReason(planning.conflicts),
+          conflicts: planning.conflicts,
+          actions: [],
+        };
+      }
+      pendingInitializationPlans.set(planning.plan, {
+        targetRoot: current.targetRoot,
+        computed,
+      });
+      return {
+        status: "planned",
+        plan: planning.plan,
+        blueprint: computed.blueprint,
+        generationRecord: computed.generationRecord,
+        projection: computed.projection,
+        ownerFacts: computed.ownerFacts,
+        actions: planning.plan.actions,
+      };
+    } catch (error) {
+      return {
+        status: "operation-failure",
+        phase: "planning",
+        error: { message: errorMessage(error) },
+      };
+    }
+  }
+
+  async function commitPlan(
+    plan: ProjectProjectionChangePlan,
+  ): Promise<
+    GeneratorResult<
+      CompositionOwnerFacts<CompositionDefinition>,
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>
+    >
+  > {
+    const pending = pendingInitializationPlans.get(plan);
+    if (pending === undefined) {
+      return {
+        status: "operation-failure",
+        phase: "commit",
+        error: { message: "提交计划必须由当前生成器的 planInit 创建" },
+      };
+    }
+    try {
+      const committed = await commitProjectProjectionPlan({
+        targetRoot: pending.targetRoot,
+        plan,
+      });
+      if (!committed.ok) {
+        return {
+          status: "conflict",
+          dryRun: false,
+          reason: conflictReason(committed.conflicts),
+          conflicts: committed.conflicts,
+          actions: [],
+        };
+      }
+      return {
+        status: "success",
+        dryRun: false,
+        blueprint: pending.computed.blueprint,
+        generationRecord: pending.computed.generationRecord,
+        projection: pending.computed.projection,
+        ownerFacts: pending.computed.ownerFacts,
+        actions: committed.actions,
+      };
+    } catch (error) {
+      return {
+        status: "operation-failure",
+        phase: "commit",
+        error: { message: errorMessage(error) },
+      };
+    }
+  }
+
+  async function init(
+    initOptions: GeneratorInitializationOptions<
+      ContentCreationInput<Members>,
+      CompositionOperationFacts<CompositionDefinition>
+    > & {
+      readonly dryRun?: boolean;
+    },
+  ): Promise<
+    GeneratorResult<
+      CompositionOwnerFacts<CompositionDefinition>,
+      CompositionConventions<CompositionDefinition>,
+      ContentCreationInput<Members>
+    >
+  > {
+    const dryRun = initOptions.dryRun ?? false;
+    const planned = await planInit({
+      targetRoot: initOptions.targetRoot,
+      selection: initOptions.selection,
+      conventions: initOptions.conventions,
+      operationFacts: initOptions.operationFacts,
+    });
+    if (planned.status === "operation-failure") return planned;
+    if (planned.status === "conflict") {
+      return { ...planned, dryRun, actions: [] };
+    }
+    if (!dryRun) return commitPlan(planned.plan);
+    return {
+      status: "success",
+      dryRun: true,
+      blueprint: planned.blueprint,
+      generationRecord: planned.generationRecord,
+      projection: planned.projection,
+      ownerFacts: planned.ownerFacts,
+      actions: planned.actions,
     };
   }
 
-  return { prepareProject, computeProject } as unknown as Generator<
+  return {
+    init,
+    planInit,
+    commitPlan,
+    prepareProject,
+    computeProject,
+  } as unknown as Generator<
     CompositionOwnerFacts<CompositionDefinition>,
     CompositionConventions<CompositionDefinition>,
     ContentCreationInput<Members>,

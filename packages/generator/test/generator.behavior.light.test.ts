@@ -38,13 +38,19 @@ type Contribution = PackageContribution<{
   readonly path: string;
   readonly resourcePaths: readonly string[];
 }>;
+type OperationFacts = { readonly currentProvider: string };
+type StableCommon = {
+  readonly edition: string;
+  readonly currentProvider: string;
+};
 type DocumentationComposition = Composition<
   Conventions,
-  { readonly edition: string },
+  StableCommon,
   unknown,
   Contribution["facts"],
   { readonly packageCount: number },
-  CreationInput
+  CreationInput,
+  OperationFacts
 >;
 
 function documentationEngine() {
@@ -75,7 +81,7 @@ function documentationEngine() {
           }[];
           readonly facts: {};
         };
-        readonly stableCommon: { readonly edition: string };
+        readonly stableCommon: StableCommon;
         readonly bindings: ReadonlyMap<string, PackageBinding>;
         readonly creationInput: CreationInput | undefined;
       }): Contribution;
@@ -151,7 +157,7 @@ function documentationEngine() {
                 ? ".template"
                 : "README.md",
             content: new TextEncoder().encode(
-              `${stableCommon.edition}:${new TextDecoder().decode(source.content)}`,
+              `${stableCommon.edition}:${stableCommon.currentProvider}:${new TextDecoder().decode(source.content)}`,
             ),
             mode: 0,
           },
@@ -191,9 +197,12 @@ function documentationEngine() {
       }
       return { edition: (value as { edition: string }).edition };
     },
-    resolve({ conventions }) {
+    resolve({ conventions, operationFacts }) {
       return {
-        stableCommon: { edition: conventions.edition },
+        stableCommon: {
+          edition: conventions.edition,
+          currentProvider: operationFacts.currentProvider,
+        },
         packageInputs: new Map<PackageDefinitionId, unknown>(),
       };
     },
@@ -259,6 +268,7 @@ void describe("公开生成计算", () => {
         ],
       },
       conventions: { edition: "draft" },
+      operationFacts: { currentProvider: "provider-snapshot" },
     });
 
     const first = generator.computeProject(prepared);
@@ -287,6 +297,7 @@ void describe("公开生成计算", () => {
         ],
       },
       conventions: { edition: "draft" },
+      operationFacts: { currentProvider: "provider-snapshot" },
     });
     const reordered = generator.computeProject(reorderedPreparation);
     assert.deepEqual(summarize(first), summarize(reordered));
@@ -306,6 +317,13 @@ void describe("公开生成计算", () => {
       false,
     );
     assert.deepEqual(first.ownerFacts, { packageCount: 2 });
+    assert.equal(
+      new TextDecoder().decode(
+        first.projection.entries.find((entry) => entry.path === "README.md")
+          ?.content,
+      ),
+      "draft:provider-snapshot:guide\n",
+    );
     const ownerPackageCount: number = first.ownerFacts.packageCount;
     const savedEdition: string =
       first.generationRecord.composition.conventions.edition;
@@ -336,6 +354,7 @@ void describe("公开生成计算", () => {
         ],
       },
       conventions: { edition: "draft" },
+      operationFacts: { currentProvider: "provider-snapshot" },
     });
 
     assert.throws(
@@ -357,6 +376,7 @@ void describe("公开生成计算", () => {
         ],
       },
       conventions: { edition: "draft" },
+      operationFacts: { currentProvider: "provider-snapshot" },
     });
 
     assert.throws(
