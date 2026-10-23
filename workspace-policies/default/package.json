@@ -96,6 +96,7 @@
   "dependencies": {
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
+    "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*",
     "ignore": "catalog:",
     "jsonc-parser": "catalog:",
