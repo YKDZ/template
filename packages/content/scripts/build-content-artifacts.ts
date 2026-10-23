@@ -814,20 +814,28 @@ function generatedCollectionSource(
   members: readonly NativeMember[],
   preparation: PrepareContentCollectionOptions["referencePreparation"],
 ): string {
+  const memberTypes = members.map(
+    (member) =>
+      `LoadedContentSourceMember<typeof import(${JSON.stringify(member.source.specifier)})>`,
+  );
+  const memberType =
+    memberTypes.length === 0 ? "never" : memberTypes.join(" | ");
   return [
-    'import { loadContentSource } from "@ykdz/template-generator/content-source";',
+    'import { loadContentSource, type LoadedContentSourceMember } from "@ykdz/template-generator/content-source";',
     ...(preparation === undefined
       ? []
       : [
           `import { ${preparation.exportName} as prepareReferenceDefinition } from ${JSON.stringify(preparation.specifier)};`,
         ]),
     "",
-    "export const templateContent = await loadContentSource({",
+    `export type TemplateContentMember = ${memberType};`,
+    "export const templateContent: readonly TemplateContentMember[] = await loadContentSource({",
     `  namespace: ${JSON.stringify(namespace)},`,
     "  resolve: (specifier) => import.meta.resolve(specifier),",
     "  members: [",
     ...members.map(
-      (member) => `    ${JSON.stringify(member.source.specifier)},`,
+      (member) =>
+        `    { specifier: ${JSON.stringify(member.source.specifier)}, load: () => import(${JSON.stringify(member.source.specifier)}) },`,
     ),
     "  ],",
     ...(preparation === undefined
@@ -841,12 +849,6 @@ function generatedCollectionSource(
         ]),
     "});",
     "",
-    "export const templatePresets = templateContent.filter(",
-    '  (member) => member.kind === "preset",',
-    ");",
-    "export const templateReferencePackages = templateContent.filter(",
-    '  (member) => member.kind === "reference",',
-    ");",
     "",
   ].join("\n");
 }
@@ -858,22 +860,26 @@ function generatedProviderAggregateSource(
     (name, index) =>
       `import { templateContent as provider${index} } from ${JSON.stringify(name)};`,
   );
+  const memberTypes = packageNames.map(
+    (_, index) => `(typeof provider${index})[number]`,
+  );
+  const memberType =
+    memberTypes.length === 0 ? "never" : memberTypes.join(" | ");
   return [
-    'import { deriveTemplateMembers } from "./template-members.js";',
-    'import type { LoadedContentMember } from "@ykdz/template-core/content-identity";',
+    'import { deriveContentMembers as deriveTemplateMembers } from "@ykdz/template-core/content-identity";',
     ...imports,
     "",
     "export { deriveTemplateMembers };",
     'export type { ContentKind } from "@ykdz/template-core/content-identity";',
-    "export const templateContent = [",
+    `export type TemplateContentMember = ${memberType};`,
+    'export type TemplatePreset = Extract<TemplateContentMember, { readonly kind: "preset" }>;',
+    'export type TemplateReferencePackage = Extract<TemplateContentMember, { readonly kind: "reference" }>;',
+    "export const templateContent: readonly TemplateContentMember[] = Object.freeze([",
     ...packageNames.map((_, index) => `  ...provider${index},`),
-    "] as readonly LoadedContentMember[];",
-    "export type TemplateContentMember = (typeof templateContent)[number];",
-    'export type TemplatePreset = TemplateContentMember & { readonly kind: "preset" };',
-    'export type TemplateReferencePackage = TemplateContentMember & { readonly kind: "reference" };',
+    "]);",
     "const templateMembers = deriveTemplateMembers(templateContent);",
-    "export const templatePresets = templateMembers.presets;",
-    "export const templateReferencePackages = templateMembers.referencePackages;",
+    "export const templatePresets: readonly TemplatePreset[] = templateMembers.presets;",
+    "export const templateReferencePackages: readonly TemplateReferencePackage[] = templateMembers.referencePackages;",
     "",
   ].join("\n");
 }
@@ -891,7 +897,6 @@ async function createModulePackageRoot(options: {
   readonly packageName: string;
   readonly packageVersion: string;
   readonly source: string;
-  readonly additionalSources?: ReadonlyMap<string, string>;
   readonly dependencies: Readonly<Record<string, string>>;
   readonly packageRoots: ReadonlyMap<string, string>;
   readonly sdkPackageRoots: ReadonlyMap<string, string>;
@@ -948,9 +953,6 @@ async function createModulePackageRoot(options: {
     )}\n`,
   );
   await writeFile(path.join(sourceRoot, "index.ts"), options.source);
-  for (const [fileName, source] of options.additionalSources ?? []) {
-    await writeFile(path.join(sourceRoot, fileName), source);
-  }
 
   for (const [name, packageRoot] of options.sdkPackageRoots) {
     await linkPackage(nodeModulesRoot, name, packageRoot);
@@ -987,7 +989,6 @@ async function createModulePackageRoot(options: {
   );
   if (stderr.length > 0) options.commandLog.push(stderr.trimEnd());
   if (stdout.length > 0) options.commandLog.push(stdout.trimEnd());
-  await rm(nodeModulesRoot, { recursive: true, force: true });
   return installRoot;
 }
 
@@ -1083,10 +1084,6 @@ async function createCollectionInstallRoot(options: {
     }
     dependencies[name] = version;
   }
-  const memberModuleSource = await readFile(
-    fileURLToPath(new URL("../src/template-members.ts", import.meta.url)),
-    "utf8",
-  );
   return await createModulePackageRoot({
     root: options.root,
     packageName: options.packageName,
@@ -1094,7 +1091,6 @@ async function createCollectionInstallRoot(options: {
     source: generatedProviderAggregateSource(
       options.providers.map(({ packageName }) => packageName),
     ),
-    additionalSources: new Map([["template-members.ts", memberModuleSource]]),
     dependencies,
     packageRoots,
     sdkPackageRoots: options.sdkPackageRoots,

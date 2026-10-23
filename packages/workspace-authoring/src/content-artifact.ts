@@ -2,6 +2,10 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type {
+  PreparedReference,
+  ResourceFileSnapshot,
+} from "@ykdz/template-core/reference-package";
 import {
   resolveTemplateSource,
   type TemplateSourceHandle,
@@ -66,6 +70,34 @@ export type DefineNativeContentArtifactOptions = Omit<
   /** 仅列出package.json devDependencies中真正由模板入口执行的名称。 */
   readonly executionDependencies?: readonly string[];
 };
+
+export type NativeReferenceContentDefinition = Readonly<{
+  readonly alias: string;
+  readonly instance: "shared" | "independent";
+}>;
+
+export type DefineNativeReferenceContentArtifactOptions<Facts> = Omit<
+  DefineNativeContentArtifactOptions,
+  "resources"
+> &
+  Readonly<{
+    readonly resources?: readonly NativeContentArtifactResource[];
+    readonly prepareFacts?: (
+      resources: readonly ResourceFileSnapshot[],
+      options: Readonly<{ readonly excludedPackagePaths: readonly string[] }>,
+    ) => Facts;
+  }>;
+
+type NativeReferenceContentArtifact<Definition extends object, Facts> = Omit<
+  Definition,
+  "prepare"
+> &
+  Readonly<{
+    readonly prepare: (options?: {
+      readonly excludedPackagePaths: readonly string[];
+    }) => PreparedReference<Facts>;
+    readonly prepareArtifact: () => PreparedNativeContentArtifact;
+  }>;
 
 function exportEntry(
   manifest: NativeContentManifest,
@@ -291,5 +323,62 @@ export function defineNativeContentArtifact<Definition extends object>(
         ...artifactOptions,
         dependencyPurposes,
       }),
+  });
+}
+
+/** 让同一所属资源声明驱动参考包快照与正式内容制品。 */
+export function defineNativeReferenceContentArtifact<
+  Definition extends NativeReferenceContentDefinition,
+  Facts,
+>(
+  definition: Definition,
+  options: DefineNativeReferenceContentArtifactOptions<Facts> & {
+    readonly prepareFacts: NonNullable<
+      DefineNativeReferenceContentArtifactOptions<Facts>["prepareFacts"]
+    >;
+  },
+): NativeReferenceContentArtifact<Definition, Facts>;
+export function defineNativeReferenceContentArtifact<
+  Definition extends NativeReferenceContentDefinition,
+>(
+  definition: Definition,
+  options: DefineNativeReferenceContentArtifactOptions<undefined> & {
+    readonly prepareFacts?: undefined;
+  },
+): NativeReferenceContentArtifact<Definition, undefined>;
+export function defineNativeReferenceContentArtifact(
+  definition: NativeReferenceContentDefinition,
+  options: DefineNativeReferenceContentArtifactOptions<unknown>,
+): object {
+  const resourceSpecifications = options.resources ?? [];
+  const nativeArtifact = defineNativeContentArtifact(definition, options);
+  return Object.freeze({
+    ...nativeArtifact,
+    prepare(prepareOptions?: {
+      readonly excludedPackagePaths: readonly string[];
+    }) {
+      const excludedPackagePaths = prepareOptions?.excludedPackagePaths ?? [];
+      const resources = resourceSpecifications
+        .filter(
+          ({ path: resourcePath }) =>
+            !excludedPackagePaths.some(
+              (packagePath) =>
+                resourcePath === packagePath ||
+                resourcePath.startsWith(`${packagePath}/`),
+            ),
+        )
+        .map(({ path: resourcePath, source, mode }) => ({
+          path: resourcePath,
+          content: readFileSync(resolveTemplateSource(source, ".")),
+          mode: mode & 0o111,
+        }));
+      const snapshot = Object.freeze(resources);
+      return Object.freeze({
+        resources: snapshot,
+        facts: options.prepareFacts?.(snapshot, {
+          excludedPackagePaths,
+        }),
+      });
+    },
   });
 }
