@@ -13,6 +13,7 @@ import {
   type ContentIdentity,
   type LoadedContentMember,
 } from "@ykdz/template-core/content-identity";
+import type { GenerationRecordSelection } from "@ykdz/template-core/generation-record";
 import type { JsonValue } from "@ykdz/template-core/json";
 import type {
   CompositionFile,
@@ -288,6 +289,7 @@ function validateDefaultFacts(
 function packageLinks(options: {
   readonly packages: readonly CompositionPackage<JsonValue>[];
   readonly content: readonly DefaultContentMember[];
+  readonly selections: readonly GenerationRecordSelection[];
 }): readonly PackageLinkIntent[] {
   const seen = new Set<string>();
   const links: PackageLinkIntent[] = [];
@@ -299,6 +301,14 @@ function packageLinks(options: {
       .filter((member) => member.kind === "reference")
       .map((member) => [contentIdentityKey(member.identity), member]),
   );
+  const packagesByNodeIdentity = new Map<string, Set<PackageDefinitionId>>();
+  for (const selection of options.selections) {
+    for (const [nodeIdentity, packageId] of Object.entries(selection.nodes)) {
+      const packageIds = packagesByNodeIdentity.get(nodeIdentity) ?? new Set();
+      packageIds.add(packageId);
+      packagesByNodeIdentity.set(nodeIdentity, packageIds);
+    }
+  }
   const add = (
     consumerId: PackageDefinitionId,
     providerId: PackageDefinitionId,
@@ -346,6 +356,34 @@ function packageLinks(options: {
     }
 
     const creationInput = consumer.creationInput;
+    if (isRecord(creationInput)) {
+      const linkToNodeIdentity = creationInput.linkToNodeIdentity;
+      if (linkToNodeIdentity !== undefined) {
+        if (
+          typeof linkToNodeIdentity !== "string" ||
+          linkToNodeIdentity.length === 0
+        ) {
+          throw new Error("包连接请求需要非空节点身份");
+        }
+        const candidates = packagesByNodeIdentity.get(linkToNodeIdentity);
+        if (candidates === undefined || candidates.size === 0) {
+          throw new Error(`包连接节点身份不存在：${linkToNodeIdentity}`);
+        }
+        if (candidates.size > 1) {
+          throw new Error(`包连接节点身份不唯一：${linkToNodeIdentity}`);
+        }
+        const providerId = candidates.values().next().value as
+          | PackageDefinitionId
+          | undefined;
+        if (providerId === undefined || !packagesById.has(providerId)) {
+          throw new Error(`包连接节点身份没有当前实例：${linkToNodeIdentity}`);
+        }
+        if (providerId === consumer.packageDefinitionId) {
+          throw new Error("包连接请求不能连接自身");
+        }
+        add(consumer.packageDefinitionId, providerId);
+      }
+    }
     if (!isRecord(creationInput) || creationInput.linkFrom === undefined) {
       continue;
     }
@@ -555,6 +593,31 @@ function linkedManifestOverrides(options: {
     }
   }
   return overrides;
+}
+
+function assertUniqueWorkspaceBinaryNames(options: {
+  readonly packages: readonly DefaultEvaluation[];
+  readonly manifestOverrides: ReadonlyMap<
+    PackageDefinitionId,
+    Readonly<Record<string, unknown>>
+  >;
+}): void {
+  const owners = new Map<string, string>();
+  for (const { package: item, contribution } of options.packages) {
+    const manifest =
+      options.manifestOverrides.get(item.packageDefinitionId) ??
+      contribution.facts.manifest;
+    if (!isRecord(manifest.bin)) continue;
+    for (const commandName of Object.keys(manifest.bin)) {
+      const previousOwner = owners.get(commandName);
+      if (previousOwner !== undefined) {
+        throw new Error(
+          `CLI命令名称 ${JSON.stringify(commandName)} 重复：${previousOwner} 与 ${item.definition.name}`,
+        );
+      }
+      owners.set(commandName, item.definition.name);
+    }
+  }
 }
 
 function mergeEntries<T>(options: {
@@ -831,6 +894,7 @@ export function createDefaultComposition(options: {
         packageLinkIntents: packageLinks({
           packages: resolveOptions.packages,
           content: options.content,
+          selections: resolveOptions.selections,
         }),
       };
     },
@@ -853,6 +917,10 @@ export function createDefaultComposition(options: {
         packages: combineOptions.packages,
         intents: combineOptions.blueprint.packageLinkIntents,
         targetManifests: combineOptions.stableCommon.targetManifests,
+      });
+      assertUniqueWorkspaceBinaryNames({
+        packages: combineOptions.packages,
+        manifestOverrides,
       });
       const requiredTemplateDependencies = new Set(
         allFacts.flatMap((facts) =>

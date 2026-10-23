@@ -48,7 +48,7 @@ export function validateCliCommandName(
 export function projectCliPackageManifest(options: {
   readonly manifest: unknown;
   readonly commandName: string;
-  readonly nodeLtsMajor: string;
+  readonly nodeDeclaration: string;
 }): Readonly<Record<string, unknown>> {
   if (!isRecord(options.manifest)) {
     throw new Error("CLI package manifest must be an object");
@@ -72,7 +72,7 @@ export function projectCliPackageManifest(options: {
     bin: {
       [validateCliCommandName(options.commandName)]: entry[1],
     },
-    engines: { node: `>=${options.nodeLtsMajor}` },
+    engines: { node: `>=${options.nodeDeclaration.split(".", 1)[0]}` },
   };
 }
 

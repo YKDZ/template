@@ -114,6 +114,135 @@ async function additionFacts(
   targetManifests.set(rootPackage.packageDefinitionId, manifest);
   const currentFacts: CurrentProjectProjectionEntry[] = [rootManifestFact.fact];
   const currentFactPaths = new Set([rootManifestFact.fact.path]);
+  const currentById = new Map(
+    options.restored.blueprint.packages.map((pkg) => [
+      pkg.packageDefinitionId,
+      pkg,
+    ]),
+  );
+  const restoredById = new Map(
+    options.restored.packages.map((pkg) => [pkg.packageDefinitionId, pkg]),
+  );
+  const contentByIdentity = new Map(
+    content
+      .filter((member) => member.kind === "reference")
+      .map((member) => [contentIdentityKey(member.identity), member]),
+  );
+  const addCurrentFact = (fact: CurrentProjectProjectionEntry): void => {
+    if (currentFactPaths.has(fact.path)) return;
+    currentFacts.push(fact);
+    currentFactPaths.add(fact.path);
+  };
+  const readPackageManifest = async (
+    packageId: GeneratorRestoredProject<JsonValue>["blueprint"]["packages"][number]["packageDefinitionId"],
+  ): Promise<Readonly<Record<string, unknown>>> => {
+    const existing = targetManifests.get(packageId);
+    if (existing !== undefined) return existing;
+    const currentPackage = currentById.get(packageId);
+    if (currentPackage === undefined) {
+      throw new Error(`包连接引用了未知当前实例：${packageId}`);
+    }
+    const current = await readTargetManifest(currentPackage.path);
+    targetManifests.set(packageId, current.value);
+    addCurrentFact(current.fact);
+    return current.value;
+  };
+  const readPackageExportTarget = async (
+    packagePath: string,
+    targetValue: string,
+  ): Promise<void> => {
+    if (
+      !targetValue.startsWith("./") ||
+      targetValue.includes("\\") ||
+      targetValue
+        .slice(2)
+        .split("/")
+        .some(
+          (segment) =>
+            segment.length === 0 || segment === "." || segment === "..",
+        )
+    ) {
+      throw new Error(
+        `复用包 ${packagePath} 的公开入口路径无效：${targetValue}`,
+      );
+    }
+    const target = path.posix.join(
+      packagePath === "." ? "" : packagePath,
+      targetValue.slice(2),
+    );
+    if (currentFactPaths.has(target)) return;
+    const targetAbsolutePath = path.join(repositoryRoot, ...target.split("/"));
+    const targetStat = await lstat(targetAbsolutePath);
+    if (!targetStat.isFile()) {
+      throw new Error(
+        `复用包 ${packagePath} 的公开文件不可读取：${targetValue}`,
+      );
+    }
+    const targetBytes = new Uint8Array(await readFile(targetAbsolutePath));
+    addCurrentFact({
+      path: target,
+      kind: "file",
+      content: targetBytes,
+      mode: targetStat.mode & 0o111,
+    });
+  };
+
+  const linkedPackageIds = new Set<
+    GeneratorRestoredProject<JsonValue>["blueprint"]["packages"][number]["packageDefinitionId"]
+  >();
+  const linkedProviderIds = new Set(linkedPackageIds);
+  for (const intent of options.restored.blueprint.packageLinkIntents) {
+    linkedPackageIds.add(intent.consumerId);
+    linkedPackageIds.add(intent.providerId);
+    linkedProviderIds.add(intent.providerId);
+  }
+  const requestedLinkToNodeIdentity = isRecord(options.selection.creationInput)
+    ? options.selection.creationInput.linkToNodeIdentity
+    : undefined;
+  if (requestedLinkToNodeIdentity !== undefined) {
+    if (
+      typeof requestedLinkToNodeIdentity !== "string" ||
+      requestedLinkToNodeIdentity.length === 0
+    ) {
+      throw new Error("包连接请求需要非空节点身份");
+    }
+    const providerIds = new Set(
+      options.restored.selections.flatMap((selection) =>
+        Object.hasOwn(selection.nodes, requestedLinkToNodeIdentity)
+          ? [selection.nodes[requestedLinkToNodeIdentity]!]
+          : [],
+      ),
+    );
+    if (providerIds.size === 0) {
+      throw new Error(`包连接节点身份不存在：${requestedLinkToNodeIdentity}`);
+    }
+    if (providerIds.size > 1) {
+      throw new Error(`包连接节点身份不唯一：${requestedLinkToNodeIdentity}`);
+    }
+    const providerId = providerIds.values().next().value;
+    if (providerId === undefined || !currentById.has(providerId)) {
+      throw new Error(
+        `包连接节点身份没有当前实例：${requestedLinkToNodeIdentity}`,
+      );
+    }
+    linkedPackageIds.add(providerId);
+    linkedProviderIds.add(providerId);
+  }
+  for (const packageId of linkedPackageIds) {
+    await readPackageManifest(packageId);
+  }
+  for (const packageId of linkedProviderIds) {
+    const provider = currentById.get(packageId);
+    const providerManifest = await readPackageManifest(packageId);
+    const exports = isRecord(providerManifest.exports)
+      ? providerManifest.exports
+      : {};
+    const rootExport = exports["."];
+    if (typeof rootExport === "string") {
+      await readPackageExportTarget(provider?.path ?? ".", rootExport);
+    }
+  }
+
   const linkFromPaths: string[] = [];
   const addLinkFrom = (value: unknown): void => {
     if (value === undefined) return;
@@ -150,26 +279,9 @@ async function additionFacts(
     }
     const current = await readTargetManifest(packagePath);
     targetManifests.set(consumer.packageDefinitionId, current.value);
-    if (!currentFactPaths.has(current.fact.path)) {
-      currentFacts.push(current.fact);
-      currentFactPaths.add(current.fact.path);
-    }
+    addCurrentFact(current.fact);
   }
 
-  const contentByIdentity = new Map(
-    content
-      .filter((member) => member.kind === "reference")
-      .map((member) => [contentIdentityKey(member.identity), member]),
-  );
-  const currentById = new Map(
-    options.restored.blueprint.packages.map((pkg) => [
-      pkg.packageDefinitionId,
-      pkg,
-    ]),
-  );
-  const restoredById = new Map(
-    options.restored.packages.map((pkg) => [pkg.packageDefinitionId, pkg]),
-  );
   for (const consumer of options.restored.packages) {
     const member = contentByIdentity.get(
       contentIdentityKey(consumer.contentIdentity),
@@ -192,10 +304,7 @@ async function additionFacts(
         const current = await readTargetManifest(provider.path);
         providerManifest = current.value;
         targetManifests.set(provider.packageDefinitionId, providerManifest);
-        if (!currentFactPaths.has(current.fact.path)) {
-          currentFacts.push(current.fact);
-          currentFactPaths.add(current.fact.path);
-        }
+        addCurrentFact(current.fact);
       }
       if (providerManifest.name !== provider.name) {
         throw new Error(
@@ -242,29 +351,7 @@ async function additionFacts(
             `复用包 ${provider.path} 的公开入口路径无效：${actual}`,
           );
         }
-        const target = path.posix.join(
-          provider.path === "." ? "" : provider.path,
-          actual.slice(2),
-        );
-        if (currentFactPaths.has(target)) continue;
-        const targetAbsolutePath = path.join(
-          repositoryRoot,
-          ...target.split("/"),
-        );
-        const targetStat = await lstat(targetAbsolutePath);
-        if (!targetStat.isFile()) {
-          throw new Error(
-            `复用包 ${provider.path} 的公开文件不可读取：${actual}`,
-          );
-        }
-        const targetBytes = new Uint8Array(await readFile(targetAbsolutePath));
-        currentFacts.push({
-          path: target,
-          kind: "file",
-          content: targetBytes,
-          mode: targetStat.mode & 0o111,
-        });
-        currentFactPaths.add(target);
+        await readPackageExportTarget(provider.path, actual);
       }
     }
   }

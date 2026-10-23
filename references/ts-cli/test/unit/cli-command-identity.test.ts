@@ -5,7 +5,7 @@ import {
   cliCommandIdentity,
   projectCliPackageManifest,
   validateCliCommandName,
-} from "@ykdz/reference-ts-cli/command-identity";
+} from "../../src/publication/cli-command-identity.ts";
 
 void describe("CLI command identity", () => {
   for (const { name, command, message } of [
@@ -62,7 +62,7 @@ void describe("CLI command identity", () => {
           engines: { node: "^24.21.0" },
         },
         commandName: "public-cli",
-        nodeLtsMajor: "24",
+        nodeDeclaration: "24.21.0",
       }),
       {
         name: "@ykdz/reference-ts-cli",
@@ -84,7 +84,7 @@ void describe("CLI command identity", () => {
         projectCliPackageManifest({
           manifest,
           commandName: "public--cli",
-          nodeLtsMajor: "24",
+          nodeDeclaration: "24",
         }),
       /single hyphens/u,
     );
@@ -99,7 +99,7 @@ void describe("CLI command identity", () => {
             },
           },
           commandName: "public-cli",
-          nodeLtsMajor: "24",
+          nodeDeclaration: "24.21.0",
         }),
       /exactly one bin/u,
     );
