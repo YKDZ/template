@@ -135,11 +135,19 @@ export type ReferencePackage<
   Definition extends ReferencePackageDefinition = ReferencePackageDefinition,
 > = LoadedContentMember<Definition, "reference">;
 
+/** 显式依赖边指向本次选择节点，或 add 时指向已恢复实例。 */
+export type SelectionDependencyBindingTarget =
+  | string
+  | Readonly<{ readonly packageDefinitionId: PackageDefinitionId }>;
+
 export type ReferenceSelectionRoot<
   CreationInput extends JsonValue = JsonValue,
 > = {
   readonly nodeIdentity: string;
   readonly contentIdentity: ContentSelector;
+  readonly dependencyBindings?: Readonly<
+    Record<string, SelectionDependencyBindingTarget>
+  >;
   readonly creationInput?: CreationInput;
   readonly layout?: unknown;
 };

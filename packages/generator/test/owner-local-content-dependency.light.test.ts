@@ -416,6 +416,314 @@ void describe("owner-local内容依赖", () => {
     }
   });
 
+  void it("direct add 按持久ID复用自定义独立provider并跨恢复保留", async () => {
+    const consumerIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/web",
+      exportPath: "./template",
+    };
+    const providerIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/api",
+      exportPath: "./template",
+    };
+    const consumer = referenceDefinition("web", {
+      key: "api",
+      contentIdentity: providerIdentity,
+    } satisfies ReferenceDependency<CreationInput>);
+    const provider = referenceDefinition("api");
+    const content = [
+      loadedReference(
+        "source",
+        consumerIdentity.packageName,
+        consumerIdentity.exportPath,
+        "file:///fixture/web/template.js",
+        consumer,
+      ),
+      loadedReference(
+        "source",
+        providerIdentity.packageName,
+        providerIdentity.exportPath,
+        "file:///fixture/api/template.js",
+        provider,
+      ),
+    ];
+
+    await withTemporaryTarget(async (targetRoot) => {
+      const initialized = await createEngine(content).init({
+        targetRoot,
+        selection: {
+          roots: [
+            {
+              nodeIdentity: "api",
+              contentIdentity: providerIdentity,
+              creationInput: { path: "packages/custom-api" },
+            },
+          ],
+        },
+        conventions: { edition: "stable" },
+        operationFacts: null,
+      });
+      assert.equal(initialized.status, "success", JSON.stringify(initialized));
+      if (initialized.status !== "success") return;
+
+      const apiId = initialized.generationRecord.selections[0]?.nodes.api;
+      assert.ok(apiId);
+      const firstAdded = await createEngine(content).add({
+        repositoryRoot: targetRoot,
+        contentIdentity: consumerIdentity,
+        nodeIdentity: "web",
+        creationInput: { path: "apps/web" },
+        dependencyBindings: {
+          api: { packageDefinitionId: apiId },
+        },
+        operationFacts: null,
+      });
+      assert.equal(firstAdded.status, "success", JSON.stringify(firstAdded));
+      if (firstAdded.status !== "success") return;
+
+      const webId = firstAdded.generationRecord.selections.at(-1)?.nodes.web;
+      assert.ok(webId);
+      const apiRecord = firstAdded.generationRecord.packages.find(
+        (item) => item.packageDefinitionId === apiId,
+      );
+      const webRecord = firstAdded.generationRecord.packages.find(
+        (item) => item.packageDefinitionId === webId,
+      );
+      assert.equal(firstAdded.generationRecord.packages.length, 2);
+      assert.equal(apiRecord?.createdBy, "initialization");
+      assert.deepEqual(apiRecord?.creationInput, {
+        path: "packages/custom-api",
+      });
+      assert.equal(webRecord?.createdBy, "addition");
+      assert.equal(webRecord?.dependencyBindings.api, apiId);
+
+      const secondAdded = await createEngine(content).add({
+        repositoryRoot: targetRoot,
+        contentIdentity: consumerIdentity,
+        nodeIdentity: "web-again",
+        creationInput: { path: "apps/web-again" },
+        dependencyBindings: {
+          api: { packageDefinitionId: apiId },
+        },
+        operationFacts: null,
+      });
+      assert.equal(secondAdded.status, "success", JSON.stringify(secondAdded));
+      if (secondAdded.status !== "success") return;
+      assert.ok(
+        [apiId, webId].every((id) =>
+          secondAdded.generationRecord.packages.some(
+            (item) => item.packageDefinitionId === id,
+          ),
+        ),
+      );
+      assert.equal(secondAdded.generationRecord.packages.length, 3);
+      assert.equal(
+        secondAdded.generationRecord.packages.find(
+          (item) => item.packageDefinitionId === apiId,
+        )?.createdBy,
+        "initialization",
+      );
+      assert.equal(
+        secondAdded.generationRecord.packages.find(
+          (item) => item.packageDefinitionId === webId,
+        )?.dependencyBindings.api,
+        apiId,
+      );
+    });
+  });
+
+  void it("direct add 在多个provider中只接受显式ID、身份与输入一致者", async () => {
+    const webIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/web",
+      exportPath: "./template",
+    };
+    const strictWebIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/strict-web",
+      exportPath: "./template",
+    };
+    const apiIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/api",
+      exportPath: "./template",
+    };
+    const otherIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/other",
+      exportPath: "./template",
+    };
+    const content = [
+      loadedReference(
+        "source",
+        webIdentity.packageName,
+        webIdentity.exportPath,
+        "file:///fixture/web/template.js",
+        referenceDefinition("web", {
+          key: "api",
+          contentIdentity: apiIdentity,
+        } satisfies ReferenceDependency<CreationInput>),
+      ),
+      loadedReference(
+        "source",
+        strictWebIdentity.packageName,
+        strictWebIdentity.exportPath,
+        "file:///fixture/strict-web/template.js",
+        referenceDefinition("strict-web", {
+          key: "api",
+          contentIdentity: apiIdentity,
+          creationInput: { path: "packages/expected-api" },
+        } satisfies ReferenceDependency<CreationInput>),
+      ),
+      loadedReference(
+        "source",
+        apiIdentity.packageName,
+        apiIdentity.exportPath,
+        "file:///fixture/api/template.js",
+        referenceDefinition("api"),
+      ),
+      loadedReference(
+        "source",
+        otherIdentity.packageName,
+        otherIdentity.exportPath,
+        "file:///fixture/other/template.js",
+        referenceDefinition("other"),
+      ),
+    ];
+
+    await withTemporaryTarget(async (targetRoot) => {
+      const initialized = await createEngine(content).init({
+        targetRoot,
+        selection: {
+          roots: [
+            {
+              nodeIdentity: "api-b",
+              contentIdentity: apiIdentity,
+              creationInput: { path: "packages/api-b" },
+            },
+            {
+              nodeIdentity: "other",
+              contentIdentity: otherIdentity,
+              creationInput: { path: "packages/other" },
+            },
+            {
+              nodeIdentity: "api-a",
+              contentIdentity: apiIdentity,
+              creationInput: { path: "packages/api-a" },
+            },
+          ],
+        },
+        conventions: { edition: "stable" },
+        operationFacts: null,
+      });
+      assert.equal(initialized.status, "success", JSON.stringify(initialized));
+      if (initialized.status !== "success") return;
+      const nodes = initialized.generationRecord.selections[0]?.nodes;
+      const apiBId = nodes?.["api-b"];
+      const apiAId = nodes?.["api-a"];
+      const otherId = nodes?.other;
+      assert.ok(apiBId);
+      assert.ok(apiAId);
+      assert.ok(otherId);
+      const metadataPath = path.join(targetRoot, ".template/generation.json");
+      const metadataBefore = await readFile(metadataPath);
+
+      const wrongIdentity = await createEngine(content).planAdd({
+        repositoryRoot: targetRoot,
+        contentIdentity: webIdentity,
+        nodeIdentity: "web",
+        creationInput: { path: "apps/web" },
+        dependencyBindings: {
+          api: { packageDefinitionId: otherId },
+        },
+        operationFacts: null,
+      });
+      assert.equal(wrongIdentity.status, "operation-failure");
+      if (wrongIdentity.status === "operation-failure") {
+        assert.equal(wrongIdentity.phase, "preparation");
+      }
+      assert.deepEqual(await readFile(metadataPath), metadataBefore);
+
+      const wrongInput = await createEngine(content).planAdd({
+        repositoryRoot: targetRoot,
+        contentIdentity: strictWebIdentity,
+        nodeIdentity: "strict-web",
+        creationInput: { path: "apps/strict-web" },
+        dependencyBindings: {
+          api: { packageDefinitionId: apiBId },
+        },
+        operationFacts: null,
+      });
+      assert.equal(wrongInput.status, "operation-failure");
+      if (wrongInput.status === "operation-failure") {
+        assert.equal(wrongInput.phase, "preparation");
+      }
+      assert.deepEqual(await readFile(metadataPath), metadataBefore);
+
+      const missingProvider = await createEngine(content).planAdd({
+        repositoryRoot: targetRoot,
+        contentIdentity: webIdentity,
+        nodeIdentity: "web",
+        creationInput: { path: "apps/web" },
+        dependencyBindings: {
+          api: {
+            packageDefinitionId:
+              `package-${"0".repeat(64)}` as PackageDefinitionId,
+          },
+        },
+        operationFacts: null,
+      });
+      assert.equal(missingProvider.status, "operation-failure");
+      if (missingProvider.status === "operation-failure") {
+        assert.equal(missingProvider.phase, "preparation");
+      }
+      assert.deepEqual(await readFile(metadataPath), metadataBefore);
+
+      const added = await createEngine(content).add({
+        repositoryRoot: targetRoot,
+        contentIdentity: webIdentity,
+        nodeIdentity: "web",
+        creationInput: { path: "apps/web" },
+        dependencyBindings: {
+          api: { packageDefinitionId: apiBId },
+        },
+        operationFacts: null,
+      });
+      assert.equal(added.status, "success", JSON.stringify(added));
+      if (added.status !== "success") return;
+      const webId = added.generationRecord.selections.at(-1)?.nodes.web;
+      assert.ok(webId);
+      assert.equal(added.generationRecord.packages.length, 4);
+      assert.equal(
+        added.generationRecord.packages.find(
+          (item) => item.packageDefinitionId === webId,
+        )?.dependencyBindings.api,
+        apiBId,
+      );
+      const apiBRecord = added.generationRecord.packages.find(
+        (item) => item.packageDefinitionId === apiBId,
+      );
+      assert.deepEqual(apiBRecord?.creationInput, { path: "packages/api-b" });
+      const metadataAfterAdd = await readFile(metadataPath);
+      const conflictingSelection = await createEngine(content).planAdd({
+        repositoryRoot: targetRoot,
+        contentIdentity: webIdentity,
+        nodeIdentity: "web",
+        creationInput: { path: "apps/web" },
+        dependencyBindings: {
+          api: { packageDefinitionId: apiAId },
+        },
+        operationFacts: null,
+      });
+      assert.equal(conflictingSelection.status, "operation-failure");
+      if (conflictingSelection.status === "operation-failure") {
+        assert.equal(conflictingSelection.phase, "preparation");
+      }
+      assert.deepEqual(await readFile(metadataPath), metadataAfterAdd);
+    });
+  });
+
   void it("拒绝错误身份、冲突输入和预设实例循环", async () => {
     const consumerIdentity: ContentIdentity = {
       namespace: "source",
