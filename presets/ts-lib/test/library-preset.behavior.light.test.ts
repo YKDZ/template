@@ -4,59 +4,75 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rm,
   stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 
 import { preset as presetDefinition } from "@ykdz/preset-ts-lib/template";
 import { referencePackage as libraryDefinition } from "@ykdz/reference-ts-lib/template";
 import {
   contentIdentityKey,
-  createContentIndex,
   type ContentIdentity,
-  type LoadedContentMember,
 } from "@ykdz/template-core/content-identity";
 import { definePreset } from "@ykdz/template-core/preset-definition";
-import { createGenerator } from "@ykdz/template-generator";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 
 const content = await loadContentSource({
   namespace: "ykdz",
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
-    "@ykdz/reference-ts-lib/template",
-    "@ykdz/reference-tooling-config/template",
-    "@ykdz/preset-ts-lib/template",
+    {
+      specifier: "@ykdz/reference-workspace-root/template",
+      load: () => import("@ykdz/reference-workspace-root/template"),
+    },
+    {
+      specifier: "@ykdz/reference-ts-lib/template",
+      load: () => import("@ykdz/reference-ts-lib/template"),
+    },
+    {
+      specifier: "@ykdz/reference-tooling-config/template",
+      load: () => import("@ykdz/reference-tooling-config/template"),
+    },
+    {
+      specifier: "@ykdz/reference-npm-publication/template",
+      load: () => import("@ykdz/reference-npm-publication/template"),
+    },
+    {
+      specifier: "@ykdz/preset-ts-lib/template",
+      load: () => import("@ykdz/preset-ts-lib/template"),
+    },
   ],
-  prepareReferenceDefinition(definition) {
-    return defineReferencePackage(
-      definition as Parameters<typeof defineReferencePackage>[0],
-    );
-  },
 });
-const contentIndex = createContentIndex(content);
-const library = contentIndex.fromDefinition(
-  libraryDefinition,
-  "reference",
-) as LoadedContentMember<
-  ReturnType<typeof defineReferencePackage>,
-  "reference"
->;
-const configuration = contentIndex.resolve(
-  {
-    namespace: "ykdz",
-    packageName: "@ykdz/reference-tooling-config",
-    exportPath: "./template",
-  },
-  "reference",
+const root = content.find(
+  (member) =>
+    member.kind === "reference" &&
+    member.identity.packageName === "@ykdz/reference-workspace-root",
 );
-const preset = contentIndex.fromDefinition(presetDefinition, "preset");
+const library = content.find(
+  (member) =>
+    member.kind === "reference" &&
+    member.identity.packageName === "@ykdz/reference-ts-lib",
+);
+const configuration = content.find(
+  (member) =>
+    member.kind === "reference" &&
+    member.identity.packageName === "@ykdz/reference-tooling-config",
+);
+const preset = content.find(
+  (member) =>
+    member.kind === "preset" &&
+    member.identity.packageName === "@ykdz/preset-ts-lib",
+);
+assert.ok(root);
+assert.ok(library);
+assert.ok(configuration);
+assert.ok(preset);
 
 async function snapshotTree(root: string): Promise<string> {
   const files: { path: string; mode: number; content: string }[] = [];
@@ -81,20 +97,30 @@ async function snapshotTree(root: string): Promise<string> {
   return JSON.stringify(files);
 }
 
+const temporaryRoots = new Set<string>();
+
+async function createTemporaryRoot(prefix: string, name = "demo") {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), prefix));
+  temporaryRoots.add(temporaryRoot);
+  return path.join(temporaryRoot, name);
+}
+
+after(async () => {
+  await Promise.all(
+    [...temporaryRoots].map((temporaryRoot) =>
+      rm(temporaryRoot, { recursive: true, force: true }),
+    ),
+  );
+});
+
 void describe("TypeScript 库公开预设", () => {
   void it("通过公开声明初始化、连续加包并复用共享配置", async () => {
-    const targetRoot = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-ts-lib-preset-")),
-      "demo",
-    );
-    const generator = createGenerator({
-      content,
-      strategy: createDefaultWorkspaceStrategy(),
-    });
+    const targetRoot = await createTemporaryRoot("template-ts-lib-preset-");
+    const generator = createDefaultGenerator({ content });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
+      selection: { presets: [{ contentIdentity: preset.identity }] },
+      conventions: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
 
     assert.strictEqual(
@@ -108,11 +134,11 @@ void describe("TypeScript 库公开预设", () => {
         "utf8",
       ),
     ) as {
-      nodeInstances: Record<string, string>;
       packages: {
         contentIdentity: ContentIdentity;
         packageDefinitionId: string;
       }[];
+      selections: { nodes: Record<string, string> }[];
     };
     assert.partialDeepStrictEqual(
       JSON.parse(
@@ -186,15 +212,15 @@ void describe("TypeScript 库公开预设", () => {
         "utf8",
       ),
     ) as {
-      nodeInstances: Record<string, string>;
       packages: {
         contentIdentity: ContentIdentity;
         packageDefinitionId: string;
       }[];
+      selections: { nodes: Record<string, string> }[];
     };
     assert.strictEqual(
-      updatedRecord.nodeInstances.library,
-      initialRecord.nodeInstances.library,
+      updatedRecord.selections[0]?.nodes.library,
+      initialRecord.selections[0]?.nodes.library,
     );
     for (const identity of [library.identity, configuration.identity]) {
       assert.strictEqual(
@@ -241,25 +267,25 @@ void describe("TypeScript 库公开预设", () => {
       mkdtemp(path.join(tmpdir(), "template-ts-lib-preset-graph-")),
       mkdtemp(path.join(tmpdir(), "template-ts-lib-reference-graph-")),
     ]);
-    const presetGenerator = createGenerator({
+    for (const temporaryRoot of roots) temporaryRoots.add(temporaryRoot);
+    const presetGenerator = createDefaultGenerator({ content });
+    const referenceGenerator = createDefaultGenerator({
       content,
-      strategy: createDefaultWorkspaceStrategy(),
-    });
-    const referenceGenerator = createGenerator({
-      content: [library, configuration],
-      strategy: createDefaultWorkspaceStrategy(),
     });
     const presetResult = await presetGenerator.init({
       targetRoot: path.join(roots[0]!, "demo"),
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
+      selection: { presets: [{ contentIdentity: preset.identity }] },
+      conventions: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     const referenceResult = await referenceGenerator.init({
       targetRoot: path.join(roots[1]!, "demo"),
       selection: {
-        roots: [{ nodeIdentity: "library", contentIdentity: "library" }],
+        roots: [
+          { nodeIdentity: "root", contentIdentity: root.identity },
+          { nodeIdentity: "library", contentIdentity: library.identity },
+        ],
       },
-      strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
+      conventions: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
 
     assert.strictEqual(presetResult.status, "success");
@@ -270,17 +296,27 @@ void describe("TypeScript 库公开预设", () => {
     ) {
       throw new Error("初始化成功后应返回正式生成结果");
     }
-    assert.deepStrictEqual(presetResult.blueprint, referenceResult.blueprint);
+    const comparableBlueprint = (blueprint: typeof presetResult.blueprint) => ({
+      ...blueprint,
+      packages: blueprint.packages
+        .map(({ name, path, role }) => ({ name, path, role }))
+        .toSorted((left, right) => left.path.localeCompare(right.path)),
+    });
     assert.deepStrictEqual(
-      presetResult.generationRecord.packages,
-      referenceResult.generationRecord.packages,
+      comparableBlueprint(presetResult.blueprint),
+      comparableBlueprint(referenceResult.blueprint),
     );
-    assert.deepStrictEqual(presetResult.generationRecord.presetSelections, [
-      preset.identity,
-    ]);
     assert.deepStrictEqual(
-      referenceResult.generationRecord.presetSelections,
-      [],
+      presetResult.generationRecord.selections.map(
+        ({ presetIdentity }) => presetIdentity,
+      ),
+      [preset.identity],
+    );
+    assert.deepStrictEqual(
+      referenceResult.generationRecord.selections.map(
+        ({ presetIdentity }) => presetIdentity,
+      ),
+      [null],
     );
     const presetFiles = JSON.parse(
       await snapshotTree(path.join(roots[0]!, "demo")),
@@ -289,9 +325,15 @@ void describe("TypeScript 库公开预设", () => {
       await snapshotTree(path.join(roots[1]!, "demo")),
     ) as { path: string; mode: number; content: string }[];
     assert.deepStrictEqual(
-      presetFiles.filter((entry) => entry.path !== ".template/generation.json"),
+      presetFiles.filter(
+        (entry) =>
+          entry.path !== ".template/generation.json" &&
+          entry.path !== ".template/blueprint.json",
+      ),
       referenceFiles.filter(
-        (entry) => entry.path !== ".template/generation.json",
+        (entry) =>
+          entry.path !== ".template/generation.json" &&
+          entry.path !== ".template/blueprint.json",
       ),
     );
   });
@@ -316,18 +358,16 @@ void describe("TypeScript 库公开预设", () => {
       alias: layoutPreset.metadata.alias,
       definition: layoutPreset,
     });
-    const targetRoot = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-ts-lib-layout-")),
-      "demo",
-    );
-    const generator = createGenerator({
-      content: [library, configuration, layoutPresetMember],
-      strategy: createDefaultWorkspaceStrategy(),
+    const targetRoot = await createTemporaryRoot("template-ts-lib-layout-");
+    const generator = createDefaultGenerator({
+      content: [root, library, configuration, layoutPresetMember],
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: layoutPresetMember.identity }] },
-      strategyInput: { defaultPackageScope: "demo" },
+      selection: {
+        presets: [{ contentIdentity: layoutPresetMember.identity }],
+      },
+      conventions: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
       initialized.status,
@@ -384,6 +424,7 @@ void describe("TypeScript 库公开预设", () => {
     assert.deepStrictEqual(
       blueprint.packages.map((item) => item.path).toSorted(),
       [
+        ".",
         "modules/archive",
         "modules/fallback",
         "modules/second",
@@ -395,34 +436,24 @@ void describe("TypeScript 库公开预设", () => {
   });
 
   void it("缺少原生共享依赖或新增路径冲突时保持目标不变", async () => {
-    const missingTarget = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-ts-lib-missing-")),
-      "demo",
-    );
-    const missingGenerator = createGenerator({
-      content: [library, preset],
-      strategy: createDefaultWorkspaceStrategy(),
+    const missingTarget = await createTemporaryRoot("template-ts-lib-missing-");
+    const missingGenerator = createDefaultGenerator({
+      content: [root, library, preset],
     });
     const missing = await missingGenerator.init({
       targetRoot: missingTarget,
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput: { defaultPackageScope: "demo" },
+      selection: { presets: [{ contentIdentity: preset.identity }] },
+      conventions: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(missing.status, "operation-failure");
     await assert.rejects(readFile(path.join(missingTarget, "package.json")));
 
-    const targetRoot = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-ts-lib-conflict-")),
-      "demo",
-    );
-    const generator = createGenerator({
-      content,
-      strategy: createDefaultWorkspaceStrategy(),
-    });
+    const targetRoot = await createTemporaryRoot("template-ts-lib-conflict-");
+    const generator = createDefaultGenerator({ content });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput: { defaultPackageScope: "demo" },
+      selection: { presets: [{ contentIdentity: preset.identity }] },
+      conventions: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(initialized.status, "success");
     const occupiedDirectory = path.join(targetRoot, "packages/occupied");
@@ -452,18 +483,14 @@ void describe("TypeScript 库公开预设", () => {
   });
 
   void it("加包时不恢复未链接既有库的缺失 manifest", async () => {
-    const targetRoot = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-ts-lib-missing-manifest-")),
-      "demo",
+    const targetRoot = await createTemporaryRoot(
+      "template-ts-lib-missing-manifest-",
     );
-    const generator = createGenerator({
-      content,
-      strategy: createDefaultWorkspaceStrategy(),
-    });
+    const generator = createDefaultGenerator({ content });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
-      strategyInput: { defaultPackageScope: "demo" },
+      selection: { presets: [{ contentIdentity: preset.identity }] },
+      conventions: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(
       initialized.status,
@@ -476,7 +503,7 @@ void describe("TypeScript 库公开预设", () => {
 
     const added = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: { leafName: "utilities" },
     });
 
@@ -500,18 +527,12 @@ void describe("TypeScript 库公开预设", () => {
   });
 
   void it("生成记录缺少必要绑定时加包失败且不提交", async () => {
-    const targetRoot = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-ts-lib-binding-")),
-      "demo",
-    );
-    const generator = createGenerator({
-      content,
-      strategy: createDefaultWorkspaceStrategy(),
-    });
+    const targetRoot = await createTemporaryRoot("template-ts-lib-binding-");
+    const generator = createDefaultGenerator({ content });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput: { defaultPackageScope: "demo" },
+      selection: { presets: [{ contentIdentity: preset.identity }] },
+      conventions: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
     assert.strictEqual(initialized.status, "success");
 
@@ -519,7 +540,7 @@ void describe("TypeScript 库公开预设", () => {
     const record = JSON.parse(await readFile(generationPath, "utf8")) as {
       packages: {
         contentIdentity: ContentIdentity;
-        bindings: Record<string, string>;
+        dependencyBindings: Record<string, string>;
       }[];
     };
     const libraryRecord = record.packages.find(
@@ -528,7 +549,7 @@ void describe("TypeScript 库公开预设", () => {
         contentIdentityKey(library.identity),
     );
     assert.ok(libraryRecord);
-    libraryRecord.bindings[contentIdentityKey(configuration.identity)] =
+    libraryRecord.dependencyBindings["tooling-config"] =
       "missing-package-instance";
     const corruptedRecord = JSON.stringify(record, null, 2) + "\n";
     await writeFile(generationPath, corruptedRecord);

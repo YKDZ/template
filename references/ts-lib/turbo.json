@@ -49,6 +49,7 @@
       "dependsOn": [
         "@ykdz/template-core#build",
         "@ykdz/template-workspace#build",
+        "@ykdz/reference-workspace-root#build:template",
         "@ykdz/reference-npm-publication#build:template"
       ],
       "outputs": ["template-dist/**"],

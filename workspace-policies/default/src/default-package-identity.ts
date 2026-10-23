@@ -106,17 +106,21 @@ function defaultPackageIssues(
       message: "Package name must be a valid npm package name for new packages",
     });
   }
-  const pathValidation = validateDefaultPackagePath(definition.path);
-  if (pathValidation.reservedWorkspaceCollection !== undefined) {
-    issues.push({
-      path: `${itemPath}.path`,
-      message: `Package Path ${definition.path} uses reserved workspace collection ${pathValidation.reservedWorkspaceCollection}`,
-    });
-  } else if (!pathValidation.hasValidShape) {
-    issues.push({
-      path: `${itemPath}.path`,
-      message: "Package Path must be exactly two safe path segments",
-    });
+  const isNativeWorkspaceRoot =
+    definition.path === "." && definition.role === "native-package";
+  if (!isNativeWorkspaceRoot) {
+    const pathValidation = validateDefaultPackagePath(definition.path);
+    if (pathValidation.reservedWorkspaceCollection !== undefined) {
+      issues.push({
+        path: `${itemPath}.path`,
+        message: `Package Path ${definition.path} uses reserved workspace collection ${pathValidation.reservedWorkspaceCollection}`,
+      });
+    } else if (!pathValidation.hasValidShape) {
+      issues.push({
+        path: `${itemPath}.path`,
+        message: "Package Path must be exactly two safe path segments",
+      });
+    }
   }
   return issues;
 }
