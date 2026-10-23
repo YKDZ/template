@@ -413,14 +413,9 @@ function defaultContext(
 
 function nativeDependencyNames(
   content: DefaultReferenceContent<PackageCreationInput>,
-  creationInput?: PackageCreationInput,
 ): readonly string[] {
   const reference = content.definition;
-  const targetDependencies = new Set(
-    reference.targetDependencyNames(
-      creationInput === undefined ? {} : { creationInput },
-    ),
-  );
+  const targetDependencies = new Set(reference.targetDependencyNames());
   return [
     ...new Set(
       [
@@ -451,10 +446,9 @@ function nativeDependencyIdentities(
     string,
     DefaultReferenceContent<PackageCreationInput>
   >,
-  creationInput?: PackageCreationInput,
 ): readonly ContentIdentity[] {
   const reference = content.definition;
-  return nativeDependencyNames(content, creationInput).map((nativeName) => {
+  return nativeDependencyNames(content).map((nativeName) => {
     let resolved: string;
     try {
       resolved = new URL(reference.resolve(`${nativeName}/template`)).href;
@@ -506,13 +500,9 @@ export function selectedWorkspaceConfigurationIdentity(options: {
   >();
   const visit = (
     content: DefaultReferenceContent<PackageCreationInput> | undefined,
-    creationInput?: PackageCreationInput,
   ): void => {
     if (content === undefined) return;
-    const key = JSON.stringify([
-      contentIdentityKey(content.identity),
-      creationInput,
-    ]);
+    const key = contentIdentityKey(content.identity);
     if (visited.has(key)) return;
     visited.add(key);
     if (content.definition.workspaceConfiguration !== undefined) {
@@ -521,7 +511,6 @@ export function selectedWorkspaceConfigurationIdentity(options: {
     for (const identity of nativeDependencyIdentities(
       content,
       options.contentByIdentity,
-      creationInput,
     )) {
       visit(options.contentByIdentity.get(contentIdentityKey(identity)));
     }
@@ -530,7 +519,6 @@ export function selectedWorkspaceConfigurationIdentity(options: {
     if (isContentIdentity(root.contentIdentity)) {
       visit(
         options.contentByIdentity.get(contentIdentityKey(root.contentIdentity)),
-        root.creationInput,
       );
     }
   }
@@ -1237,7 +1225,6 @@ export function createDefaultWorkspaceStrategy<
       state,
       content,
       contentByIdentity,
-      creationInput,
       packages,
       nodeInstances,
     }) {
@@ -1316,7 +1303,6 @@ export function createDefaultWorkspaceStrategy<
       for (const identity of nativeDependencyIdentities(
         content,
         contentByIdentity,
-        creationInput,
       )) {
         const provider = contentByIdentity.get(contentIdentityKey(identity));
         const existing = packages.filter(
@@ -1535,12 +1521,8 @@ export function createDefaultWorkspaceStrategy<
       }
       return value as DefaultWorkspaceState;
     },
-    dependencies({ content, contentByIdentity, creationInput }) {
-      return nativeDependencyIdentities(
-        content,
-        contentByIdentity,
-        creationInput,
-      );
+    dependencies({ content, contentByIdentity }) {
+      return nativeDependencyIdentities(content, contentByIdentity);
     },
     bindings({ contentByIdentity, providers }) {
       return nativeBindings(contentByIdentity, providers);

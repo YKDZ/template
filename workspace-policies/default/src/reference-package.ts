@@ -138,9 +138,7 @@ export type ReferencePackage<
   readonly templateDependencies: readonly ReferenceTemplateDependency[];
   /** prepare 后可供策略和贡献共同消费的用途归一化事实。 */
   readonly dependencyUses: readonly ReferenceDependencyUse[];
-  targetDependencyNames(options: {
-    readonly creationInput?: CreationInput;
-  }): readonly string[];
+  targetDependencyNames(): readonly string[];
   prepare(): ReferencePackagePreparation<OwnerFacts>;
   /** 完成原生模板编译后，公开可供collection装配的所属制品句柄。 */
   prepareArtifact(): PreparedNativeContentArtifact;
@@ -266,11 +264,6 @@ export function defineReferencePackage<
     readonly executionData?: readonly string[];
   };
   readonly prepare?: (options: ReferencePackagePreparationInput) => OwnerFacts;
-  /** 仅从原生声明的目标依赖全集中按创建输入选择。 */
-  readonly targetDependencies?: (options: {
-    readonly creationInput?: CreationInput;
-    readonly dependencies: readonly string[];
-  }) => readonly string[];
   readonly foundation: Contextual<
     PackageContribution["foundation"],
     CreationInput
@@ -326,21 +319,10 @@ export function defineReferencePackage<
     );
     return normalizedDependencyUses;
   };
-  const targetDependencyNames = (input: {
-    readonly creationInput?: CreationInput;
-  }): readonly string[] => {
-    const dependencies = dependencyUses()
+  const targetDependencyNames = (): readonly string[] =>
+    dependencyUses()
       .filter((dependency) => dependency.purposes.includes("target"))
       .map((dependency) => dependency.name);
-    const selected =
-      options.targetDependencies?.({ ...input, dependencies }) ?? dependencies;
-    for (const name of selected)
-      if (!dependencies.includes(name))
-        throw new Error(
-          `参考包 ${options.packageName} 选择了未声明的目标依赖：${name}`,
-        );
-    return selected;
-  };
   const defaultPath =
     options.defaultPath ?? `packages/${options.defaultLeafName}`;
   const inDeclaredResources = (file: string): boolean => {
@@ -647,13 +629,7 @@ export function defineReferencePackage<
       }
       const manifest = prepared.manifest;
       const bindings = input.bindings ?? new Map<string, PackageDefinition>();
-      const targetDependencies = new Set(
-        targetDependencyNames(
-          input.creationInput === undefined
-            ? {}
-            : { creationInput: input.creationInput },
-        ),
-      );
+      const targetDependencies = new Set(targetDependencyNames());
       const names = new Map(
         [...bindings].map(([name, definition]) => [name, definition.name]),
       );
