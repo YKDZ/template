@@ -1,20 +1,10 @@
 import { templateContent } from "@ykdz/template-content";
-import { resolveTemplateSource } from "@ykdz/template-core/renderer";
-import { createGenerator } from "@ykdz/template-generator";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
-import {
-  canConsumeNodePackageNameImportForRole,
-  canProvideSourceConditionPackageNameImportForRole,
-} from "@ykdz/template-workspace/project-linking";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 
 import type { GeneratedScenarioRuntime } from "./generated-content.ts";
 
-/** 源码作者门使用的正式公开模块集合；安装门必须显式注入已安装模块。 */
+/** 源码作者门使用正式内容集合与默认 SDK。 */
 export const sourceGeneratedScenarioRuntime: GeneratedScenarioRuntime = {
   content: templateContent,
-  createGenerator,
-  createDefaultWorkspaceStrategy,
-  resolveTemplateSource,
-  canConsumeNodePackageNameImportForRole,
-  canProvideSourceConditionPackageNameImportForRole,
+  createDefaultGenerator,
 };

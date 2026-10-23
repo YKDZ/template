@@ -1571,7 +1571,7 @@ importers:
         specifier: 'catalog:'
         version: 24.19.2
       '@ykdz/reference-tooling-config':
-        specifier: workspace:*
+        specifier: workspace:../tooling-config
         version: link:../tooling-config
       '@ykdz/template-core':
         specifier: workspace:*

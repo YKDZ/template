@@ -1,20 +1,18 @@
+import type { DependencyMaintenancePolicy } from "@ykdz/template-workspace/project-requirements";
 import { parseDocument, isScalar, visit } from "yaml";
 
 import type { GeneratedScenarioReceipt } from "./generated-content.ts";
 
 type WorkflowOracle = {
   readonly deployment: boolean;
-  readonly checkWorkflowJob: {
-    readonly name: string;
-    readonly timeoutMinutes: number;
-  };
+  readonly checkWorkflowJob: GeneratedScenarioReceipt["result"]["ownerFacts"]["checkWorkflowJob"];
   readonly diagnosticOwnerPaths: Readonly<
     Record<"playwright" | "vitest-browser", readonly string[]>
   >;
 };
 
 function ownerFacts(receipt: GeneratedScenarioReceipt) {
-  return receipt.result.projection.ownerFacts;
+  return receipt.result.ownerFacts;
 }
 
 function hasExactKeys(
@@ -34,6 +32,7 @@ function hasExactKeys(
 }
 
 function workflowOracle(receipt: GeneratedScenarioReceipt): WorkflowOracle {
+  const facts = ownerFacts(receipt);
   const packagePaths = new Set(
     receipt.result.blueprint.packages.map((definition) => definition.path),
   );
@@ -41,7 +40,7 @@ function workflowOracle(receipt: GeneratedScenarioReceipt): WorkflowOracle {
     playwright: new Set<string>(),
     "vitest-browser": new Set<string>(),
   };
-  for (const declaration of ownerFacts(receipt).diagnosticArtifacts) {
+  for (const declaration of facts.ciDiagnosticArtifacts) {
     if (
       typeof declaration !== "object" ||
       declaration === null ||
@@ -97,12 +96,12 @@ function workflowOracle(receipt: GeneratedScenarioReceipt): WorkflowOracle {
     diagnosticOwnerPaths[declaration.kind].add(ownerPath.path);
   }
 
-  const deployment = ownerFacts(receipt).environmentNeeds.deployment.some(
+  const deployment = facts.environmentNeeds.deployment.some(
     (need) => need.kind === "docker-engine",
   );
   return {
     deployment,
-    checkWorkflowJob: ownerFacts(receipt).checkWorkflowJob,
+    checkWorkflowJob: facts.checkWorkflowJob,
     diagnosticOwnerPaths: {
       playwright: [...diagnosticOwnerPaths.playwright].toSorted(),
       "vitest-browser": [...diagnosticOwnerPaths["vitest-browser"]].toSorted(),
@@ -139,9 +138,7 @@ const workflowPolicy = {
   },
   rootJob: {
     id: "check",
-    name: "Root Check",
     runner: "ubuntu-latest",
-    timeoutMinutes: 30,
   },
   actions: {
     checkout: {
@@ -531,21 +528,13 @@ export function assertWorkflowContract(
     )
   ) {
     throw new Error(
-      `${receipt.scenario.id}: Check action SHAs are outside the Dependency Maintenance Policy`,
+      `${receipt.scenario.id}: Dependency Maintenance must include GitHub Actions`,
     );
   }
 }
 
-type DependencyEcosystem =
-  | "npm"
-  | "cargo"
-  | "github-actions"
-  | "docker"
-  | "devcontainers"
-  | "rust-toolchain";
-
 type DependabotUpdateOracle = {
-  readonly ecosystem: DependencyEcosystem;
+  readonly ecosystem: DependencyMaintenancePolicy["ecosystems"][number];
   readonly directory: `/${string}`;
 };
 
@@ -568,28 +557,13 @@ function dependabotOracle(
   receipt: GeneratedScenarioReceipt,
 ): readonly DependabotUpdateOracle[] {
   const policy = ownerFacts(receipt).dependencyMaintenance;
-  const ecosystems = [
-    ...new Set(["devcontainers" as const, ...policy.ecosystems]),
-  ];
-  return ecosystems.flatMap((ecosystem) => {
-    const declaredDirectories = [
-      ...new Set([
-        ...(ecosystem === "docker" ? (["/.devcontainer"] as const) : []),
-        ...(policy.directories?.[ecosystem] === undefined
-          ? []
-          : [policy.directories[ecosystem]!]),
-        ...(policy.extraDirectories?.[ecosystem] ?? []),
-      ]),
-    ];
-    const directories: readonly `/${string}`[] =
-      declaredDirectories.length === 0
-        ? [ecosystem === "docker" ? "/.devcontainer" : "/"]
-        : declaredDirectories;
-    return directories.map((directory): DependabotUpdateOracle => ({
-      ecosystem,
-      directory,
-    }));
-  });
+  return policy.ecosystems.flatMap((ecosystem) =>
+    [
+      policy.directories?.[ecosystem] ??
+        (ecosystem === "docker" ? "/.devcontainer" : "/"),
+      ...(policy.extraDirectories?.[ecosystem] ?? []),
+    ].map((directory) => ({ ecosystem, directory })),
+  );
 }
 
 function assertExactStringMembers(
@@ -699,7 +673,9 @@ export function assertDependabotContract(
       );
     }
     const actual = {
-      ecosystem: update["package-ecosystem"] as DependencyEcosystem,
+      ecosystem: update[
+        "package-ecosystem"
+      ] as DependencyMaintenancePolicy["ecosystems"][number],
       directory: update.directory as `/${string}`,
     };
     const key = dependabotUpdateKey(actual);

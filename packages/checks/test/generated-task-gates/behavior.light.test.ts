@@ -4,22 +4,21 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import { templateContent, templatePresets } from "@ykdz/template-content";
-import { createGenerator } from "@ykdz/template-generator";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 
 async function initialize(
   targetRoot: string,
   preset: (typeof templatePresets)[number],
 ): Promise<void> {
-  const result = await createGenerator({
+  const result = await createDefaultGenerator({
     content: templateContent,
-    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
   }).init({
     targetRoot,
-    selection: { roots: [{ preset: preset.identity }] },
-    strategyInput: {
+    selection: {
+      presets: [{ contentIdentity: preset.identity }],
+    },
+    conventions: {
       repositoryName: "generated-repository",
       defaultPackageScope: "generated",
     },

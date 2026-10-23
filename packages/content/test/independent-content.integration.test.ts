@@ -30,6 +30,7 @@ void it("任意内容集合仅携带显式执行闭包并交付未被初始化�
   const ownerRoot = path.join(root, "owner");
   const consumer = path.join(root, "consumer");
   await mkdir(path.join(ownerRoot, "dist"), { recursive: true });
+  await mkdir(path.join(ownerRoot, "src"), { recursive: true });
   await mkdir(path.join(ownerRoot, "resources"));
   const manifest = {
     name: "@fixture/independent-content",
@@ -37,7 +38,10 @@ void it("任意内容集合仅携带显式执行闭包并交付未被初始化�
     type: "module",
     exports: {
       "./reference": "./package.json",
-      "./template": { default: "./dist/index.js" },
+      "./template": {
+        types: "./dist/index.d.ts",
+        default: "./dist/index.js",
+      },
     },
     devDependencies: { "never-install-target-application": "1.0.0" },
   };
@@ -50,12 +54,53 @@ void it("任意内容集合仅携带显式执行闭包并交付未被初始化�
     "完整资源声明\n",
   );
   await writeFile(
-    path.join(ownerRoot, "dist/index.js"),
+    path.join(ownerRoot, "src/index.ts"),
     [
       'import manifest from "../package.json" with { type: "json" };',
       'import { readFile } from "node:fs/promises";',
-      'export const referencePackage = { alias: "neutral", instance: "independent", manifest, unselectedResource: () => readFile(new URL("../resources/latent.txt", import.meta.url), "utf8") };',
+      "export const referencePackage = {",
+      '  alias: "neutral",',
+      '  instance: "independent",',
+      "  manifest,",
+      '  unselectedResource: () => readFile(new URL("../resources/latent.txt", import.meta.url), "utf8"),',
+      "};",
+      "",
     ].join("\n"),
+  );
+  await writeFile(
+    path.join(ownerRoot, "tsconfig.json"),
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: "ES2022",
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          rootDir: "src",
+          outDir: "dist",
+          declaration: true,
+          resolveJsonModule: true,
+          strict: true,
+          skipLibCheck: true,
+          types: ["node"],
+          typeRoots: [path.join(workspaceRoot, "node_modules", "@types")],
+        },
+        include: ["src/**/*.ts"],
+      },
+      null,
+      2,
+    ),
+  );
+  await execa(
+    "pnpm",
+    [
+      "exec",
+      "tsc",
+      "-p",
+      path.join(ownerRoot, "tsconfig.json"),
+      "--pretty",
+      "false",
+    ],
+    { cwd: workspaceRoot },
   );
   let prepared:
     | Awaited<ReturnType<typeof prepareContentCollection>>
@@ -113,7 +158,7 @@ void it("任意内容集合仅携带显式执行闭包并交付未被初始化�
         'await assert.rejects(readdir(process.argv[2]), { code: "EACCES" });',
         'assert.equal(templateContent[0].alias, "neutral");',
         'assert.equal(await templateContent[0].definition.unselectedResource(), "完整资源声明\\n");',
-        'for (const name of ["@ykdz/template-workspace/default-workspace-strategy", "@ykdz/template-workspace-authoring/content-artifact", "never-install-target-application"]) { assert.throws(() => import.meta.resolve(name)); }',
+        'for (const name of ["@ykdz/template-workspace-authoring/content-artifact", "never-install-target-application"]) { assert.throws(() => import.meta.resolve(name)); }',
       ].join("\n"),
     );
     await chmod(root, 0o755);

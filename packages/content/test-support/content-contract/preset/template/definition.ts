@@ -1,4 +1,3 @@
-import { referencePackage } from "@fixture/content-contract-reference/template";
 import { definePreset } from "@ykdz/template-core/preset-definition";
 import { defineNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
 
@@ -14,7 +13,10 @@ const presetDefinition = {
     operations: ["init", "add"],
     nodes: {
       library: {
-        reference: referencePackage,
+        reference: {
+          alias: "contract-reference",
+          instance: "independent",
+        },
         creationInput: {
           init: { projectName: "contract-starter" },
           add: { projectName: "contract-added" },

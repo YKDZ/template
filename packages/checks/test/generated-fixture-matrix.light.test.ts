@@ -57,7 +57,7 @@ void describe("registry-derived Package Addition Fixture Matrix", () => {
         config.build.args.NODE_VERSION = "999";
       },
       expectedError:
-        "build arguments do not match the default workspace owner facts",
+        "build argument NODE_VERSION does not match the default workspace owner facts",
     },
     {
       protectedField: "mount",
@@ -71,7 +71,7 @@ void describe("registry-derived Package Addition Fixture Matrix", () => {
         mount.source = "user-overlap";
       },
       expectedError:
-        "mount pnpm-store does not match the default workspace owner facts",
+        "mount /pnpm/store does not match the default workspace owner facts",
     },
   ] as const) {
     const { mutate, expectedError, protectedField } = testCase;

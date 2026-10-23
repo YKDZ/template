@@ -34,7 +34,7 @@ async function renderedPresetSource(
         repositoryName: preset.alias,
       });
       const hasDeploymentCheck =
-        receipt.result.projection.ownerFacts.environmentNeeds.deployment.some(
+        receipt.result.ownerFacts.environmentNeeds.deployment.some(
           (need) => need.kind === "docker-engine",
         );
       if (hasDeploymentCheck !== ownsDeploymentCheck) continue;
@@ -100,15 +100,18 @@ async function renderedDependabot(): Promise<{
 
 function receiptWithOwnerFacts(
   receipt: GeneratedPresetReceipt,
-  ownerFacts: GeneratedPresetReceipt["result"]["projection"]["ownerFacts"],
+  ownerFacts: GeneratedPresetReceipt["result"]["ownerFacts"],
   blueprint = receipt.result.blueprint,
 ): GeneratedPresetReceipt {
   const result = {
     ...receipt.result,
     blueprint,
-    projection: { ...receipt.result.projection, blueprint, ownerFacts },
   } as GeneratedPresetReceipt["result"];
-  return { ...receipt, initialization: result, result };
+  const withFacts = {
+    ...result,
+    ownerFacts,
+  } as GeneratedPresetReceipt["result"];
+  return { ...receipt, initialization: withFacts, result: withFacts };
 }
 
 void describe("Built-in Preset GitHub YAML checker", () => {
@@ -331,10 +334,10 @@ void describe("Built-in Preset GitHub YAML checker", () => {
       ),
     );
 
-    const ownerFacts = baseline.receipt.result.projection.ownerFacts;
+    const ownerFacts = baseline.receipt.result.ownerFacts;
     const malformedOwnerFacts = {
       ...ownerFacts,
-      diagnosticArtifacts: [
+      ciDiagnosticArtifacts: [
         {
           kind: "playwright",
           owner: { kind: "package-boundary", path: "apps/web" },
@@ -359,13 +362,13 @@ void describe("Built-in Preset GitHub YAML checker", () => {
 
     const undeclaredOwnerFacts = {
       ...ownerFacts,
-      diagnosticArtifacts: [
+      ciDiagnosticArtifacts: [
         {
           kind: "playwright",
           owner: { kind: "package-boundary", path: "apps/admin" },
         },
       ],
-    } as unknown as typeof ownerFacts;
+    } as typeof ownerFacts;
     assert.throws(
       () =>
         assertWorkflowContract(
@@ -383,13 +386,13 @@ void describe("Built-in Preset GitHub YAML checker", () => {
 
     const unsafeOwnerFacts = {
       ...ownerFacts,
-      diagnosticArtifacts: [
+      ciDiagnosticArtifacts: [
         {
           kind: "playwright",
           owner: { kind: "package-boundary", path: "node_modules/private" },
         },
       ],
-    } as unknown as typeof ownerFacts;
+    } as typeof ownerFacts;
     assert.throws(
       () =>
         assertWorkflowContract(
@@ -408,14 +411,14 @@ void describe("Built-in Preset GitHub YAML checker", () => {
 
   void it("accepts a parsed deployment workflow with multiple validated diagnostic owners", async () => {
     const baseline = await deploymentWorkflow();
-    const ownerFacts = baseline.receipt.result.projection.ownerFacts;
+    const ownerFacts = baseline.receipt.result.ownerFacts;
     const declarations = [
-      ...ownerFacts.diagnosticArtifacts,
+      ...ownerFacts.ciDiagnosticArtifacts,
       {
         kind: "playwright" as const,
         owner: { kind: "package-boundary" as const, path: "apps/admin" },
       },
-    ] as typeof ownerFacts.diagnosticArtifacts;
+    ] as typeof ownerFacts.ciDiagnosticArtifacts;
     const source = baseline.source.replace(
       "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web",
       "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/admin\n            apps/web",
@@ -434,7 +437,7 @@ void describe("Built-in Preset GitHub YAML checker", () => {
     } as typeof baseline.receipt.result.blueprint;
     const multipleOwnersReceipt = receiptWithOwnerFacts(
       baseline.receipt,
-      { ...ownerFacts, diagnosticArtifacts: declarations },
+      { ...ownerFacts, ciDiagnosticArtifacts: declarations },
       blueprint,
     );
 

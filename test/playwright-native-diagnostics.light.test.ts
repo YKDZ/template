@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
 import { templateReferencePackages } from "@ykdz/template-content";
-import { resolveTemplateSource } from "@ykdz/template-core/renderer";
 import ts from "typescript";
 
 function property(
@@ -23,11 +21,12 @@ function property(
 }
 
 async function loadMaintainedConfig(
-  relativePath: string,
+  sourcePath: string,
+  sourceText: string,
 ): Promise<ts.ObjectLiteralExpression> {
   const source = ts.createSourceFile(
-    relativePath,
-    await readFile(relativePath, "utf8"),
+    sourcePath,
+    sourceText,
     ts.ScriptTarget.Latest,
     true,
   );
@@ -46,27 +45,37 @@ async function loadMaintainedConfig(
   };
   visit(source);
   if (config === undefined)
-    throw new Error(`Missing defineConfig in ${relativePath}`);
+    throw new Error(`Missing defineConfig in ${sourcePath}`);
   return config;
 }
 
 void describe("maintained Playwright diagnostic configuration", () => {
-  const playwrightConfiguration = (name: string) => {
+  const maintainedPlaywrightConfiguration = async (name: string) => {
     const reference = templateReferencePackages.find(
       (item) => item.identity.packageName === name,
     );
     assert.ok(reference, `内容集合缺少参考包：${name}`);
-    return resolveTemplateSource(
-      reference.definition.source("playwright.config.ts"),
-      ".",
+    const prepared = await reference.definition.prepare({
+      excludedPackagePaths: [],
+    });
+    const resource = prepared.resources.find(
+      ({ path: resourcePath }) => resourcePath === "playwright.config.ts",
     );
+    assert.ok(resource, `${name} prepare 未返回 Playwright 配置资源`);
+    return {
+      sourcePath: `${name}/playwright.config.ts`,
+      sourceText: new TextDecoder("utf-8", { fatal: true }).decode(
+        resource.content,
+      ),
+    };
   };
-  for (const relativePath of [
-    playwrightConfiguration("@ykdz/reference-vue-app"),
-    playwrightConfiguration("@ykdz/reference-vike-web"),
+  for (const configuration of [
+    maintainedPlaywrightConfiguration("@ykdz/reference-vue-app"),
+    maintainedPlaywrightConfiguration("@ykdz/reference-vike-web"),
   ]) {
-    void it(`uses native failure diagnostics in ${relativePath}`, async () => {
-      const config = await loadMaintainedConfig(relativePath);
+    void it("uses native failure diagnostics in the prepared resource", async () => {
+      const { sourcePath, sourceText } = await configuration;
+      const config = await loadMaintainedConfig(sourcePath, sourceText);
       const use = property(config, "use");
 
       assert.strictEqual(

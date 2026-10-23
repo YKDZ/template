@@ -12,14 +12,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 
+import { templateContent } from "@ykdz/template-content";
 import {
   contentIdentityKey,
   createContentIndex,
   type ContentIdentity,
 } from "@ykdz/template-core/content-identity";
-import { createGenerator } from "@ykdz/template-generator";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
-import type { ReferencePackage } from "@ykdz/template-workspace/reference-package";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 
 import {
   createAuthoredContentFixture,
@@ -54,6 +53,23 @@ function identityFor(
   return member.identity;
 }
 
+function generatorFor(content: AuthoredContentFixture["members"]) {
+  return createDefaultGenerator({ content: [...templateContent, ...content] });
+}
+
+function leafNameFrom(value: unknown): string | undefined {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    !("leafName" in value) ||
+    typeof value.leafName !== "string"
+  ) {
+    return undefined;
+  }
+  return value.leafName;
+}
+
 after(async () => {
   await Promise.all([
     ...fixtures.map((fixture) => fixture.close()),
@@ -69,17 +85,14 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       const fixture = await createFixture({ namespace, marker: namespace });
       const workspace = await createWorkspace();
       const targetRoot = path.join(workspace, "project");
-      const generator = createGenerator({
-        content: fixture.members,
-        strategy: createDefaultWorkspaceStrategy(),
-      });
+      const generator = generatorFor(fixture.members);
 
       const initialized = await generator.init({
         targetRoot,
         selection: {
-          roots: [{ preset: { alias: "authored", namespace } }],
+          presets: [{ contentIdentity: { alias: "authored", namespace } }],
         },
-        strategyInput: {
+        conventions: {
           repositoryName: `${namespace}-fixture`,
           defaultPackageScope: namespace,
         },
@@ -87,10 +100,13 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       assert.equal(initialized.status, "success");
       if (initialized.status !== "success") return;
       const presetIdentity = identityFor(fixture, "@fixture/preset");
-      assert.equal(initialized.generationRecord.schemaVersion, 5);
-      assert.deepEqual(initialized.generationRecord.presetSelections, [
-        presetIdentity,
-      ]);
+      assert.equal(initialized.generationRecord.schemaVersion, 6);
+      assert.deepEqual(
+        initialized.generationRecord.selections
+          .map(({ presetIdentity }) => presetIdentity)
+          .filter((identity) => identity !== null),
+        [presetIdentity],
+      );
 
       const featureIdentity = identityFor(fixture, "@fixture/feature");
       const themeIdentity = identityFor(fixture, "@fixture/tooling-config");
@@ -117,7 +133,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
         "packages/feature",
       );
       assert.equal(
-        featureRecord.bindings[contentIdentityKey(themeIdentity)],
+        featureRecord.dependencyBindings["tooling-config"],
         themeRecord.packageDefinitionId,
       );
       const featureDefinition = initialized.blueprint.packages.find(
@@ -175,10 +191,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
         beforeWrongKind,
       );
 
-      const replayGenerator = createGenerator({
-        content: fixture.members,
-        strategy: createDefaultWorkspaceStrategy(),
-      });
+      const replayGenerator = generatorFor(fixture.members);
 
       const movedRoot = path.join(workspace, "moved-project");
       await rename(targetRoot, movedRoot);
@@ -217,7 +230,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       );
       assert.ok(addonRecord);
       assert.equal(addonRecord.createdBy, "addition");
-      assert.equal(addonRecord.creationInput?.leafName, "addon-extra");
+      assert.equal(leafNameFrom(addonRecord.creationInput), "addon-extra");
       const addonDefinition = addition.blueprint.packages.find(
         (definition) =>
           definition.packageDefinitionId === addonRecord.packageDefinitionId,
@@ -225,12 +238,11 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       assert.ok(addonDefinition);
       assert.equal(addonDefinition.path, "packages/addon-extra");
       assert.equal(addonDefinition.name, `@${namespace}/addon-extra`);
-      const strategyState = addition.generationRecord.strategyState as {
-        repositoryName: string;
-        defaultPackageScope: string;
-      };
-      assert.equal(strategyState.repositoryName, `${namespace}-fixture`);
-      assert.equal(strategyState.defaultPackageScope, namespace);
+      assert.deepEqual(addition.generationRecord.composition.conventions, {
+        repositoryName: `${namespace}-fixture`,
+        defaultPackageScope: namespace,
+        todo: false,
+      });
       assert.equal(addonDefinition.name, `@${namespace}/addon-extra`);
       assert.equal(await readFile(movedPackageNote, "utf8"), "首包更新事实\n");
       assert.deepEqual(
@@ -255,10 +267,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
         addition.generationRecord,
       );
 
-      const followupGenerator = createGenerator({
-        content: fixture.members,
-        strategy: createDefaultWorkspaceStrategy(),
-      });
+      const followupGenerator = generatorFor(fixture.members);
       const followup = await followupGenerator.add({
         repositoryRoot: movedRoot,
         contentIdentity: { alias: "addon", namespace },
@@ -270,7 +279,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
         (record) =>
           contentIdentityKey(record.contentIdentity) ===
             contentIdentityKey(addonIdentity) &&
-          record.creationInput?.leafName === "addon-next",
+          leafNameFrom(record.creationInput) === "addon-next",
       );
       assert.ok(followupRecord);
       const followupDefinition = followup.blueprint.packages.find(
@@ -306,51 +315,16 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     });
     const workspace = await createWorkspace();
     const targetRoot = path.join(workspace, "project");
-    const featureMember = fixture.members.find(
-      (member) => member.identity.packageName === "@fixture/feature",
-    );
-    assert.ok(featureMember);
-    const initialized = await createGenerator({
-      content: fixture.members,
-      strategy: createDefaultWorkspaceStrategy(),
-    }).init({
+    const initialized = await generatorFor(fixture.members).init({
       targetRoot,
-      selection: { roots: [{ preset: { alias: "authored" } }] },
-      strategyInput: {
+      selection: { presets: [{ contentIdentity: { alias: "authored" } }] },
+      conventions: {
         repositoryName: "dependency-uses",
         defaultPackageScope: "uses",
       },
     });
     assert.equal(initialized.status, "success", JSON.stringify(initialized));
     if (initialized.status !== "success") return;
-
-    const preparation = (
-      featureMember.definition as unknown as ReferencePackage
-    ).prepare();
-    assert.deepEqual(
-      preparation.dependencyUses.find(
-        (dependency) => dependency.name === "@fixture/tooling-config",
-      )?.purposes,
-      ["target", "template-execution"],
-    );
-    assert.deepEqual(
-      preparation.dependencyUses.find(
-        (dependency) => dependency.name === "@fixture/execution-only",
-      )?.purposes,
-      ["template-execution"],
-    );
-    assert.deepEqual(
-      preparation.dependencyUses.find(
-        (dependency) => dependency.name === "@ykdz/template-workspace",
-      )?.purposes,
-      ["template-execution"],
-    );
-    assert.deepEqual(
-      preparation.dependencyUses.find(
-        (dependency) => dependency.name === "@fixture/build-only",
-      )?.purposes,
-      ["template-build"],
-    );
 
     const featureIdentity = identityFor(fixture, "@fixture/feature");
     const themeIdentity = identityFor(fixture, "@fixture/tooling-config");
@@ -367,7 +341,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     assert.ok(featureRecord);
     assert.ok(themeRecord);
     assert.equal(
-      featureRecord.bindings[contentIdentityKey(themeIdentity)],
+      featureRecord.dependencyBindings["tooling-config"],
       themeRecord.packageDefinitionId,
     );
     const featureDefinition = initialized.blueprint.packages.find(
@@ -387,7 +361,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       };
     const assertTargetDependencies = async () => {
       const manifest = await readGeneratedManifest();
-      assert.ok(manifest.dependencies?.["@uses/tooling-config"]);
+      assert.ok(manifest.dependencies?.["@uses/fixture-tooling-config"]);
       for (const field of ["dependencies", "devDependencies"] as const) {
         assert.equal(
           Object.hasOwn(manifest[field] ?? {}, "@fixture/execution-only"),
@@ -408,10 +382,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     };
     await assertTargetDependencies();
 
-    const added = await createGenerator({
-      content: fixture.members,
-      strategy: createDefaultWorkspaceStrategy(),
-    }).add({
+    const added = await generatorFor(fixture.members).add({
       repositoryRoot: targetRoot,
       contentIdentity: identityFor(fixture, "@fixture/addon"),
       creationInput: { leafName: "uses-addon" },
@@ -431,7 +402,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     assert.ok(retainedFeature);
     assert.ok(retainedTheme);
     assert.equal(
-      retainedFeature.bindings[contentIdentityKey(themeIdentity)],
+      retainedFeature.dependencyBindings["tooling-config"],
       retainedTheme.packageDefinitionId,
     );
     await assertTargetDependencies();
@@ -449,13 +420,10 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     });
     const workspace = await createWorkspace();
     const targetRoot = path.join(workspace, "project");
-    const initialized = await createGenerator({
-      content: original.members,
-      strategy: createDefaultWorkspaceStrategy(),
-    }).init({
+    const initialized = await generatorFor(original.members).init({
       targetRoot,
-      selection: { roots: [{ preset: { alias: "authored" } }] },
-      strategyInput: {
+      selection: { presets: [{ contentIdentity: { alias: "authored" } }] },
+      conventions: {
         repositoryName: "revision-project",
         defaultPackageScope: "revision",
       },
@@ -492,24 +460,13 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       `${JSON.stringify(rootManifest, null, 2)}\n`,
     );
 
-    const addition = await createGenerator({
-      content: current.members,
-      strategy: createDefaultWorkspaceStrategy(),
-    }).add({
+    const addition = await generatorFor(current.members).add({
       repositoryRoot: targetRoot,
       contentIdentity: identityFor(current, "@fixture/addon"),
       creationInput: { leafName: "revision-addon" },
     });
     assert.equal(addition.status, "success", JSON.stringify(addition));
     if (addition.status !== "success") return;
-    assert.ok(
-      addition.projection?.operations.some(
-        (operation) =>
-          "to" in operation &&
-          operation.to ===
-            path.posix.join(featureDefinition.path, "lib/renamed-content.ts"),
-      ),
-    );
     assert.equal(await readFile(oldSource, "utf8"), "用户定制的旧源码\n");
     assert.equal((await stat(oldSource)).mode & 0o777, 0o600);
     await assert.rejects(
@@ -558,13 +515,10 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     });
     const workspace = await createWorkspace();
     const targetRoot = path.join(workspace, "project");
-    const initialized = await createGenerator({
-      content: original.members,
-      strategy: createDefaultWorkspaceStrategy(),
-    }).init({
+    const initialized = await generatorFor(original.members).init({
       targetRoot,
-      selection: { roots: [{ preset: { alias: "authored" } }] },
-      strategyInput: {
+      selection: { presets: [{ contentIdentity: { alias: "authored" } }] },
+      conventions: {
         repositoryName: "slot-project",
         defaultPackageScope: "slot",
       },
@@ -588,7 +542,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     assert.ok(originalTheme);
     assert.equal(originalTheme.createdBy, "shared-dependency");
     assert.equal(
-      originalFeature.bindings[contentIdentityKey(themeIdentity)],
+      originalFeature.dependencyBindings["tooling-config"],
       originalTheme.packageDefinitionId,
     );
     const themeDefinition = initialized.blueprint.packages.find(
@@ -621,10 +575,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       false,
     );
 
-    const addition = await createGenerator({
-      content: current.members,
-      strategy: createDefaultWorkspaceStrategy(),
-    }).add({
+    const addition = await generatorFor(current.members).add({
       repositoryRoot: targetRoot,
       contentIdentity: identityFor(current, "@fixture/addon"),
       creationInput: { leafName: "after-slot-removal" },
@@ -652,10 +603,17 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       retainedTheme.packageDefinitionId,
       originalTheme.packageDefinitionId,
     );
-    assert.deepEqual(retainedFeature.bindings, originalFeature.bindings);
     assert.deepEqual(
-      addition.generationRecord.nodeInstances,
-      initialized.generationRecord.nodeInstances,
+      retainedFeature.dependencyBindings,
+      originalFeature.dependencyBindings,
+    );
+    assert.deepEqual(
+      addition.generationRecord.selections.find(
+        ({ presetIdentity }) => presetIdentity !== null,
+      )?.nodes,
+      initialized.generationRecord.selections.find(
+        ({ presetIdentity }) => presetIdentity !== null,
+      )?.nodes,
     );
     assert.ok(
       addition.blueprint.packages.some(
@@ -674,14 +632,11 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     const beta = await createFixture({ namespace: "beta", marker: "beta" });
     const workspace = await createWorkspace();
     const targetRoot = path.join(workspace, "ambiguous");
-    const generator = createGenerator({
-      content: [...alpha.members, ...beta.members],
-      strategy: createDefaultWorkspaceStrategy(),
-    });
+    const generator = generatorFor([...alpha.members, ...beta.members]);
     const ambiguous = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: "authored" }] },
-      strategyInput: {
+      selection: { presets: [{ contentIdentity: "authored" }] },
+      conventions: {
         repositoryName: "ambiguous",
         defaultPackageScope: "demo",
       },
@@ -752,10 +707,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     assert.equal(alphaFeature.source.moduleURL, betaFeature.source.moduleURL);
     assert.strictEqual(alphaFeature.definition, betaFeature.definition);
 
-    const generator = createGenerator({
-      content,
-      strategy: createDefaultWorkspaceStrategy(),
-    });
+    const generator = generatorFor(content);
     const directTarget = path.join(
       await createWorkspace(),
       "explicit-reference",
@@ -767,7 +719,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
           { nodeIdentity: "main", contentIdentity: betaFeature.identity },
         ],
       },
-      strategyInput: {
+      conventions: {
         repositoryName: "explicit-reference",
         defaultPackageScope: "demo",
       },
@@ -787,7 +739,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     assert.ok(directFeature);
     assert.ok(directTheme);
     assert.equal(
-      directFeature.bindings[contentIdentityKey(betaTheme.identity)],
+      directFeature.dependencyBindings["tooling-config"],
       directTheme.packageDefinitionId,
     );
     assert.equal(
@@ -802,8 +754,8 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     const presetTarget = path.join(await createWorkspace(), "explicit-preset");
     const initialized = await generator.init({
       targetRoot: presetTarget,
-      selection: { roots: [{ preset: betaPreset.identity }] },
-      strategyInput: {
+      selection: { presets: [{ contentIdentity: betaPreset.identity }] },
+      conventions: {
         repositoryName: "explicit-preset",
         defaultPackageScope: "demo",
       },
@@ -822,15 +774,18 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     );
     assert.ok(presetFeature);
     assert.ok(presetTheme);
-    assert.deepEqual(initialized.generationRecord.presetSelections, [
-      betaPreset.identity,
-    ]);
+    assert.deepEqual(
+      initialized.generationRecord.selections.map(
+        ({ presetIdentity }) => presetIdentity,
+      ),
+      [betaPreset.identity],
+    );
     assert.equal(
-      initialized.generationRecord.nodeInstances.feature,
+      initialized.generationRecord.selections[0]?.nodes.feature,
       presetFeature.packageDefinitionId,
     );
     assert.equal(
-      presetFeature.bindings[contentIdentityKey(betaTheme.identity)],
+      presetFeature.dependencyBindings["tooling-config"],
       presetTheme.packageDefinitionId,
     );
     const presetFeatureDefinition = initialized.blueprint.packages.find(
@@ -854,10 +809,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     });
     const beta = await createFixture({ namespace: "source-beta", marker: "B" });
     const content = [...alpha.members, ...beta.members];
-    const generator = createGenerator({
-      content,
-      strategy: createDefaultWorkspaceStrategy(),
-    });
+    const generator = generatorFor(content);
 
     for (const fixture of [alpha, beta]) {
       const targetRoot = path.join(
@@ -868,8 +820,8 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       assert.ok(preset);
       const initialized = await generator.init({
         targetRoot,
-        selection: { roots: [{ preset: preset.identity }] },
-        strategyInput: {
+        selection: { presets: [{ contentIdentity: preset.identity }] },
+        conventions: {
           repositoryName: fixture.members[0]!.identity.namespace,
           defaultPackageScope: fixture.members[0]!.identity.namespace,
         },
@@ -902,7 +854,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       assert.ok(featureDefinition);
       assert.ok(themeDefinition);
       assert.equal(
-        featureRecord.bindings[contentIdentityKey(themeIdentity)],
+        featureRecord.dependencyBindings["tooling-config"],
         themeRecord.packageDefinitionId,
       );
       const marker = fixture.members[0]!.identity.namespace.endsWith("alpha")
@@ -941,25 +893,24 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     });
     const workspace = await createWorkspace();
     const targetRoot = path.join(workspace, "missing-dependency");
-    const generator = createGenerator({
-      content: fixture.members,
-      strategy: createDefaultWorkspaceStrategy(),
-    });
+    const generator = generatorFor(fixture.members);
     const result = await generator.init({
       targetRoot,
       selection: {
-        roots: [{ preset: { alias: "authored", namespace: "incomplete" } }],
+        presets: [
+          { contentIdentity: { alias: "authored", namespace: "incomplete" } },
+        ],
       },
-      strategyInput: {
+      conventions: {
         repositoryName: "missing-dependency",
         defaultPackageScope: "demo",
       },
     });
     assert.equal(result.status, "operation-failure");
     if (result.status === "operation-failure") {
-      assert.equal(result.phase, "planning");
-      assert.match(result.error.message, /incomplete:@fixture\/feature/u);
-      assert.match(result.error.message, /未登记/u);
+      assert.equal(result.phase, "preparation");
+      assert.match(result.error.message, /@fixture\/tooling-config\/template/u);
+      assert.match(result.error.message, /同一命名空间公开/u);
     }
     await assert.rejects(readFile(targetRoot));
   });
@@ -991,16 +942,13 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       )?.source.moduleURL,
     );
     const targetRoot = path.join(await createWorkspace(), "moved-resource");
-    const generator = createGenerator({
-      content: moved.members,
-      strategy: createDefaultWorkspaceStrategy(),
-    });
+    const generator = generatorFor(moved.members);
     const generated = await generator.init({
       targetRoot,
       selection: {
         roots: [{ nodeIdentity: "feature", contentIdentity: movedFeature }],
       },
-      strategyInput: {
+      conventions: {
         repositoryName: "moved-resource",
         defaultPackageScope: "demo",
       },
@@ -1027,10 +975,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       'export const fixtureOrigin = "two:feature";\n',
     );
 
-    const freshGenerator = createGenerator({
-      content: moved.members,
-      strategy: createDefaultWorkspaceStrategy(),
-    });
+    const freshGenerator = generatorFor(moved.members);
     const added = await freshGenerator.add({
       repositoryRoot: targetRoot,
       contentIdentity: identityFor(moved, "@fixture/addon"),
@@ -1069,22 +1014,19 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     ]);
     const generated = await Promise.all(
       [original, changed].map(async (fixture, index) => {
-        const result = await createGenerator({
-          content: fixture.members,
-          strategy: createDefaultWorkspaceStrategy(),
-        }).init({
+        const result = await generatorFor(fixture.members).init({
           targetRoot: generatedRoots[index]!,
           selection: {
-            roots: [
+            presets: [
               {
-                preset: {
+                contentIdentity: {
                   alias: "authored",
                   namespace: "source-propagation",
                 },
               },
             ],
           },
-          strategyInput: {
+          conventions: {
             repositoryName: "source-propagation",
             defaultPackageScope: "demo",
           },
@@ -1165,17 +1107,14 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
     const oldIdentity = identityFor(original, "@fixture/feature");
     const newIdentity = identityFor(renamed, "@fixture/feature-v2");
     assert.notDeepEqual(oldIdentity, newIdentity);
-    const generator = createGenerator({
-      content: renamed.members,
-      strategy: createDefaultWorkspaceStrategy(),
-    });
+    const generator = generatorFor(renamed.members);
     const newTargetRoot = path.join(await createWorkspace(), "new-package");
     const generated = await generator.init({
       targetRoot: newTargetRoot,
       selection: {
         roots: [{ nodeIdentity: "feature", contentIdentity: newIdentity }],
       },
-      strategyInput: {
+      conventions: {
         repositoryName: "new-package",
         defaultPackageScope: "demo",
       },
@@ -1207,7 +1146,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       selection: {
         roots: [{ nodeIdentity: "feature", contentIdentity: oldIdentity }],
       },
-      strategyInput: {
+      conventions: {
         repositoryName: "old-identity",
         defaultPackageScope: "demo",
       },

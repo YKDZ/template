@@ -1,26 +1,24 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import {
   contentIdentityKey,
-  createContentIndex,
   type ContentIdentity,
+  type LoadedContentMember,
 } from "@ykdz/template-core/content-identity";
-import type { ProjectBlueprint } from "@ykdz/template-core/project-blueprint";
-import type { GeneratorResult } from "@ykdz/template-generator";
-import type {
-  DefaultWorkspaceCreationInput,
-  DefaultWorkspaceOwnerFacts,
-  DefaultWorkspaceInput,
-} from "@ykdz/template-workspace/default-workspace-strategy";
-import { canLinkNodePackageRoles } from "@ykdz/template-workspace/project-linking";
+import type { JsonValue } from "@ykdz/template-core/json";
+import type { PresetSelectionDefinition } from "@ykdz/template-core/reference-package";
+import type { DefaultWorkspaceConventions } from "@ykdz/template-workspace/reference-package";
 
-export type ChecksCreationInput =
-  DefaultWorkspaceCreationInput<TsCliCreationInput>;
-export type ChecksPreset = Extract<
-  (typeof import("@ykdz/template-content").templateContent)[number],
-  { readonly kind: "preset" }
+export type ChecksPreset = LoadedContentMember<
+  PresetSelectionDefinition<JsonValue> & {
+    readonly metadata: {
+      readonly alias: string;
+      readonly title: string;
+      readonly description: string;
+    };
+  },
+  "preset"
 >;
 export type GeneratedScenario = {
   readonly id: string;
@@ -31,25 +29,24 @@ export type GeneratedScenario = {
 };
 
 export type GeneratedScenarioRuntime = {
-  readonly content: typeof import("@ykdz/template-content").templateContent;
-  readonly createGenerator: typeof import("@ykdz/template-generator").createGenerator;
-  readonly createDefaultWorkspaceStrategy: typeof import("@ykdz/template-workspace/default-workspace-strategy").createDefaultWorkspaceStrategy;
-  readonly resolveTemplateSource: typeof import("@ykdz/template-core/renderer").resolveTemplateSource;
-  readonly canConsumeNodePackageNameImportForRole: typeof import("@ykdz/template-workspace/project-linking").canConsumeNodePackageNameImportForRole;
-  readonly canProvideSourceConditionPackageNameImportForRole: typeof import("@ykdz/template-workspace/project-linking").canProvideSourceConditionPackageNameImportForRole;
+  readonly content: readonly (
+    | ChecksPreset
+    | LoadedContentMember<unknown, "reference">
+  )[];
+  readonly createDefaultGenerator: typeof import("@ykdz/template-workspace/default-generation").createDefaultGenerator;
 };
 
-type GeneratorSuccess = Extract<
-  GeneratorResult<ChecksCreationInput, DefaultWorkspaceOwnerFacts>,
+type DefaultGenerator = ReturnType<
+  typeof import("@ykdz/template-workspace/default-generation").createDefaultGenerator<
+    typeof import("@ykdz/template-content").templateContent
+  >
+>;
+type DefaultGeneratorResult = Awaited<ReturnType<DefaultGenerator["init"]>>;
+
+export type SuccessfulScenarioResult = Extract<
+  DefaultGeneratorResult,
   { readonly status: "success" }
 >;
-
-export type SuccessfulScenarioResult = Omit<GeneratorSuccess, "projection"> & {
-  readonly projection: NonNullable<GeneratorSuccess["projection"]> & {
-    readonly blueprint: ProjectBlueprint;
-    readonly ownerFacts: DefaultWorkspaceOwnerFacts;
-  };
-};
 
 export type GeneratedScenarioReceipt = {
   readonly status: "generated";
@@ -150,7 +147,7 @@ export function deriveFocusedProjectLinkScenarios(
 }
 
 function requireSuccess(
-  result: GeneratorResult<ChecksCreationInput, DefaultWorkspaceOwnerFacts>,
+  result: DefaultGeneratorResult,
   phase: "initialization" | "addition",
   scenario: GeneratedScenario,
 ): SuccessfulScenarioResult {
@@ -159,24 +156,19 @@ function requireSuccess(
       `${scenario.id}: ${phase} did not succeed: ${JSON.stringify(result)}`,
     );
   }
-  if (
-    result.projection === null ||
-    result.projection.blueprint === undefined ||
-    result.projection.ownerFacts === undefined
-  ) {
-    throw new Error(
-      `${scenario.id}: ${phase} omitted default workspace projection facts`,
-    );
-  }
-  return result as SuccessfulScenarioResult;
+  return result;
 }
 
 async function focusedConsumerPath(options: {
+  readonly generator: ReturnType<
+    GeneratedScenarioRuntime["createDefaultGenerator"]
+  >;
   readonly projectDir: string;
   readonly blueprint: SuccessfulScenarioResult["blueprint"];
   readonly generationRecord: SuccessfulScenarioResult["generationRecord"];
-  readonly providerRole: string;
-  readonly canConsumePackageNameImport: GeneratedScenarioRuntime["canConsumeNodePackageNameImportForRole"];
+  readonly repositoryRoot: string;
+  readonly additionPreset: ChecksPreset;
+  readonly creationInput: Record<string, string | string[]>;
 }): Promise<string | undefined> {
   const initializedPaths = new Set(
     options.blueprint.packages.flatMap((definition) => {
@@ -189,18 +181,31 @@ async function focusedConsumerPath(options: {
   );
   for (const consumer of options.blueprint.packages) {
     if (!initializedPaths.has(consumer.path)) continue;
-    if (!canLinkNodePackageRoles(consumer.role, options.providerRole)) {
-      continue;
-    }
     const manifest = JSON.parse(
       await readFile(
         path.join(options.projectDir, consumer.path, "package.json"),
         "utf8",
       ),
     ) as Readonly<Record<string, unknown>>;
-    if (options.canConsumePackageNameImport(consumer.role, manifest)) {
-      return consumer.path;
+    if (manifest.type !== "module") continue;
+    const planned = await options.generator.planAdd({
+      repositoryRoot: options.repositoryRoot,
+      preset: options.additionPreset.identity,
+      creationInput: {
+        ...options.creationInput,
+        linkFrom: [consumer.path],
+      },
+    });
+    if (planned.status === "planned") return consumer.path;
+    if (
+      planned.status === "operation-failure" &&
+      planned.error.packageLinkIssue?.kind === "unsupported-link"
+    ) {
+      continue;
     }
+    throw new Error(
+      `${options.additionPreset.identity.packageName}: focused link planning failed for ${consumer.path}: ${JSON.stringify(planned)}`,
+    );
   }
   return undefined;
 }
@@ -210,8 +215,8 @@ export async function materializeGeneratedScenario(options: {
   readonly runtime: GeneratedScenarioRuntime;
   readonly scenario: GeneratedScenario;
   readonly workspace: string;
-  readonly strategyInput?: DefaultWorkspaceInput;
-  readonly initializationCreationInput?: ChecksCreationInput;
+  readonly conventions?: Partial<DefaultWorkspaceConventions>;
+  readonly initializationCreationInput?: JsonValue;
   readonly additionIdentity?: { readonly name: string; readonly path?: string };
   readonly afterInitialization?: (
     result: SuccessfulScenarioResult,
@@ -221,38 +226,33 @@ export async function materializeGeneratedScenario(options: {
 }): Promise<GeneratedScenarioReceipt | { readonly status: "not-applicable" }> {
   const projectDir = path.join(options.workspace, options.scenario.id);
   options.cancelSignal?.throwIfAborted();
-  const generator = options.runtime.createGenerator({
+  const generator = options.runtime.createDefaultGenerator({
     content: options.runtime.content,
-    strategy:
-      options.runtime.createDefaultWorkspaceStrategy<ChecksCreationInput>(),
   });
   const initialization = requireSuccess(
     await generator.init({
       targetRoot: projectDir,
       selection: {
-        roots: [
+        presets: [
           {
-            preset: options.scenario.base.identity,
+            contentIdentity: options.scenario.base.identity,
             ...(options.initializationCreationInput === undefined
               ? {}
               : { creationInput: options.initializationCreationInput }),
           },
         ],
       },
-      strategyInput: {
-        repositoryName: options.scenario.id,
+      conventions: {
+        repositoryName: `fixture-${options.scenario.id
+          .toLowerCase()
+          .replace(/[^a-z0-9-]/gu, "-")}`,
         defaultPackageScope: "fixture",
-        ...options.strategyInput,
+        ...options.conventions,
       },
     }),
     "initialization",
     options.scenario,
   );
-  if (initialization.projection === null) {
-    throw new Error(
-      `${options.scenario.id}: initialization omitted its projection`,
-    );
-  }
   await options.afterInitialization?.(initialization, projectDir);
   options.cancelSignal?.throwIfAborted();
 
@@ -269,31 +269,26 @@ export async function materializeGeneratedScenario(options: {
 
   let linkFrom: readonly string[] = [];
   if (options.scenario.focusedLink === true) {
-    const providerNode = Object.values(
-      options.scenario.addition.definition.nodes,
-    )[0];
-    if (providerNode === undefined) {
-      throw new Error(
-        `${options.scenario.id}: focused provider node is missing`,
-      );
-    }
-    const provider = createContentIndex(options.runtime.content).fromDefinition(
-      providerNode.reference,
-      "reference",
-      { namespace: options.scenario.addition.identity.namespace },
-    );
     const consumer = await focusedConsumerPath({
+      generator,
       projectDir,
       blueprint: initialization.blueprint,
       generationRecord: initialization.generationRecord,
-      providerRole: provider.definition.role,
-      canConsumePackageNameImport:
-        options.runtime.canConsumeNodePackageNameImportForRole,
+      repositoryRoot: projectDir,
+      additionPreset: options.scenario.addition,
+      creationInput: {
+        leafName:
+          options.additionIdentity?.name ??
+          `fixture-${options.scenario.addition.definition.metadata.alias}`,
+        ...(options.additionIdentity?.path === undefined
+          ? {}
+          : { packagePath: options.additionIdentity.path }),
+      },
     });
     if (consumer === undefined) return { status: "not-applicable" };
     linkFrom = [consumer];
   }
-  const additionResult = await generator.add({
+  const additionPlan = await generator.planAdd({
     repositoryRoot: projectDir,
     preset: options.scenario.addition.identity,
     creationInput: {
@@ -308,15 +303,18 @@ export async function materializeGeneratedScenario(options: {
   });
   if (
     options.scenario.focusedLink === true &&
-    additionResult.status === "input-invalid" &&
-    additionResult.issues.some((issue) => issue.code === "UNSUPPORTED_LINK")
+    additionPlan.status === "operation-failure" &&
+    additionPlan.error.packageLinkIssue?.kind === "unsupported-link"
   ) {
     return { status: "not-applicable" };
   }
-  const result = requireSuccess(additionResult, "addition", options.scenario);
-  if (result.projection === null) {
-    throw new Error(`${options.scenario.id}: addition omitted its projection`);
+  if (additionPlan.status !== "planned") {
+    throw new Error(
+      `${options.scenario.id}: addition planning did not succeed: ${JSON.stringify(additionPlan)}`,
+    );
   }
+  const additionResult = await generator.commitPlan(additionPlan.plan);
+  const result = requireSuccess(additionResult, "addition", options.scenario);
   return {
     status: "generated",
     scenario: options.scenario,

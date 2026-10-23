@@ -134,10 +134,7 @@ await test("原生作者factory只准备快照并把完整原生文档留给组�
     assert.equal(manifestValue.name, "@sample/lib");
     assert.equal(exports["./reference"], undefined);
     assert.equal(scripts?.["build:template"], undefined);
-    assert.equal(
-      devDependencies["@sample/tooling-config"],
-      "workspace:../tooling-config",
-    );
+    assert.equal(devDependencies["@sample/tooling-config"], "workspace:*");
     assert.equal(devDependencies["@fixture/template-runtime"], undefined);
     assert.equal(
       contribution.facts.manifest,

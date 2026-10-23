@@ -29,11 +29,8 @@ import {
   type PreparedContentCollection,
 } from "@ykdz/template-content/artifact-builder";
 import { contentIdentityKey } from "@ykdz/template-core/content-identity";
-import {
-  resolveTemplateSource,
-  type TemplateSourceHandle,
-} from "@ykdz/template-core/renderer";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+import { resolveReferenceDependencyIdentity } from "@ykdz/template-generator";
+import type { DefaultReferencePackageDefinition } from "@ykdz/template-workspace/reference-package";
 import { execa } from "execa";
 
 import { createAuthoredContentFixture } from "../test-support/authored-content-fixture.ts";
@@ -355,10 +352,6 @@ void describe("原生内容制品安装链", () => {
     );
     assert.ok(preset);
     const prepared = await prepareContentCollection({
-      referencePreparation: {
-        specifier: "@ykdz/template-workspace/reference-package",
-        exportName: "defineReferencePackage",
-      },
       content: templateContent,
       roots: [preset],
 
@@ -375,6 +368,7 @@ void describe("原生内容制品安装链", () => {
         "@ykdz/reference-npm-publication",
         "@ykdz/reference-ts-lib",
         "@ykdz/reference-tooling-config",
+        "@ykdz/reference-workspace-root",
       ].sort(),
     );
 
@@ -418,28 +412,24 @@ void describe("原生内容制品安装链", () => {
       [
         'import assert from "node:assert/strict";',
         'import { chmod, readdir, readFile, stat, writeFile } from "node:fs/promises";',
-        'import { contentIdentityKey } from "@ykdz/template-core/content-identity";',
-        'import { createGenerator } from "@ykdz/template-generator";',
-        'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
+        'import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";',
+        "",
         'import { templateContent } from "@ykdz/template-content";',
         "",
         "const targetRoot = process.argv[2];",
         "const resultPath = process.argv[3];",
         'const authorRoots = JSON.parse(await readFile(process.argv[4], "utf8"));',
         'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
-        "const generator = createGenerator({",
-        "  content: templateContent,",
-        "  strategy: createDefaultWorkspaceStrategy(),",
-        "});",
+        "const generator = createDefaultGenerator({ content: templateContent });",
         "const initialized = await generator.init({",
         "  targetRoot,",
-        '  selection: { roots: [{ preset: { alias: "ts-lib", namespace: "ykdz" } }] },',
-        '  strategyInput: { repositoryName: "packed-library", defaultPackageScope: "packed-library" },',
+        '  selection: { presets: [{ contentIdentity: { alias: "ts-lib", namespace: "ykdz" } }] },',
+        '  conventions: { repositoryName: "packed-library", defaultPackageScope: "packed-library" },',
         "});",
         'assert.equal(initialized.status, "success", JSON.stringify(initialized));',
         'if (initialized.status !== "success") process.exit(2);',
-        "const initializedPackages = initialized.generationRecord.packages.map((record) => ({ packageDefinitionId: record.packageDefinitionId, bindings: record.bindings }));",
-        "const initializedNodeInstances = initialized.generationRecord.nodeInstances;",
+        "const initializedPackages = initialized.generationRecord.packages.map((record) => ({ packageDefinitionId: record.packageDefinitionId, dependencyBindings: record.dependencyBindings }));",
+        "const initializedSelections = initialized.generationRecord.selections;",
         "const initializedDefinitions = initialized.blueprint.packages.map(({ packageDefinitionId, path }) => ({ packageDefinitionId, path }));",
         "const userFile = `${targetRoot}/user-owned.txt`;",
         'await writeFile(userFile, "keep the initialized workspace\\n", { mode: 0o640 });',
@@ -453,20 +443,17 @@ void describe("原生内容制品安装链", () => {
         "assert.equal(library.source.manifestURL.includes(process.argv[5]), false);",
         "assert.equal(configuration.source.moduleURL.includes(process.argv[5]), false);",
         "assert.equal(configuration.source.manifestURL.includes(process.argv[5]), false);",
-        "assert.equal(libraryRecord.bindings[contentIdentityKey(configuration.identity)], configurationRecord.packageDefinitionId);",
+        'assert.equal(libraryRecord.dependencyBindings["tooling-config"], configurationRecord.packageDefinitionId);',
         "const libraryDefinition = initialized.blueprint.packages.find((definition) => definition.packageDefinitionId === libraryRecord.packageDefinitionId);",
         "assert.ok(libraryDefinition);",
         'const generated = await readFile(`${targetRoot}/${libraryDefinition.path}/src/index.ts`, "utf8");',
-        "const replayGenerator = createGenerator({",
-        "  content: templateContent,",
-        "  strategy: createDefaultWorkspaceStrategy(),",
-        "});",
+        "const replayGenerator = createDefaultGenerator({ content: templateContent });",
         "assert.notStrictEqual(replayGenerator, generator);",
         'const addition = await replayGenerator.add({ repositoryRoot: targetRoot, contentIdentity: { alias: "library", namespace: "ykdz" }, creationInput: { leafName: "fresh-library" } });',
         'assert.equal(addition.status, "success", JSON.stringify(addition));',
         'if (addition.status !== "success") process.exit(3);',
-        "for (const previous of initializedPackages) { const current = addition.generationRecord.packages.find((record) => record.packageDefinitionId === previous.packageDefinitionId); assert.ok(current); assert.deepEqual(current.bindings, previous.bindings); }",
-        "for (const [identity, instanceId] of Object.entries(initializedNodeInstances)) assert.equal(addition.generationRecord.nodeInstances[identity], instanceId);",
+        "for (const previous of initializedPackages) { const current = addition.generationRecord.packages.find((record) => record.packageDefinitionId === previous.packageDefinitionId); assert.ok(current); assert.deepEqual(current.dependencyBindings, previous.dependencyBindings); }",
+        "for (const previous of initializedSelections) assert.deepEqual(addition.generationRecord.selections.find(({ selectionId }) => selectionId === previous.selectionId), previous);",
         "for (const previous of initializedDefinitions) assert.ok(addition.blueprint.packages.some(({ packageDefinitionId, path }) => packageDefinitionId === previous.packageDefinitionId && path === previous.path));",
         'assert.equal(await readFile(userFile, "utf8"), "keep the initialized workspace\\n");',
         "assert.equal((await stat(userFile)).mode & 0o777, 0o640);",
@@ -505,7 +492,9 @@ void describe("原生内容制品安装链", () => {
 
     const result = JSON.parse(await readFile(resultPath, "utf8")) as {
       readonly generationRecord: {
-        readonly presetSelections: readonly { readonly packageName: string }[];
+        readonly selections: readonly {
+          readonly presetIdentity: { readonly packageName: string } | null;
+        }[];
       };
       readonly blueprint: {
         readonly packages: readonly {
@@ -537,8 +526,8 @@ void describe("原生内容制品安装链", () => {
       };
     };
     assert.deepEqual(
-      result.generationRecord.presetSelections.map(
-        ({ packageName }) => packageName,
+      result.generationRecord.selections.flatMap(({ presetIdentity }) =>
+        presetIdentity === null ? [] : [presetIdentity.packageName],
       ),
       ["@ykdz/preset-ts-lib"],
     );
@@ -697,7 +686,7 @@ void describe("原生内容制品安装链", () => {
           providers: closure.packages,
           links: closure.links,
           initialized: {
-            presetSelections: result.generationRecord.presetSelections,
+            selections: result.generationRecord.selections,
             packagePaths: result.blueprint.packages.map(
               ({ path: packagePath }) => packagePath,
             ),
@@ -734,10 +723,6 @@ void describe("原生内容制品安装链", () => {
     for (const preset of presets) {
       assert.equal(preset.kind, "preset");
       const prepared = await prepareContentCollection({
-        referencePreparation: {
-          specifier: "@ykdz/template-workspace/reference-package",
-          exportName: "defineReferencePackage",
-        },
         content: templateContent,
         roots: [preset],
 
@@ -800,26 +785,26 @@ void describe("原生内容制品安装链", () => {
         [
           'import assert from "node:assert/strict";',
           'import { chmod, readdir, readFile, stat, writeFile } from "node:fs/promises";',
-          'import { createGenerator } from "@ykdz/template-generator";',
-          'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
+          'import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";',
+          "",
           'import { templateContent } from "@ykdz/template-content";',
-          "const strategy = createDefaultWorkspaceStrategy();",
+          "",
           'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
           'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
           'const preset = templateContent.find((member) => member.kind === "preset" && member.alias === process.argv[4]);',
           "assert.ok(preset);",
-          "const generator = createGenerator({ content: templateContent, strategy });",
-          "const initialized = await generator.init({ targetRoot: process.argv[2], selection: { roots: [{ preset: preset.identity }] }, strategyInput: { repositoryName: `installed-${preset.alias}`, defaultPackageScope: `installed-${preset.alias}`, todo: false } });",
+          "const generator = createDefaultGenerator({ content: templateContent });",
+          "const initialized = await generator.init({ targetRoot: process.argv[2], selection: { presets: [{ contentIdentity: preset.identity }] }, conventions: { repositoryName: `installed-${preset.alias}`, defaultPackageScope: `installed-${preset.alias}`, todo: false } });",
           'assert.equal(initialized.status, "success", JSON.stringify(initialized));',
           'if (initialized.status !== "success") process.exit(2);',
-          "assert.deepEqual(initialized.generationRecord.presetSelections.map(({ packageName }) => packageName), [preset.identity.packageName]);",
-          "const initializedPackages = initialized.generationRecord.packages.map((record) => ({ packageDefinitionId: record.packageDefinitionId, bindings: record.bindings }));",
-          "const initializedNodeInstances = initialized.generationRecord.nodeInstances;",
+          "assert.deepEqual(initialized.generationRecord.selections.flatMap(({ presetIdentity }) => presetIdentity === null ? [] : [presetIdentity.packageName]), [preset.identity.packageName]);",
+          "const initializedPackages = initialized.generationRecord.packages.map((record) => ({ packageDefinitionId: record.packageDefinitionId, dependencyBindings: record.dependencyBindings }));",
+          "const initializedSelections = initialized.generationRecord.selections;",
           "const initializedDefinitions = initialized.blueprint.packages.map(({ packageDefinitionId, path }) => ({ packageDefinitionId, path }));",
           "const userFile = `${process.argv[2]}/user-owned.txt`;",
           'await writeFile(userFile, "keep the initialized workspace\\n", { mode: 0o640 });',
           "await chmod(userFile, 0o640);",
-          "await writeFile(process.argv[5], JSON.stringify({ initialized: { presetSelections: initialized.generationRecord.presetSelections, packages: initializedPackages, nodeInstances: initializedNodeInstances, definitions: initializedDefinitions, packagePaths: initialized.blueprint.packages.map(({ path }) => path) } }));",
+          "await writeFile(process.argv[5], JSON.stringify({ initialized: { selections: initializedSelections, packages: initializedPackages, definitions: initializedDefinitions, packagePaths: initialized.blueprint.packages.map(({ path }) => path) } }));",
         ].join("\n"),
       );
 
@@ -851,14 +836,15 @@ void describe("原生内容制品安装链", () => {
 
       const result = JSON.parse(await readFile(resultPath, "utf8")) as {
         readonly initialized: {
-          readonly presetSelections: readonly {
-            readonly packageName: string;
+          readonly selections: readonly {
+            readonly selectionId: string;
+            readonly presetIdentity: { readonly packageName: string } | null;
+            readonly nodes: Readonly<Record<string, string>>;
           }[];
           readonly packages: readonly {
             readonly packageDefinitionId: string;
-            readonly bindings: Readonly<Record<string, string>>;
+            readonly dependencyBindings: Readonly<Record<string, string>>;
           }[];
-          readonly nodeInstances: Readonly<Record<string, string>>;
           readonly definitions: readonly {
             readonly packageDefinitionId: string;
             readonly path: string;
@@ -867,8 +853,8 @@ void describe("原生内容制品安装链", () => {
         };
       };
       assert.deepEqual(
-        result.initialized.presetSelections.map(
-          ({ packageName }) => packageName,
+        result.initialized.selections.flatMap(({ presetIdentity }) =>
+          presetIdentity === null ? [] : [presetIdentity.packageName],
         ),
         [preset.identity.packageName],
       );
@@ -932,10 +918,6 @@ void describe("原生内容制品安装链", () => {
       let replayConsumerRoot = consumerRoot;
       if (!alreadyPrepared) {
         replayPrepared = await prepareContentCollection({
-          referencePreparation: {
-            specifier: "@ykdz/template-workspace/reference-package",
-            exportName: "defineReferencePackage",
-          },
           content: templateContent,
           roots: [preset, replayMember],
 
@@ -1006,11 +988,10 @@ void describe("原生内容制品安装链", () => {
         [
           'import assert from "node:assert/strict";',
           'import { readdir, readFile, stat, writeFile } from "node:fs/promises";',
-          'import { contentIdentityKey } from "@ykdz/template-core/content-identity";',
-          'import { createGenerator } from "@ykdz/template-generator";',
-          'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
+          'import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";',
+          "",
           `import { templateContent } from "${replayPrepared.collection.name}";`,
-          "const strategy = createDefaultWorkspaceStrategy();",
+          "",
           "const targetRoot = process.argv[2];",
           'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
           'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
@@ -1018,21 +999,20 @@ void describe("原生内容制品安装链", () => {
           'const member = templateContent.find((candidate) => candidate.kind === "reference" && candidate.identity.packageName === process.argv[5]);',
           "assert.ok(member);",
           "const creationInput = JSON.parse(process.argv[6]);",
-          "const generator = createGenerator({ content: templateContent, strategy });",
+          "const generator = createDefaultGenerator({ content: templateContent });",
           "const addition = await generator.add({ repositoryRoot: targetRoot, contentIdentity: member.identity, creationInput });",
           'assert.equal(addition.status, "success", JSON.stringify(addition));',
           'if (addition.status !== "success") process.exit(3);',
-          "for (const previous of baseline.packages) { const current = addition.generationRecord.packages.find((record) => record.packageDefinitionId === previous.packageDefinitionId); assert.ok(current); assert.deepEqual(current.bindings, previous.bindings); }",
-          "for (const [identity, instanceId] of Object.entries(baseline.nodeInstances)) assert.equal(addition.generationRecord.nodeInstances[identity], instanceId);",
+          "for (const previous of baseline.packages) { const current = addition.generationRecord.packages.find((record) => record.packageDefinitionId === previous.packageDefinitionId); assert.ok(current); assert.deepEqual(current.dependencyBindings, previous.dependencyBindings); }",
           "for (const previous of baseline.definitions) assert.ok(addition.blueprint.packages.some(({ packageDefinitionId, path }) => packageDefinitionId === previous.packageDefinitionId && path === previous.path));",
-          "assert.deepEqual(addition.generationRecord.presetSelections.map(({ packageName }) => packageName), baseline.presetSelections.map(({ packageName }) => packageName));",
+          "for (const previous of baseline.selections) assert.deepEqual(addition.generationRecord.selections.find(({ selectionId }) => selectionId === previous.selectionId), previous);",
           "const userFile = `${targetRoot}/user-owned.txt`;",
           'assert.equal(await readFile(userFile, "utf8"), "keep the initialized workspace\\n");',
           "assert.equal((await stat(userFile)).mode & 0o777, 0o640);",
           "const newRecord = addition.generationRecord.packages.find((record) => record.contentIdentity.packageName === member.identity.packageName && !baseline.packages.some((previous) => previous.packageDefinitionId === record.packageDefinitionId));",
           "assert.ok(newRecord);",
           "assert.ok(addition.blueprint.packages.some((definition) => definition.packageDefinitionId === newRecord.packageDefinitionId && definition.path === creationInput.packagePath));",
-          'await writeFile(process.argv[7], JSON.stringify({ status: addition.status, identity: member.identity, packageDefinitionId: newRecord.packageDefinitionId, path: creationInput.packagePath, retainedPackages: baseline.packages.length, retainedDefinitions: baseline.definitions.length, retainedNodeInstances: Object.keys(baseline.nodeInstances).length, userCustomization: { text: await readFile(userFile, "utf8"), mode: (await stat(userFile)).mode & 0o777 } }));',
+          'await writeFile(process.argv[7], JSON.stringify({ status: addition.status, identity: member.identity, packageDefinitionId: newRecord.packageDefinitionId, path: creationInput.packagePath, retainedPackages: baseline.packages.length, retainedDefinitions: baseline.definitions.length, retainedSelectionNodes: baseline.selections.reduce((count, selection) => count + Object.keys(selection.nodes).length, 0), userCustomization: { text: await readFile(userFile, "utf8"), mode: (await stat(userFile)).mode & 0o777 } }));',
         ].join("\n"),
       );
       await withUnreadableAuthorDirectories(
@@ -1077,7 +1057,7 @@ void describe("原生内容制品安装链", () => {
         readonly path: string;
         readonly retainedPackages: number;
         readonly retainedDefinitions: number;
-        readonly retainedNodeInstances: number;
+        readonly retainedSelectionNodes: number;
         readonly userCustomization: {
           readonly text: string;
           readonly mode: number;
@@ -1166,12 +1146,12 @@ void describe("原生内容制品安装链", () => {
           [
             'import assert from "node:assert/strict";',
             'import { readdir, readFile, writeFile } from "node:fs/promises";',
-            'import { createGenerator } from "@ykdz/template-generator";',
-            'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
+            'import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";',
+            "",
             'import { templateContent } from "@ykdz/template-content";',
             'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
             'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
-            "const generator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+            "const generator = createDefaultGenerator({ content: templateContent });",
             'const result = await generator.add({ repositoryRoot: process.argv[2], contentIdentity: { alias: "binary", namespace: "ykdz" }, creationInput: { leafName: "second-app" } });',
             "await writeFile(process.argv[4], JSON.stringify({ status: result.status, phase: result.phase, errorMessage: result.error?.message }));",
           ].join("\n"),
@@ -1222,10 +1202,10 @@ void describe("原生内容制品安装链", () => {
           readonly errorMessage: string;
         };
         assert.equal(missingResourceEvidence.status, "operation-failure");
-        assert.equal(missingResourceEvidence.phase, "planning");
+        assert.equal(missingResourceEvidence.phase, "preparation");
         assert.match(
           missingResourceEvidence.errorMessage,
-          /@ykdz\/reference-rust-bin.*prepare 阶段失败.*模板执行数据未包含/u,
+          /@ykdz\/reference-rust-bin\/native\/Cargo\.toml/u,
         );
         assert.deepEqual(
           await snapshotTree(targetRoot),
@@ -1272,7 +1252,7 @@ void describe("原生内容制品安装链", () => {
               path: replayResult.path,
               retainedPackages: replayResult.retainedPackages,
               retainedDefinitions: replayResult.retainedDefinitions,
-              retainedNodeInstances: replayResult.retainedNodeInstances,
+              retainedSelectionNodes: replayResult.retainedSelectionNodes,
               userCustomization: replayResult.userCustomization,
               authorDirectories: [
                 ...replayAuthorRoots.map((authorPath) => ({
@@ -1306,12 +1286,16 @@ void describe("原生内容制品安装链", () => {
     const contentByIdentity = new Map(
       references.map((member) => [contentIdentityKey(member.identity), member]),
     );
-    const strategy = createDefaultWorkspaceStrategy();
+    const dependencyIdentities = (member: (typeof references)[number]) =>
+      (member.definition.dependencies ?? []).map((dependency) =>
+        resolveReferenceDependencyIdentity({
+          consumerIdentity: member.identity,
+          dependency,
+          members: templateContent,
+        }),
+      );
     const entries = references.map((member) => {
-      const dependencies = strategy.dependencies({
-        content: member,
-        contentByIdentity,
-      });
+      const dependencies = dependencyIdentities(member);
       return {
         member,
         independentDependencies: dependencies
@@ -1346,50 +1330,30 @@ void describe("原生内容制品安装链", () => {
       vueHonoWeb && honoApi && vikeWeb && vikeDatabase && vikeMigrations,
     );
     assert.ok(
-      strategy
-        .dependencies({
-          content: vueHonoWeb,
-          contentByIdentity,
-        })
-        .some(
-          (identity) =>
-            contentIdentityKey(identity) ===
-            contentIdentityKey(honoApi.identity),
-        ),
+      dependencyIdentities(vueHonoWeb).some(
+        (identity) =>
+          contentIdentityKey(identity) === contentIdentityKey(honoApi.identity),
+      ),
       "Vue-Hono web 的真实依赖声明应指向 Hono API",
     );
     assert.ok(
-      strategy
-        .dependencies({
-          content: vikeWeb,
-          contentByIdentity,
-        })
-        .some(
-          (identity) =>
-            contentIdentityKey(identity) ===
-            contentIdentityKey(vikeDatabase.identity),
-        ),
+      dependencyIdentities(vikeWeb).some(
+        (identity) =>
+          contentIdentityKey(identity) ===
+          contentIdentityKey(vikeDatabase.identity),
+      ),
       "Vike web 的真实依赖声明应指向 Vike DB",
     );
     assert.ok(
-      strategy
-        .dependencies({
-          content: vikeMigrations,
-          contentByIdentity,
-        })
-        .some(
-          (identity) =>
-            contentIdentityKey(identity) ===
-            contentIdentityKey(vikeDatabase.identity),
-        ),
+      dependencyIdentities(vikeMigrations).some(
+        (identity) =>
+          contentIdentityKey(identity) ===
+          contentIdentityKey(vikeDatabase.identity),
+      ),
       "Vike migrations 的真实依赖声明应指向 Vike DB",
     );
 
     const prepared = await prepareContentCollection({
-      referencePreparation: {
-        specifier: "@ykdz/template-workspace/reference-package",
-        exportName: "defineReferencePackage",
-      },
       content: templateContent,
       roots: references,
       workspaceRoot,
@@ -1405,7 +1369,7 @@ void describe("原生内容制品安装链", () => {
         .sort(),
       references.map((member) => contentIdentityKey(member.identity)).sort(),
     );
-    assert.equal(prepared.owners.length, 11);
+    assert.equal(prepared.owners.length, 12);
     const vueAppOwner = prepared.owners.find(
       (owner) =>
         owner.member.identity.packageName === "@ykdz/reference-vue-app",
@@ -1428,12 +1392,12 @@ void describe("原生内容制品安装链", () => {
     assert.ok(nativeTypeScript?.from && nativeTypeScript.version);
     const vueAppArchiveManifest = JSON.parse(
       await readFile(
-        path.join(vueAppOwner.installRoot, "package.json"),
+        path.join(vueAppOwner.installRoot, "native", "package.json"),
         "utf8",
       ),
-    ) as { readonly dependencies?: Readonly<Record<string, string>> };
+    ) as { readonly devDependencies?: Readonly<Record<string, string>> };
     assert.equal(
-      vueAppArchiveManifest.dependencies?.["typescript-7"],
+      vueAppArchiveManifest.devDependencies?.["typescript-7"],
       nativeTypeScript.from === "typescript-7"
         ? nativeTypeScript.version
         : `npm:${nativeTypeScript.from}@${nativeTypeScript.version}`,
@@ -1522,8 +1486,9 @@ void describe("原生内容制品安装链", () => {
         'import assert from "node:assert/strict";',
         'import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";',
         'import { contentIdentityKey } from "@ykdz/template-core/content-identity";',
-        'import { createGenerator } from "@ykdz/template-generator";',
-        'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
+        'import { resolveReferenceDependencyIdentity } from "@ykdz/template-generator";',
+        'import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";',
+        "",
         'import { deriveTemplateMembers, templateContent } from "@ykdz/template-content";',
         "const targetBase = process.argv[2];",
         'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
@@ -1537,16 +1502,19 @@ void describe("原生内容制品安装链", () => {
         "for (const [index, entry] of entries.entries()) {",
         '  const roots = [{ nodeIdentity: "entry", contentIdentity: entry.identity }, ...entry.independentDependencies.map((contentIdentity, providerIndex) => ({ nodeIdentity: `provider-${providerIndex}`, contentIdentity }))];',
         "  const targetRoot = `${targetBase}/entry-${index}`;",
-        "  const generator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
-        "  const initialized = await generator.init({ targetRoot, selection: { roots }, strategyInput: { repositoryName: `reference-${index}`, defaultPackageScope: `reference-${index}`, todo: false } });",
+        "  const generator = createDefaultGenerator({ content: templateContent });",
+        "  const initialized = await generator.init({ targetRoot, selection: { roots }, conventions: { repositoryName: `reference-${index}`, defaultPackageScope: `reference-${index}`, todo: false } });",
         '  assert.equal(initialized.status, "success", `${entry.identity.packageName}: ${JSON.stringify(initialized)}`);',
         '  if (initialized.status !== "success") process.exit(2);',
         "  const entryRecord = initialized.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(entry.identity));",
         "  assert.ok(entryRecord, `generation record missing ${entry.identity.packageName}`);",
-        "  for (const dependencyIdentity of createDefaultWorkspaceStrategy().dependencies({ content: contentByIdentity.get(contentIdentityKey(entry.identity)), contentByIdentity })) {",
+        "  const entryContent = contentByIdentity.get(contentIdentityKey(entry.identity));",
+        "  assert.ok(entryContent);",
+        "  for (const dependency of entryContent.definition.dependencies ?? []) {",
+        "    const dependencyIdentity = resolveReferenceDependencyIdentity({ consumerIdentity: entry.identity, dependency, members: templateContent });",
         "    const providerRecord = initialized.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(dependencyIdentity));",
         "    assert.ok(providerRecord, `binding provider missing ${dependencyIdentity.packageName}`);",
-        "    assert.equal(entryRecord.bindings[contentIdentityKey(dependencyIdentity)], providerRecord.packageDefinitionId, `invalid binding ${entry.identity.packageName} -> ${dependencyIdentity.packageName}`);",
+        "    assert.equal(entryRecord.dependencyBindings[dependency.key], providerRecord.packageDefinitionId, `invalid binding ${entry.identity.packageName} -> ${dependencyIdentity.packageName}`);",
         "  }",
         "  await access(targetRoot);",
         "  results.push({ identity: entry.identity, roots, generationRecord: initialized.generationRecord, packagePaths: initialized.blueprint.packages.map(({ path }) => path) });",
@@ -1554,14 +1522,14 @@ void describe("原生内容制品安装链", () => {
         'const web = entries.find((entry) => entry.identity.packageName === "@ykdz/reference-vue-hono-web");',
         "assert.ok(web);",
         "const missingBindingTarget = `${targetBase}/missing-independent-provider`;",
-        'const missingBinding = await createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() }).init({ targetRoot: missingBindingTarget, selection: { roots: [{ nodeIdentity: "entry", contentIdentity: web.identity }] }, strategyInput: { repositoryName: "missing-binding", defaultPackageScope: "missing-binding", todo: false } });',
+        'const missingBinding = await createDefaultGenerator({ content: templateContent }).init({ targetRoot: missingBindingTarget, selection: { roots: [{ nodeIdentity: "entry", contentIdentity: web.identity }] }, conventions: { repositoryName: "missing-binding", defaultPackageScope: "missing-binding", todo: false } });',
         'assert.equal(missingBinding.status, "operation-failure");',
         'assert.equal(missingBinding.phase, "planning");',
         "assert.match(missingBinding.error.message, /缺少明确的独立依赖实例/u);",
         'await assert.rejects(access(missingBindingTarget), { code: "ENOENT" });',
         "const missingContentTarget = `${targetBase}/missing-content-provider`;",
         'const missingContent = templateContent.filter((member) => member.identity.packageName !== "@ykdz/reference-hono-api");',
-        'const missingProvider = await createGenerator({ content: missingContent, strategy: createDefaultWorkspaceStrategy() }).init({ targetRoot: missingContentTarget, selection: { roots: [{ nodeIdentity: "entry", contentIdentity: web.identity }] }, strategyInput: { repositoryName: "missing-content", defaultPackageScope: "missing-content", todo: false } });',
+        'const missingProvider = await createDefaultGenerator({ content: missingContent }).init({ targetRoot: missingContentTarget, selection: { roots: [{ nodeIdentity: "entry", contentIdentity: web.identity }] }, conventions: { repositoryName: "missing-content", defaultPackageScope: "missing-content", todo: false } });',
         'assert.equal(missingProvider.status, "operation-failure");',
         'assert.equal(missingProvider.phase, "planning");',
         'assert.ok(missingProvider.error.message.includes("必要模板依赖未登记") && missingProvider.error.message.includes("@ykdz/reference-hono-api"));',
@@ -1609,7 +1577,7 @@ void describe("原生内容制品安装链", () => {
         readonly generationRecord: {
           readonly packages: readonly {
             readonly contentIdentity: { readonly packageName: string };
-            readonly bindings: Readonly<Record<string, string>>;
+            readonly dependencyBindings: Readonly<Record<string, string>>;
           }[];
         };
         readonly packagePaths: readonly string[];
@@ -1791,7 +1759,11 @@ void describe("原生内容制品安装链", () => {
       featureDefinitionPath,
       "utf8",
     );
-    assert.ok(originalFeatureDefinition.includes('resources: ["src"],'));
+    assert.ok(
+      originalFeatureDefinition.includes(
+        'resources: [{ path: "src/content.ts" }],',
+      ),
+    );
     await mkdir(path.join(featureAuthorRoot, "lib"), { recursive: true });
     await rename(
       path.join(featureAuthorRoot, "src", "content.ts"),
@@ -1804,8 +1776,8 @@ void describe("原生内容制品安装链", () => {
     await writeFile(
       featureDefinitionPath,
       originalFeatureDefinition.replace(
-        'resources: ["src"],',
-        'resources: ["lib"],',
+        'resources: [{ path: "src/content.ts" }],',
+        'resources: [{ path: "lib/content.ts" }],',
       ),
     );
     const content = await buildNativeAuthoredContent(
@@ -1818,52 +1790,18 @@ void describe("原生内容制品安装链", () => {
     );
     assert.ok(feature);
     assert.equal(feature.kind, "reference");
-    const featureDefinition = feature.definition as {
-      readonly source: (resourcePath: string) => TemplateSourceHandle;
-      readonly prepareArtifact: () => {
-        readonly resources: readonly {
-          readonly path: string;
-          readonly data: Uint8Array;
-        }[];
-      };
-    };
-    const featureSource = featureDefinition.source("lib/content.ts");
-    const authoringSdkRoot = await realpath(
-      path.join(
-        fixture.root,
-        namespace,
-        "authors",
-        "feature",
-        "node_modules",
-        "@ykdz",
-        "template-workspace",
-      ),
+    const featureDefinition =
+      feature.definition as DefaultReferencePackageDefinition;
+    const preparedFeatureSnapshot = featureDefinition.prepare({
+      excludedPackagePaths: [],
+    });
+    const snapshotFeatureSource = preparedFeatureSnapshot.resources.find(
+      ({ path: resourcePath }) => resourcePath === "lib/content.ts",
     );
-    const workspaceCoreEntry = import.meta
-      .resolve("@ykdz/template-core/renderer");
-    const workspaceAuthoringEntry = import.meta
-      .resolve("@ykdz/template-workspace/reference-package");
-    const authoringRequire = createRequire(
-      path.join(authoringSdkRoot, "dist", "reference-package.js"),
-    );
-    const archiveCoreEntry = pathToFileURL(
-      authoringRequire.resolve("@ykdz/template-core/renderer"),
-    ).href;
-    const archiveAuthoringEntry = pathToFileURL(
-      path.join(authoringSdkRoot, "dist", "reference-package.js"),
-    ).href;
-    assert.notEqual(archiveCoreEntry, workspaceCoreEntry);
-    assert.notEqual(archiveAuthoringEntry, workspaceAuthoringEntry);
-    let crossSdkHandleFailure: unknown;
-    try {
-      resolveTemplateSource(featureSource, ".");
-    } catch (error) {
-      crossSdkHandleFailure = error;
-    }
-    assert.ok(crossSdkHandleFailure instanceof Error);
-    assert.match(
-      crossSdkHandleFailure.message,
-      /unknown Template Source handle/u,
+    assert.ok(snapshotFeatureSource);
+    assert.equal(
+      Buffer.from(snapshotFeatureSource.content).toString("utf8"),
+      'export const fixtureOrigin = "native-authored:feature";\n',
     );
     const preparedFeature = featureDefinition.prepareArtifact();
     const preparedFeatureSource = preparedFeature.resources.find(
@@ -1875,12 +1813,7 @@ void describe("原生内容制品安装链", () => {
       'export const fixtureOrigin = "native-authored:feature";\n',
     );
     assert.equal(preparedFeatureSource.path, "lib/content.ts");
-    const sdkBoundaryEvidence = {
-      archiveCoreEntry,
-      workspaceCoreEntry,
-      archiveAuthoringEntry,
-      workspaceAuthoringEntry,
-      red: crossSdkHandleFailure.message,
+    const authoredResourceEvidence = {
       green: {
         owner: feature.identity,
         path: preparedFeatureSource.path,
@@ -1902,10 +1835,6 @@ void describe("原生内容制品安装链", () => {
     ) as { readonly version: string };
     const buildRoot = await temporaryRoot("preset-authored-content-");
     const prepared = await prepareContentCollection({
-      referencePreparation: {
-        specifier: "@ykdz/template-workspace/reference-package",
-        exportName: "defineReferencePackage",
-      },
       content: content as unknown as typeof templateContent,
       roots: [preset, addon] as unknown as typeof templateContent,
 
@@ -2013,8 +1942,8 @@ void describe("原生内容制品安装链", () => {
         'import assert from "node:assert/strict";',
         'import { chmod, lstat, readdir, readFile, readlink, stat, writeFile } from "node:fs/promises";',
         'import { contentIdentityKey } from "@ykdz/template-core/content-identity";',
-        'import { createGenerator } from "@ykdz/template-generator";',
-        'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
+        'import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";',
+        "",
         'import { templateContent } from "@fixture/authored-content";',
         "",
         "const targetRoot = process.argv[2];",
@@ -2040,11 +1969,11 @@ void describe("原生内容制品安装链", () => {
         "  assert.equal(member.source.moduleURL.includes(process.argv[5]), false);",
         "  assert.equal(member.source.manifestURL.includes(process.argv[5]), false);",
         "}",
-        "const generator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+        "const generator = createDefaultGenerator({ content: templateContent });",
         "const initialized = await generator.init({",
         "  targetRoot,",
-        '  selection: { roots: [{ preset: { alias: "authored", namespace: "native-authored" } }] },',
-        '  strategyInput: { repositoryName: "authored-library", defaultPackageScope: "authored" },',
+        '  selection: { presets: [{ contentIdentity: { alias: "authored", namespace: "native-authored" } }] },',
+        '  conventions: { repositoryName: "authored-library", defaultPackageScope: "authored" },',
         "});",
         'assert.equal(initialized.status, "success", JSON.stringify(initialized));',
         'if (initialized.status !== "success") process.exit(2);',
@@ -2053,7 +1982,7 @@ void describe("原生内容制品安装链", () => {
         "const featureRecord = initialized.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(featureIdentity));",
         "const themeRecord = initialized.generationRecord.packages.find((record) => contentIdentityKey(record.contentIdentity) === contentIdentityKey(themeIdentity));",
         "assert.ok(featureRecord && themeRecord);",
-        "assert.equal(featureRecord.bindings[contentIdentityKey(themeIdentity)], themeRecord.packageDefinitionId);",
+        'assert.equal(featureRecord.dependencyBindings["tooling-config"], themeRecord.packageDefinitionId);',
         "const featureDefinition = initialized.blueprint.packages.find((definition) => definition.packageDefinitionId === featureRecord.packageDefinitionId);",
         "const themeDefinition = initialized.blueprint.packages.find((definition) => definition.packageDefinitionId === themeRecord.packageDefinitionId);",
         "assert.ok(featureDefinition && themeDefinition);",
@@ -2073,13 +2002,14 @@ void describe("原生内容制品安装链", () => {
         "await writeFile(rootManifestPath, `${JSON.stringify(rootManifest, null, 2)}\\n`);",
         'const beforeWrongKind = await readFile(generationPath, "utf8");',
         "const beforeWrongKindTree = await snapshotTree(targetRoot);",
-        "const presetIdentity = initialized.generationRecord.presetSelections[0];",
+        "const presetIdentity = initialized.generationRecord.selections.find(({ presetIdentity }) => presetIdentity !== null)?.presetIdentity;",
+        "assert.ok(presetIdentity);",
         "const wrongKind = await generator.add({ repositoryRoot: targetRoot, contentIdentity: presetIdentity });",
         'assert.equal(wrongKind.status, "operation-failure", JSON.stringify(wrongKind));',
         'assert.equal(await readFile(generationPath, "utf8"), beforeWrongKind);',
         "const afterWrongKindTree = await snapshotTree(targetRoot);",
         "assert.deepEqual(afterWrongKindTree, beforeWrongKindTree);",
-        "const freshGenerator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+        "const freshGenerator = createDefaultGenerator({ content: templateContent });",
         'const addition = await freshGenerator.add({ repositoryRoot: targetRoot, contentIdentity: { alias: "addon", namespace: "native-authored" }, creationInput: { leafName: "fresh-addon" } });',
         'assert.equal(addition.status, "success", JSON.stringify(addition));',
         'if (addition.status !== "success") process.exit(3);',
@@ -2101,9 +2031,9 @@ void describe("原生内容制品安装链", () => {
         "assert.equal(afterFeatureRecord.packageDefinitionId, featureRecord.packageDefinitionId);",
         "assert.equal(afterThemeRecords.length, 1);",
         "assert.equal(afterThemeRecords[0].packageDefinitionId, themeRecord.packageDefinitionId);",
-        "assert.equal(addonRecord.bindings[contentIdentityKey(themeIdentity)], themeRecord.packageDefinitionId);",
-        "for (const [nodeIdentity, instanceId] of Object.entries(initialized.generationRecord.nodeInstances)) assert.equal(addition.generationRecord.nodeInstances[nodeIdentity], instanceId);",
-        "const secondFreshGenerator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+        'assert.equal(addonRecord.dependencyBindings["tooling-config"], themeRecord.packageDefinitionId);',
+        "for (const previous of initialized.generationRecord.selections) assert.deepEqual(addition.generationRecord.selections.find(({ selectionId }) => selectionId === previous.selectionId), previous);",
+        "const secondFreshGenerator = createDefaultGenerator({ content: templateContent });",
         'const secondAddition = await secondFreshGenerator.add({ repositoryRoot: targetRoot, contentIdentity: { alias: "addon", namespace: "native-authored" }, creationInput: { leafName: "second-addon" } });',
         'assert.equal(secondAddition.status, "success", JSON.stringify(secondAddition));',
         'if (secondAddition.status !== "success") process.exit(4);',
@@ -2119,10 +2049,10 @@ void describe("原生内容制品安装链", () => {
         "assert.equal(secondFeatureRecord.packageDefinitionId, featureRecord.packageDefinitionId);",
         "assert.equal(secondThemeRecords.length, 1);",
         "assert.equal(secondThemeRecords[0].packageDefinitionId, themeRecord.packageDefinitionId);",
-        "assert.equal(addonRecord.bindings[contentIdentityKey(themeIdentity)], themeRecord.packageDefinitionId);",
-        "assert.equal(secondAddonRecord.bindings[contentIdentityKey(themeIdentity)], themeRecord.packageDefinitionId);",
-        "for (const record of addition.generationRecord.packages) { const retained = secondAddition.generationRecord.packages.find((candidate) => candidate.packageDefinitionId === record.packageDefinitionId); assert.ok(retained); assert.deepEqual(retained.bindings, record.bindings); }",
-        "for (const [nodeIdentity, instanceId] of Object.entries(addition.generationRecord.nodeInstances)) assert.equal(secondAddition.generationRecord.nodeInstances[nodeIdentity], instanceId);",
+        'assert.equal(addonRecord.dependencyBindings["tooling-config"], themeRecord.packageDefinitionId);',
+        'assert.equal(secondAddonRecord.dependencyBindings["tooling-config"], themeRecord.packageDefinitionId);',
+        "for (const record of addition.generationRecord.packages) { const retained = secondAddition.generationRecord.packages.find((candidate) => candidate.packageDefinitionId === record.packageDefinitionId); assert.ok(retained); assert.deepEqual(retained.dependencyBindings, record.dependencyBindings); }",
+        "for (const previous of addition.generationRecord.selections) assert.deepEqual(secondAddition.generationRecord.selections.find(({ selectionId }) => selectionId === previous.selectionId), previous);",
         'assert.equal(await readFile(`${targetRoot}/user-owned.txt`, "utf8"), "keep this file\\n");',
         "assert.equal((await stat(`${targetRoot}/user-owned.txt`)).mode & 0o777, 0o640);",
         'assert.equal(await readFile(featureSourcePath, "utf8"), customizedFeatureSource);',
@@ -2133,10 +2063,10 @@ void describe("原生内容制品安装链", () => {
         "const invalidGenerationRecord = JSON.parse(validGenerationRecordText);",
         "const invalidFeatureRecord = invalidGenerationRecord.packages.find((record) => record.packageDefinitionId === featureRecord.packageDefinitionId);",
         "assert.ok(invalidFeatureRecord);",
-        'invalidFeatureRecord.bindings[contentIdentityKey(themeIdentity)] = "missing-theme-instance";',
+        'invalidFeatureRecord.dependencyBindings["tooling-config"] = "missing-theme-instance";',
         "await writeFile(generationPath, `${JSON.stringify(invalidGenerationRecord, null, 2)}\\n`);",
         "const beforeInvalidBindingTree = await snapshotTree(targetRoot);",
-        "const invalidBindingGenerator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+        "const invalidBindingGenerator = createDefaultGenerator({ content: templateContent });",
         'const invalidBinding = await invalidBindingGenerator.add({ repositoryRoot: targetRoot, contentIdentity: { alias: "addon", namespace: "native-authored" }, creationInput: { leafName: "rejected-addon" } });',
         'assert.equal(invalidBinding.status, "operation-failure", JSON.stringify(invalidBinding));',
         'if (invalidBinding.status !== "operation-failure") process.exit(5);',
@@ -2177,8 +2107,8 @@ void describe("原生内容制品安装链", () => {
       }[];
       readonly initialized: {
         readonly generationRecord: {
-          readonly presetSelections: readonly {
-            readonly packageName: string;
+          readonly selections: readonly {
+            readonly presetIdentity: { readonly packageName: string } | null;
           }[];
         };
       };
@@ -2232,8 +2162,9 @@ void describe("原生内容制品安装链", () => {
       ),
     );
     assert.deepEqual(
-      result.initialized.generationRecord.presetSelections.map(
-        ({ packageName }) => packageName,
+      result.initialized.generationRecord.selections.flatMap(
+        ({ presetIdentity }) =>
+          presetIdentity === null ? [] : [presetIdentity.packageName],
       ),
       ["@fixture/preset"],
     );
@@ -2416,14 +2347,14 @@ void describe("原生内容制品安装链", () => {
       [
         'import assert from "node:assert/strict";',
         'import { readdir, readFile, writeFile } from "node:fs/promises";',
-        'import { createGenerator } from "@ykdz/template-generator";',
-        'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
+        'import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";',
+        "",
         'import { templateContent } from "@fixture/authored-content";',
         'const authorRoots = JSON.parse(await readFile(process.argv[5], "utf8"));',
         'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
-        "const generator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+        "const generator = createDefaultGenerator({ content: templateContent });",
         'const existing = await generator.add({ repositoryRoot: process.argv[2], contentIdentity: { alias: "addon", namespace: "native-authored" }, creationInput: { leafName: "second-addon" } });',
-        'const fresh = await generator.init({ targetRoot: process.argv[3], selection: { roots: [{ preset: { alias: "authored", namespace: "native-authored" } }] }, strategyInput: { repositoryName: "authored-library", defaultPackageScope: "authored" } });',
+        'const fresh = await generator.init({ targetRoot: process.argv[3], selection: { presets: [{ contentIdentity: { alias: "authored", namespace: "native-authored" } }] }, conventions: { repositoryName: "authored-library", defaultPackageScope: "authored" } });',
         "const summarize = (result) => ({ status: result.status, phase: result.phase, errorMessage: result.error?.message });",
         "await writeFile(process.argv[4], JSON.stringify({ existing: summarize(existing), fresh: summarize(fresh) }));",
         "",
@@ -2525,8 +2456,7 @@ void describe("原生内容制品安装链", () => {
           providers: closure.packages,
           links: closure.links,
           initialized: {
-            presetSelections:
-              result.initialized.generationRecord.presetSelections,
+            selections: result.initialized.generationRecord.selections,
             generatedAddon: result.generatedAddon,
             freshAdd: result.addition.status,
             secondFreshAdd: result.secondAddition.status,
@@ -2544,7 +2474,7 @@ void describe("原生内容制品安装链", () => {
             targetCreated: false,
           },
           missingResource: missingResourceFailures,
-          ownerSdkBoundary: sdkBoundaryEvidence,
+          authoredResource: authoredResourceEvidence,
           existingTargetAfterMissingResource: await snapshotTree(targetRoot),
           missingResourceTargetCreated: false,
         },
@@ -2617,10 +2547,6 @@ void describe("原生内容制品安装链", () => {
       return feature;
     });
     const prepared = await prepareContentCollection({
-      referencePreparation: {
-        specifier: "@ykdz/template-workspace/reference-package",
-        exportName: "defineReferencePackage",
-      },
       content: members as unknown as typeof templateContent,
       roots: features as unknown as typeof templateContent,
 
@@ -2704,21 +2630,21 @@ void describe("原生内容制品安装链", () => {
         'import assert from "node:assert/strict";',
         'import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";',
         'import { contentIdentityKey } from "@ykdz/template-core/content-identity";',
-        'import { createGenerator } from "@ykdz/template-generator";',
-        'import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";',
+        'import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";',
+        "",
         'import { templateContent } from "@fixture/multi-source-content";',
         'const { targetRoot, identities, versions, markers } = JSON.parse(await readFile(process.argv[2], "utf8"));',
         'const authorRoots = JSON.parse(await readFile(process.argv[3], "utf8"));',
         'for (const root of authorRoots) await assert.rejects(readdir(root), { code: "EACCES" });',
-        "const generator = createGenerator({ content: templateContent, strategy: createDefaultWorkspaceStrategy() });",
+        "const generator = createDefaultGenerator({ content: templateContent });",
         "const ambiguousTarget = `${targetRoot}/ambiguous`;",
-        'const ambiguous = await generator.init({ targetRoot: ambiguousTarget, selection: { roots: [{ nodeIdentity: "ambiguous", contentIdentity: { alias: "feature" } }] }, strategyInput: { repositoryName: "ambiguous", defaultPackageScope: "ambiguous", todo: false } });',
+        'const ambiguous = await generator.init({ targetRoot: ambiguousTarget, selection: { roots: [{ nodeIdentity: "ambiguous", contentIdentity: { alias: "feature" } }] }, conventions: { repositoryName: "ambiguous", defaultPackageScope: "ambiguous", todo: false } });',
         'assert.equal(ambiguous.status, "operation-failure");',
         'assert.equal(ambiguous.phase, "planning");',
         "assert.match(ambiguous.error.message, /内容别名存在歧义：feature/u);",
         'await assert.rejects(readdir(ambiguousTarget), { code: "ENOENT" });',
         "await mkdir(targetRoot, { recursive: true });",
-        'const initialized = await generator.init({ targetRoot, selection: { roots: identities.map((contentIdentity, index) => ({ nodeIdentity: `source-${index}`, contentIdentity, creationInput: { leafName: `source-${index}` } })) }, strategyInput: { repositoryName: "multi-source", defaultPackageScope: "multi-source", todo: false } });',
+        'const initialized = await generator.init({ targetRoot, selection: { roots: identities.map((contentIdentity, index) => ({ nodeIdentity: `source-${index}`, contentIdentity, creationInput: { leafName: `source-${index}` } })) }, conventions: { repositoryName: "multi-source", defaultPackageScope: "multi-source", todo: false } });',
         'assert.equal(initialized.status, "success", JSON.stringify(initialized));',
         'if (initialized.status !== "success") process.exit(2);',
         "const results = identities.map((identity, index) => {",

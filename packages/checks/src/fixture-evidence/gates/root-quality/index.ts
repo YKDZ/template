@@ -14,7 +14,7 @@ export function generatedRootQualityExecutionResources(
   options: { readonly rootGate?: "check" | "check:full" } = {},
 ): readonly FixtureEvidenceExecutionResource[] {
   if (options.rootGate === "check") return [];
-  return result.projection.ownerFacts.environmentNeeds.check.some(
+  return result.ownerFacts.environmentNeeds.check.some(
     (need) => need.kind === "playwright-browser-assets",
   )
     ? ["browser"]
@@ -38,7 +38,7 @@ export function normalizedGeneratedRootQualityPlan(
     dependencyInstallation: normalizedFixtureDependencyInstallationPlan(),
     developmentContainer: {
       lockfileWrites: false,
-      probes: result.projection.ownerFacts.container.probes.map((probe) => ({
+      probes: result.ownerFacts.container.probes.map((probe) => ({
         identity: probe.identity,
         command: probe.command,
         args: [...(probe.args ?? [])],
