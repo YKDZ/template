@@ -6,6 +6,7 @@ import {
 } from "@ykdz/template-core/content-identity";
 import type { GeneratorSelectionRoot } from "@ykdz/template-core/workspace-strategy";
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
+import type { GeneratorPackageState } from "@ykdz/template-core/workspace-strategy";
 import { createGenerator } from "@ykdz/template-generator";
 import {
   createDefaultWorkspaceStrategy,
@@ -23,6 +24,18 @@ export const cliPresets: readonly CliPreset[] = templateMembers.presets;
 const presetIndex = createContentIndex(cliPresets);
 const referencePackages = templateMembers.referencePackages;
 const referenceIndex = createContentIndex(referencePackages);
+
+/** CLI 外层按已持久参考声明装配原生发布根贡献。 */
+function projectSelectedPublicationWorkspace(options: {
+  readonly packages: readonly GeneratorPackageState[];
+}) {
+  return projectPublicationWorkspace({
+    references: options.packages.map(
+      (record) =>
+        referenceIndex.resolve(record.contentIdentity, "reference").definition,
+    ),
+  });
+}
 
 export function presetByAlias(alias: string): CliPreset | undefined {
   if (!cliPresets.some((preset) => preset.alias === alias)) return undefined;
@@ -63,7 +76,7 @@ export function workspaceConfigurationIdentityForPreset(
 
 export const cliWorkspaceStrategy = createDefaultWorkspaceStrategy<
   DefaultWorkspaceCreationInput<PackageCreationInput>
->({ project: projectPublicationWorkspace });
+>({ project: projectSelectedPublicationWorkspace });
 
 export const cliGenerator = createGenerator({
   content: templateContent,

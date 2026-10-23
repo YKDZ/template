@@ -41,9 +41,6 @@ const packageUpdateSchema = v.object({
 });
 
 export const packageAdditionSchema = standardSchema(packageUpdateSchema);
-export const packageConfigurationSchema = standardSchema(
-  v.object({ ...packageUpdateSchema.entries, packageDefinitionId: v.string() }),
-);
 
 const packageIdentity = v.object({
   name: v.string(),

@@ -1,9 +1,7 @@
 import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+import type { ReferencePackage } from "@ykdz/template-workspace/reference-package";
 
-import {
-  projectChangesetsWorkspace,
-  type PublicationWorkspaceOptions,
-} from "./workspace.ts";
+import { projectChangesetsWorkspace } from "./workspace.ts";
 
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-npm-publication",
@@ -39,14 +37,18 @@ export const referencePackage = defineReferencePackage({
   },
 });
 
-export function projectPublicationWorkspace(
-  options: PublicationWorkspaceOptions,
-) {
-  return projectChangesetsWorkspace(options, referencePackage.manifest);
-}
+type PublicationConsumer = Pick<ReferencePackage, "dependencyUses">;
 
-export {
-  normalizePublicationConfiguration,
-  projectPublicationTarget,
-  isPublicationEnabled,
-} from "./target.ts";
+/** 只有显式依赖本参考模板内容的组合才取得 Changesets 根贡献。 */
+export function projectPublicationWorkspace(options: {
+  readonly references: readonly PublicationConsumer[];
+}) {
+  const required = options.references.some((reference) =>
+    reference.dependencyUses.some(
+      ({ name, purposes }) =>
+        name === referencePackage.manifest.name &&
+        purposes.includes("template-execution"),
+    ),
+  );
+  return required ? projectChangesetsWorkspace(referencePackage.manifest) : [];
+}
