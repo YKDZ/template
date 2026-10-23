@@ -90,45 +90,6 @@ async function workspaceRoot(): Promise<string> {
   return path.resolve(stdout.trim());
 }
 
-async function includeHiddenOwnerResources(
-  packageRoot: string,
-  content: PreparedContentCollection,
-): Promise<void> {
-  const resourcesByPackage = new Map<string, Set<string>>();
-  for (const owner of content.owners) {
-    const hiddenResources = owner.artifact.resources.filter((resource) =>
-      [".gitignore", ".npmignore"].includes(path.posix.basename(resource.path)),
-    );
-    if (hiddenResources.length === 0) continue;
-    const files =
-      resourcesByPackage.get(owner.packed.name) ?? new Set<string>();
-    for (const resource of hiddenResources) {
-      files.add(`native/${resource.path}`);
-    }
-    resourcesByPackage.set(owner.packed.name, files);
-  }
-
-  for (const [name, resources] of resourcesByPackage) {
-    const ownerRoot = path.join(
-      packageRoot,
-      "node_modules",
-      ...name.split("/"),
-    );
-    const manifestPath = path.join(ownerRoot, "package.json");
-    const manifest = JSON.parse(
-      await readFile(manifestPath, "utf8"),
-    ) as PackageManifest;
-    const files = [...(manifest.files ?? [])];
-    for (const resource of resources) {
-      if (!files.includes(resource)) files.push(resource);
-    }
-    await writeFile(
-      manifestPath,
-      `${JSON.stringify({ ...manifest, files }, null, 2)}\n`,
-    );
-  }
-}
-
 function packageManifestForArchives(
   archives: readonly PackedArtifact[],
   resolved: Readonly<Record<string, WorkspaceDependency>>,
@@ -204,8 +165,6 @@ try {
       `pnpm 原生安装 CLI 内容闭包失败：${install.stderr || install.stdout}`,
     );
   }
-  await includeHiddenOwnerResources(stage, prepared);
-
   await rm(destination, { recursive: true, force: true });
   await cp(stage, destination, { recursive: true });
   console.log(`CLI 分发目录已准备：${destination}`);
