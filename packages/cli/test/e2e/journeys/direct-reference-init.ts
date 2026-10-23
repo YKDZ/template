@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { summarizeNativeArtifacts } from "../native-artifact-summary.ts";
+
 const targetRoot = process.argv[2];
 const mode = process.argv[3];
 const packedBin = process.argv[4];
@@ -48,6 +50,7 @@ const generationEntry = await loadPublicModule(
 const generationModule =
   generationEntry.module as typeof import("@ykdz/template-workspace/default-generation");
 const { templateContent } = contentModule;
+const preparedArtifacts = summarizeNativeArtifacts(templateContent);
 const library = templateContent.find(
   (member) => member.identity.packageName === "@ykdz/reference-ts-lib",
 );
@@ -85,9 +88,43 @@ if (result.status !== "success") {
   throw new Error(`直接参考初始化失败：${JSON.stringify(result)}`);
 }
 
+const libraryRecord = result.generationRecord.packages.find(
+  ({ contentIdentity }) =>
+    contentIdentity.packageName === library.identity.packageName &&
+    contentIdentity.namespace === library.identity.namespace &&
+    contentIdentity.exportPath === library.identity.exportPath,
+);
+const libraryDefinition = result.blueprint.packages.find(
+  ({ packageDefinitionId }) =>
+    packageDefinitionId === libraryRecord?.packageDefinitionId,
+);
+const libraryArtifact = library.definition.prepareArtifact();
+for (const { resourcePath, targetPath } of [
+  { resourcePath: "resources/gitignore", targetPath: ".gitignore" },
+  { resourcePath: "resources/npmignore", targetPath: ".npmignore" },
+]) {
+  const resource = libraryArtifact.resources.find(
+    ({ path: itemPath }) => itemPath === resourcePath,
+  );
+  const projected = result.projection.entries.find(
+    ({ path: itemPath }) =>
+      itemPath === `${libraryDefinition?.path}/${targetPath}`,
+  );
+  if (
+    resource === undefined ||
+    projected === undefined ||
+    !Buffer.from(projected.content).equals(Buffer.from(resource.data))
+  ) {
+    throw new Error(
+      `参考资源 ${resourcePath} 没有映射为预期目标文件 ${targetPath}`,
+    );
+  }
+}
+
 console.log(
   JSON.stringify({
     mode,
+    preparedArtifacts,
     modules: {
       content: contentEntry.entry,
       defaultGeneration: generationEntry.entry,

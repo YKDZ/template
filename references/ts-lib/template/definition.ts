@@ -35,8 +35,8 @@ export const referencePackage = defineReferencePackage({
     },
   ],
   resources: [
-    { path: ".gitignore" },
-    { path: ".npmignore" },
+    { path: "resources/gitignore", targetPath: ".gitignore" },
+    { path: "resources/npmignore", targetPath: ".npmignore" },
     { path: "src/index.ts" },
     { path: "src/name-schema.ts" },
     { path: "test/greet.test.ts" },

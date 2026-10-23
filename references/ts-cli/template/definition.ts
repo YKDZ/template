@@ -63,8 +63,8 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
     },
   ],
   resources: [
-    { path: ".gitignore" },
-    { path: ".npmignore" },
+    { path: "resources/gitignore", targetPath: ".gitignore" },
+    { path: "resources/npmignore", targetPath: ".npmignore" },
     { path: "src/cli.ts" },
     { path: "src/main.ts" },
     { path: "src/publication/cli-command-identity.ts" },

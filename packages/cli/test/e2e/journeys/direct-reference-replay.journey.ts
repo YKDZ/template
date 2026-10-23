@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { templatePresets } from "@ykdz/template-content";
+import { templateContent, templatePresets } from "@ykdz/template-content";
 
 import type { CliJourney } from "../journey.ts";
+import { summarizeNativeArtifacts } from "../native-artifact-summary.ts";
 import { requireReferencePresetName } from "../reference-preset.ts";
 
 const cliPresetName = requireReferencePresetName("@ykdz/reference-ts-cli");
@@ -242,8 +243,28 @@ const journey: CliJourney = {
     const directInit = JSON.parse(results[0]?.stdout ?? "{}") as {
       readonly mode: string;
       readonly modules: Readonly<Record<string, string>>;
+      readonly preparedArtifacts: readonly {
+        readonly identity: {
+          readonly namespace: string;
+          readonly packageName: string;
+          readonly exportPath: string;
+        };
+        readonly compiledCount: number;
+        readonly resourceCount: number;
+        readonly byteCount: number;
+        readonly sha256: string;
+      }[];
     };
     assert.equal(directInit.mode, context.mode);
+    assert.deepEqual(
+      directInit.preparedArtifacts,
+      summarizeNativeArtifacts(templateContent),
+    );
+    for (const artifact of directInit.preparedArtifacts) {
+      assert.ok(artifact.compiledCount > 0);
+      assert.ok(artifact.byteCount > 0);
+      assert.match(artifact.sha256, /^[a-f0-9]{64}$/u);
+    }
     assert.deepEqual(Object.keys(directInit.modules), [
       "content",
       "defaultGeneration",

@@ -282,6 +282,25 @@ const journey: CliJourney = {
       );
       assert.deepEqual(data.blueprint, blueprint);
       const planned = await planPreset(member);
+      const ignoreEntries = planned.projection.entries.filter(
+        ({ path: entryPath }) =>
+          entryPath === ".gitignore" ||
+          entryPath === ".npmignore" ||
+          entryPath.endsWith("/.gitignore") ||
+          entryPath.endsWith("/.npmignore"),
+      );
+      assert.ok(ignoreEntries.length > 0);
+      for (const entry of ignoreEntries) {
+        const actualPath = path.join(project, entry.path);
+        const actual = await readFile(actualPath);
+        assert.ok(
+          actual.equals(Buffer.from(entry.content)),
+          `${entry.path} 与正式规划资源不一致`,
+        );
+        const metadata = await stat(actualPath);
+        assert.equal(metadata.mode & 0o111, entry.mode, entry.path);
+        assert.ok(entry.sources && entry.sources.length > 0, entry.path);
+      }
       const plannedRootManifestEntry = planned.projection.entries.find(
         ({ path: entryPath }) => entryPath === "package.json",
       );
