@@ -1716,28 +1716,50 @@ export function createGenerator<
 
     const selectionRootFacts = (
       root: PackageNodeDraft<ContentCreationInput<Members>>,
+      existingSelection: PackageSelectionDraft<ContentCreationInput<Members>>,
     ) => ({
       nodeIdentity: root.nodeIdentity,
       identity: contentIdentityKey(root.content.identity),
       creationInput: root.creationInput ?? null,
       definition: root.definition,
       dependencies: root.dependencies
-        .map(({ key, package: dependency }) => ({
-          key,
-          target:
-            dependency.restored !== undefined
-              ? { packageDefinitionId: dependency.restored.packageDefinitionId }
-              : dependency.explicitRoot !== undefined
-                ? {
-                    selectionId: dependency.explicitRoot.selectionId,
-                    nodeIdentity: dependency.explicitRoot.nodeIdentity,
-                  }
-                : {
-                    identity: contentIdentityKey(dependency.content.identity),
-                    creationInput: dependency.creationInput ?? null,
-                    definition: dependency.definition,
-                  },
-        }))
+        .map(({ key, package: dependency }) => {
+          if (dependency.restored !== undefined) {
+            return {
+              key,
+              target: {
+                packageDefinitionId: dependency.restored.packageDefinitionId,
+              },
+            };
+          }
+          if (dependency.explicitRoot !== undefined) {
+            const packageDefinitionId =
+              dependency.explicitRoot.selectionId ===
+              existingSelection.selectionId
+                ? existingSelection.recordedNodeIds?.[
+                    dependency.explicitRoot.nodeIdentity
+                  ]
+                : undefined;
+            return {
+              key,
+              target:
+                packageDefinitionId === undefined
+                  ? {
+                      selectionId: dependency.explicitRoot.selectionId,
+                      nodeIdentity: dependency.explicitRoot.nodeIdentity,
+                    }
+                  : { packageDefinitionId },
+            };
+          }
+          return {
+            key,
+            target: {
+              identity: contentIdentityKey(dependency.content.identity),
+              creationInput: dependency.creationInput ?? null,
+              definition: dependency.definition,
+            },
+          };
+        })
         .toSorted((left, right) =>
           left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
         ),
@@ -1751,7 +1773,7 @@ export function createGenerator<
       );
       if (existing !== undefined) {
         const existingRoots = existing.roots
-          .map(selectionRootFacts)
+          .map((root) => selectionRootFacts(root, existing))
           .toSorted((left, right) =>
             left.nodeIdentity < right.nodeIdentity
               ? -1
@@ -1760,7 +1782,7 @@ export function createGenerator<
                 : 0,
           );
         const requestedRoots = group.roots
-          .map(selectionRootFacts)
+          .map((root) => selectionRootFacts(root, existing))
           .toSorted((left, right) =>
             left.nodeIdentity < right.nodeIdentity
               ? -1

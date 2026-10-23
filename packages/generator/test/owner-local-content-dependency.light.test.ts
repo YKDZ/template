@@ -416,6 +416,107 @@ void describe("owner-local内容依赖", () => {
     }
   });
 
+  void it("重复选择同一预设时复用恢复的节点绑定", async () => {
+    const webIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/web",
+      exportPath: "./template",
+    };
+    const apiIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/api",
+      exportPath: "./template",
+    };
+    const presetIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/web-api",
+      exportPath: "./preset",
+    };
+    const content = [
+      loadedReference(
+        "source",
+        webIdentity.packageName,
+        webIdentity.exportPath,
+        "file:///fixture/web/template.js",
+        referenceDefinition("web", {
+          key: "api",
+          contentIdentity: apiIdentity,
+        } satisfies ReferenceDependency<CreationInput>),
+      ),
+      loadedReference(
+        "source",
+        apiIdentity.packageName,
+        apiIdentity.exportPath,
+        "file:///fixture/api/template.js",
+        referenceDefinition("api"),
+      ),
+      loadedPreset(presetIdentity, {
+        web: {
+          reference: { alias: "web", instance: "independent" },
+          creationInput: {
+            init: { path: "apps/web" },
+            add: { path: "apps/web" },
+          },
+          dependencyBindings: { api: "api" },
+        },
+        api: {
+          reference: { alias: "api", instance: "independent" },
+          creationInput: {
+            init: { path: "apps/api" },
+            add: { path: "apps/api" },
+          },
+        },
+      }),
+    ];
+
+    await withTemporaryTarget(async (targetRoot) => {
+      const initialized = await createEngine(content).init({
+        targetRoot,
+        selection: { presets: [{ contentIdentity: presetIdentity }] },
+        conventions: { edition: "stable" },
+        operationFacts: null,
+      });
+      assert.equal(initialized.status, "success", JSON.stringify(initialized));
+      if (initialized.status !== "success") return;
+
+      const initialSelection = initialized.generationRecord.selections[0];
+      const webId = initialSelection?.nodes.web;
+      const apiId = initialSelection?.nodes.api;
+      assert.ok(initialSelection && webId && apiId);
+
+      const added = await createEngine(content).add({
+        repositoryRoot: targetRoot,
+        preset: presetIdentity,
+        operationFacts: null,
+      });
+      assert.equal(added.status, "success", JSON.stringify(added));
+      if (added.status !== "success") return;
+
+      assert.equal(added.generationRecord.selections.length, 1);
+      assert.equal(
+        added.generationRecord.selections[0]?.selectionId,
+        initialSelection.selectionId,
+      );
+      assert.deepEqual(added.generationRecord.selections[0]?.nodes, {
+        web: webId,
+        api: apiId,
+      });
+      assert.equal(added.generationRecord.packages.length, 2);
+      assert.equal(
+        added.generationRecord.packages.find(
+          (item) => item.packageDefinitionId === webId,
+        )?.dependencyBindings.api,
+        apiId,
+      );
+      assert.equal(
+        added.generationRecord.packages.find(
+          (item) => item.packageDefinitionId === apiId,
+        )?.createdBy,
+        "initialization",
+      );
+    });
+  });
+
   void it("direct add 按持久ID复用自定义独立provider并跨恢复保留", async () => {
     const consumerIdentity: ContentIdentity = {
       namespace: "source",
