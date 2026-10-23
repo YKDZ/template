@@ -820,6 +820,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/preset-ts-lib':
+        specifier: workspace:*
+        version: link:../ts-lib
       '@ykdz/reference-npm-publication':
         specifier: workspace:*
         version: link:../../references/npm-publication
@@ -832,6 +835,9 @@ importers:
       '@ykdz/reference-ts-lib':
         specifier: workspace:*
         version: link:../../references/ts-lib
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../../references/workspace-root
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../../packages/generator
@@ -1198,6 +1204,9 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: link:../tooling-config
         version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core

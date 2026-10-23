@@ -66,7 +66,7 @@ void describe("Rust 工具链共同事实", () => {
           requirement,
           { ...requirement, toolchain: "1.97.0" },
         ]),
-      /相互兼容/u,
+      /工具链要求冲突/u,
     );
   });
 });

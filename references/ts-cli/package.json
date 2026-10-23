@@ -43,6 +43,7 @@
     "@types/node": "catalog:",
     "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-tooling-config": "link:../tooling-config",
+    "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",

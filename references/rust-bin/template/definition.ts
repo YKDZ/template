@@ -1,22 +1,21 @@
-import type {
-  PackageContribution,
-} from "@ykdz/template-core/package-contribution";
+import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type { ResourceFileSnapshot } from "@ykdz/template-core/reference-package";
+import type {
+  ApplicationRequirements,
+  RustToolchainRequirement,
+} from "@ykdz/template-workspace/application-requirements";
+import {
+  rustDevelopmentContainerToolLayer,
+  rustToolchainEnvironmentNeed,
+} from "@ykdz/template-workspace/default-environment";
 import {
   defineReferencePackage,
   serializeNativeReferenceDocument,
   type DefaultReferenceContributionFacts,
 } from "@ykdz/template-workspace/reference-package";
-import {
-  rustDevelopmentContainerToolLayer,
-  rustToolchainEnvironmentNeed,
-} from "@ykdz/template-workspace/default-environment";
-import type {
-  ApplicationRequirements,
-  RustToolchainRequirement,
-} from "@ykdz/template-workspace/application-requirements";
 import { parse } from "smol-toml";
 
+import referenceManifest from "../package.json" with { type: "json" };
 import {
   projectRustCargoFiles,
   projectRustPackageScripts,
@@ -27,8 +26,6 @@ import {
   parseRustToolchainDeclaration,
   projectRustToolchainDeclaration,
 } from "./rust-toolchain-projection.ts";
-
-import referenceManifest from "../package.json" with { type: "json" };
 
 type RustCreationInput = {
   readonly leafName?: string;
@@ -44,7 +41,8 @@ type RustReferenceFacts = {
   >;
 };
 
-type RustContributionFacts = DefaultReferenceContributionFacts<RustReferenceFacts>;
+type RustContributionFacts =
+  DefaultReferenceContributionFacts<RustReferenceFacts>;
 
 function snapshot(
   resources: readonly ResourceFileSnapshot[],
@@ -73,7 +71,9 @@ function applicationRequirements(
   };
 }
 
-function stableRustToolchain(value: unknown):
+function stableRustToolchain(
+  value: unknown,
+):
   | (RustToolchainRequirement & { readonly existingDeclaration?: string })
   | undefined {
   if (!isRecord(value) || !isRecord(value.applicationRequirements)) {
@@ -84,7 +84,9 @@ function stableRustToolchain(value: unknown):
     !isRecord(requirement) ||
     typeof requirement.toolchain !== "string" ||
     !Array.isArray(requirement.components) ||
-    !requirement.components.every((component) => typeof component === "string") ||
+    !requirement.components.every(
+      (component) => typeof component === "string",
+    ) ||
     typeof requirement.configurationText !== "string" ||
     (requirement.existingDeclaration !== undefined &&
       typeof requirement.existingDeclaration !== "string")
@@ -100,7 +102,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const nativeReference = defineReferencePackage<RustCreationInput, RustReferenceFacts>({
+const nativeReference = defineReferencePackage<
+  RustCreationInput,
+  RustReferenceFacts
+>({
   manifest: referenceManifest,
   resourceRoot: new URL("../", import.meta.url),
   alias: "binary",
@@ -155,8 +160,7 @@ const nativeReference = defineReferencePackage<RustCreationInput, RustReferenceF
         rust: {
           toolchain: requirement.toolchain,
           components: requirement.components,
-          configurationText:
-            ownerFacts.toolchainConfiguration.declaration,
+          configurationText: ownerFacts.toolchainConfiguration.declaration,
         },
       },
       editorCapabilities: ["rust-tooling"],
@@ -277,20 +281,32 @@ export const referencePackage = Object.freeze({
       (document) => document.path === "package.json",
     );
     const files = contribution.files.map((file) => {
-      if (file.path === "package.json" && packageManifestDocument !== undefined) {
+      if (
+        file.path === "package.json" &&
+        packageManifestDocument !== undefined
+      ) {
         return {
           ...file,
           content: serializeNativeReferenceDocument(packageManifestDocument),
         };
       }
       if (file.path === "Cargo.toml") {
-        return { ...file, content: new TextEncoder().encode(cargoFiles.manifestText) };
+        return {
+          ...file,
+          content: new TextEncoder().encode(cargoFiles.manifestText),
+        };
       }
       if (file.path === "Cargo.lock") {
-        return { ...file, content: new TextEncoder().encode(cargoFiles.lockText) };
+        return {
+          ...file,
+          content: new TextEncoder().encode(cargoFiles.lockText),
+        };
       }
       if (file.path === "turbo.json" && turboDocument !== undefined) {
-        return { ...file, content: serializeNativeReferenceDocument(turboDocument) };
+        return {
+          ...file,
+          content: serializeNativeReferenceDocument(turboDocument),
+        };
       }
       return file;
     });

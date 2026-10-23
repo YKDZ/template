@@ -72,7 +72,10 @@ void describe("Rust 原生内容公开组合行为", () => {
     const rootManifest = JSON.parse(
       await readFile(path.join(targetRoot, "package.json"), "utf8"),
     ) as { scripts: Record<string, string> };
-    assert.strictEqual(rootManifest.scripts["toolchain:prepare"], "cargo --version");
+    assert.strictEqual(
+      rootManifest.scripts["toolchain:prepare"],
+      "cargo --version",
+    );
     const rootTurbo = JSON.parse(
       await readFile(path.join(targetRoot, "turbo.json"), "utf8"),
     ) as { tasks: Record<string, unknown> };
@@ -92,7 +95,10 @@ void describe("Rust 原生内容公开组合行为", () => {
     );
     assert.match(cargoLock, /name = "app"/u);
     const packageManifest = JSON.parse(
-      await readFile(path.join(targetRoot, "packages/app/package.json"), "utf8"),
+      await readFile(
+        path.join(targetRoot, "packages/app/package.json"),
+        "utf8",
+      ),
     ) as { scripts: Record<string, string> };
     assert.strictEqual(
       packageManifest.scripts.lint,
@@ -150,7 +156,11 @@ void describe("Rust 原生内容公开组合行为", () => {
       },
       conventions,
     });
-    assert.strictEqual(initialized.status, "success", JSON.stringify(initialized));
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
 
     const customDeclaration =
       '# local setting\n[toolchain]\nchannel = "nightly-2026-10-01"\ncomponents = ["rustfmt"]\nprofile = "minimal"\n';
@@ -188,7 +198,10 @@ void describe("Rust 原生内容公开组合行为", () => {
       ),
     );
     assert.match(
-      await readFile(path.join(targetRoot, "packages/native/Cargo.toml"), "utf8"),
+      await readFile(
+        path.join(targetRoot, "packages/native/Cargo.toml"),
+        "utf8",
+      ),
       /name = "native"/u,
     );
   });
@@ -201,7 +214,11 @@ void describe("Rust 原生内容公开组合行为", () => {
       selection: { presets: [{ contentIdentity: rustPreset.identity }] },
       conventions,
     });
-    assert.strictEqual(initialized.status, "success", JSON.stringify(initialized));
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
     await rm(path.join(targetRoot, "rust-toolchain.toml"));
     const before = await readFile(path.join(targetRoot, "package.json"));
 
@@ -231,7 +248,11 @@ void describe("Rust 原生内容公开组合行为", () => {
       },
       conventions,
     });
-    assert.strictEqual(initialized.status, "success", JSON.stringify(initialized));
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
     await writeFile(
       path.join(targetRoot, "rust-toolchain.toml"),
       '[toolchain]\nchannel = "stable"\ncomponents = ["rustfmt", "clippy"]\n',

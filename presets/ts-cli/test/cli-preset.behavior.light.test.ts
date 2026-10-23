@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -12,83 +13,87 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 
-import { projectPublicationWorkspace } from "@ykdz/reference-npm-publication/template";
-import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
-import { createContentIndex } from "@ykdz/template-core/content-identity";
-import type { GeneratorPackageState } from "@ykdz/template-core/workspace-strategy";
-import { createGenerator } from "@ykdz/template-generator";
+import type { LoadedContentMember } from "@ykdz/template-core/content-identity";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
-import {
-  defineReferencePackage,
-  type ReferencePackage,
-} from "@ykdz/template-workspace/reference-package";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
+import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 const content = await loadContentSource({
   namespace: "ykdz",
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
-    "@ykdz/reference-ts-cli/template",
-    "@ykdz/reference-npm-publication/template",
-    "@ykdz/reference-ts-lib/template",
-    "@ykdz/reference-rust-bin/template",
-    "@ykdz/reference-tooling-config/template",
-    "@ykdz/preset-ts-cli/template",
+    {
+      specifier: "@ykdz/reference-workspace-root/template",
+      load: () => import("@ykdz/reference-workspace-root/template"),
+    },
+    {
+      specifier: "@ykdz/reference-ts-cli/template",
+      load: () => import("@ykdz/reference-ts-cli/template"),
+    },
+    {
+      specifier: "@ykdz/reference-ts-lib/template",
+      load: () => import("@ykdz/reference-ts-lib/template"),
+    },
+    {
+      specifier: "@ykdz/reference-tooling-config/template",
+      load: () => import("@ykdz/reference-tooling-config/template"),
+    },
+    {
+      specifier: "@ykdz/reference-npm-publication/template",
+      load: () => import("@ykdz/reference-npm-publication/template"),
+    },
+    {
+      specifier: "@ykdz/preset-ts-cli/template",
+      load: () => import("@ykdz/preset-ts-cli/template"),
+    },
+    {
+      specifier: "@ykdz/preset-ts-lib/template",
+      load: () => import("@ykdz/preset-ts-lib/template"),
+    },
   ],
-  prepareReferenceDefinition(definition) {
-    return defineReferencePackage(
-      definition as Parameters<typeof defineReferencePackage>[0],
-    );
-  },
 });
-const contentIndex = createContentIndex(content);
-const cli = contentIndex.resolve(
-  {
-    namespace: "ykdz",
-    packageName: "@ykdz/reference-ts-cli",
-    exportPath: "./template",
-  },
-  "reference",
+
+const cli = content.find(
+  (member) =>
+    member.kind === "reference" &&
+    member.identity.packageName === "@ykdz/reference-ts-cli",
 );
-const library = contentIndex.resolve(
-  {
-    namespace: "ykdz",
-    packageName: "@ykdz/reference-ts-lib",
-    exportPath: "./template",
-  },
-  "reference",
+const root = content.find(
+  (member) =>
+    member.kind === "reference" &&
+    member.identity.packageName === "@ykdz/reference-workspace-root",
 );
-const rust = contentIndex.resolve(
-  {
-    namespace: "ykdz",
-    packageName: "@ykdz/reference-rust-bin",
-    exportPath: "./template",
-  },
-  "reference",
+const preset = content.find(
+  (member) =>
+    member.kind === "preset" &&
+    member.identity.packageName === "@ykdz/preset-ts-cli",
 );
-const preset = contentIndex.resolve(
-  {
-    namespace: "ykdz",
-    packageName: "@ykdz/preset-ts-cli",
-    exportPath: "./template",
-  },
-  "preset",
+const libraryPreset = content.find(
+  (member) =>
+    member.kind === "preset" &&
+    member.identity.packageName === "@ykdz/preset-ts-lib",
 );
-const temporaryDirectories: string[] = [];
+assert.ok(cli);
+assert.ok(root);
+assert.ok(preset);
+assert.ok(libraryPreset);
+
+const temporaryRoots = new Set<string>();
 
 async function createTargetRoot(prefix: string): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), prefix));
-  temporaryDirectories.push(directory);
-  return path.join(directory, "demo");
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), prefix));
+  temporaryRoots.add(temporaryRoot);
+  return path.join(temporaryRoot, "demo");
 }
 
-after(async () => {
-  await Promise.all(
-    temporaryDirectories.map((directory) =>
-      rm(directory, { recursive: true, force: true }),
-    ),
-  );
-});
+async function readManifest(
+  targetRoot: string,
+  packagePath: string,
+): Promise<Record<string, any>> {
+  return JSON.parse(
+    await readFile(path.join(targetRoot, packagePath, "package.json"), "utf8"),
+  ) as Record<string, any>;
+}
 
 async function snapshotTree(root: string): Promise<string> {
   const entries: {
@@ -128,341 +133,603 @@ async function snapshotTree(root: string): Promise<string> {
   });
 }
 
-function generator() {
-  return createGenerator({
-    content,
-    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>({
-      project: projectSelectedPublicationWorkspace,
-    }),
-  });
-}
-
-function projectSelectedPublicationWorkspace(options: {
-  readonly packages: readonly GeneratorPackageState[];
-}) {
-  return projectPublicationWorkspace({
-    references: options.packages.map(
-      (record) =>
-        contentIndex.resolve(record.contentIdentity, "reference")
-          .definition as ReferencePackage,
+after(async () => {
+  await Promise.all(
+    [...temporaryRoots].map((temporaryRoot) =>
+      rm(temporaryRoot, { recursive: true, force: true }),
     ),
-  });
-}
+  );
+});
 
-const strategyInput = {
-  repositoryName: "demo",
-  defaultPackageScope: "demo",
-};
-
-void describe("TypeScript CLI 公开组合预设", () => {
-  void it("声明发布工具依赖后默认私有并在后续组合中复用根配置", async () => {
-    const targetRoot = await createTargetRoot("template-ts-cli-preset-");
-    const initialized = await generator().init({
-      targetRoot,
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput,
+void describe("TypeScript CLI 公开预设", () => {
+  void it("直接参考与单节点预设共享原生命令入口和Node引擎转换", async () => {
+    const targets = await Promise.all([
+      createTargetRoot("template-ts-cli-direct-"),
+      createTargetRoot("template-ts-cli-preset-"),
+    ]);
+    const conventions = {
+      repositoryName: "demo",
+      defaultPackageScope: "demo",
+    };
+    const presetResult = await createDefaultGenerator({ content }).init({
+      targetRoot: targets[0]!,
+      selection: { presets: [{ contentIdentity: preset.identity }] },
+      conventions,
     });
-    assert.equal(initialized.status, "success", JSON.stringify(initialized));
-    const manifest = async (directory: string) =>
-      JSON.parse(
-        await readFile(
-          path.join(targetRoot, directory, "package.json"),
-          "utf8",
-        ),
-      );
-    assert.equal((await manifest("packages/cli")).private, true);
-    const customizedRoot = await manifest(".");
-    customizedRoot.scripts.notes = "echo 维护者说明";
-    await writeFile(
-      path.join(targetRoot, "package.json"),
-      JSON.stringify(customizedRoot),
-    );
-    const workflowPath = path.join(targetRoot, ".github/workflows/release.yml");
-    const workflow = await readFile(workflowPath, "utf8");
-    await writeFile(workflowPath, `${workflow}\n# 用户工作流定制\n`);
-    const addedCli = await generator().add({
-      repositoryRoot: targetRoot,
-      preset: preset.identity,
-      creationInput: {
-        leafName: "public-cli",
-        packagePath: "packages/public-cli",
-      },
-    });
-    assert.equal(addedCli.status, "success", JSON.stringify(addedCli));
-    const root = await manifest(".");
-    assert.equal(root.scripts.notes, "echo 维护者说明");
-    assert.equal(root.devDependencies["@changesets/cli"], "catalog:");
-    assert.equal((await manifest("packages/public-cli")).private, true);
-    assert.match(await readFile(workflowPath, "utf8"), /# 用户工作流定制/u);
-    const addedLibrary = await generator().add({
-      repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
-      creationInput: { leafName: "public-lib" },
-    });
-    assert.equal(addedLibrary.status, "success", JSON.stringify(addedLibrary));
-    assert.equal((await manifest("packages/public-lib")).private, true);
-    assert.equal(
-      (await manifest(".")).devDependencies["@changesets/cli"],
-      "catalog:",
-    );
-  });
-
-  void it("发布拥有者与另一声明来源冲突时在初始化写入前诊断双方", async () => {
-    const targetRoot = await createTargetRoot(
-      "template-publication-source-conflict-",
-    );
-    const generated = createGenerator({
-      content,
-      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>({
-        project(options) {
-          return [
-            ...projectSelectedPublicationWorkspace(options),
-            {
-              kind: "shared-root-files",
-              source: "consumer#publication",
-              manifest: {
-                scripts: {
-                  "publication:pack": "node consumer-artifact.ts",
-                },
-              },
-            },
-          ];
-        },
-      }),
-    });
-    const result = await generated.init({
-      targetRoot,
-      selection: {
-        roots: [{ preset: preset.identity }],
-      },
-      strategyInput,
-    });
-    assert.equal(result.status, "operation-failure", JSON.stringify(result));
-    if (result.status !== "operation-failure")
-      throw new Error("应在写入前拒绝来源冲突");
-    assert.match(
-      result.error.message,
-      /@ykdz\/reference-npm-publication#\.\/template/u,
-    );
-    assert.match(result.error.message, /consumer#publication/u);
-    await assert.rejects(stat(targetRoot), { code: "ENOENT" });
-  });
-
-  void it("加包时保留消费者对共享发布脚本的定制", async () => {
-    const targetRoot = await createTargetRoot("template-publication-conflict-");
-    const initialized = await generator().init({
-      targetRoot,
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput,
-    });
-    assert.equal(initialized.status, "success", JSON.stringify(initialized));
-    const manifestPath = path.join(targetRoot, "package.json");
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.scripts["publication:pack"] = "node custom-publication.ts";
-    await writeFile(manifestPath, JSON.stringify(manifest));
-    const result = await generator().add({
-      repositoryRoot: targetRoot,
-      preset: preset.identity,
-      creationInput: { leafName: "public-cli" },
-    });
-    assert.equal(result.status, "success", JSON.stringify(result));
-    assert.equal(
-      JSON.parse(await readFile(manifestPath, "utf8")).scripts[
-        "publication:pack"
-      ],
-      "node custom-publication.ts",
-    );
-  });
-
-  void it("直接选择 CLI 原生参考包时仍按私有包处理", async () => {
-    const targetRoot = await createTargetRoot(
-      "template-ts-cli-private-reference-",
-    );
-    const result = await generator().init({
-      targetRoot,
+    const referenceResult = await createDefaultGenerator({ content }).init({
+      targetRoot: targets[1]!,
       selection: {
         roots: [{ nodeIdentity: "cli", contentIdentity: cli.identity }],
       },
-      strategyInput,
+      conventions,
     });
 
-    assert.strictEqual(result.status, "success", JSON.stringify(result));
     assert.strictEqual(
-      JSON.parse(
-        await readFile(
-          path.join(targetRoot, "packages/cli/package.json"),
-          "utf8",
-        ),
-      ).engines.node,
-      ">=24",
+      presetResult.status,
+      "success",
+      JSON.stringify(presetResult),
     );
+    assert.strictEqual(
+      referenceResult.status,
+      "success",
+      JSON.stringify(referenceResult),
+    );
+    const presetManifest = await readManifest(targets[0]!, "packages/cli");
+    const referenceManifest = await readManifest(targets[1]!, "packages/cli");
+    for (const manifest of [presetManifest, referenceManifest]) {
+      assert.strictEqual(manifest.private, true);
+      assert.deepStrictEqual(manifest.bin, { cli: "./dist/cli.js" });
+      assert.strictEqual(manifest.engines.node, ">=24");
+      assert.deepStrictEqual(manifest.devDependencies, {
+        "@demo/tooling-config": "link:../tooling-config",
+        "@types/node": "catalog:",
+        oxfmt: "catalog:",
+        oxlint: "catalog:",
+        "oxlint-tsgolint": "catalog:",
+        "typescript-7": "catalog:",
+      });
+      assert.strictEqual(
+        Object.hasOwn(manifest.exports ?? {}, "./command-identity"),
+        false,
+      );
+    }
+    assert.deepStrictEqual(presetManifest, referenceManifest);
+    const generatedTurbo = JSON.parse(
+      await readFile(path.join(targets[0]!, "packages/cli/turbo.json"), "utf8"),
+    ) as {
+      readonly tasks: { readonly build: { readonly dependsOn: string[] } };
+    };
+    assert.deepStrictEqual(generatedTurbo.tasks.build.dependsOn, ["^build"]);
+    for (const targetRoot of targets) {
+      const rootManifest = await readManifest(targetRoot, ".");
+      assert.strictEqual(
+        rootManifest.devDependencies["@changesets/cli"],
+        "catalog:",
+      );
+      assert.match(
+        rootManifest.scripts["publication:pack"],
+        /turbo run build/u,
+      );
+    }
   });
 
-  void it("库连接由实际 exports 构建并在真实普通加包回放时校验当前根导出", async () => {
-    const targetRoot = await createTargetRoot("template-ts-cli-link-preset-");
-    const generated = generator();
-    const initialized = await generated.init({
+  void it("直接参考与预设CLI都只通过显式节点身份连接已有库", async () => {
+    for (const usePreset of [false, true]) {
+      const targetRoot = await createTargetRoot(
+        usePreset ? "template-ts-cli-preset-link-" : "template-ts-cli-link-",
+      );
+      const generator = createDefaultGenerator({ content });
+      const initialized = await generator.init({
+        targetRoot,
+        selection: { presets: [{ contentIdentity: libraryPreset.identity }] },
+        conventions: {
+          repositoryName: "demo",
+          defaultPackageScope: "demo",
+        },
+      });
+      assert.strictEqual(
+        initialized.status,
+        "success",
+        JSON.stringify(initialized),
+      );
+      const rootManifest = await readManifest(targetRoot, ".");
+      rootManifest.scripts["user:note"] = "node --version";
+      await writeFile(
+        path.join(targetRoot, "package.json"),
+        `${JSON.stringify(rootManifest, null, 2)}\n`,
+      );
+      const releaseWorkflowPath = path.join(
+        targetRoot,
+        ".github/workflows/release.yml",
+      );
+      await writeFile(
+        releaseWorkflowPath,
+        `${await readFile(releaseWorkflowPath, "utf8")}\n# 用户保留的发布工作流定制\n`,
+      );
+
+      const planned = await generator.planAdd({
+        repositoryRoot: targetRoot,
+        ...(usePreset
+          ? { preset: preset.identity }
+          : { contentIdentity: cli.identity, nodeIdentity: "cli" }),
+        creationInput: { linkTo: { nodeIdentity: "library" } },
+      });
+      assert.strictEqual(planned.status, "planned", JSON.stringify(planned));
+      if (planned.status !== "planned") {
+        throw new Error("CLI显式库连接应可规划");
+      }
+      assert.strictEqual(planned.blueprint.packageLinkIntents.length, 1);
+      const committed = await generator.commitPlan(planned.plan);
+      assert.strictEqual(
+        committed.status,
+        "success",
+        JSON.stringify(committed),
+      );
+
+      const manifest = await readManifest(targetRoot, "packages/cli");
+      assert.strictEqual(manifest.dependencies["@demo/lib"], "workspace:*");
+      assert.strictEqual(
+        (await readManifest(targetRoot, ".")).scripts["user:note"],
+        "node --version",
+      );
+      assert.match(
+        await readFile(releaseWorkflowPath, "utf8"),
+        /# 用户保留的发布工作流定制/u,
+      );
+
+      manifest.dependencies["@demo/custom"] = "workspace:*";
+      await writeFile(
+        path.join(targetRoot, "packages/cli/package.json"),
+        `${JSON.stringify(manifest, null, 2)}\n`,
+      );
+      const addedAgain = await generator.add({
+        repositoryRoot: targetRoot,
+        preset: preset.identity,
+        creationInput: {
+          leafName: "cli-extra",
+          linkTo: { nodeIdentity: "library" },
+        },
+      });
+      assert.strictEqual(
+        addedAgain.status,
+        "success",
+        JSON.stringify(addedAgain),
+      );
+      const customizedManifest = await readManifest(targetRoot, "packages/cli");
+      assert.strictEqual(
+        customizedManifest.dependencies["@demo/lib"],
+        "workspace:*",
+      );
+      assert.strictEqual(
+        customizedManifest.dependencies["@demo/custom"],
+        "workspace:*",
+      );
+      const blueprint = JSON.parse(
+        await readFile(
+          path.join(targetRoot, ".template/blueprint.json"),
+          "utf8",
+        ),
+      ) as { readonly packageLinkIntents: readonly unknown[] };
+      assert.strictEqual(blueprint.packageLinkIntents.length, 2);
+    }
+  });
+
+  void it("按实例ID选择同名库，并在后续加包时保留该连接", async () => {
+    const targetRoot = await createTargetRoot("template-ts-cli-instance-link-");
+    const generator = createDefaultGenerator({ content });
+    const initialized = await generator.init({
       targetRoot,
       selection: {
-        roots: [{ nodeIdentity: "library", contentIdentity: library.identity }],
+        presets: [
+          {
+            contentIdentity: libraryPreset.identity,
+            creationInput: { leafName: "lib-one" },
+          },
+          {
+            contentIdentity: libraryPreset.identity,
+            creationInput: { leafName: "lib-two" },
+          },
+        ],
       },
-      strategyInput,
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
     });
     assert.strictEqual(
       initialized.status,
       "success",
       JSON.stringify(initialized),
     );
+    if (initialized.status !== "success") {
+      throw new Error("两个同名节点应初始化为不同的包实例");
+    }
+    const selectedLibrary = initialized.blueprint.packages.find(
+      ({ path: packagePath }) => packagePath === "packages/lib-two",
+    );
+    assert.ok(selectedLibrary);
 
-    const linked = await generated.add({
+    const linked = await generator.add({
       repositoryRoot: targetRoot,
-      preset: preset.identity,
-      creationInput: { linkToNodeIdentity: "library" },
+      contentIdentity: cli.identity,
+      nodeIdentity: "cli",
+      creationInput: {
+        linkTo: { packageDefinitionId: selectedLibrary.packageDefinitionId },
+      },
     });
     assert.strictEqual(linked.status, "success", JSON.stringify(linked));
-    if (linked.status !== "success") return;
+    if (linked.status !== "success") {
+      throw new Error("CLI应按实例ID连接指定的库");
+    }
+    const cliPackage = linked.blueprint.packages.find(
+      ({ path: packagePath }) => packagePath === "packages/cli",
+    );
+    assert.ok(cliPackage);
     assert.deepStrictEqual(linked.blueprint.packageLinkIntents, [
       {
-        consumerPackagePath: "packages/cli",
-        providerPackagePath: "packages/lib",
+        consumerId: cliPackage.packageDefinitionId,
+        providerId: selectedLibrary.packageDefinitionId,
       },
     ]);
-    assert.deepStrictEqual(
-      JSON.parse(
-        await readFile(
-          path.join(targetRoot, "packages/lib/package.json"),
-          "utf8",
-        ),
-      ).exports["."],
-      {
-        source: "./src/index.ts",
-        types: "./dist/index.d.ts",
-        default: "./dist/index.js",
-      },
-    );
+    const linkedManifest = await readManifest(targetRoot, "packages/cli");
     assert.strictEqual(
-      JSON.parse(
-        await readFile(
-          path.join(targetRoot, "packages/cli/package.json"),
-          "utf8",
-        ),
-      ).dependencies["@demo/lib"],
+      linkedManifest.dependencies["@demo/lib-two"],
       "workspace:*",
     );
+    assert.strictEqual(linkedManifest.dependencies["@demo/lib"], undefined);
 
-    const ordinaryAdd = await generated.add({
+    const addedSameName = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
-      creationInput: { leafName: "next", packagePath: "packages/next" },
+      preset: libraryPreset.identity,
+      creationInput: { leafName: "lib-three" },
     });
     assert.strictEqual(
-      ordinaryAdd.status,
+      addedSameName.status,
       "success",
-      JSON.stringify(ordinaryAdd),
+      JSON.stringify(addedSameName),
     );
-
-    const providerPath = path.join(targetRoot, "packages/lib/package.json");
-    const providerManifest = JSON.parse(
-      await readFile(providerPath, "utf8"),
-    ) as {
-      exports: Record<string, unknown>;
-    };
-    delete (providerManifest.exports["."] as Record<string, unknown>).default;
-    await writeFile(
-      providerPath,
-      JSON.stringify(providerManifest, null, 2) + "\n",
+    if (addedSameName.status !== "success") {
+      throw new Error("后续同名节点不能改变已有CLI连接");
+    }
+    assert.deepStrictEqual(
+      addedSameName.blueprint.packageLinkIntents,
+      linked.blueprint.packageLinkIntents,
     );
-    const beforeRejectedAdd = await snapshotTree(targetRoot);
-    const rejected = await generated.add({
-      repositoryRoot: targetRoot,
-      contentIdentity: library.identity,
-      creationInput: {
-        leafName: "after-broken-link",
-        packagePath: "packages/after-broken-link",
-      },
-    });
-    assert.strictEqual(rejected.status, "operation-failure");
-    assert.match(
-      rejected.status === "operation-failure" ? rejected.error.message : "",
-      /Package Link provider packages\/lib does not expose an importable package root/u,
+    assert.strictEqual(
+      (await readManifest(targetRoot, "packages/cli")).dependencies[
+        "@demo/lib-two"
+      ],
+      "workspace:*",
     );
-    assert.strictEqual(await snapshotTree(targetRoot), beforeRejectedAdd);
   });
 
-  void it("缺失绑定和不支持的 Rust 连接均在提交前拒绝", async () => {
-    const missingRoot = await createTargetRoot(
-      "template-ts-cli-missing-binding-",
-    );
-    await mkdir(missingRoot, { recursive: true });
-    const missing = await generator().init({
-      targetRoot: missingRoot,
-      selection: {
-        roots: [
-          {
-            preset: preset.identity,
-            creationInput: {
-              variant: "private",
-              linkToNodeIdentity: "missing",
-            },
-          },
-        ],
-      },
-      strategyInput,
-    });
-    assert.strictEqual(missing.status, "operation-failure");
-    assert.deepStrictEqual(await readdir(missingRoot), []);
-
-    const unsupportedRoot = await createTargetRoot(
-      "template-ts-cli-unsupported-link-",
-    );
-    await mkdir(unsupportedRoot, { recursive: true });
-    const unsupported = await generator().init({
-      targetRoot: unsupportedRoot,
-      selection: {
-        roots: [
-          { nodeIdentity: "rust", contentIdentity: rust.identity },
-          {
-            preset: preset.identity,
-            creationInput: { variant: "private", linkToNodeIdentity: "rust" },
-          },
-        ],
-      },
-      strategyInput,
-    });
-    assert.strictEqual(unsupported.status, "operation-failure");
-    assert.deepStrictEqual(await readdir(unsupportedRoot), []);
-  });
-
-  void it("真实文件冲突拒绝 CLI 加包且目标字节权限不变", async () => {
-    const targetRoot = await createTargetRoot("template-ts-cli-conflict-");
-    const generated = generator();
-    const initialized = await generated.init({
+  void it("未知节点身份或不兼容的原生提供者会在写入前拒绝", async () => {
+    const targetRoot = await createTargetRoot("template-ts-cli-invalid-link-");
+    const generator = createDefaultGenerator({ content });
+    const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: preset.identity }] },
-      strategyInput,
+      selection: { presets: [{ contentIdentity: libraryPreset.identity }] },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
     });
     assert.strictEqual(
       initialized.status,
       "success",
       JSON.stringify(initialized),
     );
-    const conflictingFile = path.join(
-      targetRoot,
-      "packages/private-cli/package.json",
+    const beforeUnknown = await snapshotTree(targetRoot);
+    const unknown = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: cli.identity,
+      creationInput: { linkTo: { nodeIdentity: "not-selected" } },
+    });
+    assert.strictEqual(unknown.status, "operation-failure");
+    assert.strictEqual(await snapshotTree(targetRoot), beforeUnknown);
+
+    const missingId = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: cli.identity,
+      creationInput: {
+        linkTo: { packageDefinitionId: "package-not-restored" },
+      },
+    });
+    assert.strictEqual(missingId.status, "operation-failure");
+    assert.strictEqual(await snapshotTree(targetRoot), beforeUnknown);
+
+    const nativeTarget = await createTargetRoot("template-ts-cli-native-link-");
+    const nativeGenerator = createDefaultGenerator({ content });
+    const nativeInitialized = await nativeGenerator.init({
+      targetRoot: nativeTarget,
+      selection: {
+        roots: [{ nodeIdentity: "workspace", contentIdentity: root.identity }],
+      },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      nativeInitialized.status,
+      "success",
+      JSON.stringify(nativeInitialized),
     );
-    await mkdir(path.dirname(conflictingFile), { recursive: true });
-    await writeFile(conflictingFile, '{"name":"preserve"}\n');
-    const before = await snapshotTree(targetRoot);
-    const result = await generated.add({
+    const beforeNative = await snapshotTree(nativeTarget);
+    const native = await nativeGenerator.add({
+      repositoryRoot: nativeTarget,
+      contentIdentity: cli.identity,
+      creationInput: { linkTo: { nodeIdentity: "workspace" } },
+    });
+    assert.strictEqual(native.status, "operation-failure");
+    assert.strictEqual(await snapshotTree(nativeTarget), beforeNative);
+  });
+
+  void it("读取的提供者清单和字符串导出目标会过期而无关编辑可提交", async () => {
+    const targetRoot = await createTargetRoot("template-ts-cli-read-facts-");
+    const generator = createDefaultGenerator({ content });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { presets: [{ contentIdentity: libraryPreset.identity }] },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+    const providerManifestPath = path.join(
+      targetRoot,
+      "packages/lib/package.json",
+    );
+    const providerManifest = JSON.parse(
+      await readFile(providerManifestPath, "utf8"),
+    ) as Record<string, any>;
+    providerManifest.exports["."] = "./src/index.ts";
+    await writeFile(
+      providerManifestPath,
+      `${JSON.stringify(providerManifest, null, 2)}\n`,
+    );
+    const providerSourcePath = path.join(
+      targetRoot,
+      "packages/lib/src/index.ts",
+    );
+
+    const staleTargetPlan = await generator.planAdd({
+      repositoryRoot: targetRoot,
+      contentIdentity: cli.identity,
+      creationInput: { linkTo: { nodeIdentity: "library" } },
+    });
+    assert.strictEqual(staleTargetPlan.status, "planned");
+    if (staleTargetPlan.status !== "planned") {
+      throw new Error("有效CLI显式连接应可规划");
+    }
+    const originalSource = await readFile(providerSourcePath, "utf8");
+    await writeFile(providerSourcePath, `${originalSource}\n// 当前修改\n`);
+    const staleTargetCommit = await generator.commitPlan(staleTargetPlan.plan);
+    assert.strictEqual(staleTargetCommit.status, "conflict");
+    await assert.rejects(stat(path.join(targetRoot, "packages/cli")));
+
+    const staleManifestPlan = await generator.planAdd({
+      repositoryRoot: targetRoot,
+      contentIdentity: cli.identity,
+      creationInput: { linkTo: { nodeIdentity: "library" } },
+    });
+    assert.strictEqual(staleManifestPlan.status, "planned");
+    if (staleManifestPlan.status !== "planned") {
+      throw new Error("当前CLI显式连接应可规划");
+    }
+    const changedManifest = JSON.parse(
+      await readFile(providerManifestPath, "utf8"),
+    ) as Record<string, any>;
+    changedManifest.description = "用户修改";
+    await writeFile(
+      providerManifestPath,
+      `${JSON.stringify(changedManifest, null, 2)}\n`,
+    );
+    const staleManifestCommit = await generator.commitPlan(
+      staleManifestPlan.plan,
+    );
+    assert.strictEqual(staleManifestCommit.status, "conflict");
+    await assert.rejects(stat(path.join(targetRoot, "packages/cli")));
+
+    const unrelatedPlan = await generator.planAdd({
+      repositoryRoot: targetRoot,
+      contentIdentity: cli.identity,
+      creationInput: { linkTo: { nodeIdentity: "library" } },
+    });
+    assert.strictEqual(unrelatedPlan.status, "planned");
+    if (unrelatedPlan.status !== "planned") {
+      throw new Error("当前CLI显式连接应可规划");
+    }
+    await writeFile(path.join(targetRoot, "notes.txt"), "用户文件\n");
+    const unrelatedCommit = await generator.commitPlan(unrelatedPlan.plan);
+    assert.strictEqual(
+      unrelatedCommit.status,
+      "success",
+      JSON.stringify(unrelatedCommit),
+    );
+    assert.strictEqual(
+      await readFile(path.join(targetRoot, "notes.txt"), "utf8"),
+      "用户文件\n",
+    );
+
+    const linkedConsumerManifestPath = path.join(
+      targetRoot,
+      "packages/cli/package.json",
+    );
+    const staleConsumerPlan = await generator.planAdd({
       repositoryRoot: targetRoot,
       preset: preset.identity,
       creationInput: {
-        leafName: "private-cli",
-        packagePath: "packages/private-cli",
+        leafName: "next-cli",
+        linkTo: { nodeIdentity: "library" },
+      },
+    });
+    assert.strictEqual(staleConsumerPlan.status, "planned");
+    if (staleConsumerPlan.status !== "planned") {
+      throw new Error("已有CLI连接应可回放并继续加包");
+    }
+    const customizedConsumer = JSON.parse(
+      await readFile(linkedConsumerManifestPath, "utf8"),
+    ) as Record<string, any>;
+    customizedConsumer.scripts["user:note"] = "node custom";
+    await writeFile(
+      linkedConsumerManifestPath,
+      `${JSON.stringify(customizedConsumer, null, 2)}\n`,
+    );
+    const staleConsumerCommit = await generator.commitPlan(
+      staleConsumerPlan.plan,
+    );
+    assert.strictEqual(staleConsumerCommit.status, "conflict");
+    await assert.rejects(stat(path.join(targetRoot, "packages/next-cli")));
+  });
+
+  void it("当前提供者移除可导入入口时零写入失败", async () => {
+    const targetRoot = await createTargetRoot(
+      "template-ts-cli-invalid-export-",
+    );
+    const generator = createDefaultGenerator({ content });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { presets: [{ contentIdentity: libraryPreset.identity }] },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+    const manifestPath = path.join(targetRoot, "packages/lib/package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<
+      string,
+      any
+    >;
+    delete manifest.exports["."].default;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    const before = await snapshotTree(targetRoot);
+
+    const result = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: cli.identity,
+      creationInput: { linkTo: { nodeIdentity: "library" } },
+    });
+
+    assert.strictEqual(result.status, "operation-failure");
+    assert.strictEqual(await snapshotTree(targetRoot), before);
+  });
+
+  void it("新CLI目标目录冲突时保留用户文件内容和权限", async () => {
+    const targetRoot = await createTargetRoot("template-ts-cli-path-conflict-");
+    const generator = createDefaultGenerator({ content });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { presets: [{ contentIdentity: libraryPreset.identity }] },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+    const occupiedDirectory = path.join(targetRoot, "packages/occupied-cli");
+    await mkdir(occupiedDirectory, { recursive: true });
+    const userManifest = path.join(occupiedDirectory, "package.json");
+    await writeFile(userManifest, '{"name":"user-package"}\n');
+    await chmod(userManifest, 0o640);
+    const before = await snapshotTree(targetRoot);
+
+    const result = await generator.add({
+      repositoryRoot: targetRoot,
+      contentIdentity: cli.identity,
+      creationInput: {
+        leafName: "occupied-cli",
+        packagePath: "packages/occupied-cli",
+        linkTo: { nodeIdentity: "library" },
       },
     });
 
-    assert.strictEqual(result.status, "conflict", JSON.stringify(result));
+    assert.strictEqual(result.status, "conflict");
+    assert.strictEqual(await snapshotTree(targetRoot), before);
+  });
+
+  void it("整个工作区的二进制入口名称必须唯一", async () => {
+    const duplicateDefinition = defineReferencePackage({
+      manifest: {
+        name: "@fixture/duplicate-command",
+        private: true,
+        type: "module",
+        bin: { cli: "./dist/cli.js" },
+        exports: {
+          "./reference": "./package.json",
+          "./template": {
+            source: "./template/definition.ts",
+            types: "./template-dist/definition.d.ts",
+            default: "./template-dist/definition.js",
+          },
+        },
+      },
+      resourceRoot: new URL("../", import.meta.url),
+      alias: "duplicate-command",
+      instance: "independent",
+      defaultLeafName: "duplicate-tool",
+      role: "shared-library",
+      resources: [],
+      templateExports: ["./template"],
+    });
+    const duplicateMember: LoadedContentMember<
+      typeof duplicateDefinition,
+      "reference"
+    > = {
+      identity: {
+        namespace: "fixture",
+        packageName: "@fixture/duplicate-command",
+        exportPath: "./template",
+      },
+      kind: "reference",
+      alias: duplicateDefinition.alias,
+      definition: duplicateDefinition,
+      source: {
+        specifier: "@fixture/duplicate-command/template",
+        moduleURL: import.meta.url,
+        manifestURL: import.meta.url,
+      },
+    };
+    const targetRoot = await createTargetRoot(
+      "template-ts-cli-duplicate-command-",
+    );
+    await mkdir(targetRoot);
+    const before = await snapshotTree(targetRoot);
+    const result = await createDefaultGenerator({
+      content: [...content, duplicateMember],
+    }).init({
+      targetRoot,
+      selection: {
+        roots: [
+          { nodeIdentity: "cli", contentIdentity: cli.identity },
+          { nodeIdentity: "tool", contentIdentity: duplicateMember.identity },
+        ],
+      },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+
+    assert.strictEqual(result.status, "operation-failure");
+    assert.match(
+      result.status === "operation-failure" ? result.error.message : "",
+      /CLI命令名称 "cli" 重复：@demo\/cli 与 @demo\/duplicate-tool/u,
+    );
     assert.strictEqual(await snapshotTree(targetRoot), before);
   });
 });

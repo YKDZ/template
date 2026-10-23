@@ -582,15 +582,27 @@ async function copyOwnerArtifact(
       : { types: `./native/${safePath(artifact.entry.types)}` }),
     default: `./native/${safePath(artifact.entry.default)}`,
   };
+  const exports: Record<
+    string,
+    string | { readonly types?: string; readonly default: string }
+  > = {
+    "./reference": "./native/package.json",
+    [artifact.exportPath]: entry,
+  };
+  for (const templateExport of artifact.templateExports) {
+    exports[templateExport.path] = {
+      ...(templateExport.types === undefined
+        ? {}
+        : { types: `./native/${safePath(templateExport.types)}` }),
+      default: `./native/${safePath(templateExport.default)}`,
+    };
+  }
   const packageManifest = {
     name: artifact.coordinate.name,
     version: artifact.coordinate.version,
     type: "module",
     files: ["native"],
-    exports: {
-      "./reference": "./native/package.json",
-      [artifact.exportPath]: entry,
-    },
+    exports,
     dependencies,
   };
   await writeFile(
@@ -992,9 +1004,7 @@ async function createContentProviderRoot(options: {
     dependencies[owner.artifact.coordinate.name] =
       owner.artifact.coordinate.version;
   }
-  for (const name of [
-    "@ykdz/template-generator",
-  ]) {
+  for (const name of ["@ykdz/template-generator"]) {
     const version = options.sdkVersions.get(name);
     if (version === undefined)
       throw new Error(`公开准备入口未由原生依赖解析：${name}`);
@@ -1004,10 +1014,7 @@ async function createContentProviderRoot(options: {
     root: options.root,
     packageName,
     packageVersion: "1.0.0",
-    source: generatedCollectionSource(
-      options.namespace,
-      options.members,
-    ),
+    source: generatedCollectionSource(options.namespace, options.members),
     dependencies,
     packageRoots,
     sdkPackageRoots: options.sdkPackageRoots,
