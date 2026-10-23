@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -26,8 +34,16 @@ type CreationInput = { readonly path: string };
 type Conventions = { readonly edition: string };
 type StableCommon = { readonly edition: string };
 type PackageInput = { readonly edition: string };
-type Facts = { readonly packageName: string };
+type Facts = {
+  readonly packageName: string;
+  readonly dependencyKeys: readonly string[];
+  readonly evaluatedBy: string;
+};
 type Contribution = PackageContribution<Facts>;
+type OwnerFacts = {
+  readonly packageCount: number;
+  readonly evaluations: readonly Facts[];
+};
 
 const compositionIdentity: ContentIdentity = {
   namespace: "fixture-composition",
@@ -40,7 +56,7 @@ const composition: Composition<
   StableCommon,
   PackageInput,
   Facts,
-  { readonly packageCount: number },
+  OwnerFacts,
   CreationInput,
   null
 > = {
@@ -67,7 +83,12 @@ const composition: Composition<
     };
   },
   combine({ packages }) {
-    return { facts: { packageCount: packages.length } };
+    return {
+      facts: {
+        packageCount: packages.length,
+        evaluations: packages.map(({ contribution }) => contribution.facts),
+      },
+    };
   },
 };
 
@@ -110,6 +131,8 @@ function referenceDefinition(
     evaluate({
       packageDefinitionId,
       definition,
+      prepared,
+      bindings,
     }: {
       readonly packageDefinitionId: PackageDefinitionId;
       readonly definition: PackageDefinition;
@@ -127,7 +150,11 @@ function referenceDefinition(
       return {
         packageDefinitionId,
         files: [],
-        facts: { packageName: definition.name },
+        facts: {
+          packageName: definition.name,
+          dependencyKeys: [...bindings.keys()],
+          evaluatedBy: prepared.facts.alias,
+        },
       };
     },
   };
@@ -213,6 +240,270 @@ async function withTemporaryTarget(
 }
 
 void describe("owner-local内容依赖", () => {
+  void it("删除当前依赖槽后仍从持久图恢复共享实例并可继续加包", async () => {
+    const featureIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/feature",
+      exportPath: "./template",
+    };
+    const themeIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/theme",
+      exportPath: "./template",
+    };
+    const paletteIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/palette",
+      exportPath: "./template",
+    };
+    const addonIdentity: ContentIdentity = {
+      namespace: "source",
+      packageName: "@fixture/addon",
+      exportPath: "./template",
+    };
+    const themeSource = new TextEncoder().encode(
+      "export const theme = 'default';\n",
+    );
+    const createContent = (options: {
+      readonly featureUsesTheme: boolean;
+      readonly themeUsesPalette: boolean;
+    }) => {
+      const feature = referenceDefinition(
+        "feature",
+        options.featureUsesTheme
+          ? {
+              key: "theme",
+              contentIdentity: themeIdentity,
+              creationInput: { path: "packages/theme" },
+            }
+          : undefined,
+      );
+      const themeBase = referenceDefinition(
+        "theme",
+        options.themeUsesPalette
+          ? {
+              key: "palette",
+              contentIdentity: paletteIdentity,
+              creationInput: { path: "packages/palette" },
+            }
+          : undefined,
+        "shared",
+      );
+      const theme = {
+        ...themeBase,
+        evaluate(
+          evaluation: Parameters<typeof themeBase.evaluate>[0],
+        ): Contribution {
+          const contribution = themeBase.evaluate(evaluation);
+          return {
+            ...contribution,
+            files: [
+              {
+                path: "src/theme.ts",
+                content: themeSource,
+                mode: 0,
+              },
+            ],
+            reconciliation: [{ path: "src/theme.ts", driver: "text" }],
+          };
+        },
+      };
+      const palette = referenceDefinition("palette", undefined, "shared");
+      const addon = referenceDefinition("addon", {
+        key: "theme",
+        contentIdentity: themeIdentity,
+        creationInput: { path: "packages/theme" },
+      });
+      return [
+        loadedReference(
+          "source",
+          featureIdentity.packageName,
+          featureIdentity.exportPath,
+          "file:///fixture/feature/template.js",
+          feature,
+        ),
+        loadedReference(
+          "source",
+          themeIdentity.packageName,
+          themeIdentity.exportPath,
+          "file:///fixture/theme/template.js",
+          theme,
+        ),
+        loadedReference(
+          "source",
+          paletteIdentity.packageName,
+          paletteIdentity.exportPath,
+          "file:///fixture/palette/template.js",
+          palette,
+        ),
+        loadedReference(
+          "source",
+          addonIdentity.packageName,
+          addonIdentity.exportPath,
+          "file:///fixture/addon/template.js",
+          addon,
+        ),
+      ];
+    };
+    const originalContent = createContent({
+      featureUsesTheme: true,
+      themeUsesPalette: true,
+    });
+    const currentContent = createContent({
+      featureUsesTheme: false,
+      themeUsesPalette: false,
+    });
+
+    await withTemporaryTarget(async (targetRoot) => {
+      const initialized = await createEngine(originalContent).init({
+        targetRoot,
+        selection: {
+          roots: [
+            {
+              nodeIdentity: "feature",
+              contentIdentity: featureIdentity,
+              creationInput: { path: "apps/feature" },
+            },
+          ],
+        },
+        conventions: { edition: "stable" },
+        operationFacts: null,
+      });
+      assert.equal(initialized.status, "success", JSON.stringify(initialized));
+      if (initialized.status !== "success") return;
+
+      const originalFeature = initialized.generationRecord.packages.find(
+        (item) => item.contentIdentity.packageName === featureIdentity.packageName,
+      );
+      const originalTheme = initialized.generationRecord.packages.find(
+        (item) => item.contentIdentity.packageName === themeIdentity.packageName,
+      );
+      const originalPalette = initialized.generationRecord.packages.find(
+        (item) =>
+          item.contentIdentity.packageName === paletteIdentity.packageName,
+      );
+      assert.ok(originalFeature && originalTheme && originalPalette);
+      assert.equal(originalFeature.dependencyBindings.theme, originalTheme.packageDefinitionId);
+      assert.equal(originalTheme.dependencyBindings.palette, originalPalette.packageDefinitionId);
+      assert.equal(originalTheme.createdBy, "shared-dependency");
+
+      const themeDefinition = initialized.blueprint.packages.find(
+        (item) =>
+          item.packageDefinitionId === originalTheme.packageDefinitionId,
+      );
+      assert.ok(themeDefinition);
+      const themeSourcePath = path.join(
+        targetRoot,
+        themeDefinition.path,
+        "src/theme.ts",
+      );
+      const customizedTheme = "export const theme = '用户定制';\n";
+      await writeFile(themeSourcePath, customizedTheme);
+      await chmod(themeSourcePath, 0o600);
+
+      const firstAddition = await createEngine(currentContent).add({
+        repositoryRoot: targetRoot,
+        contentIdentity: addonIdentity,
+        nodeIdentity: "addon-one",
+        creationInput: { path: "apps/addon-one" },
+        operationFacts: null,
+      });
+      assert.equal(
+        firstAddition.status,
+        "success",
+        JSON.stringify(firstAddition),
+      );
+      if (firstAddition.status !== "success") return;
+
+      const expectRetainedGraph = (
+        generationRecord: typeof firstAddition.generationRecord,
+        expectedPackageCount: number,
+      ) => {
+        const feature = generationRecord.packages.find(
+          (item) =>
+            item.contentIdentity.packageName === featureIdentity.packageName,
+        );
+        const theme = generationRecord.packages.find(
+          (item) =>
+            item.contentIdentity.packageName === themeIdentity.packageName,
+        );
+        const palette = generationRecord.packages.find(
+          (item) =>
+            item.contentIdentity.packageName === paletteIdentity.packageName,
+        );
+        assert.ok(feature && theme && palette);
+        assert.equal(generationRecord.packages.length, expectedPackageCount);
+        assert.equal(feature.packageDefinitionId, originalFeature.packageDefinitionId);
+        assert.deepEqual(feature.dependencyBindings, originalFeature.dependencyBindings);
+        assert.equal(theme.packageDefinitionId, originalTheme.packageDefinitionId);
+        assert.equal(theme.createdBy, "shared-dependency");
+        assert.deepEqual(theme.dependencyBindings, originalTheme.dependencyBindings);
+        assert.equal(palette.packageDefinitionId, originalPalette.packageDefinitionId);
+      };
+      expectRetainedGraph(firstAddition.generationRecord, 4);
+      const firstAddon = firstAddition.generationRecord.packages.find(
+        (item) => item.contentIdentity.packageName === addonIdentity.packageName,
+      );
+      assert.equal(firstAddon?.dependencyBindings.theme, originalTheme.packageDefinitionId);
+      assert.deepEqual(
+        firstAddition.ownerFacts.evaluations.find(
+          ({ packageName }) => packageName === "apps/feature",
+        )?.dependencyKeys,
+        [],
+      );
+      assert.deepEqual(
+        firstAddition.ownerFacts.evaluations.find(
+          ({ packageName }) => packageName === "packages/theme",
+        )?.dependencyKeys,
+        [],
+      );
+      assert.equal(
+        firstAddition.ownerFacts.evaluations.find(
+          ({ packageName }) => packageName === "packages/theme",
+        )?.evaluatedBy,
+        "theme",
+      );
+      assert.equal(await readFile(themeSourcePath, "utf8"), customizedTheme);
+      assert.equal((await stat(themeSourcePath)).mode & 0o777, 0o600);
+
+      const sameSelection = await createEngine(currentContent).add({
+        repositoryRoot: targetRoot,
+        contentIdentity: featureIdentity,
+        nodeIdentity: "feature",
+        creationInput: { path: "apps/feature" },
+        operationFacts: null,
+      });
+      assert.equal(sameSelection.status, "success", JSON.stringify(sameSelection));
+      if (sameSelection.status !== "success") return;
+      expectRetainedGraph(sameSelection.generationRecord, 4);
+
+      const secondAddition = await createEngine(currentContent).add({
+        repositoryRoot: targetRoot,
+        contentIdentity: addonIdentity,
+        nodeIdentity: "addon-two",
+        creationInput: { path: "apps/addon-two" },
+        operationFacts: null,
+      });
+      assert.equal(secondAddition.status, "success", JSON.stringify(secondAddition));
+      if (secondAddition.status !== "success") return;
+      expectRetainedGraph(secondAddition.generationRecord, 5);
+      assert.equal(
+        secondAddition.generationRecord.packages.find(
+          (item) => item.contentIdentity.packageName === addonIdentity.packageName && item.definition.path === "apps/addon-one",
+        )?.dependencyBindings.theme,
+        originalTheme.packageDefinitionId,
+      );
+      assert.equal(
+        secondAddition.generationRecord.packages.find(
+          (item) => item.contentIdentity.packageName === addonIdentity.packageName && item.definition.path === "apps/addon-two",
+        )?.dependencyBindings.theme,
+        originalTheme.packageDefinitionId,
+      );
+      assert.equal(await readFile(themeSourcePath, "utf8"), customizedTheme);
+      assert.equal((await stat(themeSourcePath)).mode & 0o777, 0o600);
+    });
+  });
+
   void it("将独立 provider 绑定到显式预设节点并在恢复后保留关系", async () => {
     const consumerIdentity: ContentIdentity = {
       namespace: "source",
