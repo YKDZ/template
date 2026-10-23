@@ -32,21 +32,39 @@ type ProcessBindings = {
   readonly values: ReadonlySet<ts.Symbol>;
 };
 
-const publicPlanningContracts = [
-  {
-    module: "@ykdz/template-core/preset-definition",
-    names: new Set(["definePreset", "PresetDefinition"]),
-    role: "preset" as const,
-  },
+type PlanningRole = "preset" | "reference" | "composition";
+
+type PlanningRoleContract = {
+  readonly module: string;
+  readonly names: ReadonlySet<string>;
+  readonly role: PlanningRole;
+  readonly members: readonly string[];
+};
+
+const publicPlanningContracts: readonly PlanningRoleContract[] = [
   {
     module: "@ykdz/template-workspace/reference-package",
-    names: new Set(["defineReferencePackage", "ReferencePackage"]),
+    names: new Set(["defineReferencePackage"]),
     role: "reference" as const,
+    members: ["transformManifest", "transformDocument"],
   },
   {
-    module: "@ykdz/template-core/workspace-strategy",
-    names: new Set(["WorkspaceStrategy"]),
-    role: "workspace strategy" as const,
+    module: "@ykdz/template-core/reference-package",
+    names: new Set(["ReferencePackageDefinition"]),
+    role: "reference" as const,
+    members: ["parseCreationInput", "createDefinition", "evaluate"],
+  },
+  {
+    module: "@ykdz/template-workspace/default-composition",
+    names: new Set(["DefaultPresetRootContributionOwner"]),
+    role: "preset" as const,
+    members: ["compose"],
+  },
+  {
+    module: "@ykdz/template-core/composition",
+    names: new Set(["Composition"]),
+    role: "composition" as const,
+    members: ["resolve", "combine"],
   },
 ];
 
@@ -251,26 +269,32 @@ function propertyNameText(name: ts.PropertyName): string | undefined {
   return undefined;
 }
 
-function projectPropertySymbols(
+function planningPropertySymbols(
   symbol: ts.Symbol,
-  role: "preset" | "reference" | "workspace strategy",
+  contract: PlanningRoleContract,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
-): readonly ts.Symbol[] {
-  if (role === "workspace strategy") {
+): ReadonlyMap<string, ts.Symbol> {
+  const properties = new Map<string, ts.Symbol>();
+  const addProperties = (type: ts.Type): void => {
+    for (const name of contract.members) {
+      const property = checker.getPropertyOfType(type, name);
+      if (property !== undefined) properties.set(name, property);
+    }
+  };
+  if ((symbol.flags & ts.SymbolFlags.Type) !== 0) {
     try {
       const type = checker.getDeclaredTypeOfSymbol(symbol);
-      const project = checker.getPropertyOfType(type, "project");
-      return project === undefined ? [] : [project];
+      addProperties(type);
     } catch {
-      return [];
+      return properties;
     }
+    return properties;
   }
   const callable = checker.getTypeOfSymbolAtLocation(
     symbol,
     symbol.valueDeclaration ?? sourceFile,
   );
-  const properties: ts.Symbol[] = [];
   for (const signature of checker.getSignaturesOfType(
     callable,
     ts.SignatureKind.Call,
@@ -281,8 +305,7 @@ function projectPropertySymbols(
       parameter,
       parameter.valueDeclaration ?? sourceFile,
     );
-    const project = checker.getPropertyOfType(parameterType, "project");
-    if (project !== undefined) properties.push(project);
+    addProperties(parameterType);
   }
   return properties;
 }
@@ -303,14 +326,15 @@ function sameDeclarations(left: ts.Symbol, right: ts.Symbol): boolean {
 
 function roleKind(
   object: ts.ObjectLiteralExpression,
+  memberName: string,
   checker: ts.TypeChecker,
-): "preset" | "reference" | "workspace strategy" | undefined {
+): PlanningRole | undefined {
   const contextualType = checker.getContextualType(object);
-  const project =
+  const member =
     contextualType === undefined
       ? undefined
-      : checker.getPropertyOfType(contextualType, "project");
-  if (project === undefined) return undefined;
+      : checker.getPropertyOfType(contextualType, memberName);
+  if (member === undefined) return undefined;
 
   const sourceFile = object.getSourceFile();
   for (const statement of sourceFile.statements) {
@@ -352,7 +376,9 @@ function roleKind(
     for (const candidate of candidates) {
       const contract = publicPlanningContracts.find(
         (item) =>
-          item.module === moduleSpecifier && item.names.has(candidate.name),
+          item.module === moduleSpecifier &&
+          item.names.has(candidate.name) &&
+          item.members.includes(memberName),
       );
       if (contract === undefined) continue;
       let exportedSymbol = candidate.symbol;
@@ -363,13 +389,14 @@ function roleKind(
           continue;
         }
       }
-      const anchors = projectPropertySymbols(
+      const anchors = planningPropertySymbols(
         exportedSymbol,
-        contract.role,
+        contract,
         checker,
         sourceFile,
       );
-      if (anchors.some((anchor) => sameDeclarations(anchor, project))) {
+      const anchor = anchors.get(memberName);
+      if (anchor !== undefined && sameDeclarations(anchor, member)) {
         return contract.role;
       }
     }
@@ -562,18 +589,16 @@ function plannerCallbacks(
     [];
   const visit = (node: ts.Node): void => {
     if (ts.isObjectLiteralExpression(node)) {
-      const projectMember = node.properties.find(
-        (member) =>
-          member.name !== undefined &&
-          propertyNameText(member.name) === "project",
-      );
-      if (projectMember !== undefined) {
-        const kind = roleKind(node, checker);
-        const callback = callbackFunction(projectMember, checker);
+      for (const member of node.properties) {
+        const memberName =
+          member.name === undefined ? undefined : propertyNameText(member.name);
+        if (memberName === undefined) continue;
+        const kind = roleKind(node, memberName, checker);
+        const callback = callbackFunction(member, checker);
         if (kind !== undefined && callback !== undefined) {
           callbacks.push({
             callback,
-            role: `${root.identity}:${kind}.project`,
+            role: `${root.identity}:${kind}.${memberName}`,
           });
         }
       }
@@ -858,14 +883,14 @@ export async function runAuthorPlanningRoleCheck(
       identity: `${member.identity.namespace}:${member.identity.packageName}#${member.identity.exportPath}`,
     })),
   );
-  const strategyEntry = fileURLToPath(
-    import.meta.resolve("@ykdz/template-workspace/default-workspace-strategy"),
+  const compositionEntry = fileURLToPath(
+    import.meta.resolve("@ykdz/template-workspace/default-composition"),
   );
-  const strategyPackageRoot = await packageRootFor(strategyEntry);
+  const compositionPackageRoot = await packageRootFor(compositionEntry);
   roots.push({
-    entryFile: strategyEntry,
-    packageRoot: strategyPackageRoot,
-    identity: "@ykdz/template-workspace#./default-workspace-strategy",
+    entryFile: compositionEntry,
+    packageRoot: compositionPackageRoot,
+    identity: "@ykdz/template-workspace#./default-composition",
   });
 
   if (ownerDirectory !== undefined) {

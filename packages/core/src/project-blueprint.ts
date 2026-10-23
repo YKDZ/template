@@ -39,7 +39,39 @@ export type ProjectBlueprintDraft = {
 export type BlueprintValidationIssue = {
   readonly path: string;
   readonly message: string;
+  readonly packageIdentityIssue?: BlueprintPackageIdentityIssue;
 };
+
+export type BlueprintPackageIdentityIssue =
+  | {
+      readonly kind: "duplicate";
+      readonly field: "name" | "path";
+      readonly existing: PackageDefinition;
+      readonly requested: PackageDefinition;
+    }
+  | {
+      readonly kind: "invalid";
+      readonly field: "name" | "path";
+    }
+  | { readonly kind: "reserved"; readonly field: "path" };
+
+export class ProjectBlueprintValidationError extends Error {
+  readonly issues: readonly BlueprintValidationIssue[];
+
+  constructor(issues: readonly BlueprintValidationIssue[]) {
+    super(issues.map((issue) => `${issue.path}: ${issue.message}`).join("\n"));
+    this.name = "ProjectBlueprintValidationError";
+    this.issues = issues;
+  }
+
+  get packageIdentityIssues(): readonly BlueprintPackageIdentityIssue[] {
+    return this.issues.flatMap((issue) =>
+      issue.packageIdentityIssue === undefined
+        ? []
+        : [issue.packageIdentityIssue],
+    );
+  }
+}
 
 export type BlueprintValidationResult =
   | { readonly ok: true; readonly value: ProjectBlueprint }
@@ -107,6 +139,7 @@ function validateBlueprintSemantics(
       issues.push({
         path: `${itemPath}.name`,
         message: "软件包名称不能为空",
+        packageIdentityIssue: { kind: "invalid", field: "name" },
       });
     }
     if (definition.role.trim().length === 0) {
@@ -119,6 +152,7 @@ function validateBlueprintSemantics(
       issues.push({
         path: `${itemPath}.path`,
         message: "软件包路径必须是规范化的安全相对路径",
+        packageIdentityIssue: { kind: "invalid", field: "path" },
       });
     }
   }
@@ -127,16 +161,31 @@ function validateBlueprintSemantics(
     ["name", "软件包名称"],
     ["path", "软件包路径"],
   ] as const) {
-    const seen = new Set<string>();
+    const seen = new Map<string, PackageDefinition>();
     for (const definition of blueprint.packages) {
       const member = definition[property];
-      if (seen.has(member)) {
+      const existing = seen.get(member);
+      if (existing !== undefined) {
         issues.push({
           path: ".packages",
           message: `${label}必须唯一：${member}`,
+          packageIdentityIssue: {
+            kind: "duplicate",
+            field: property,
+            existing: {
+              name: existing.name,
+              path: existing.path,
+              role: existing.role,
+            },
+            requested: {
+              name: definition.name,
+              path: definition.path,
+              role: definition.role,
+            },
+          },
         });
       }
-      seen.add(member);
+      seen.set(member, definition);
     }
   }
 
@@ -203,7 +252,13 @@ function structureIssues(value: unknown): BlueprintValidationIssue[] {
       issue.type === "strict_object" &&
       issue.path?.at(-1)?.origin === "key"
     ) {
-      return { path: issuePath, message: "蓝图 v4 包含未知字段" };
+      return {
+        path: issuePath,
+        message:
+          issue.expected === "never"
+            ? "蓝图 v4 包含未知字段"
+            : "蓝图缺少必需字段",
+      };
     }
     return { path: issuePath, message: "字段类型或结构不符合蓝图要求" };
   });
@@ -244,9 +299,7 @@ export function assertProjectBlueprintDraft(
     packageLinkIntents: value.packageLinkIntents ?? [],
   });
   if (issues.length > 0) {
-    throw new Error(
-      issues.map((issue) => `${issue.path}: ${issue.message}`).join("\n"),
-    );
+    throw new ProjectBlueprintValidationError(issues);
   }
   return value;
 }
@@ -254,11 +307,7 @@ export function assertProjectBlueprintDraft(
 export function assertProjectBlueprint(value: unknown): ProjectBlueprint {
   const result = validateProjectBlueprint(value);
   if (!result.ok) {
-    throw new Error(
-      result.issues
-        .map((issue) => `${issue.path}: ${issue.message}`)
-        .join("\n"),
-    );
+    throw new ProjectBlueprintValidationError(result.issues);
   }
   return result.value;
 }

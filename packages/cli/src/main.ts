@@ -174,19 +174,43 @@ function createCliContract(runtime: CliRuntime) {
           },
         },
         failures: {
+          invalidRequest: {
+            description: "初始包身份与基础配置包冲突",
+            exitCode: 2,
+            schema: standardSchema(
+              v.object({
+                issues: v.array(
+                  v.object({
+                    code: v.picklist([
+                      "PRESET_UNKNOWN",
+                      "FIXED_TOPOLOGY_OVERRIDE",
+                      "INVALID_PACKAGE_NAME",
+                      "INVALID_PACKAGE_PATH",
+                      "RESERVED_PACKAGE_PATH",
+                      "INVALID_PACKAGE_SCOPE",
+                      "INVALID_REPOSITORY_SCOPE",
+                      "CONFLICTING_PACKAGE_IDENTITY",
+                    ]),
+                  }),
+                ),
+              }),
+            ),
+            text: ({ issues }) =>
+              text.lines([
+                "初始化请求无效。",
+                ...issues.map(({ code }) =>
+                  code === "CONFLICTING_PACKAGE_IDENTITY"
+                    ? "初始包身份与基础配置包冲突。"
+                    : "请检查预设、包名称、路径和 scope 参数。",
+                ),
+              ]),
+          },
           operationFailed: {
             description: "初始化操作失败",
             exitCode: 1,
             schema: standardSchema(
               v.object({
                 targetDir: v.string(),
-                phase: v.picklist([
-                  "preset",
-                  "planning",
-                  "preflight",
-                  "materialization",
-                  "render",
-                ]),
                 error: v.object({
                   message: v.string(),
                   suggestion: v.string(),
@@ -217,11 +241,15 @@ function createCliContract(runtime: CliRuntime) {
           if (result.status === "operation-failure")
             return outcome.failure.operationFailed({
               targetDir: result.targetDir,
-              phase: result.phase,
               error: result.error,
             });
-          if (result.status !== "success")
-            throw new Error("初始化输入校验与契约不一致");
+          if (result.status === "usage-error")
+            return outcome.failure.invalidRequest({
+              issues: result.issues.map(({ code }) => ({ code })),
+            });
+          if (result.status !== "success") {
+            throw new Error("初始化结果与命令契约不一致");
+          }
           const { status: _status, ...data } = result;
           const payload = {
             ...data,
@@ -233,16 +261,12 @@ function createCliContract(runtime: CliRuntime) {
             blueprint: {
               schemaVersion: data.blueprint.schemaVersion,
               packages: [...data.blueprint.packages],
-              ...(data.blueprint.packageLinkIntents === undefined
-                ? {}
-                : {
-                    packageLinkIntents: [...data.blueprint.packageLinkIntents],
-                  }),
+              packageLinkIntents: [...data.blueprint.packageLinkIntents],
             },
             generationRecord: {
               ...data.generationRecord,
               packages: [...data.generationRecord.packages],
-              presetSelections: [...data.generationRecord.presetSelections],
+              selections: [...data.generationRecord.selections],
             },
           };
           return input.dryRun
@@ -329,13 +353,23 @@ function createCliContract(runtime: CliRuntime) {
         },
         failures: {
           invalidRequest: {
-            description: "仓库不支持所请求的消费关系",
+            description: "新增包请求无效",
             exitCode: 1,
             schema: standardSchema(
               v.object({
                 issues: v.array(
                   v.object({
-                    code: v.picklist(["UNKNOWN_LINK_FROM", "UNSUPPORTED_LINK"]),
+                    code: v.picklist([
+                      "PRESET_UNKNOWN",
+                      "PRESET_NOT_ADDABLE",
+                      "INVALID_PACKAGE_NAME",
+                      "INVALID_PACKAGE_PATH",
+                      "RESERVED_PACKAGE_PATH",
+                      "INVALID_LINK_FROM",
+                      "RESERVED_LINK_FROM",
+                      "UNKNOWN_LINK_FROM",
+                      "UNSUPPORTED_LINK",
+                    ]),
                   }),
                 ),
               }),
@@ -343,11 +377,25 @@ function createCliContract(runtime: CliRuntime) {
             text: ({ issues }) =>
               text.lines([
                 "新增包请求无效。",
-                ...issues.map(({ code }) =>
-                  code === "UNKNOWN_LINK_FROM"
-                    ? "指定的消费包不存在，请检查 --link-from。"
-                    : "指定的包角色不支持此链接，请调整 --link-from。",
-                ),
+                ...issues.map(({ code }) => {
+                  const messages: Record<typeof code, string> = {
+                    PRESET_UNKNOWN: "请选择有效的预设。",
+                    PRESET_NOT_ADDABLE: "该预设不支持新增包。",
+                    INVALID_PACKAGE_NAME:
+                      "--name 与当前工作区 scope 组合后不是有效的软件包名称。",
+                    INVALID_PACKAGE_PATH: "--path 必须恰好包含两个安全路径段。",
+                    RESERVED_PACKAGE_PATH: "--path 不能使用保留的工作区目录。",
+                    INVALID_LINK_FROM:
+                      "--link-from 必须恰好包含两个安全路径段。",
+                    RESERVED_LINK_FROM:
+                      "--link-from 不能使用保留的工作区目录。",
+                    UNKNOWN_LINK_FROM:
+                      "指定的消费包不存在，请检查 --link-from。",
+                    UNSUPPORTED_LINK:
+                      "指定的包角色不支持此链接，请调整 --link-from。",
+                  };
+                  return messages[code];
+                }),
               ]),
           },
           operationFailed: {
@@ -355,12 +403,6 @@ function createCliContract(runtime: CliRuntime) {
             exitCode: 1,
             schema: standardSchema(
               v.object({
-                phase: v.picklist([
-                  "metadata",
-                  "default",
-                  "planning",
-                  "reconciliation",
-                ]),
                 error: v.object({
                   message: v.string(),
                   suggestion: v.string(),
@@ -374,43 +416,41 @@ function createCliContract(runtime: CliRuntime) {
             description: "新增包冲突，未写入变更",
             exitCode: 1,
             schema: packageConflictSchema,
-            text: ({ conflicts }) =>
-              text.lines([
-                "新增包存在冲突，未写入变更。",
-                ...conflicts.flatMap((conflict) =>
-                  "kind" in conflict
-                    ? [
-                        `${conflict.requested.path}: 包身份或链接与当前仓库冲突。`,
-                        `现有包: ${conflict.existing.name} (${conflict.existing.path})`,
-                        `请求包: ${conflict.requested.name} (${conflict.requested.path})`,
-                      ]
+            text: ({ conflicts }) => {
+              const lines = conflicts.flatMap((conflict) => {
+                if ("kind" in conflict) {
+                  return [
+                    `包身份冲突：请求 ${conflict.requested.name}（${conflict.requested.path}）与现有 ${conflict.existing.name}（${conflict.existing.path}）重复。`,
+                  ];
+                }
+                return [
+                  `${conflict.path} (${conflict.driver})`,
+                  ...(conflict.location === undefined
+                    ? []
+                    : [`位置: ${conflict.location || "<文档根>"}`]),
+                  ...(conflict.region === undefined
+                    ? []
                     : [
-                        `${conflict.path} (${conflict.driver})`,
-                        ...(conflict.location === undefined
-                          ? []
-                          : [`位置: ${conflict.location || "<文档根>"}`]),
-                        ...(conflict.region === undefined
-                          ? []
-                          : [
-                              `区域: 生成前第 ${conflict.region.before.startLine} 行；当前第 ${conflict.region.current.startLine} 行；请求后第 ${conflict.region.after.startLine} 行`,
-                            ]),
-                        ...(conflict.attribute === undefined
-                          ? []
-                          : [`属性: ${conflict.attribute}`]),
-                        ...(conflict.sources === undefined
-                          ? []
-                          : [
-                              `来源: ${conflict.sources.map((source) => source.label).join("、")}`,
-                            ]),
-                        `原因: ${conflict.reason}`,
-                        `生成前: ${conflict.context.before}`,
-                        `当前: ${conflict.context.current}`,
-                        `请求后: ${conflict.context.after}`,
-                      ].flatMap((line) =>
-                        line.replaceAll("\0", "\\0").split(/\r\n|\r|\n/u),
-                      ),
-                ),
-              ]),
+                        `区域: 生成前第 ${conflict.region.before.startLine} 行；当前第 ${conflict.region.current.startLine} 行；请求后第 ${conflict.region.after.startLine} 行`,
+                      ]),
+                  ...(conflict.attribute === undefined
+                    ? []
+                    : [`属性: ${conflict.attribute}`]),
+                  ...(conflict.sources === undefined
+                    ? []
+                    : [
+                        `来源: ${conflict.sources.map((source) => source.label).join("、")}`,
+                      ]),
+                  `原因: ${conflict.reason}`,
+                  `生成前: ${conflict.context.before}`,
+                  `当前: ${conflict.context.current}`,
+                  `请求后: ${conflict.context.after}`,
+                ].flatMap((line) =>
+                  line.replaceAll("\0", "\\0").split(/\r\n|\r|\n/u),
+                );
+              });
+              return text.lines(["新增包存在冲突，未写入变更。", ...lines]);
+            },
           },
         },
         async handler({ input, dependencies, outcome }) {
@@ -426,7 +466,6 @@ function createCliContract(runtime: CliRuntime) {
           );
           if (result.status === "operation-failure")
             return outcome.failure.operationFailed({
-              phase: result.phase,
               error: result.error,
             });
           if (result.status === "conflict")
@@ -437,8 +476,6 @@ function createCliContract(runtime: CliRuntime) {
             });
           if (result.status === "usage-error") {
             const issues = result.issues.map(({ code }) => {
-              if (code !== "UNKNOWN_LINK_FROM" && code !== "UNSUPPORTED_LINK")
-                throw new Error("新增包输入校验与契约不一致");
               return { code };
             });
             return outcome.failure.invalidRequest({ issues });

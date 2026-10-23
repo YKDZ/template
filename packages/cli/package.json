@@ -62,13 +62,9 @@
   "dependencies": {
     "@valibot/to-json-schema": "catalog:",
     "@ykdz/cli-contract": "catalog:",
-    "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/template-content": "workspace:*",
     "@ykdz/template-core": "workspace:*",
-    "@ykdz/template-environment": "workspace:*",
-    "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
-    "@ykdz/template-workspace-authoring": "workspace:*",
     "hosted-git-info": "catalog:",
     "ignore": "catalog:",
     "lru-cache": "catalog:",
