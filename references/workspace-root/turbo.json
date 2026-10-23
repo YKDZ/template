@@ -1,6 +1,12 @@
 {
   "extends": ["//"],
   "tasks": {
+    "build": {
+      "dependsOn": [],
+      "inputs": [],
+      "outputs": [],
+      "tags": []
+    },
     "check": {
       "tags": ["quality:conditional"]
     },
