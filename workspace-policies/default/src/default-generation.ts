@@ -6,6 +6,7 @@ import {
   contentIdentityKey,
   contentIdentityLabel,
   createContentIndex,
+  type ContentIdentity,
   type ContentSelector,
 } from "@ykdz/template-core/content-identity";
 import type { GenerationRecordSelection } from "@ykdz/template-core/generation-record";
@@ -47,40 +48,26 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function referencesSelectedByAddition(
-  content: readonly DefaultContentMember[],
-  selection: GeneratorAdditionSelection<JsonValue>,
-): ReadonlySet<string> {
-  const index = createContentIndex(content);
-  if (!("preset" in selection)) {
-    const selected = index.resolve(selection.contentIdentity, "reference");
-    return new Set([contentIdentityKey(selected.identity)]);
-  }
+type PreparedContentNode = {
+  readonly content: { readonly identity: ContentIdentity };
+  readonly dependencies: readonly {
+    readonly package: PreparedContentNode;
+  }[];
+};
 
-  const preset = index.resolve(selection.preset, "preset");
-  if (!isRecord(preset.definition) || !isRecord(preset.definition.nodes)) {
-    throw new Error(
-      `预设缺少节点声明：${contentIdentityLabel(preset.identity)}`,
+/** 只遍历正式准备后的图，不在外围重新解释 direct 或 preset 输入。 */
+function preparedSelectionsContainOwner(
+  selections: readonly {
+    readonly roots: readonly PreparedContentNode[];
+  }[],
+  ownerIdentities: ReadonlySet<string>,
+): boolean {
+  const containsOwner = (node: PreparedContentNode): boolean =>
+    ownerIdentities.has(contentIdentityKey(node.content.identity)) ||
+    node.dependencies.some(({ package: dependency }) =>
+      containsOwner(dependency),
     );
-  }
-  const selected = new Set<string>();
-  for (const node of Object.values(preset.definition.nodes)) {
-    if (!isRecord(node) || !isRecord(node.reference)) continue;
-    const reference = node.reference;
-    const owner = content.find(
-      (member) =>
-        member.kind === "reference" &&
-        (member.definition === reference ||
-          (isRecord(member.definition) &&
-            isRecord(member.definition.manifest) &&
-            member.definition.manifest.name ===
-              (isRecord(reference.manifest) ? reference.manifest.name : null) &&
-            member.definition.alias === reference.alias &&
-            member.definition.instance === reference.instance)),
-    );
-    if (owner !== undefined) selected.add(contentIdentityKey(owner.identity));
-  }
-  return selected;
+  return selections.some((selection) => selection.roots.some(containsOwner));
 }
 
 function defaultRootIdentity(content: readonly DefaultContentMember[]) {
@@ -569,36 +556,6 @@ async function additionFacts(
     selections: options.restored.selections,
     packages: options.restored.packages,
   });
-  const rustOwnerIdentities = new Set(
-    baseFacts.rootDeclarations
-      .filter(
-        (declaration) =>
-          declaration.applicationRequirements?.rustToolchain !== undefined,
-      )
-      .map((declaration) => contentIdentityKey(declaration.sourceIdentity)),
-  );
-  const hasRustPackage = options.restored.packages.some((record) =>
-    rustOwnerIdentities.has(contentIdentityKey(record.contentIdentity)),
-  );
-  const addsRustPackage = [
-    ...referencesSelectedByAddition(content, options.selection),
-  ].some((identity) => rustOwnerIdentities.has(identity));
-  let rustToolchainTarget:
-    | Awaited<ReturnType<typeof prepareRootRustToolchainTarget>>
-    | undefined;
-  if (hasRustPackage || addsRustPackage) {
-    rustToolchainTarget = await prepareRootRustToolchainTarget({
-      repositoryRoot,
-      required: hasRustPackage,
-    });
-  }
-  if (
-    rustToolchainTarget !== undefined &&
-    !currentFactPaths.has(rustToolchainTarget.readFact.path)
-  ) {
-    currentFacts.push(rustToolchainTarget.readFact);
-    currentFactPaths.add(rustToolchainTarget.readFact.path);
-  }
   const readPreparedLinkFacts = async (creationInputs: readonly unknown[]) => {
     const factCount = currentFacts.length;
     const selectedProviderIds = new Set<
@@ -658,9 +615,6 @@ async function additionFacts(
       ...baseFacts,
       nodeDeclaration,
       packageManagerPin,
-      ...(rustToolchainTarget?.target === undefined
-        ? {}
-        : { rustToolchainTarget: rustToolchainTarget.target }),
       targetManifests,
       existingPackageDefinitionIds: new Set(
         options.restored.blueprint.packages.map(
@@ -745,6 +699,28 @@ export function createDefaultGenerator<
       ...prepareOptions,
       operationFacts: prepared.operationFacts,
     });
+    const rustOwnerIdentities = new Set(
+      prepared.operationFacts.rootDeclarations
+        .filter(
+          (declaration) =>
+            declaration.applicationRequirements?.rustToolchain !== undefined,
+        )
+        .map((declaration) => contentIdentityKey(declaration.sourceIdentity)),
+    );
+    const existingRustPackage = preparedSelectionsContainOwner(
+      preparation.before.selections,
+      rustOwnerIdentities,
+    );
+    const resultingRustPackage = preparedSelectionsContainOwner(
+      preparation.after.selections,
+      rustOwnerIdentities,
+    );
+    const rustToolchainTarget = resultingRustPackage
+      ? await prepareRootRustToolchainTarget({
+          repositoryRoot: prepareOptions.restored.targetRoot,
+          required: existingRustPackage,
+        })
+      : undefined;
     const previousSelectionIds = new Set(
       preparation.before.selections.flatMap((selection) =>
         selection.selectionId === undefined ? [] : [selection.selectionId],
@@ -763,17 +739,29 @@ export function createDefaultGenerator<
       await prepared.readPreparedLinkFacts(addedCreationInputs);
     const operationFacts = {
       ...prepared.operationFacts,
+      ...(rustToolchainTarget?.target === undefined
+        ? {}
+        : { rustToolchainTarget: rustToolchainTarget.target }),
       targetManifests: linkedFacts.targetManifests,
     };
+    const readFacts = [
+      ...preparation.readFacts,
+      ...prepared.readFacts,
+      ...linkedFacts.readFacts,
+    ];
+    if (
+      rustToolchainTarget !== undefined &&
+      !readFacts.some(
+        ({ path: factPath }) => factPath === rustToolchainTarget.readFact.path,
+      )
+    ) {
+      readFacts.push(rustToolchainTarget.readFact);
+    }
     return {
       ...preparation,
       before: { ...preparation.before, operationFacts },
       after: { ...preparation.after, operationFacts },
-      readFacts: [
-        ...preparation.readFacts,
-        ...prepared.readFacts,
-        ...linkedFacts.readFacts,
-      ],
+      readFacts,
     };
   }
 
