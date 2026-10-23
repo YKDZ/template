@@ -23,7 +23,8 @@ import type {
   PackageDefinitionId,
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
-import { parse as parseJsonc } from "jsonc-parser";
+import type { ReferenceDependency } from "@ykdz/template-core/reference-package";
+import { resolveReferenceDependencyIdentity } from "@ykdz/template-generator";
 import { stringify as stringifyYaml } from "yaml";
 
 import {
@@ -65,12 +66,12 @@ import type {
   DefaultRootDeclarationData,
   DefaultWorkspaceConventions,
 } from "./reference-package.ts";
-import { serializeNativeReferenceDocument } from "./reference-package.ts";
-import { releaseToolchainSnapshot } from "./release-toolchain-snapshot.ts";
 import {
-  composeCheckWorkflow,
-  type RootResourceOperation,
-} from "./shared-root-files.ts";
+  serializeNativeJson,
+  serializeNativeReferenceDocument,
+} from "./reference-package.ts";
+import { releaseToolchainSnapshot } from "./release-toolchain-snapshot.ts";
+import { composeCheckWorkflow } from "./shared-root-files.ts";
 import { vuePnpmDependencyOverrides } from "./vue-policy.ts";
 import {
   dependencyCatalogSnapshot,
@@ -80,6 +81,14 @@ import {
 export type DefaultRootDeclaration = DefaultRootDeclarationData & {
   readonly sourceIdentity: ContentIdentity;
   readonly requiredTemplateDependency?: string;
+};
+
+export type DefaultRootAttachmentDependencyFact = {
+  readonly consumerIdentity: ContentIdentity;
+  readonly key: string;
+  readonly result:
+    | { readonly kind: "resolved"; readonly ownerIdentity: ContentIdentity }
+    | { readonly kind: "error"; readonly message: string };
 };
 
 export type DefaultCompositionFileResource = {
@@ -107,6 +116,7 @@ export type DefaultOperationFacts = {
   readonly packageManagerPin: string;
   readonly resources: DefaultCompositionResources;
   readonly rootDeclarations: readonly DefaultRootDeclaration[];
+  readonly rootAttachmentDependencies: readonly DefaultRootAttachmentDependencyFact[];
   /** 本次add明确连接端点读取到的当前manifest；键为恢复后的实例ID。 */
   readonly targetManifests: ReadonlyMap<
     PackageDefinitionId,
@@ -119,6 +129,7 @@ export type DefaultStableCommon = {
   readonly packageManagerPin: string;
   readonly resources: DefaultCompositionResources;
   readonly rootDeclarations: readonly DefaultRootDeclaration[];
+  readonly rootAttachmentIdentities: readonly ContentIdentity[];
   readonly targetManifests: ReadonlyMap<
     PackageDefinitionId,
     Readonly<Record<string, unknown>>
@@ -147,6 +158,10 @@ type DefaultContentMember = LoadedContentMember<unknown>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function parseConventions(value: unknown): DefaultWorkspaceConventions {
@@ -210,6 +225,7 @@ export function prepareDefaultCompositionResources(): DefaultCompositionResource
 export function prepareDefaultInitOperationFacts(
   options: {
     readonly rootDeclarations?: readonly DefaultRootDeclaration[];
+    readonly rootAttachmentDependencies?: readonly DefaultRootAttachmentDependencyFact[];
     readonly resources?: DefaultCompositionResources;
   } = {},
 ): DefaultOperationFacts {
@@ -218,6 +234,7 @@ export function prepareDefaultInitOperationFacts(
     packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
     resources: options.resources ?? prepareDefaultCompositionResources(),
     rootDeclarations: options.rootDeclarations ?? [],
+    rootAttachmentDependencies: options.rootAttachmentDependencies ?? [],
     targetManifests: new Map(),
   });
 }
@@ -265,6 +282,52 @@ export async function prepareDefaultRootDeclarations(
   return Object.freeze(declarations);
 }
 
+/** 正式准备阶段解析owner入口；Composition只消费这份完整身份快照。 */
+export function prepareDefaultRootAttachmentDependencies(
+  content: readonly DefaultContentMember[],
+): readonly DefaultRootAttachmentDependencyFact[] {
+  const facts: DefaultRootAttachmentDependencyFact[] = [];
+  for (const member of content) {
+    if (member.kind !== "reference" || !isRecord(member.definition)) continue;
+    const dependencies = member.definition.rootAttachmentDependencies;
+    if (dependencies === undefined) continue;
+    if (!Array.isArray(dependencies)) {
+      throw new Error(
+        `根附件owner依赖必须是列表：${contentIdentityLabel(member.identity)}`,
+      );
+    }
+    for (const value of dependencies) {
+      if (!isRecord(value) || typeof value.key !== "string") {
+        throw new Error(
+          `根附件owner依赖声明无效：${contentIdentityLabel(member.identity)}`,
+        );
+      }
+      const dependency = value as unknown as ReferenceDependency;
+      try {
+        facts.push({
+          consumerIdentity: member.identity,
+          key: value.key,
+          result: {
+            kind: "resolved",
+            ownerIdentity: resolveReferenceDependencyIdentity({
+              consumerIdentity: member.identity,
+              dependency,
+              members: content,
+            }),
+          },
+        });
+      } catch (error) {
+        facts.push({
+          consumerIdentity: member.identity,
+          key: value.key,
+          result: { kind: "error", message: errorMessage(error) },
+        });
+      }
+    }
+  }
+  return Object.freeze(facts);
+}
+
 function sourceLabel(identity: ContentIdentity): string {
   return contentIdentityLabel(identity);
 }
@@ -279,10 +342,77 @@ function validateDefaultFacts(
     typeof value.packageManagerPin !== "string" ||
     value.packageManagerPin.trim().length === 0 ||
     !Array.isArray(value.rootDeclarations) ||
+    !Array.isArray(value.rootAttachmentDependencies) ||
     !isRecord(value.resources)
   ) {
     throw new Error("默认工作区本次operationFacts无效");
   }
+}
+
+function prepareSelectedRootAttachmentIdentities(options: {
+  readonly packages: readonly CompositionPackage<JsonValue>[];
+  readonly content: readonly DefaultContentMember[];
+  readonly operationFacts: DefaultOperationFacts;
+}): readonly ContentIdentity[] {
+  const contentByIdentity = new Map(
+    options.content
+      .filter((member) => member.kind === "reference")
+      .map((member) => [contentIdentityKey(member.identity), member]),
+  );
+  const factsByConsumerAndKey = new Map(
+    options.operationFacts.rootAttachmentDependencies.map((fact) => [
+      JSON.stringify([contentIdentityKey(fact.consumerIdentity), fact.key]),
+      fact,
+    ]),
+  );
+  const declarationIdentities = new Set(
+    options.operationFacts.rootDeclarations.map(({ sourceIdentity }) =>
+      contentIdentityKey(sourceIdentity),
+    ),
+  );
+  const requested = new Map<string, ContentIdentity>();
+  for (const item of options.packages) {
+    const member = contentByIdentity.get(
+      contentIdentityKey(item.contentIdentity),
+    );
+    if (member === undefined || !isRecord(member.definition)) continue;
+    const dependencies = member.definition.rootAttachmentDependencies;
+    if (dependencies === undefined) continue;
+    if (!Array.isArray(dependencies)) {
+      throw new Error(
+        `根附件owner依赖必须是列表：${contentIdentityLabel(member.identity)}`,
+      );
+    }
+    for (const value of dependencies) {
+      if (!isRecord(value) || typeof value.key !== "string") {
+        throw new Error(
+          `根附件owner依赖声明无效：${contentIdentityLabel(member.identity)}`,
+        );
+      }
+      const fact = factsByConsumerAndKey.get(
+        JSON.stringify([contentIdentityKey(member.identity), value.key]),
+      );
+      if (fact === undefined) {
+        throw new Error(
+          `正式准备缺少根附件owner依赖身份：${contentIdentityLabel(member.identity)}/${value.key}`,
+        );
+      }
+      if (fact.result.kind === "error") {
+        throw new Error(
+          `根附件owner依赖无法解析：${contentIdentityLabel(member.identity)}/${value.key}：${fact.result.message}`,
+        );
+      }
+      const ownerIdentity = fact.result.ownerIdentity;
+      const ownerKey = contentIdentityKey(ownerIdentity);
+      if (!declarationIdentities.has(ownerKey)) {
+        throw new Error(
+          `根附件owner未提供所需声明：${contentIdentityLabel(ownerIdentity)}`,
+        );
+      }
+      requested.set(ownerKey, ownerIdentity);
+    }
+  }
+  return Object.freeze([...requested.values()]);
 }
 
 function packageLinks(options: {
@@ -622,7 +752,7 @@ function boundariesFor(blueprint: ProjectBlueprint) {
 }
 
 function json(value: unknown): Uint8Array {
-  return new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`);
+  return serializeNativeJson(value);
 }
 
 function rootFile(options: {
@@ -819,12 +949,18 @@ export function createDefaultComposition(options: {
       ) {
         throw new Error("默认组合只能有一个根包");
       }
+      const rootAttachmentIdentities = prepareSelectedRootAttachmentIdentities({
+        packages: resolveOptions.packages,
+        content: options.content,
+        operationFacts: resolveOptions.operationFacts,
+      });
       return {
         stableCommon: Object.freeze({
           nodeDeclaration: resolveOptions.operationFacts.nodeDeclaration,
           packageManagerPin: resolveOptions.operationFacts.packageManagerPin,
           resources: resolveOptions.operationFacts.resources,
           rootDeclarations: resolveOptions.operationFacts.rootDeclarations,
+          rootAttachmentIdentities,
           targetManifests: resolveOptions.operationFacts.targetManifests,
         }),
         packageInputs: new Map(),
@@ -861,6 +997,11 @@ export function createDefaultComposition(options: {
             .map(({ name }) => name),
         ),
       );
+      const requiredRootAttachmentIdentities = new Set(
+        combineOptions.stableCommon.rootAttachmentIdentities.map(
+          contentIdentityKey,
+        ),
+      );
       const declarations: DefaultRootDeclaration[] = [
         ...combineOptions.packages.flatMap(({ package: item, contribution }) =>
           contribution.facts.rootDeclaration === undefined
@@ -875,9 +1016,12 @@ export function createDefaultComposition(options: {
         ...combineOptions.stableCommon.rootDeclarations.filter(
           (declaration) =>
             declaration.requiredTemplateDependency === undefined ||
-            requiredTemplateDependencies.has(
+            (requiredTemplateDependencies.has(
               declaration.requiredTemplateDependency,
-            ),
+            ) &&
+              requiredRootAttachmentIdentities.has(
+                contentIdentityKey(declaration.sourceIdentity),
+              )),
         ),
       ];
       const rootIdentity = rootPackage.package.contentIdentity;
@@ -1026,14 +1170,13 @@ export function createDefaultComposition(options: {
             })),
         ),
       });
-      const rootResources: DefaultCompositionFile[] = [
-        ...combineOptions.stableCommon.resources.rootFiles.map((resource) => ({
+      const rootResources: DefaultCompositionFile[] =
+        combineOptions.stableCommon.resources.rootFiles.map((resource) => ({
           path: resource.path,
           content: resource.content,
           mode: resource.mode,
           sourcePath: resource.path,
-        })),
-      ];
+        }));
       const ownerPackagePaths = packagePaths;
       const editor = projectBuiltInEditorCustomization(
         allFacts.flatMap((facts) => {

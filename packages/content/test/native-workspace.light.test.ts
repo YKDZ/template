@@ -77,7 +77,7 @@ function generator() {
   return createDefaultGenerator({ content });
 }
 
-it("直接参考生成原生根并连续添加ts-lib与显式provider连接", async () => {
+await it("直接参考生成原生根并连续添加ts-lib与显式provider连接", async () => {
   await withTarget(async (targetRoot) => {
     const current = generator();
     const initialized = await current.init({
@@ -102,6 +102,10 @@ it("直接参考生成原生根并连续添加ts-lib与显式provider连接", as
       "node --conditions=source scripts/task-gates.ts check",
     );
     assert.ok(rootManifest.devDependencies["@demo/tooling-config"]);
+    assert.equal(
+      rootManifest.devDependencies["@demo/tooling-config"],
+      "workspace:./packages/tooling-config",
+    );
     assert.equal(
       (await stat(path.join(targetRoot, "scripts/task-gates.ts"))).mode & 0o777,
       0o644,
@@ -178,7 +182,7 @@ it("直接参考生成原生根并连续添加ts-lib与显式provider连接", as
   });
 });
 
-it("ts-lib预设也明确创建基础root", async () => {
+await it("ts-lib预设也明确创建基础root", async () => {
   await withTarget(async (targetRoot) => {
     const current = generator();
     const initialized = await current.init({
@@ -207,7 +211,65 @@ it("ts-lib预设也明确创建基础root", async () => {
   });
 });
 
-it("计划锁定实际根与provider事实、允许无关编辑并拒绝相关变更", async () => {
+await it("选中ts-lib却未装载发布附件owner时拒绝初始化", async () => {
+  const contentWithoutPublication = content.filter(
+    (member) =>
+      member.identity.packageName !== "@ykdz/reference-npm-publication",
+  );
+  const current = createDefaultGenerator({
+    content: contentWithoutPublication,
+  });
+  await withTarget(async (targetRoot) => {
+    const result = await current.init({
+      targetRoot,
+      selection: {
+        presets: [{ contentIdentity: libraryPreset.identity }],
+      },
+      conventions: {
+        repositoryName: "missing-publication-demo",
+        defaultPackageScope: "demo",
+      },
+    });
+
+    assert.equal(result.status, "operation-failure", result.status);
+    if (result.status !== "operation-failure") return;
+    assert.match(result.error.message, /reference-npm-publication/u);
+    await assert.rejects(stat(path.join(targetRoot, "package.json")), {
+      code: "ENOENT",
+    });
+  });
+});
+
+await it("root-only初始化不要求或投影发布附件owner", async () => {
+  const contentWithoutPublication = content.filter(
+    (member) =>
+      member.identity.packageName !== "@ykdz/reference-npm-publication",
+  );
+  const current = createDefaultGenerator({
+    content: contentWithoutPublication,
+  });
+  await withTarget(async (targetRoot) => {
+    const initialized = await current.init({
+      targetRoot,
+      selection: {
+        roots: [{ nodeIdentity: "root", contentIdentity: root.identity }],
+      },
+      conventions: {
+        repositoryName: "root-only-demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.equal(initialized.status, "success", initialized.status);
+    await assert.rejects(
+      stat(path.join(targetRoot, ".changeset/config.json")),
+      {
+        code: "ENOENT",
+      },
+    );
+  });
+});
+
+await it("计划锁定实际根与provider事实、允许无关编辑并拒绝相关变更", async () => {
   await withTarget(async (targetRoot) => {
     const current = generator();
     const initialized = await current.init({
