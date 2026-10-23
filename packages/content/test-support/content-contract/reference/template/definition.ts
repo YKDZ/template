@@ -132,6 +132,9 @@ export const referencePackage = defineNativeReferenceContentArtifact(
     manifest,
     resourceRoot: new URL("../", import.meta.url),
     exportPath: "./template",
+    dependencyPurposes: new Map([
+      ["never-install-target-application", ["target"]],
+    ]),
     resources: [
       {
         path: "resources/README.md",

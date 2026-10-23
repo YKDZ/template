@@ -2,7 +2,7 @@
   "extends": "./tsconfig.node.json",
   "compilerOptions": {
     "customConditions": [],
-    "declaration": false,
+    "declaration": true,
     "declarationMap": false,
     "outDir": "dist",
     "rootDir": "src",

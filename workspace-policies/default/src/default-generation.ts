@@ -158,6 +158,12 @@ async function additionFacts(
 ): Promise<{
   readonly operationFacts: DefaultOperationFacts;
   readonly readFacts: readonly CurrentProjectProjectionEntry[];
+  readonly readPreparedLinkFacts: (
+    creationInputs: readonly unknown[],
+  ) => Promise<{
+    readonly targetManifests: DefaultOperationFacts["targetManifests"];
+    readonly readFacts: readonly CurrentProjectProjectionEntry[];
+  }>;
 }> {
   const targetManifests = new Map<
     GeneratorRestoredProject<JsonValue>["blueprint"]["packages"][number]["packageDefinitionId"],
@@ -168,7 +174,7 @@ async function additionFacts(
     const stat = await lstat(manifestPath);
     if (!stat.isFile()) {
       throw new Error(
-        `加包需要已连接包的package.json是普通文件：${packagePath}`,
+        `加包需要参与验证的当前包package.json是普通文件：${packagePath}`,
       );
     }
     const bytes = new Uint8Array(await readFile(manifestPath));
@@ -209,6 +215,164 @@ async function additionFacts(
   targetManifests.set(rootPackage.packageDefinitionId, manifest);
   const currentFacts: CurrentProjectProjectionEntry[] = [rootManifestFact.fact];
   const currentFactPaths = new Set([rootManifestFact.fact.path]);
+  const currentById = new Map(
+    options.restored.blueprint.packages.map((pkg) => [
+      pkg.packageDefinitionId,
+      pkg,
+    ]),
+  );
+  const restoredById = new Map(
+    options.restored.packages.map((pkg) => [pkg.packageDefinitionId, pkg]),
+  );
+  const contentByIdentity = new Map(
+    content
+      .filter((member) => member.kind === "reference")
+      .map((member) => [contentIdentityKey(member.identity), member]),
+  );
+  const addCurrentFact = (fact: CurrentProjectProjectionEntry): void => {
+    if (currentFactPaths.has(fact.path)) return;
+    currentFacts.push(fact);
+    currentFactPaths.add(fact.path);
+  };
+  const readPackageManifest = async (
+    packageId: GeneratorRestoredProject<JsonValue>["blueprint"]["packages"][number]["packageDefinitionId"],
+  ): Promise<Readonly<Record<string, unknown>>> => {
+    const existing = targetManifests.get(packageId);
+    if (existing !== undefined) return existing;
+    const currentPackage = currentById.get(packageId);
+    if (currentPackage === undefined) {
+      throw new Error(`包连接引用了未知当前实例：${packageId}`);
+    }
+    const current = await readTargetManifest(currentPackage.path);
+    targetManifests.set(packageId, current.value);
+    addCurrentFact(current.fact);
+    return current.value;
+  };
+  const readPackageExportTarget = async (
+    packagePath: string,
+    targetValue: string,
+  ): Promise<void> => {
+    if (
+      !targetValue.startsWith("./") ||
+      targetValue.includes("\\") ||
+      targetValue
+        .slice(2)
+        .split("/")
+        .some(
+          (segment) =>
+            segment.length === 0 || segment === "." || segment === "..",
+        )
+    ) {
+      throw new Error(
+        `复用包 ${packagePath} 的公开入口路径无效：${targetValue}`,
+      );
+    }
+    const target = path.posix.join(
+      packagePath === "." ? "" : packagePath,
+      targetValue.slice(2),
+    );
+    if (currentFactPaths.has(target)) return;
+    const targetAbsolutePath = path.join(repositoryRoot, ...target.split("/"));
+    const targetStat = await lstat(targetAbsolutePath);
+    if (!targetStat.isFile()) {
+      throw new Error(
+        `复用包 ${packagePath} 的公开文件不可读取：${targetValue}`,
+      );
+    }
+    const targetBytes = new Uint8Array(await readFile(targetAbsolutePath));
+    addCurrentFact({
+      path: target,
+      kind: "file",
+      content: targetBytes,
+      mode: targetStat.mode & 0o111,
+    });
+  };
+  const packageExportSourceTargetValues = (
+    value: unknown,
+  ): readonly string[] => {
+    if (typeof value === "string") return [value];
+    if (Array.isArray(value)) {
+      return value.flatMap(packageExportSourceTargetValues);
+    }
+    if (isRecord(value)) {
+      const sourceTarget =
+        typeof value.source === "string" ? [value.source] : [];
+      return [
+        ...sourceTarget,
+        ...Object.entries(value)
+          .filter(
+            ([key]) => key !== "source" && key !== "types" && key !== "default",
+          )
+          .flatMap(([, nested]) => packageExportSourceTargetValues(nested)),
+      ];
+    }
+    return [];
+  };
+
+  const linkedPackageIds = new Set<
+    GeneratorRestoredProject<JsonValue>["blueprint"]["packages"][number]["packageDefinitionId"]
+  >();
+  const linkedProviderIds = new Set(linkedPackageIds);
+  for (const intent of options.restored.blueprint.packageLinkIntents) {
+    linkedPackageIds.add(intent.consumerId);
+    linkedPackageIds.add(intent.providerId);
+    linkedProviderIds.add(intent.providerId);
+  }
+  const selectionRecord: unknown = options.selection;
+  const requestedBindings = isRecord(selectionRecord)
+    ? selectionRecord.dependencyBindings
+    : undefined;
+  if (isRecord(requestedBindings)) {
+    for (const binding of Object.values(requestedBindings)) {
+      if (
+        !isRecord(binding) ||
+        typeof binding.packageDefinitionId !== "string"
+      ) {
+        continue;
+      }
+      const providerId =
+        binding.packageDefinitionId as GeneratorRestoredProject<JsonValue>["blueprint"]["packages"][number]["packageDefinitionId"];
+      if (!currentById.has(providerId)) {
+        throw new Error(`依赖绑定实例ID不存在：${binding.packageDefinitionId}`);
+      }
+      linkedPackageIds.add(providerId);
+      linkedProviderIds.add(providerId);
+    }
+  }
+  for (const packageId of linkedPackageIds) {
+    await readPackageManifest(packageId);
+  }
+  for (const currentPackage of options.restored.blueprint.packages) {
+    const restoredPackage = restoredById.get(
+      currentPackage.packageDefinitionId,
+    );
+    const member =
+      restoredPackage === undefined
+        ? undefined
+        : contentByIdentity.get(
+            contentIdentityKey(restoredPackage.contentIdentity),
+          );
+    const nativeManifest =
+      member !== undefined && isRecord(member.definition)
+        ? member.definition.manifest
+        : undefined;
+    const declaresNativeBinary =
+      isRecord(nativeManifest) && isRecord(nativeManifest.bin);
+    if (currentPackage.role !== "cli-tool" && !declaresNativeBinary) continue;
+    await readPackageManifest(currentPackage.packageDefinitionId);
+  }
+  for (const packageId of linkedProviderIds) {
+    const provider = currentById.get(packageId);
+    const providerManifest = await readPackageManifest(packageId);
+    const exports = isRecord(providerManifest.exports)
+      ? providerManifest.exports
+      : {};
+    const rootExport = exports["."];
+    for (const target of packageExportSourceTargetValues(rootExport)) {
+      await readPackageExportTarget(provider?.path ?? ".", target);
+    }
+  }
+
   const linkFromPaths: string[] = [];
   const addLinkFrom = (value: unknown): void => {
     if (value === undefined) return;
@@ -245,26 +409,9 @@ async function additionFacts(
     }
     const current = await readTargetManifest(packagePath);
     targetManifests.set(consumer.packageDefinitionId, current.value);
-    if (!currentFactPaths.has(current.fact.path)) {
-      currentFacts.push(current.fact);
-      currentFactPaths.add(current.fact.path);
-    }
+    addCurrentFact(current.fact);
   }
 
-  const contentByIdentity = new Map(
-    content
-      .filter((member) => member.kind === "reference")
-      .map((member) => [contentIdentityKey(member.identity), member]),
-  );
-  const currentById = new Map(
-    options.restored.blueprint.packages.map((pkg) => [
-      pkg.packageDefinitionId,
-      pkg,
-    ]),
-  );
-  const restoredById = new Map(
-    options.restored.packages.map((pkg) => [pkg.packageDefinitionId, pkg]),
-  );
   for (const consumer of options.restored.packages) {
     const member = contentByIdentity.get(
       contentIdentityKey(consumer.contentIdentity),
@@ -287,10 +434,7 @@ async function additionFacts(
         const current = await readTargetManifest(provider.path);
         providerManifest = current.value;
         targetManifests.set(provider.packageDefinitionId, providerManifest);
-        if (!currentFactPaths.has(current.fact.path)) {
-          currentFacts.push(current.fact);
-          currentFactPaths.add(current.fact.path);
-        }
+        addCurrentFact(current.fact);
       }
       if (providerManifest.name !== provider.name) {
         throw new Error(
@@ -337,29 +481,7 @@ async function additionFacts(
             `复用包 ${provider.path} 的公开入口路径无效：${actual}`,
           );
         }
-        const target = path.posix.join(
-          provider.path === "." ? "" : provider.path,
-          actual.slice(2),
-        );
-        if (currentFactPaths.has(target)) continue;
-        const targetAbsolutePath = path.join(
-          repositoryRoot,
-          ...target.split("/"),
-        );
-        const targetStat = await lstat(targetAbsolutePath);
-        if (!targetStat.isFile()) {
-          throw new Error(
-            `复用包 ${provider.path} 的公开文件不可读取：${actual}`,
-          );
-        }
-        const targetBytes = new Uint8Array(await readFile(targetAbsolutePath));
-        currentFacts.push({
-          path: target,
-          kind: "file",
-          content: targetBytes,
-          mode: targetStat.mode & 0o111,
-        });
-        currentFactPaths.add(target);
+        await readPackageExportTarget(provider.path, actual);
       }
     }
   }
@@ -398,14 +520,75 @@ async function additionFacts(
     selections: options.restored.selections,
     packages: options.restored.packages,
   });
+  const readPreparedLinkFacts = async (creationInputs: readonly unknown[]) => {
+    const factCount = currentFacts.length;
+    const selectedProviderIds = new Set<
+      GeneratorRestoredProject<JsonValue>["blueprint"]["packages"][number]["packageDefinitionId"]
+    >();
+    for (const creationInput of creationInputs) {
+      if (!isRecord(creationInput) || !isRecord(creationInput.linkTo)) {
+        continue;
+      }
+      const linkTo = creationInput.linkTo;
+      const keys = Object.keys(linkTo);
+      if (
+        keys.length !== 1 ||
+        !["nodeIdentity", "packageDefinitionId"].includes(keys[0]!)
+      ) {
+        continue;
+      }
+      if (typeof linkTo.packageDefinitionId === "string") {
+        const providerId =
+          linkTo.packageDefinitionId as GeneratorRestoredProject<JsonValue>["blueprint"]["packages"][number]["packageDefinitionId"];
+        if (currentById.has(providerId)) selectedProviderIds.add(providerId);
+        continue;
+      }
+      if (typeof linkTo.nodeIdentity !== "string") continue;
+      const nodeIdentity = linkTo.nodeIdentity;
+      const providerIds = new Set(
+        options.restored.selections.flatMap((selection) =>
+          Object.hasOwn(selection.nodes, nodeIdentity)
+            ? [selection.nodes[nodeIdentity]!]
+            : [],
+        ),
+      );
+      if (providerIds.size === 1) {
+        const providerId = providerIds.values().next().value;
+        if (providerId !== undefined && currentById.has(providerId)) {
+          selectedProviderIds.add(providerId);
+        }
+      }
+    }
+    for (const providerId of selectedProviderIds) {
+      const provider = currentById.get(providerId)!;
+      const providerManifest = await readPackageManifest(providerId);
+      const exports = isRecord(providerManifest.exports)
+        ? providerManifest.exports
+        : {};
+      for (const target of packageExportSourceTargetValues(exports["."])) {
+        await readPackageExportTarget(provider.path, target);
+      }
+    }
+    return {
+      targetManifests: new Map(targetManifests),
+      readFacts: currentFacts.slice(factCount),
+    };
+  };
   return {
     operationFacts: {
       ...baseFacts,
       nodeDeclaration,
       packageManagerPin,
       targetManifests,
+      existingPackageDefinitionIds: new Set(
+        options.restored.blueprint.packages.map(
+          ({ packageDefinitionId }) => packageDefinitionId,
+        ),
+      ),
+      existingPackageLinkIntents: options.restored.blueprint.packageLinkIntents,
     },
     readFacts: [...currentFacts, ...baseFacts.presetRootContributionReadFacts],
+    readPreparedLinkFacts,
   };
 }
 
@@ -452,7 +635,9 @@ export function createDefaultGenerator<
     "operationFacts"
   >;
 
-  async function prepareAddition(prepareOptions: PrepareAddOptions) {
+  async function prepareAddition(
+    prepareOptions: PrepareAddOptions,
+  ): Promise<Awaited<ReturnType<typeof generator.prepareAddProject>>> {
     const prepared = await additionFacts(
       prepareOptions.restored.targetRoot,
       options.content,
@@ -465,9 +650,35 @@ export function createDefaultGenerator<
       ...prepareOptions,
       operationFacts: prepared.operationFacts,
     });
+    const previousSelectionIds = new Set(
+      preparation.before.selections.flatMap((selection) =>
+        selection.selectionId === undefined ? [] : [selection.selectionId],
+      ),
+    );
+    const addedCreationInputs = preparation.after.selections
+      .filter(
+        (selection) =>
+          selection.selectionId === undefined ||
+          !previousSelectionIds.has(selection.selectionId),
+      )
+      .flatMap((selection) =>
+        selection.roots.map((root) => root.creationInput),
+      );
+    const linkedFacts =
+      await prepared.readPreparedLinkFacts(addedCreationInputs);
+    const operationFacts = {
+      ...prepared.operationFacts,
+      targetManifests: linkedFacts.targetManifests,
+    };
     return {
       ...preparation,
-      readFacts: [...preparation.readFacts, ...prepared.readFacts],
+      before: { ...preparation.before, operationFacts },
+      after: { ...preparation.after, operationFacts },
+      readFacts: [
+        ...preparation.readFacts,
+        ...prepared.readFacts,
+        ...linkedFacts.readFacts,
+      ],
     };
   }
 

@@ -172,6 +172,9 @@ export type DefaultOperationFacts = {
   readonly resources: DefaultCompositionResources;
   readonly rootDeclarations: readonly DefaultRootDeclaration[];
   readonly rootAttachmentDependencies: readonly DefaultRootAttachmentDependencyFact[];
+  /** 现存创建输入中的一次性连接已由蓝图固定为实例ID。 */
+  readonly existingPackageDefinitionIds: ReadonlySet<PackageDefinitionId>;
+  readonly existingPackageLinkIntents: readonly PackageLinkIntent[];
   readonly presetRootContributions: readonly PreparedDefaultPresetRootContribution[];
   readonly presetRootContributionReadFacts: readonly CurrentProjectProjectionEntry[];
   /** 本次add明确连接端点读取到的当前manifest；键为恢复后的实例ID。 */
@@ -188,6 +191,7 @@ export type DefaultStableCommon = {
   readonly rootDeclarations: readonly DefaultRootDeclaration[];
   readonly rootAttachmentIdentities: readonly ContentIdentity[];
   readonly presetRootContributions: readonly PreparedDefaultPresetRootContribution[];
+  readonly existingPackageDefinitionIds: ReadonlySet<PackageDefinitionId>;
   readonly targetManifests: ReadonlyMap<
     PackageDefinitionId,
     Readonly<Record<string, unknown>>
@@ -393,6 +397,8 @@ export function prepareDefaultInitOperationFacts(
     resources: options.resources ?? prepareDefaultCompositionResources(),
     rootDeclarations: options.rootDeclarations ?? [],
     rootAttachmentDependencies: options.rootAttachmentDependencies ?? [],
+    existingPackageDefinitionIds: new Set<PackageDefinitionId>(),
+    existingPackageLinkIntents: [],
     presetRootContributions: options.presetRootContributions ?? [],
     presetRootContributionReadFacts:
       options.presetRootContributionReadFacts ?? [],
@@ -504,6 +510,8 @@ function validateDefaultFacts(
     value.packageManagerPin.trim().length === 0 ||
     !Array.isArray(value.rootDeclarations) ||
     !Array.isArray(value.rootAttachmentDependencies) ||
+    !(value.existingPackageDefinitionIds instanceof Set) ||
+    !Array.isArray(value.existingPackageLinkIntents) ||
     !Array.isArray(value.presetRootContributions) ||
     !Array.isArray(value.presetRootContributionReadFacts) ||
     !isRecord(value.resources)
@@ -581,6 +589,9 @@ function prepareSelectedRootAttachmentIdentities(options: {
 function packageLinks(options: {
   readonly packages: readonly CompositionPackage<JsonValue>[];
   readonly content: readonly DefaultContentMember[];
+  readonly selections: readonly GenerationRecordSelection[];
+  readonly existingPackageDefinitionIds: ReadonlySet<PackageDefinitionId>;
+  readonly existingPackageLinkIntents: readonly PackageLinkIntent[];
 }): readonly PackageLinkIntent[] {
   const seen = new Set<string>();
   const links: PackageLinkIntent[] = [];
@@ -592,6 +603,14 @@ function packageLinks(options: {
       .filter((member) => member.kind === "reference")
       .map((member) => [contentIdentityKey(member.identity), member]),
   );
+  const packagesByNodeIdentity = new Map<string, Set<PackageDefinitionId>>();
+  for (const selection of options.selections) {
+    for (const [nodeIdentity, packageId] of Object.entries(selection.nodes)) {
+      const packageIds = packagesByNodeIdentity.get(nodeIdentity) ?? new Set();
+      packageIds.add(packageId);
+      packagesByNodeIdentity.set(nodeIdentity, packageIds);
+    }
+  }
   const add = (
     consumerId: PackageDefinitionId,
     providerId: PackageDefinitionId,
@@ -602,6 +621,9 @@ function packageLinks(options: {
     seen.add(identity);
     links.push({ consumerId, providerId });
   };
+  for (const intent of options.existingPackageLinkIntents) {
+    add(intent.consumerId, intent.providerId);
+  }
 
   for (const consumer of options.packages) {
     const consumerMember = contentByIdentity.get(
@@ -639,7 +661,70 @@ function packageLinks(options: {
     }
 
     const creationInput = consumer.creationInput;
-    if (!isRecord(creationInput) || creationInput.linkFrom === undefined) {
+    const isExistingPackage = options.existingPackageDefinitionIds.has(
+      consumer.packageDefinitionId,
+    );
+    if (!isExistingPackage && isRecord(creationInput)) {
+      const linkTo = creationInput.linkTo;
+      if (linkTo !== undefined) {
+        if (!isRecord(linkTo)) {
+          throw new Error("包连接目标必须是节点身份或现存实例ID");
+        }
+        const targetKeys = Object.keys(linkTo);
+        if (
+          targetKeys.length !== 1 ||
+          !["nodeIdentity", "packageDefinitionId"].includes(targetKeys[0]!)
+        ) {
+          throw new Error("包连接目标必须且只能指定一种身份");
+        }
+        const nodeIdentity = linkTo.nodeIdentity;
+        const packageDefinitionId = linkTo.packageDefinitionId;
+        let providerId: PackageDefinitionId | undefined;
+        if (typeof nodeIdentity === "string") {
+          if (nodeIdentity.length === 0) {
+            throw new Error("包连接请求需要非空节点身份");
+          }
+          const candidates = packagesByNodeIdentity.get(nodeIdentity);
+          if (candidates === undefined || candidates.size === 0) {
+            throw new Error(`包连接节点身份不存在：${nodeIdentity}`);
+          }
+          if (candidates.size > 1) {
+            throw new Error(`包连接节点身份不唯一：${nodeIdentity}`);
+          }
+          providerId = candidates.values().next().value;
+        } else if (typeof packageDefinitionId === "string") {
+          if (packageDefinitionId.length === 0) {
+            throw new Error("包连接请求需要非空实例ID");
+          }
+          if (
+            !options.existingPackageDefinitionIds.has(
+              packageDefinitionId as PackageDefinitionId,
+            )
+          ) {
+            throw new Error(`包连接实例ID不存在：${packageDefinitionId}`);
+          }
+          providerId = packageDefinitionId as PackageDefinitionId;
+        }
+        if (providerId === undefined || !packagesById.has(providerId)) {
+          const identity =
+            typeof nodeIdentity === "string"
+              ? nodeIdentity
+              : typeof packageDefinitionId === "string"
+                ? packageDefinitionId
+                : "实例ID";
+          throw new Error(`包连接目标没有当前实例：${identity}`);
+        }
+        if (providerId === consumer.packageDefinitionId) {
+          throw new Error("包连接请求不能连接自身");
+        }
+        add(consumer.packageDefinitionId, providerId);
+      }
+    }
+    if (
+      isExistingPackage ||
+      !isRecord(creationInput) ||
+      creationInput.linkFrom === undefined
+    ) {
       continue;
     }
     if (
@@ -727,6 +812,7 @@ function requestsInjectedProvider(
 function linkedManifestOverrides(options: {
   readonly packages: readonly DefaultEvaluation[];
   readonly intents: readonly PackageLinkIntent[];
+  readonly existingPackageDefinitionIds: DefaultStableCommon["existingPackageDefinitionIds"];
   readonly targetManifests: DefaultStableCommon["targetManifests"];
 }): ReadonlyMap<PackageDefinitionId, Readonly<Record<string, unknown>>> {
   const byId = new Map(
@@ -737,10 +823,10 @@ function linkedManifestOverrides(options: {
   const getOverride = (item: DefaultEvaluation): Record<string, unknown> => {
     const existing = overrides.get(item.package.packageDefinitionId);
     if (existing !== undefined) return existing;
-    const next = structuredClone(item.contribution.facts.manifest) as Record<
-      string,
-      unknown
-    >;
+    const next = structuredClone(
+      options.targetManifests.get(item.package.packageDefinitionId) ??
+        item.contribution.facts.manifest,
+    ) as Record<string, unknown>;
     overrides.set(item.package.packageDefinitionId, next);
     return next;
   };
@@ -753,10 +839,30 @@ function linkedManifestOverrides(options: {
     }
     const consumerSource = consumer.contribution.facts.manifest;
     const providerSource = provider.contribution.facts.manifest;
-    const consumerCurrent =
-      options.targetManifests.get(intent.consumerId) ?? consumerSource;
-    const providerCurrent =
-      options.targetManifests.get(intent.providerId) ?? providerSource;
+    const currentManifest = (
+      item: DefaultEvaluation,
+      id: PackageDefinitionId,
+      source: Readonly<Record<string, unknown>>,
+    ): Readonly<Record<string, unknown>> => {
+      const current = options.targetManifests.get(id);
+      if (current !== undefined) return current;
+      if (options.existingPackageDefinitionIds.has(id)) {
+        throw new Error(
+          `包连接缺少当前manifest事实：${item.package.definition.path}`,
+        );
+      }
+      return source;
+    };
+    const consumerCurrent = currentManifest(
+      consumer,
+      intent.consumerId,
+      consumerSource,
+    );
+    const providerCurrent = currentManifest(
+      provider,
+      intent.providerId,
+      providerSource,
+    );
     for (const [item, manifest] of [
       [consumer, consumerCurrent],
       [provider, providerCurrent],
@@ -848,6 +954,33 @@ function linkedManifestOverrides(options: {
     }
   }
   return overrides;
+}
+
+function assertUniqueWorkspaceBinaryNames(options: {
+  readonly packages: readonly DefaultEvaluation[];
+  readonly targetManifests: DefaultStableCommon["targetManifests"];
+  readonly manifestOverrides: ReadonlyMap<
+    PackageDefinitionId,
+    Readonly<Record<string, unknown>>
+  >;
+}): void {
+  const owners = new Map<string, string>();
+  for (const { package: item, contribution } of options.packages) {
+    const manifest =
+      options.manifestOverrides.get(item.packageDefinitionId) ??
+      options.targetManifests.get(item.packageDefinitionId) ??
+      contribution.facts.manifest;
+    if (!isRecord(manifest.bin)) continue;
+    for (const commandName of Object.keys(manifest.bin)) {
+      const previousOwner = owners.get(commandName);
+      if (previousOwner !== undefined) {
+        throw new Error(
+          `CLI命令名称 ${JSON.stringify(commandName)} 重复：${previousOwner} 与 ${item.definition.name}`,
+        );
+      }
+      owners.set(commandName, item.definition.name);
+    }
+  }
 }
 
 function mergeEntries<T>(options: {
@@ -1150,12 +1283,19 @@ export function createDefaultComposition(options: {
           rootAttachmentIdentities,
           presetRootContributions:
             resolveOptions.operationFacts.presetRootContributions,
+          existingPackageDefinitionIds:
+            resolveOptions.operationFacts.existingPackageDefinitionIds,
           targetManifests: resolveOptions.operationFacts.targetManifests,
         }),
         packageInputs: new Map(),
         packageLinkIntents: packageLinks({
           packages: resolveOptions.packages,
           content: options.content,
+          selections: resolveOptions.selections,
+          existingPackageDefinitionIds:
+            resolveOptions.operationFacts.existingPackageDefinitionIds,
+          existingPackageLinkIntents:
+            resolveOptions.operationFacts.existingPackageLinkIntents,
         }),
       };
     },
@@ -1185,7 +1325,14 @@ export function createDefaultComposition(options: {
       const manifestOverrides = linkedManifestOverrides({
         packages: combineOptions.packages,
         intents: combineOptions.blueprint.packageLinkIntents,
+        existingPackageDefinitionIds:
+          combineOptions.stableCommon.existingPackageDefinitionIds,
         targetManifests: combineOptions.stableCommon.targetManifests,
+      });
+      assertUniqueWorkspaceBinaryNames({
+        packages: combineOptions.packages,
+        targetManifests: combineOptions.stableCommon.targetManifests,
+        manifestOverrides,
       });
       const requiredTemplateDependencies = new Set(
         allFacts.flatMap((facts) =>

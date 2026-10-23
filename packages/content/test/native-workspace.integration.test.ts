@@ -30,6 +30,10 @@ const content = await loadContentSource({
       load: () => import("@ykdz/reference-workspace-root/template"),
     },
     {
+      specifier: "@ykdz/reference-ts-cli/template",
+      load: () => import("@ykdz/reference-ts-cli/template"),
+    },
+    {
       specifier: "@ykdz/reference-ts-lib/template",
       load: () => import("@ykdz/reference-ts-lib/template"),
     },
@@ -42,21 +46,31 @@ const content = await loadContentSource({
       load: () => import("@ykdz/reference-npm-publication/template"),
     },
     {
+      specifier: "@ykdz/preset-ts-cli/template",
+      load: () => import("@ykdz/preset-ts-cli/template"),
+    },
+    {
       specifier: "@ykdz/preset-ts-lib/template",
       load: () => import("@ykdz/preset-ts-lib/template"),
     },
   ],
 });
-const preset = content.find(
+const libraryPreset = content.find(
   (member) =>
     member.kind === "preset" &&
     member.identity.packageName === "@ykdz/preset-ts-lib",
 );
-assert.ok(preset);
+const cliPreset = content.find(
+  (member) =>
+    member.kind === "preset" &&
+    member.identity.packageName === "@ykdz/preset-ts-cli",
+);
+assert.ok(libraryPreset);
+assert.ok(cliPreset);
 
 await it(
-  "通过正式归档安装默认SDK，在普通Node进程中初始化并新进程连续加包",
-  { timeout: 300_000 },
+  "通过正式归档安装默认SDK，在普通Node进程中初始化库并新进程添加CLI",
+  { timeout: 600_000 },
   async () => {
     const temporaryRoot = await mkdtemp(
       path.join(tmpdir(), "native-workspace-consumer-"),
@@ -74,6 +88,7 @@ await it(
           "run",
           "build:template",
           "--filter=@ykdz/preset-ts-lib",
+          "--filter=@ykdz/preset-ts-cli",
           "--force",
         ],
         { cwd: workspaceRoot },
@@ -92,7 +107,7 @@ await it(
       );
       prepared = await prepareContentCollection({
         content,
-        roots: [preset],
+        roots: [libraryPreset, cliPreset],
         workspaceRoot,
         root: preparedRoot,
       });
@@ -103,6 +118,8 @@ await it(
           .toSorted(),
         [
           "@ykdz/preset-ts-lib",
+          "@ykdz/preset-ts-cli",
+          "@ykdz/reference-ts-cli",
           "@ykdz/reference-npm-publication",
           "@ykdz/reference-ts-lib",
           "@ykdz/reference-tooling-config",
@@ -130,16 +147,18 @@ await it(
       await writeFile(
         driverPath,
         [
-          'import { readFile, writeFile } from "node:fs/promises";',
           'import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";',
           'import { templateContent } from "@ykdz/template-content";',
           "const [phase, targetRoot] = process.argv.slice(2);",
-          'const preset = templateContent.find((member) => member.kind === "preset" && member.identity.packageName === "@ykdz/preset-ts-lib");',
-          "if (!preset) throw new Error('已安装集合缺少ts-lib预设');",
+          'const libraryPreset = templateContent.find((member) => member.kind === "preset" && member.identity.packageName === "@ykdz/preset-ts-lib");',
+          'const cliPreset = templateContent.find((member) => member.kind === "preset" && member.identity.packageName === "@ykdz/preset-ts-cli");',
+          "if (!libraryPreset || !cliPreset) throw new Error('已安装集合缺少ts-lib或ts-cli预设');",
           "const generator = createDefaultGenerator({ content: templateContent });",
           "const result = phase === 'init'",
-          "  ? await generator.init({ targetRoot, selection: { presets: [{ contentIdentity: preset.identity }] }, conventions: { repositoryName: 'packed-native-demo', defaultPackageScope: 'demo' } })",
-          "  : await generator.add({ repositoryRoot: targetRoot, preset: preset.identity, creationInput: { leafName: 'next', linkFrom: ['packages/lib'] } });",
+          "  ? await generator.init({ targetRoot, selection: { presets: [{ contentIdentity: libraryPreset.identity }] }, conventions: { repositoryName: 'packed-native-demo', defaultPackageScope: 'demo' } })",
+          "  : phase === 'add-cli'",
+          "    ? await generator.add({ repositoryRoot: targetRoot, preset: cliPreset.identity, creationInput: { linkTo: { nodeIdentity: 'library' } } })",
+          "    : await generator.add({ repositoryRoot: targetRoot, preset: libraryPreset.identity, creationInput: { leafName: 'next', linkFrom: ['packages/lib'] } });",
           "if (result.status !== 'success') throw new Error(JSON.stringify(result));",
           "console.log(JSON.stringify({ packagePaths: result.blueprint.packages.map(({ path }) => path).toSorted(), status: result.status }));",
           "",
@@ -189,10 +208,66 @@ await it(
       await readFile(
         path.join(targetRoot, "packages/tooling-config/tsconfig.json"),
       );
+
+      const addedCli = await execa(
+        process.execPath,
+        [driverPath, "add-cli", targetRoot],
+        { cwd: consumerRoot },
+      );
+      assert.deepEqual(JSON.parse(addedCli.stdout), {
+        packagePaths: [
+          ".",
+          "packages/cli",
+          "packages/lib",
+          "packages/tooling-config",
+        ],
+        status: "success",
+      });
+      const cliManifest = JSON.parse(
+        await readFile(
+          path.join(targetRoot, "packages/cli/package.json"),
+          "utf8",
+        ),
+      ) as {
+        readonly bin: Readonly<Record<string, string>>;
+        readonly dependencies: Readonly<Record<string, string>>;
+      };
+      assert.deepEqual(cliManifest.bin, { cli: "./dist/cli.js" });
+      assert.equal(cliManifest.dependencies["@demo/lib"], "workspace:*");
+
+      await writeFile(
+        path.join(targetRoot, "packages/cli/src/linked-library.ts"),
+        [
+          'import { greet } from "@demo/lib";',
+          "",
+          'console.log(greet("Ada").message);',
+          "",
+        ].join("\n"),
+      );
       await execa("pnpm", ["install"], { cwd: targetRoot });
       await execa("pnpm", ["exec", "turbo", "run", "build", "--force"], {
         cwd: targetRoot,
       });
+      assert.equal(
+        await execa(
+          process.execPath,
+          [
+            "packages/cli/dist/cli.js",
+            "lookup",
+            "ada",
+            "--output-format",
+            "text",
+          ],
+          { cwd: targetRoot },
+        ).then(({ stdout }) => stdout),
+        "找到记录：Ada Lovelace（ada）",
+      );
+      assert.equal(
+        await execa(process.execPath, ["dist/linked-library.js"], {
+          cwd: path.join(targetRoot, "packages/cli"),
+        }).then(({ stdout }) => stdout),
+        "Hello, Ada",
+      );
 
       const packedLibraryRoot = path.join(targetRoot, "packages/lib");
       await execa("pnpm", ["pack", "--pack-destination", temporaryRoot], {
@@ -234,6 +309,7 @@ await it(
       assert.deepEqual(JSON.parse(added.stdout), {
         packagePaths: [
           ".",
+          "packages/cli",
           "packages/lib",
           "packages/next",
           "packages/tooling-config",
@@ -273,10 +349,18 @@ await it(
       const libraryTypecheck = tasks.find(
         ({ taskId }) => taskId === "@demo/lib#typecheck",
       );
+      const cliBuild = tasks.find(({ taskId }) => taskId === "@demo/cli#build");
+      const cliTypecheck = tasks.find(
+        ({ taskId }) => taskId === "@demo/cli#typecheck",
+      );
       assert.ok(libraryBuild);
       assert.ok(libraryTypecheck);
+      assert.ok(cliBuild);
+      assert.ok(cliTypecheck);
       assert.ok(libraryBuild.dependencies.includes("@demo/next#build"));
       assert.ok(libraryTypecheck.dependencies.includes("@demo/next#typecheck"));
+      assert.ok(cliBuild.dependencies.includes("@demo/lib#build"));
+      assert.ok(cliTypecheck.dependencies.includes("@demo/lib#typecheck"));
       assert.ok(
         tasks.some(({ taskId }) => taskId === "@demo/tooling-config#build"),
       );
