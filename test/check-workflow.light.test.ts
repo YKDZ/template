@@ -336,7 +336,9 @@ void describe("Fixture Verification Evidence check workflow", () => {
     assert.strictEqual(packageCheck?.env, undefined);
     assert.strictEqual(
       check.steps.every((step) =>
-        Object.keys(step.env ?? {}).every((name) => !name.startsWith("TURBO_")),
+        Object.keys(step.env ?? {}).every(
+          (name) => name === "TURBO_CONCURRENCY" || !name.startsWith("TURBO_"),
+        ),
       ),
       true,
     );
@@ -346,6 +348,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
       assert.deepStrictEqual(
         check.steps.find((step) => step.run === command)?.env,
         {
+          TURBO_CONCURRENCY: "1",
           TEMPLATE_FIXTURE_TURBO_TEAM: "${{ vars.TURBO_TEAM }}",
           TEMPLATE_FIXTURE_TURBO_TOKEN: `${trustedCacheCredential}TURBO_TOKEN || '' }}`,
           TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY: `${trustedCacheCredential}TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}`,
