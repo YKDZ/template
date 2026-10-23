@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
-import { inspectTaskGate } from "@ykdz/template-workspace/task-gates";
+import { inspectTaskGate } from "@ykdz/reference-workspace-root/task-gates";
 import { execa } from "execa";
 import { parse } from "yaml";
 
@@ -167,7 +167,7 @@ void describe("Template Repository native task model", () => {
     const configBuild = buildTasks.get("@ykdz/reference-tooling-config#build");
     assert.ok(configBuild);
     assert.equal(configBuild.command, "<NONEXISTENT>");
-    assert.deepEqual(configBuild.resolvedTaskDefinition.dependsOn, ["^build"]);
+    assert.deepEqual(configBuild.resolvedTaskDefinition.dependsOn, []);
     assert.deepEqual(
       nativeTaskByName(directory).get("@ykdz/reference-tooling-config#build")
         ?.tags,
@@ -177,8 +177,9 @@ void describe("Template Repository native task model", () => {
       [
         "@ykdz/template#build",
         [
+          "@ykdz/reference-tooling-config#build",
+          "@ykdz/template-content#build",
           "@ykdz/template-core#build",
-          "@ykdz/template-environment#build",
           "@ykdz/template-workspace#build",
         ],
       ],
@@ -192,6 +193,7 @@ void describe("Template Repository native task model", () => {
           "@ykdz/template-generator#build",
           "@ykdz/template-workspace#build",
           "@ykdz/template-workspace-authoring#build",
+          "@ykdz/reference-workspace-root#build",
         ],
       ],
     ] as const)
@@ -202,7 +204,7 @@ void describe("Template Repository native task model", () => {
         );
     assert.deepEqual(
       buildTasks.get("@ykdz/template-core#build")?.dependencies,
-      ["@ykdz/reference-tooling-config#build"],
+      [],
     );
   });
 

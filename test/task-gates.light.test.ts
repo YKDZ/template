@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { execa } from "execa";
 
 const taskGatesPath = fileURLToPath(
-  import.meta.resolve("@ykdz/template-workspace/task-gates"),
+  import.meta.resolve("@ykdz/reference-workspace-root/task-gates"),
 );
 const turboExecutablePath = fileURLToPath(import.meta.resolve("turbo"));
 const gateEntries = [

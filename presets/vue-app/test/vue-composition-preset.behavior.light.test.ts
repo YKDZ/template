@@ -185,7 +185,7 @@ void describe("Vue 独立组合预设公开行为", () => {
     });
     assert.strictEqual(
       appManifest.devDependencies["@demo/tooling-config"],
-      "workspace:../../packages/tooling-config",
+      "workspace:*",
     );
     assert.strictEqual(
       (await stat(path.join(targetRoot, "apps/web/src/main.ts"))).mode & 0o777,
@@ -243,7 +243,7 @@ void describe("Vue 独立组合预设公开行为", () => {
       assert.strictEqual(addedManifest.name, `@demo/${leafName}`);
       assert.strictEqual(
         addedManifest.devDependencies["@demo/tooling-config"],
-        "workspace:../../packages/tooling-config",
+        "workspace:*",
       );
       assert.strictEqual(
         (await stat(path.join(targetRoot, `apps/${leafName}/src/main.ts`)))

@@ -45,6 +45,7 @@
     "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/reference-ts-lib": "workspace:*",
+    "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",
