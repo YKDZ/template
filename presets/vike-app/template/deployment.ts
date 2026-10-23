@@ -157,7 +157,7 @@ function requiredTaskScripts(options: {
     { definition: options.migrations, names: ["db:push", "typecheck"] },
     {
       definition: options.application,
-      names: ["build", "dev", "typecheck", "test:e2e"],
+      names: ["build", "browser:prepare", "dev", "typecheck", "test:e2e"],
     },
   ];
 }
@@ -317,6 +317,7 @@ function deploymentTask(
     cache: false,
     dependsOn: [
       `${application.name}#build`,
+      `${application.name}#browser:prepare`,
       `${database.name}#build`,
       `${migrations.name}#build`,
     ],

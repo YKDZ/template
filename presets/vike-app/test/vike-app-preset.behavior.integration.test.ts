@@ -74,6 +74,14 @@ void describe("Vike 应用公开预设安装行为", () => {
           cancelSignal: testContext.signal,
         });
       }
+      await execa(
+        "pnpm",
+        ["--filter", "./apps/web", "run", "browser:prepare"],
+        {
+          cwd: targetRoot,
+          cancelSignal: testContext.signal,
+        },
+      );
       await execa("pnpm", ["run", "deployment"], {
         cwd: targetRoot,
         cancelSignal: testContext.signal,
