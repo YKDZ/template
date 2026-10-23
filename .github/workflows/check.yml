@@ -126,10 +126,15 @@ jobs:
         if: always() && steps.package-check.outcome == 'success'
         run: node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy
         env:
+          TURBO_CONCURRENCY: "1"
           TEMPLATE_FIXTURE_TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TEMPLATE_FIXTURE_TURBO_TOKEN: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_TOKEN || '' }}
           TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
           TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref) && 'false' || 'true' }}
+
+      - name: 显示失败时的内核资源诊断
+        if: failure()
+        run: sudo dmesg --level=err,warn --time-format=iso | tail -n 80
 
       - name: Check Fixture Evidence Health
         id: fixture-evidence-health
