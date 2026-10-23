@@ -15,6 +15,8 @@ export const referencePackage = defineReferencePackage({
   resources: [
     { path: "base.json" },
     { path: "node.json" },
+    { path: "tsconfig.json" },
+    { path: "turbo.json" },
     { path: "oxlint.config.ts" },
     { path: "oxfmt.config.ts" },
   ],

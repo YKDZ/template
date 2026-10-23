@@ -64,6 +64,11 @@ const configuration = content.find(
     member.kind === "reference" &&
     member.identity.packageName === "@ykdz/reference-tooling-config",
 );
+const publication = content.find(
+  (member) =>
+    member.kind === "reference" &&
+    member.identity.packageName === "@ykdz/reference-npm-publication",
+);
 const preset = content.find(
   (member) =>
     member.kind === "preset" &&
@@ -72,6 +77,7 @@ const preset = content.find(
 assert.ok(root);
 assert.ok(library);
 assert.ok(configuration);
+assert.ok(publication);
 assert.ok(preset);
 
 async function snapshotTree(root: string): Promise<string> {
@@ -344,7 +350,7 @@ void describe("TypeScript 库公开预设", () => {
       operations: presetDefinition.operations,
       nodes: {
         library: {
-          reference: library.definition,
+          reference: libraryDefinition,
           layout: { packageDirectory: "modules" },
           creationInput: {
             init: { leafName: "archive" },
@@ -360,7 +366,7 @@ void describe("TypeScript 库公开预设", () => {
     });
     const targetRoot = await createTemporaryRoot("template-ts-lib-layout-");
     const generator = createDefaultGenerator({
-      content: [root, library, configuration, layoutPresetMember],
+      content: [root, library, configuration, publication, layoutPresetMember],
     });
     const initialized = await generator.init({
       targetRoot,
@@ -438,7 +444,7 @@ void describe("TypeScript 库公开预设", () => {
   void it("缺少原生共享依赖或新增路径冲突时保持目标不变", async () => {
     const missingTarget = await createTemporaryRoot("template-ts-lib-missing-");
     const missingGenerator = createDefaultGenerator({
-      content: [root, library, preset],
+      content: [root, library, publication, preset],
     });
     const missing = await missingGenerator.init({
       targetRoot: missingTarget,
