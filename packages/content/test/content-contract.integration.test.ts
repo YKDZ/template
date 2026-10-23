@@ -318,13 +318,43 @@ async function writeRuntimeDriver(consumerRoot: string): Promise<string> {
   await writeFile(
     driverPath,
     [
-      'import { runContentContractInitialization } from "./content-public-contract.mts";',
-      "const result = await runContentContractInitialization(process.argv[2]);",
+      'import { runContentContractAddition, runContentContractInitialization } from "./content-public-contract.mts";',
+      "const [phase, targetRoot] = process.argv.slice(2);",
+      'const result = phase === "init" ? await runContentContractInitialization(targetRoot) : await runContentContractAddition(targetRoot);',
       "process.stdout.write(JSON.stringify(result));",
       "",
     ].join("\n"),
   );
   return driverPath;
+}
+
+async function runRuntimeDriver(
+  driverPath: string,
+  consumerRoot: string,
+  phase: "init" | "add",
+  targetRoot: string,
+  options: {
+    readonly sourceConditions?: boolean;
+    readonly unprivileged?: boolean;
+  } = {},
+): Promise<unknown> {
+  const result = await execa(
+    process.execPath,
+    [
+      "--no-global-search-paths",
+      "--experimental-strip-types",
+      ...(options.sourceConditions ? ["--conditions=source"] : []),
+      driverPath,
+      phase,
+      targetRoot,
+    ],
+    {
+      cwd: consumerRoot,
+      ...(options.unprivileged ? unprivilegedProcessOptions : {}),
+      env: { ...process.env, NODE_OPTIONS: "", NODE_PATH: "" },
+    },
+  );
+  return JSON.parse(result.stdout);
 }
 
 void it("同一份严格TypeScript消费代码通过源码和正式安装制品", async () => {
@@ -339,6 +369,14 @@ void it("同一份严格TypeScript消费代码通过源码和正式安装制品"
   const installedConsumerRoot = path.join(root, "installed-consumer");
   const sourceTargetRoot = path.join(root, "source-target");
   const installedTargetRoot = path.join(root, "installed-target");
+  const installedConflictTargetRoot = path.join(
+    root,
+    "installed-conflict-target",
+  );
+  const installedOldFormatTargetRoot = path.join(
+    root,
+    "installed-old-format-target",
+  );
   try {
     await mkdir(ownersRoot, { recursive: true });
     await writeFile(
@@ -415,21 +453,14 @@ void it("同一份严格TypeScript消费代码通过源码和正式安装制品"
     await typecheckConsumer(sourceConsumerRoot);
 
     const sourceDriverPath = await writeRuntimeDriver(sourceConsumerRoot);
-    const sourceRun = await execa(
-      process.execPath,
-      [
-        "--no-global-search-paths",
-        "--experimental-strip-types",
-        "--conditions=source",
-        sourceDriverPath,
-        sourceTargetRoot,
-      ],
-      {
-        cwd: sourceConsumerRoot,
-        env: { ...process.env, NODE_OPTIONS: "", NODE_PATH: "" },
-      },
+    const sourceRun = await runRuntimeDriver(
+      sourceDriverPath,
+      sourceConsumerRoot,
+      "init",
+      sourceTargetRoot,
+      { sourceConditions: true },
     );
-    assert.deepEqual(JSON.parse(sourceRun.stdout), {
+    assert.deepEqual(sourceRun, {
       packagePaths: ["packages/contract-starter"],
       ownerPackageCount: 1,
       plannedOwnerCount: 1,
@@ -495,6 +526,47 @@ void it("同一份严格TypeScript消费代码通过源码和正式安装制品"
         },
       ],
     );
+    const referenceArchives = prepared.owners.filter(
+      ({ member }) => member.kind === "reference",
+    );
+    assert.equal(referenceArchives.length, 2);
+    const archiveEvidence = referenceArchives.map(({ member, packed }) => {
+      assert.match(packed.sha256, /^[0-9a-f]{64}$/u);
+      assert.equal(
+        packed.provider?.identity.namespace,
+        member.identity.namespace,
+      );
+      return {
+        namespace: member.identity.namespace,
+        name: packed.name,
+        version: packed.version,
+        sha256: packed.sha256,
+      };
+    });
+    assert.deepEqual(
+      archiveEvidence.map(({ namespace, name, version }) => ({
+        namespace,
+        name,
+        version,
+      })),
+      [
+        {
+          namespace: "alpha",
+          name: "@fixture/content-contract-reference",
+          version: "1.0.0",
+        },
+        {
+          namespace: "beta",
+          name: "@fixture/content-contract-reference",
+          version: "2.0.0",
+        },
+      ],
+    );
+    assert.notEqual(archiveEvidence[0]?.sha256, archiveEvidence[1]?.sha256);
+    assert.equal(prepared.providers.length, 2);
+    assert.equal(new Set(prepared.providers.map(({ name }) => name)).size, 2);
+    assert.equal(prepared.collection.name, collectionName);
+    assert.match(prepared.collection.sha256, /^[0-9a-f]{64}$/u);
     await installContentCollection(prepared, installedConsumerRoot);
 
     const requiredSdkArchives = [
@@ -527,21 +599,19 @@ void it("同一份严格TypeScript消费代码通过源码和正式安装制品"
     await chmod(root, 0o777);
     await chmod(ownersRoot, 0);
     try {
-      const installedRun = await execa(
-        process.execPath,
-        [
-          "--no-global-search-paths",
-          "--experimental-strip-types",
+      const runInstalled = (
+        phase: "init" | "add",
+        targetRoot: string,
+      ): Promise<unknown> =>
+        runRuntimeDriver(
           installedDriverPath,
-          installedTargetRoot,
-        ],
-        {
-          cwd: installedConsumerRoot,
-          ...unprivilegedProcessOptions,
-          env: { ...process.env, NODE_OPTIONS: "", NODE_PATH: "" },
-        },
-      );
-      assert.deepEqual(JSON.parse(installedRun.stdout), {
+          installedConsumerRoot,
+          phase,
+          targetRoot,
+          { unprivileged: true },
+        );
+      const installedRun = await runInstalled("init", installedTargetRoot);
+      assert.deepEqual(installedRun, {
         packagePaths: ["packages/contract-starter"],
         ownerPackageCount: 1,
         plannedOwnerCount: 1,
@@ -558,6 +628,152 @@ void it("同一份严格TypeScript消费代码通过源码和正式安装制品"
           },
         ],
       });
+
+      const installedAddition = await runInstalled("add", installedTargetRoot);
+      assert.deepEqual(installedAddition, {
+        status: "success",
+        packagePaths: ["packages/contract-starter", "packages/contract-added"],
+        packageCount: 2,
+        ownerPackageCount: 2,
+        additions: [
+          {
+            path: "packages/contract-added",
+            namespace: "alpha",
+            packageName: "@fixture/content-contract-reference",
+            creationInput: { projectName: "contract-added" },
+          },
+        ],
+        references: [
+          {
+            namespace: "alpha",
+            packageName: "@fixture/content-contract-reference",
+            revision: "reference-extension-v1",
+          },
+          {
+            namespace: "beta",
+            packageName: "@fixture/content-contract-reference",
+            revision: "reference-extension-v2",
+          },
+        ],
+      });
+      const installedRecord = JSON.parse(
+        await readFile(
+          path.join(installedTargetRoot, ".template/generation.json"),
+          "utf8",
+        ),
+      ) as {
+        readonly schemaVersion: number;
+        readonly packages: readonly {
+          readonly createdBy: string;
+          readonly contentIdentity: {
+            readonly namespace: string;
+            readonly packageName: string;
+          };
+          readonly creationInput: unknown;
+        }[];
+      };
+      assert.equal(installedRecord.schemaVersion, 6);
+      assert.deepEqual(
+        installedRecord.packages.map(
+          ({ createdBy, contentIdentity, creationInput }) => ({
+            createdBy,
+            namespace: contentIdentity.namespace,
+            packageName: contentIdentity.packageName,
+            creationInput,
+          }),
+        ),
+        [
+          {
+            createdBy: "initialization",
+            namespace: "alpha",
+            packageName: "@fixture/content-contract-reference",
+            creationInput: { projectName: "contract-starter" },
+          },
+          {
+            createdBy: "addition",
+            namespace: "alpha",
+            packageName: "@fixture/content-contract-reference",
+            creationInput: { projectName: "contract-added" },
+          },
+        ],
+      );
+      assert.equal(
+        await readFile(
+          path.join(installedTargetRoot, "packages/contract-added/README.md"),
+          "utf8",
+        ),
+        "由中立参考包拥有的资源字节。\n\nneutral\nprovider-v3\ncontract-added\npackages/contract-added",
+      );
+
+      await runInstalled("init", installedConflictTargetRoot);
+      const conflictingPath = path.join(
+        installedConflictTargetRoot,
+        "packages/contract-added",
+      );
+      await mkdir(conflictingPath, { recursive: true });
+      await writeFile(path.join(conflictingPath, "keep.txt"), "用户文件\n");
+      const conflictRecordPath = path.join(
+        installedConflictTargetRoot,
+        ".template/generation.json",
+      );
+      const conflictRecordBefore = await readFile(conflictRecordPath);
+      const conflictRun = await runInstalled(
+        "add",
+        installedConflictTargetRoot,
+      );
+      assert.deepEqual(conflictRun, {
+        status: "conflict",
+        conflictCount: 1,
+        actions: [],
+      });
+      assert.deepEqual(
+        await readFile(conflictRecordPath),
+        conflictRecordBefore,
+      );
+      assert.equal(
+        await readFile(path.join(conflictingPath, "keep.txt"), "utf8"),
+        "用户文件\n",
+      );
+      await assert.rejects(readFile(path.join(conflictingPath, "README.md")), {
+        code: "ENOENT",
+      });
+
+      await runInstalled("init", installedOldFormatTargetRoot);
+      const oldFormatRecordPath = path.join(
+        installedOldFormatTargetRoot,
+        ".template/generation.json",
+      );
+      const oldRecord = JSON.parse(
+        await readFile(oldFormatRecordPath, "utf8"),
+      ) as { schemaVersion: number };
+      oldRecord.schemaVersion = 5;
+      await writeFile(oldFormatRecordPath, JSON.stringify(oldRecord));
+      const oldRecordBefore = await readFile(oldFormatRecordPath);
+      const oldIndexBefore = await readFile(
+        path.join(
+          installedOldFormatTargetRoot,
+          "packages/contract-starter/README.md",
+        ),
+      );
+      const oldFormatRun = await runInstalled(
+        "add",
+        installedOldFormatTargetRoot,
+      );
+      assert.deepEqual(oldFormatRun, {
+        status: "operation-failure",
+        phase: "metadata",
+        error: "不支持的生成记录 schema 5；当前只支持 schema6",
+      });
+      assert.deepEqual(await readFile(oldFormatRecordPath), oldRecordBefore);
+      assert.deepEqual(
+        await readFile(
+          path.join(
+            installedOldFormatTargetRoot,
+            "packages/contract-starter/README.md",
+          ),
+        ),
+        oldIndexBefore,
+      );
     } finally {
       await chmod(ownersRoot, 0o755);
       await chmod(root, 0o755);

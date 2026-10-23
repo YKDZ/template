@@ -105,6 +105,19 @@ function proveNegativeTypes(): void {
       operation: "initialization",
     },
   });
+  void generator.add({
+    repositoryRoot: "/tmp/content-contract",
+    contentIdentity: requiredReference.identity,
+    creationInput: {
+      // @ts-expect-error 原生 add 入口沿用所选参考包的创建输入。
+      projectName: 7,
+    },
+    operationFacts: {
+      providerVersion: "provider-v2",
+      // @ts-expect-error add 只接受已声明的操作类别。
+      operation: "update",
+    },
+  });
 }
 
 type Conventions = { readonly policy: "neutral" };
@@ -236,5 +249,56 @@ export async function runContentContractInitialization(targetRoot: string) {
       packageName: identity.packageName,
       revision: definition.authorExtension.marker,
     })),
+  };
+}
+
+export async function runContentContractAddition(targetRoot: string) {
+  const result = await generator.add({
+    repositoryRoot: targetRoot,
+    contentIdentity: requiredReference.identity,
+    creationInput: { projectName: "contract-added" },
+    operationFacts: {
+      providerVersion: "provider-v3",
+      operation: "addition",
+    },
+  });
+  if (result.status === "success") {
+    const packagePaths = new Map(
+      result.blueprint.packages.map(({ packageDefinitionId, path }) => [
+        packageDefinitionId,
+        path,
+      ]),
+    );
+    return {
+      status: result.status,
+      packagePaths: result.blueprint.packages.map(({ path }) => path),
+      packageCount: result.generationRecord.packages.length,
+      ownerPackageCount: result.ownerFacts.packageCount,
+      additions: result.generationRecord.packages
+        .filter(({ createdBy }) => createdBy === "addition")
+        .map(({ packageDefinitionId, contentIdentity, creationInput }) => ({
+          path: packagePaths.get(packageDefinitionId),
+          namespace: contentIdentity.namespace,
+          packageName: contentIdentity.packageName,
+          creationInput,
+        })),
+      references: derived.referencePackages.map(({ identity, definition }) => ({
+        namespace: identity.namespace,
+        packageName: identity.packageName,
+        revision: definition.authorExtension.marker,
+      })),
+    };
+  }
+  if (result.status === "conflict") {
+    return {
+      status: result.status,
+      conflictCount: result.conflicts.length,
+      actions: result.actions,
+    };
+  }
+  return {
+    status: result.status,
+    phase: result.phase,
+    error: result.error.message,
   };
 }
