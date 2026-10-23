@@ -723,6 +723,11 @@ function composeVikeDeploymentContribution(options: {
       }),
     }),
     turboTasks: Object.freeze({
+      "//#dev": {
+        cache: false,
+        persistent: true,
+        tags: ["work:development"],
+      },
       "//#database:prepare:dev": { cache: false, tags: ["work:preparation"] },
       "//#database:prepare:e2e": { cache: false, tags: ["work:preparation"] },
       "//#database:prepare:test": { cache: false, tags: ["work:preparation"] },

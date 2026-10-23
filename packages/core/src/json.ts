@@ -71,10 +71,84 @@ function sortJson(value: JsonValue): JsonValue {
   );
 }
 
+const canonicalJsonPrintWidth = 80;
+
+function isScalarJsonValue(value: JsonValue): boolean {
+  return (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "number" ||
+    typeof value === "string"
+  );
+}
+
+function stringifyJsonValue(value: JsonValue): string {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new Error("JSON 输出无法序列化");
+  }
+  return serialized;
+}
+
+function formatCanonicalJsonValue(
+  value: JsonValue,
+  indentation: number,
+  currentColumn = indentation,
+  trailingComma = false,
+): string {
+  if (Array.isArray(value)) {
+    if (value.every(isScalarJsonValue)) {
+      const compact = `[${value.map(stringifyJsonValue).join(", ")}]`;
+      if (
+        currentColumn + compact.length + (trailingComma ? 1 : 0) <=
+        canonicalJsonPrintWidth
+      ) {
+        return compact;
+      }
+    }
+    return (
+      "[\n" +
+      value
+        .map(
+          (item, index) =>
+            `${" ".repeat(indentation + 2)}${formatCanonicalJsonValue(
+              item,
+              indentation + 2,
+              indentation + 2,
+              index < value.length - 1,
+            )}`,
+        )
+        .join(",\n") +
+      `\n${" ".repeat(indentation)}]`
+    );
+  }
+  if (!isRecord(value)) return stringifyJsonValue(value);
+
+  const entries = Object.entries(value).toSorted(([left], [right]) =>
+    compareStrings(left, right),
+  );
+  if (entries.length === 0) return "{}";
+  return (
+    "{\n" +
+    entries
+      .map(
+        ([key, entry], index) =>
+          `${" ".repeat(indentation + 2)}${JSON.stringify(key)}: ${formatCanonicalJsonValue(
+            entry as JsonValue,
+            indentation + 2,
+            indentation + 2 + JSON.stringify(key).length + 2,
+            index < entries.length - 1,
+          )}`,
+      )
+      .join(",\n") +
+    `\n${" ".repeat(indentation)}}`
+  );
+}
+
 /** 稳定打印 JSON，供元数据作为普通文件进入期望文件树。 */
 export function printCanonicalJson(value: JsonValue): Uint8Array {
   assertJsonValue(value, "JSON 输出");
   return new TextEncoder().encode(
-    `${JSON.stringify(sortJson(value), null, 2)}\n`,
+    `${formatCanonicalJsonValue(sortJson(value), 0)}\n`,
   );
 }
