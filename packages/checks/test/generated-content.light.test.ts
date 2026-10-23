@@ -52,9 +52,9 @@ void describe("唯一内容集合的真实生成检查场景", () => {
         }
         assert.strictEqual(
           receipt.initialization.generationRecord.schemaVersion,
-          4,
+          5,
         );
-        assert.strictEqual(receipt.result.generationRecord.schemaVersion, 4);
+        assert.strictEqual(receipt.result.generationRecord.schemaVersion, 5);
         await validateGeneratedScenarioReceipt({
           receipt,
           runtime: sourceGeneratedScenarioRuntime,
@@ -68,7 +68,7 @@ void describe("唯一内容集合的真实生成检查场景", () => {
             "utf8",
           ),
         ) as { readonly schemaVersion: number };
-        assert.strictEqual(persistedRecord.schemaVersion, 4);
+        assert.strictEqual(persistedRecord.schemaVersion, 5);
         if (scenario.addition !== undefined) {
           const addition = receipt.result.generationRecord.packages.find(
             (record) => record.createdBy === "addition",

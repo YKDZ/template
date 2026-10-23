@@ -109,7 +109,7 @@ async function readGenerationRecordToolchain(project: string) {
       readonly toolchain: { readonly nodeLtsMajor: string };
     };
   };
-  assert.equal(record.schemaVersion, 4);
+  assert.equal(record.schemaVersion, 5);
   return record.strategyState.toolchain;
 }
 
@@ -938,7 +938,7 @@ const journey: CliJourney = {
       const generationRecord = JSON.parse(
         await readFile(path.join(project, ".template/generation.json"), "utf8"),
       );
-      assert.equal(generationRecord.schemaVersion, 4);
+      assert.equal(generationRecord.schemaVersion, 5);
       assert.ok(
         generationRecord.packages.some(
           (record: { readonly packageDefinitionId: string }) =>

@@ -11,9 +11,9 @@ import type {
   PackageCreationInput,
 } from "./workspace-strategy.ts";
 
-/** schema4 只保存后续操作所需的事实；蓝图仍是包定义的唯一来源。 */
+/** schema5 只保存后续操作所需的事实；蓝图仍是包定义的唯一来源。 */
 export const generationRecordSchema = v.strictObject({
-  schemaVersion: v.literal(4),
+  schemaVersion: v.literal(5),
   strategyIdentity: v.pipe(v.string(), v.minLength(1)),
   strategyState: v.unknown(),
   packages: v.array(
@@ -29,7 +29,6 @@ export const generationRecordSchema = v.strictObject({
         v.regex(/^package-[a-f0-9]{64}$/),
       ),
       creationInput: v.nullable(v.unknown()),
-      configuration: v.nullable(v.unknown()),
       bindings: v.record(v.string(), v.string()),
     }),
   ),
@@ -41,27 +40,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** 按公开 schema4 结构解析；策略状态由 workspace owner 继续校验。 */
+/** 按公开 schema5 结构解析；策略状态由 workspace owner 继续校验。 */
 export function parseGenerationRecordStructure<
   CreationInput extends PackageCreationInput = PackageCreationInput,
 >(value: unknown): GenerationRecord<CreationInput> {
-  if (isRecord(value) && value.schemaVersion !== 4) {
+  if (isRecord(value) && value.schemaVersion !== 5) {
     throw new Error(
-      `不支持的生成记录 schema ${String(value.schemaVersion)}；当前只支持 schema4`,
+      `不支持的生成记录 schema ${String(value.schemaVersion)}；当前只支持 schema5`,
     );
-  }
-  if (
-    isRecord(value) &&
-    Array.isArray(value.packages) &&
-    value.packages.some(
-      (entry) => isRecord(entry) && !Object.hasOwn(entry, "configuration"),
-    )
-  ) {
-    throw new Error("生成记录不符合 schema4 结构：缺少实例现行配置");
   }
   const parsed = v.safeParse(generationRecordSchema, value);
   if (!parsed.success) {
-    throw new Error("生成记录不符合 schema4 结构");
+    throw new Error("生成记录不符合 schema5 结构");
   }
   return parsed.output as GenerationRecord<CreationInput>;
 }

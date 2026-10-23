@@ -68,7 +68,6 @@ type PackageNode<
   readonly nodeIdentity?: string;
   readonly createdBy: GeneratorPackageRecord["createdBy"];
   readonly creationInput?: CreationInput;
-  readonly configuration: unknown;
   readonly providers: Map<
     string,
     PackageNode<Context, Contribution, CreationInput, Content>
@@ -162,17 +161,10 @@ export type Generator<
     readonly strategyInput: Input;
     readonly dryRun?: boolean;
   }): Promise<GeneratorResult<CreationInput, OwnerFacts>>;
-  configure(options: {
-    readonly repositoryRoot: string;
-    readonly packageDefinitionId: PackageDefinitionId;
-    readonly configuration: unknown;
-    readonly dryRun?: boolean;
-  }): Promise<GeneratorResult<CreationInput, OwnerFacts>>;
   add(
     options: {
       readonly repositoryRoot: string;
       readonly creationInput?: CreationInput;
-      readonly configuration?: unknown;
       readonly dryRun?: boolean;
     } & (
       | { readonly contentIdentity: ContentSelector }
@@ -211,7 +203,6 @@ type GeneratorSelectionInput<
             PresetProjectContribution
           >;
       readonly creationInput?: CreationInput;
-      readonly configuration?: unknown;
     };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -350,7 +341,7 @@ export function parseGenerationRecord<
   }
   const presetSelections = parsePresetSelections(record.presetSelections);
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     strategyIdentity: record.strategyIdentity,
     strategyState: record.strategyState,
     packages: record.packages,
@@ -491,18 +482,13 @@ export function createGenerator<
     readonly preset: LoadedPreset;
     readonly operation: "init" | "add";
     readonly creationInput?: CreationInput;
-    readonly configuration?: unknown;
   }): GeneratorSelectionRoot<CreationInput, NodeLayout>[] {
     const preset = options_.preset.definition;
     if (!preset.operations.includes(options_.operation)) {
       throw new Error(`预设不支持${options_.operation}操作`);
     }
     const nodes = Object.entries(preset.nodes);
-    if (
-      (options_.creationInput !== undefined ||
-        options_.configuration !== undefined) &&
-      nodes.length !== 1
-    ) {
+    if (options_.creationInput !== undefined && nodes.length !== 1) {
       throw new Error("多节点预设不能接收单一包创建输入");
     }
     return nodes.map(([nodeIdentity, node]) => {
@@ -520,10 +506,6 @@ export function createGenerator<
         contentIdentity: reference.identity,
         ...(node.layout === undefined ? {} : { layout: node.layout }),
         ...(creationInput === undefined ? {} : { creationInput }),
-        configuration:
-          options_.configuration === undefined
-            ? node.configuration?.[options_.operation]
-            : options_.configuration,
       };
     });
   }
@@ -539,16 +521,6 @@ export function createGenerator<
       throw new Error("生成记录引用了不存在的包实例：" + id);
     }
     return record;
-  }
-
-  function normalizeConfiguration(content: Content, input: unknown): unknown {
-    if (content.definition.normalizeConfiguration !== undefined)
-      return content.definition.normalizeConfiguration(input) ?? null;
-    if (input !== undefined && input !== null)
-      throw new Error(
-        `内容 ${contentIdentityLabel(content.identity)} 不支持实例配置`,
-      );
-    return null;
   }
 
   function resolvePackageStates(
@@ -583,12 +555,6 @@ export function createGenerator<
           `蓝图缺少内容 ${contentIdentityLabel(record.contentIdentity)} 对应的包实例：${record.packageDefinitionId}`,
         );
       }
-      const configuration = normalizeConfiguration(
-        requireContent(record.contentIdentity),
-        record.configuration,
-      );
-      if (!isDeepStrictEqual(configuration, record.configuration))
-        throw new Error(`生成记录包含未规范化的实例配置：${definition.path}`);
       return { ...record, definition };
     });
   }
@@ -607,7 +573,6 @@ export function createGenerator<
         options.strategy.dependencies({
           content,
           contentByIdentity,
-          configuration: record.configuration,
           ...(record.creationInput === null
             ? {}
             : { creationInput: record.creationInput }),
@@ -704,7 +669,6 @@ export function createGenerator<
         content: requireContent(record.contentIdentity),
         definition: record.definition,
         createdBy: record.createdBy,
-        configuration: record.configuration,
         preparation: preparations.get(
           requireContent(record.contentIdentity).definition,
         ),
@@ -749,7 +713,6 @@ export function createGenerator<
     });
     const contributionOptions = {
       context,
-      configuration: node.configuration,
       definition: node.definition,
       bindings: nativeBindings,
       createdBy: node.createdBy,
@@ -795,7 +758,7 @@ export function createGenerator<
     presetSelections: readonly ContentIdentity[],
   ): GeneratorRecord<CreationInput> {
     return {
-      schemaVersion: 4,
+      schemaVersion: 5,
       strategyIdentity: options.strategy.identity,
       strategyState: state,
       packages: records.map(({ definition: _definition, ...record }) => record),
@@ -981,7 +944,6 @@ export function createGenerator<
       const dependencies = options.strategy.dependencies({
         content: node.content,
         contentByIdentity,
-        configuration: node.configuration,
         ...(node.creationInput === undefined
           ? {}
           : { creationInput: node.creationInput }),
@@ -1031,7 +993,6 @@ export function createGenerator<
             content: dependency,
             definition,
             createdBy: "shared-dependency",
-            configuration: normalizeConfiguration(dependency, undefined),
             providers: new Map(),
           };
           newNodes.set(dependencyKey + "\u0000" + definition.path, provider);
@@ -1089,7 +1050,6 @@ export function createGenerator<
         createdBy: node.createdBy,
         packageDefinitionId: persisted.packageDefinitionId,
         creationInput: node.creationInput ?? null,
-        configuration: node.configuration,
         bindings: {},
       };
     }
@@ -1150,7 +1110,6 @@ export function createGenerator<
           ? expandPreset({
               preset: resolvePreset(root.preset),
               operation: "init",
-              configuration: root.configuration,
               ...(root.creationInput === undefined
                 ? {}
                 : { creationInput: root.creationInput }),
@@ -1202,7 +1161,6 @@ export function createGenerator<
           definition,
           nodeIdentity: root.nodeIdentity,
           createdBy: "initialization" as const,
-          configuration: normalizeConfiguration(content, root.configuration),
           ...(root.creationInput === undefined
             ? {}
             : { creationInput: root.creationInput }),
@@ -1308,7 +1266,6 @@ export function createGenerator<
     addOptions: {
       readonly repositoryRoot: string;
       readonly creationInput?: CreationInput;
-      readonly configuration?: unknown;
       readonly dryRun?: boolean;
     } & (
       | { readonly contentIdentity: ContentSelector }
@@ -1364,7 +1321,6 @@ export function createGenerator<
           ? expandPreset({
               preset: resolvePreset(addOptions.preset),
               operation: "add",
-              configuration: addOptions.configuration,
               ...(addOptions.creationInput === undefined
                 ? {}
                 : { creationInput: addOptions.creationInput }),
@@ -1372,7 +1328,6 @@ export function createGenerator<
           : [
               {
                 nodeIdentity: "addition",
-                configuration: addOptions.configuration,
                 contentIdentity: addOptions.contentIdentity,
                 ...(addOptions.creationInput === undefined
                   ? {}
@@ -1388,10 +1343,6 @@ export function createGenerator<
       }
       const selected = requireContent(selectionRoot.contentIdentity);
       const creationInput = selectionRoot.creationInput;
-      const configuration = normalizeConfiguration(
-        selected,
-        selectionRoot.configuration,
-      );
       const addedPresetMember =
         "preset" in addOptions ? resolvePreset(addOptions.preset) : undefined;
       const addedPreset =
@@ -1419,7 +1370,6 @@ export function createGenerator<
           state,
           content: selected,
           contentByIdentity,
-          configuration,
           packages: packageStates,
           nodeInstances: currentNodeInstances,
           ...(creationInput === undefined ? {} : { creationInput }),
@@ -1451,7 +1401,6 @@ export function createGenerator<
         content: selected,
         definition,
         createdBy: "addition",
-        configuration,
         ...(addedProjectPreset !== undefined
           ? { nodeIdentity: selectionRoot.nodeIdentity }
           : {}),
@@ -1610,7 +1559,6 @@ export function createGenerator<
             contentIdentityKey(selected.identity) &&
           prior.definition.name === definition.name &&
           prior.definition.path === definition.path &&
-          isDeepStrictEqual(prior.configuration, configuration) &&
           isDeepStrictEqual(
             prior.creationInput ?? undefined,
             selectionRoot.creationInput,
@@ -1754,182 +1702,5 @@ export function createGenerator<
     }
   }
 
-  async function configure(configureOptions: {
-    readonly repositoryRoot: string;
-    readonly packageDefinitionId: PackageDefinitionId;
-    readonly configuration: unknown;
-    readonly dryRun?: boolean;
-  }): Promise<GeneratorResult<CreationInput, OwnerFacts>> {
-    const repositoryRoot = path.resolve(configureOptions.repositoryRoot);
-    let restored: Awaited<ReturnType<typeof restoreRepository>>;
-    try {
-      restored = await restoreRepository(repositoryRoot);
-    } catch (error) {
-      return fail("metadata", error, options.strategy.diagnoseFailure?.(error));
-    }
-    const { blueprint, record, state, packageStates } = restored;
-    const target = packageStates.find(
-      (item) =>
-        item.packageDefinitionId === configureOptions.packageDefinitionId,
-    );
-    if (target === undefined)
-      return {
-        status: "input-invalid",
-        issues: [{ code: "UNKNOWN_GENERATED_INSTANCE" }],
-      };
-    try {
-      for (const item of packageStates)
-        prepareContent(requireContent(item.contentIdentity));
-      validateRequiredBindings(packageStates);
-    } catch (error) {
-      return fail("metadata", error, options.strategy.diagnoseFailure?.(error));
-    }
-    let phase: "planning" | "reconciliation" = "planning";
-    try {
-      const selected = requireContent(target.contentIdentity);
-      const configuration = normalizeConfiguration(
-        selected,
-        configureOptions.configuration,
-      );
-      if (isDeepStrictEqual(target.configuration, configuration)) {
-        return {
-          status: "success",
-          dryRun: configureOptions.dryRun ?? false,
-          blueprint,
-          generationRecord: record,
-          projection: null,
-          actions: [],
-        };
-      }
-      const currentNodeInstances = resolveNodeInstances(
-        packageStates,
-        record.nodeInstances,
-      );
-      const context = await options.strategy.prepareUpdate({
-        targetRoot: repositoryRoot,
-        state,
-        content: selected,
-        contentByIdentity,
-        configuration,
-        packages: packageStates,
-        nodeInstances: currentNodeInstances,
-        ...(target.creationInput === null
-          ? {}
-          : { creationInput: target.creationInput }),
-      });
-      const beforeNodes = nodesFromRecords(packageStates);
-      const beforeContributions = persistedContributions(
-        beforeNodes,
-        context,
-        packageStates,
-        currentNodeInstances,
-      );
-      await validatePresetUpdate(
-        repositoryRoot,
-        context,
-        beforeContributions,
-        currentNodeInstances,
-        record.presetSelections,
-      );
-      const before = project(
-        context,
-        state,
-        blueprint,
-        packageStates,
-        beforeContributions,
-        record.nodeInstances,
-        record.presetSelections,
-      );
-      const afterNodes = nodesFromRecords(
-        packageStates.map((item) =>
-          item.packageDefinitionId === target.packageDefinitionId
-            ? { ...item, configuration }
-            : item,
-        ),
-      );
-      const changed = afterNodes.find(
-        (node) =>
-          node.record?.packageDefinitionId === target.packageDefinitionId,
-      )!;
-      const additions = expandDependencies({
-        roots: [changed],
-        existing: afterNodes,
-        context,
-        occupiedIds: new Set(
-          record.packages.map((item) => item.packageDefinitionId),
-        ),
-      });
-      const allNodes = [...afterNodes, ...additions];
-      const afterBlueprint = assertProjectBlueprint({
-        ...blueprint,
-        packages: [
-          ...blueprint.packages,
-          ...additions.map((node) => node.definition),
-        ],
-      });
-      const afterPackages = resolvePackageStates(
-        allNodes.map((node) => node.record!),
-        afterBlueprint,
-      );
-      validateRequiredBindings(afterPackages);
-      const afterNodeInstances = resolveNodeInstances(
-        afterPackages,
-        record.nodeInstances,
-      );
-      const after = project(
-        context,
-        state,
-        afterBlueprint,
-        afterPackages,
-        persistedContributions(
-          allNodes,
-          context,
-          afterPackages,
-          afterNodeInstances,
-        ),
-        record.nodeInstances,
-        record.presetSelections,
-      );
-      phase = "reconciliation";
-      const reconciliation = await reconcileAndApplyProjectProjections({
-        targetRoot: repositoryRoot,
-        before: {
-          operations: before.operations,
-          reconciliation: before.reconciliation,
-        },
-        after: {
-          operations: after.operations,
-          reconciliation: after.reconciliation,
-        },
-        preconditions: additions.map((node) => ({
-          path: node.definition.path,
-          kind: "must-not-exist",
-          reason: "新共享依赖路径已存在：" + node.definition.path,
-        })),
-        ...(configureOptions.dryRun === undefined
-          ? {}
-          : { dryRun: configureOptions.dryRun }),
-      });
-      if (!reconciliation.ok)
-        return {
-          status: "conflict",
-          dryRun: configureOptions.dryRun ?? false,
-          reason: "目标工作区的现行内容与配置投影发生冲突。",
-          conflicts: reconciliation.conflicts,
-          actions: [],
-        };
-      return {
-        status: "success",
-        dryRun: configureOptions.dryRun ?? false,
-        blueprint: after.blueprint,
-        generationRecord: after.generationRecord,
-        projection: after,
-        actions: reconciliation.actions,
-      };
-    } catch (error) {
-      return fail(phase, error, options.strategy.diagnoseFailure?.(error));
-    }
-  }
-
-  return { init, add, configure };
+  return { init, add };
 }

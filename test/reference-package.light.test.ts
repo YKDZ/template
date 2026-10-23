@@ -493,7 +493,7 @@ await test("模板执行数据必须来自所属准备资源且诊断保留owner
   );
 });
 
-await test("实例条件依赖与原生清单投影共用有效目标集合，静态分发用途仍完整", async (context) => {
+await test("创建输入条件依赖与原生清单投影共用有效目标集合，静态分发用途仍完整", async (context) => {
   const setup = await fixture(
     context,
     { "src/index.ts": "export {};\n" },
@@ -501,19 +501,9 @@ await test("实例条件依赖与原生清单投影共用有效目标集合，�
   );
   const reference = defineReferencePackage({
     ...setup.options,
-    normalizeConfiguration(input) {
-      if (input === undefined) return { includeTool: false };
-      if (
-        typeof input !== "object" ||
-        input === null ||
-        !("includeTool" in input) ||
-        typeof input.includeTool !== "boolean"
-      )
-        throw new Error("无效的工具配置");
-      return { includeTool: input.includeTool };
-    },
-    targetDependencies: ({ configuration, dependencies }) =>
-      (configuration as { includeTool: boolean }).includeTool
+    targetDependencies: ({ creationInput, dependencies }) =>
+      (creationInput?.variant as { includeTool?: boolean } | undefined)
+        ?.includeTool
         ? dependencies
         : [],
   });
@@ -527,23 +517,27 @@ await test("实例条件依赖与原生清单投影共用有效目标集合，�
   const disabled = reference.contribute({
     ...setup.input,
     bindings,
-    configuration: { includeTool: false },
+    creationInput: { variant: { includeTool: false } },
   });
   assert.deepEqual(disabled.manifest.devDependencies, {});
   const enabled = reference.contribute({
     ...setup.input,
     bindings,
-    configuration: { includeTool: true },
+    creationInput: { variant: { includeTool: true } },
   });
   assert.deepEqual(enabled.manifest.devDependencies, {
     "@consumer/tool": "workspace:*",
   });
   assert.deepEqual(
-    reference.targetDependencyNames({ configuration: { includeTool: false } }),
+    reference.targetDependencyNames({
+      creationInput: { variant: { includeTool: false } },
+    }),
     [],
   );
   assert.deepEqual(
-    reference.targetDependencyNames({ configuration: { includeTool: true } }),
+    reference.targetDependencyNames({
+      creationInput: { variant: { includeTool: true } },
+    }),
     ["@author/tool"],
   );
   assert.deepEqual(

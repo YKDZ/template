@@ -42,7 +42,7 @@ export function presetByAlias(alias: string): CliPreset | undefined {
   return presetIndex.resolve(alias, "preset");
 }
 
-/** 沿实际选中包的目标依赖图取得配置拥有者公开的默认身份。 */
+/** 从预设依赖图取得工具配置参考内容公开的默认身份。 */
 export function workspaceConfigurationIdentityForPreset(
   preset: CliPreset,
   scope: string,
@@ -51,7 +51,6 @@ export function workspaceConfigurationIdentityForPreset(
     ([nodeIdentity, node]): GeneratorSelectionRoot => ({
       nodeIdentity,
       ...(node.layout === undefined ? {} : { layout: node.layout }),
-      configuration: node.configuration?.init,
       ...(node.creationInput?.init === undefined
         ? {}
         : { creationInput: node.creationInput.init }),

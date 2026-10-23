@@ -87,7 +87,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       assert.equal(initialized.status, "success");
       if (initialized.status !== "success") return;
       const presetIdentity = identityFor(fixture, "@fixture/preset");
-      assert.equal(initialized.generationRecord.schemaVersion, 4);
+      assert.equal(initialized.generationRecord.schemaVersion, 5);
       assert.deepEqual(initialized.generationRecord.presetSelections, [
         presetIdentity,
       ]);

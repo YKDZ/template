@@ -90,7 +90,6 @@ export type ReferenceContributionOptions<
   CreationInput extends PackageCreationInput = PackageCreationInput,
 > = {
   readonly context: GenerationContext;
-  readonly configuration?: unknown;
   readonly definition: PackageDefinition;
   readonly bindings?: ReadonlyMap<string, PackageDefinition>;
   /** 公开生成器传入的持久创建语义。 */
@@ -129,7 +128,7 @@ export type ReferencePackage<
     readonly path: string;
     readonly role: DefaultPackageRole;
   };
-  /** 实际配置拥有者标记的有限工作区配置能力。 */
+  /** 工具配置参考内容标记的有限工作区能力。 */
   readonly workspaceConfiguration?: {
     readonly kind: "typescript-workspace-configuration";
   };
@@ -139,9 +138,7 @@ export type ReferencePackage<
   readonly templateDependencies: readonly ReferenceTemplateDependency[];
   /** prepare 后可供策略和贡献共同消费的用途归一化事实。 */
   readonly dependencyUses: readonly ReferenceDependencyUse[];
-  normalizeConfiguration?(input: unknown): unknown;
   targetDependencyNames(options: {
-    readonly configuration: unknown;
     readonly creationInput?: CreationInput;
   }): readonly string[];
   prepare(): ReferencePackagePreparation<OwnerFacts>;
@@ -269,10 +266,8 @@ export function defineReferencePackage<
     readonly executionData?: readonly string[];
   };
   readonly prepare?: (options: ReferencePackagePreparationInput) => OwnerFacts;
-  readonly normalizeConfiguration?: (input: unknown) => unknown;
-  /** 仅从原生声明的目标依赖全集中按实例配置选择。 */
+  /** 仅从原生声明的目标依赖全集中按创建输入选择。 */
   readonly targetDependencies?: (options: {
-    readonly configuration: unknown;
     readonly creationInput?: CreationInput;
     readonly dependencies: readonly string[];
   }) => readonly string[];
@@ -332,7 +327,6 @@ export function defineReferencePackage<
     return normalizedDependencyUses;
   };
   const targetDependencyNames = (input: {
-    readonly configuration: unknown;
     readonly creationInput?: CreationInput;
   }): readonly string[] => {
     const dependencies = dependencyUses()
@@ -606,9 +600,6 @@ export function defineReferencePackage<
     get dependencyUses() {
       return dependencyUses();
     },
-    ...(options.normalizeConfiguration === undefined
-      ? {}
-      : { normalizeConfiguration: options.normalizeConfiguration }),
     targetDependencyNames,
     prepare,
     prepareArtifact() {
@@ -657,15 +648,11 @@ export function defineReferencePackage<
       const manifest = prepared.manifest;
       const bindings = input.bindings ?? new Map<string, PackageDefinition>();
       const targetDependencies = new Set(
-        targetDependencyNames({
-          configuration:
-            input.configuration ??
-            options.normalizeConfiguration?.(undefined) ??
-            null,
-          ...(input.creationInput === undefined
+        targetDependencyNames(
+          input.creationInput === undefined
             ? {}
-            : { creationInput: input.creationInput }),
-        }),
+            : { creationInput: input.creationInput },
+        ),
       );
       const names = new Map(
         [...bindings].map(([name, definition]) => [name, definition.name]),
