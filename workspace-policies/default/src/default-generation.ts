@@ -683,6 +683,41 @@ export function createDefaultGenerator<
           readonly rootToolchainIssue?: RootToolchainDeclarationIssue;
         };
       });
+  type PreparedInitializationFacts =
+    | {
+        readonly kind: "ready";
+        readonly operationFacts: DefaultOperationFacts;
+      }
+    | {
+        readonly kind: "failure";
+        readonly failure: Extract<
+          Awaited<ReturnType<typeof generator.planInit>>,
+          { readonly status: "operation-failure" }
+        >;
+      };
+
+  async function prepareInitializationFacts(
+    selectedPresets: readonly ContentSelector[] | undefined,
+  ): Promise<PreparedInitializationFacts> {
+    try {
+      return {
+        kind: "ready" as const,
+        operationFacts: await initOperationFacts(
+          options.content,
+          selectedPresets,
+        ),
+      };
+    } catch (error) {
+      return {
+        kind: "failure" as const,
+        failure: {
+          status: "operation-failure" as const,
+          phase: "preparation" as const,
+          error: { message: errorMessage(error) },
+        },
+      };
+    }
+  }
 
   async function prepareAddition(
     prepareOptions: PrepareAddOptions,
@@ -883,25 +918,27 @@ export function createDefaultGenerator<
   return {
     ...generator,
     async init(initOptions: InitOptions) {
+      const prepared = await prepareInitializationFacts(
+        initOptions.selection.presets?.map(
+          ({ contentIdentity }) => contentIdentity,
+        ),
+      );
+      if (prepared.kind === "failure") return prepared.failure;
       return generator.init({
         ...initOptions,
-        operationFacts: await initOperationFacts(
-          options.content,
-          initOptions.selection.presets?.map(
-            ({ contentIdentity }) => contentIdentity,
-          ),
-        ),
+        operationFacts: prepared.operationFacts,
       });
     },
     async planInit(planOptions: PlanInitOptions) {
+      const prepared = await prepareInitializationFacts(
+        planOptions.selection.presets?.map(
+          ({ contentIdentity }) => contentIdentity,
+        ),
+      );
+      if (prepared.kind === "failure") return prepared.failure;
       return generator.planInit({
         ...planOptions,
-        operationFacts: await initOperationFacts(
-          options.content,
-          planOptions.selection.presets?.map(
-            ({ contentIdentity }) => contentIdentity,
-          ),
-        ),
+        operationFacts: prepared.operationFacts,
       });
     },
     add,

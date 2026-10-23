@@ -1,11 +1,12 @@
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { createGenerator, type TemplatePreset } from "@ykdz/template-content";
+import { templateContent, type TemplatePreset } from "@ykdz/template-content";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import type { ProjectProjection } from "@ykdz/template-core/project-projection";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 
-const generator = createGenerator();
+const generator = createDefaultGenerator({ content: templateContent });
 
 /** 用正式规划结果读取预设实际选择的包身份，测试不再推断作者默认路径。 */
 export async function planPreset(member: TemplatePreset): Promise<{

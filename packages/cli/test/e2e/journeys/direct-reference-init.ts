@@ -42,6 +42,11 @@ async function loadPublicModule(specifier: string): Promise<{
 const contentEntry = await loadPublicModule("@ykdz/template-content");
 const contentModule =
   contentEntry.module as typeof import("@ykdz/template-content");
+const generationEntry = await loadPublicModule(
+  "@ykdz/template-workspace/default-generation",
+);
+const generationModule =
+  generationEntry.module as typeof import("@ykdz/template-workspace/default-generation");
 const { templateContent } = contentModule;
 const library = templateContent.find(
   (member) => member.identity.packageName === "@ykdz/reference-ts-lib",
@@ -52,7 +57,9 @@ const configuration = templateContent.find(
 if (library?.kind !== "reference" || configuration?.kind !== "reference") {
   throw new Error("唯一内容集合缺少直接参考初始化所需的参考包");
 }
-const generator = contentModule.createGenerator();
+const generator = generationModule.createDefaultGenerator({
+  content: templateContent,
+});
 const result = await generator.init({
   targetRoot: path.resolve(targetRoot),
   selection: {
@@ -83,6 +90,7 @@ console.log(
     mode,
     modules: {
       content: contentEntry.entry,
+      defaultGeneration: generationEntry.entry,
     },
   }),
 );

@@ -1,9 +1,6 @@
-import {
-  createGenerator as createContentGenerator,
-  deriveTemplateMembers,
-  templateContent,
-} from "@ykdz/template-content";
+import { deriveTemplateMembers, templateContent } from "@ykdz/template-content";
 import { createContentIndex } from "@ykdz/template-core/content-identity";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 
 export type CliPreset = Extract<
   (typeof templateContent)[number],
@@ -19,5 +16,7 @@ export function presetByAlias(alias: string): CliPreset | undefined {
   return presetIndex.resolve(alias, "preset");
 }
 
-/** 命令和检查共享内容包公开的唯一默认生成器。 */
-export const cliGenerator = createContentGenerator();
+/** 命令和检查共享同一正式内容集合对应的默认生成器。 */
+export const cliGenerator = createDefaultGenerator({
+  content: templateContent,
+});

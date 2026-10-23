@@ -1,5 +1,3 @@
-import { createDefaultGenerator as createDefaultGeneratorForContent } from "@ykdz/template-workspace/default-generation";
-
 import { loadTemplateContent } from "./collection.ts";
 
 /** 所有可选择内容只在这里登记一次，并从原生公开入口装载。 */
@@ -103,8 +101,3 @@ export const templateReferencePackages: readonly TemplateReferencePackage[] =
   templateContent.filter(
     (member): member is TemplateReferencePackage => member.kind === "reference",
   );
-
-/** 默认公开SDK以真实原生内容装配器提供计算、规划和提交。 */
-export function createGenerator() {
-  return createDefaultGeneratorForContent({ content: templateContent });
-}

@@ -244,7 +244,10 @@ const journey: CliJourney = {
       readonly modules: Readonly<Record<string, string>>;
     };
     assert.equal(directInit.mode, context.mode);
-    assert.deepEqual(Object.keys(directInit.modules), ["content"]);
+    assert.deepEqual(Object.keys(directInit.modules), [
+      "content",
+      "defaultGeneration",
+    ]);
     if (context.mode === "packed") {
       for (const entry of Object.values(directInit.modules)) {
         assert.ok(entry.includes("node_modules"));
