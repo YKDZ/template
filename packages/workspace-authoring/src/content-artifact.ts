@@ -40,6 +40,12 @@ export type NativeContentArtifactDependency = {
   readonly purposes: readonly ("target" | "template-execution")[];
 };
 
+export type NativeContentArtifactExport = {
+  readonly path: string;
+  readonly default: string;
+  readonly types?: string;
+};
+
 export type PreparedNativeContentArtifact = {
   readonly coordinate: { readonly name: string; readonly version: string };
   readonly exportPath: string;
@@ -48,6 +54,7 @@ export type PreparedNativeContentArtifact = {
     readonly default: string;
     readonly types?: string;
   };
+  readonly templateExports: readonly NativeContentArtifactExport[];
   readonly compiled: readonly NativeContentArtifactFile[];
   readonly resources: readonly NativeContentArtifactFile[];
   readonly dependencies: readonly NativeContentArtifactDependency[];
@@ -57,6 +64,8 @@ export type PrepareNativeContentArtifactOptions = {
   readonly manifest: NativeContentManifest;
   readonly resourceRoot: URL;
   readonly exportPath: string;
+  /** 参考包模板定义在作者包内执行时使用的显式公开子路径。 */
+  readonly templateExports?: readonly string[];
   /** 仅原生清单没有version时由所属包显式提供。 */
   readonly artifactVersion?: string;
   readonly resources?: readonly NativeContentArtifactResource[];
@@ -192,71 +201,91 @@ export function prepareNativeContentArtifact(
       `所属包 ${options.manifest.name} 缺少制品版本；无原生version时必须显式声明artifactVersion`,
     );
   }
-  const entry = exportEntry(options.manifest, options.exportPath);
-  const entryPath = packagePath(entry.default, "default入口");
   const resourceRoot = path.resolve(fileURLToPath(options.resourceRoot));
-  const compiledRoot = path.resolve(
-    resourceRoot,
-    path.posix.dirname(entryPath),
-  );
-  const rootRelative = path.relative(resourceRoot, compiledRoot);
-  if (
-    rootRelative === ".." ||
-    rootRelative.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(rootRelative)
-  ) {
-    throw new Error(
-      `所属包 ${options.manifest.name} 的内容编译入口超出包根目录`,
+  const compiledFiles = new Map<string, NativeContentArtifactFile>();
+  const collectExport = (
+    exportPath: string,
+    entry: ReturnType<typeof exportEntry>,
+  ): void => {
+    const entryPath = packagePath(entry.default, "default入口");
+    const compiledRoot = path.resolve(
+      resourceRoot,
+      path.posix.dirname(entryPath),
     );
-  }
+    const rootRelative = path.relative(resourceRoot, compiledRoot);
+    if (
+      rootRelative === ".." ||
+      rootRelative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(rootRelative)
+    ) {
+      throw new Error(
+        `所属包 ${options.manifest.name} 的内容编译入口超出包根目录`,
+      );
+    }
 
-  const compiled: NativeContentArtifactFile[] = [];
-  const visit = (directory: string): void => {
-    for (const child of readdirSync(directory, { withFileTypes: true }).sort(
-      (left, right) => left.name.localeCompare(right.name),
-    )) {
-      const absolutePath = path.join(directory, child.name);
-      if (child.isSymbolicLink()) {
-        throw new Error(
-          `所属包 ${options.manifest.name} 的编译产物包含符号链接：${path.relative(resourceRoot, absolutePath)}`,
-        );
+    const visit = (directory: string): void => {
+      for (const child of readdirSync(directory, { withFileTypes: true }).sort(
+        (left, right) => left.name.localeCompare(right.name),
+      )) {
+        const absolutePath = path.join(directory, child.name);
+        if (child.isSymbolicLink()) {
+          throw new Error(
+            `所属包 ${options.manifest.name} 的编译产物包含符号链接：${path.relative(resourceRoot, absolutePath)}`,
+          );
+        }
+        if (child.isDirectory()) {
+          visit(absolutePath);
+          continue;
+        }
+        const relativePath = path
+          .relative(resourceRoot, absolutePath)
+          .split(path.sep)
+          .join("/");
+        compiledFiles.set(relativePath, {
+          path: relativePath,
+          data: readFileSync(absolutePath),
+          mode: statSync(absolutePath).mode & 0o777,
+        });
       }
-      if (child.isDirectory()) {
-        visit(absolutePath);
-        continue;
-      }
-      const relativePath = path
-        .relative(resourceRoot, absolutePath)
-        .split(path.sep)
-        .join("/");
-      compiled.push({
-        path: relativePath,
-        data: readFileSync(absolutePath),
-        mode: statSync(absolutePath).mode & 0o777,
-      });
+    };
+    try {
+      visit(compiledRoot);
+    } catch (error) {
+      throw new Error(
+        `所属包 ${options.manifest.name} 的编译入口尚未准备：${entry.default}`,
+        { cause: error },
+      );
+    }
+    const typesPath =
+      entry.types === undefined
+        ? undefined
+        : packagePath(entry.types, "types入口");
+    if (
+      !compiledFiles.has(entryPath) ||
+      (typesPath !== undefined && !compiledFiles.has(typesPath))
+    ) {
+      throw new Error(
+        `所属包 ${options.manifest.name} 的编译制品未包含公开入口 ${exportPath}`,
+      );
     }
   };
-  try {
-    visit(compiledRoot);
-  } catch (error) {
-    throw new Error(
-      `所属包 ${options.manifest.name} 的编译入口尚未准备：${entry.default}`,
-      { cause: error },
-    );
-  }
-  const typesPath =
-    entry.types === undefined
-      ? undefined
-      : packagePath(entry.types, "types入口");
-  if (
-    !compiled.some((file) => file.path === entryPath) ||
-    (typesPath !== undefined &&
-      !compiled.some((file) => file.path === typesPath))
-  ) {
-    throw new Error(
-      `所属包 ${options.manifest.name} 的编译制品未包含公开入口 ${entry.default}`,
-    );
-  }
+  const entry = exportEntry(options.manifest, options.exportPath);
+  collectExport(options.exportPath, entry);
+  const templateExports = (options.templateExports ?? [])
+    .filter(
+      (exportPath) =>
+        exportPath !== options.exportPath &&
+        exportPath !== "./reference" &&
+        exportPath !== "./template",
+    )
+    .map((exportPath) => {
+      const exportEntryValue = exportEntry(options.manifest, exportPath);
+      collectExport(exportPath, exportEntryValue);
+      return Object.freeze({ path: exportPath, ...exportEntryValue });
+    });
+  const compiled = [...compiledFiles.values()].sort((left, right) =>
+    left.path.localeCompare(right.path),
+  );
 
   const resources = new Map<string, NativeContentArtifactFile>();
   for (const resource of options.resources ?? []) {
@@ -274,6 +303,7 @@ export function prepareNativeContentArtifact(
     exportPath: options.exportPath,
     manifest: options.manifest,
     entry: Object.freeze(entry),
+    templateExports: Object.freeze(templateExports),
     compiled: Object.freeze(compiled),
     resources: Object.freeze([...resources.values()]),
     dependencies: dependencyFacts(options.manifest, options.dependencyPurposes),

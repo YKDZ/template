@@ -170,6 +170,17 @@ export type DefaultReferenceManifestTransformOptions<
   readonly ownerFacts: OwnerFacts;
 };
 
+export type DefaultReferenceDocumentTransformOptions<
+  CreationInput extends JsonValue,
+  OwnerFacts,
+> = Omit<
+  DefaultReferenceManifestTransformOptions<CreationInput, OwnerFacts>,
+  "manifest"
+> & {
+  readonly path: string;
+  readonly value: Readonly<Record<string, unknown>>;
+};
+
 const dependencyPurposeOrder: readonly ReferenceTemplateDependencyPurpose[] = [
   "target",
   "template-execution",
@@ -685,6 +696,13 @@ export function defineReferencePackage<
       OwnerFacts
     >,
   ) => Readonly<Record<string, unknown>>;
+  /** 在所属原生 JSON 文档投影后应用本包的纯变换。 */
+  readonly transformDocument?: (
+    options: DefaultReferenceDocumentTransformOptions<
+      CreationInput,
+      OwnerFacts
+    >,
+  ) => Readonly<Record<string, unknown>>;
 }): ReturnType<
   typeof defineNativeReferenceContentArtifact<
     ReferencePackageDefinition<
@@ -908,9 +926,20 @@ export function defineReferencePackage<
           }
           value.tasks = tasks;
         }
+        const transformedDocument =
+          options.transformDocument?.({
+            path: document.path,
+            value,
+            definition: input.definition,
+            conventions: input.conventions,
+            creationInput: input.creationInput,
+            bindings: input.bindings,
+            stableCommon: input.stableCommon,
+            ownerFacts: input.prepared.facts.ownerFacts,
+          }) ?? value;
         return {
           ...document,
-          value,
+          value: transformedDocument,
         };
       });
       const documentBySourcePath = new Map(
@@ -1076,6 +1105,7 @@ export function defineReferencePackage<
     manifest: options.manifest,
     resourceRoot: options.resourceRoot,
     exportPath: "./template",
+    templateExports,
     ...(options.artifactVersion === undefined
       ? {}
       : { artifactVersion: options.artifactVersion }),

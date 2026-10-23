@@ -23,8 +23,15 @@ function nodeDeclarationFrom(value: unknown): string {
   return value.nodeDeclaration;
 }
 
+function recordFrom(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 export const referencePackage = defineReferencePackage<TsCliCreationInput>({
   manifest: referenceManifest,
+  artifactVersion: "0.0.0",
   resourceRoot: new URL("../", import.meta.url),
   alias: "cli-package-addition",
   instance: "independent",
@@ -70,7 +77,7 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
     { path: "tsconfig.build.json" },
     { path: "tsconfig.json" },
     { path: "tsconfig.node.json" },
-    { path: "template/files/turbo.json", targetPath: "turbo.json" },
+    { path: "turbo.json" },
   ],
   templateDependencies: [
     {
@@ -123,5 +130,20 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
       ),
       nodeDeclaration: nodeDeclarationFrom(options.stableCommon),
     });
+  },
+  transformDocument({ path: documentPath, value }) {
+    if (documentPath !== "turbo.json") return value;
+    const tasks = recordFrom(value.tasks);
+    const build = tasks === undefined ? undefined : recordFrom(tasks.build);
+    if (tasks === undefined || build === undefined) {
+      throw new Error("CLI 原生 turbo.json 必须声明 build 任务");
+    }
+    return {
+      ...value,
+      tasks: {
+        ...tasks,
+        build: { ...build, dependsOn: ["^build"] },
+      },
+    };
   },
 });
