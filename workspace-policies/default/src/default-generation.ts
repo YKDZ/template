@@ -28,6 +28,12 @@ import {
   type DefaultContentMember,
   type DefaultOperationFacts,
 } from "./default-composition.ts";
+import {
+  PackageLinkValidationError,
+  RootToolchainDeclarationError,
+  type PackageLinkValidationIssue,
+  type RootToolchainDeclarationIssue,
+} from "./project-requirements.ts";
 import { prepareRootRustToolchainTarget } from "./rust-toolchain-facts.ts";
 
 const nodeDeclarationPattern = /^([0-9]+)(?:\.([0-9]+)\.([0-9]+))?$/u;
@@ -437,7 +443,10 @@ async function additionFacts(
       ({ path: currentPath }) => currentPath === packagePath,
     );
     if (consumer === undefined) {
-      throw new Error(`加包linkFrom指向未知当前包：${packagePath}`);
+      throw new PackageLinkValidationError(
+        { kind: "unknown-consumer", path: packagePath },
+        `加包linkFrom指向未知当前包：${packagePath}`,
+      );
     }
     if (
       packagePath === "." ||
@@ -532,8 +541,9 @@ async function additionFacts(
     typeof nodeDeclaration !== "string" ||
     !nodeDeclarationPattern.test(nodeDeclaration)
   ) {
-    throw new Error(
-      `加包需要根package.json的engines.node为单个Node大版本或精确版本，实际收到${JSON.stringify(nodeDeclaration ?? null)}`,
+    throw new RootToolchainDeclarationError(
+      { kind: "invalid-node-declaration" },
+      `加包需要根package.json的engines.node为单个Node大版本或精确版本，实际收到 ${JSON.stringify(nodeDeclaration ?? null)}`,
     );
   }
   const packageManagerPin = isRecord(manifest)
@@ -543,8 +553,9 @@ async function additionFacts(
     typeof packageManagerPin !== "string" ||
     !pnpmPinPattern.test(packageManagerPin)
   ) {
-    throw new Error(
-      `加包需要根package.json的packageManager为精确pnpm版本，实际收到${JSON.stringify(packageManagerPin ?? null)}`,
+    throw new RootToolchainDeclarationError(
+      { kind: "invalid-package-manager-pin" },
+      `加包需要根package.json的packageManager为精确pnpm版本，实际收到 ${JSON.stringify(packageManagerPin ?? null)}`,
     );
   }
   const selectedPresetSelectors: ContentSelector[] = [
@@ -705,6 +716,19 @@ export function createDefaultGenerator<
     Parameters<typeof generator.prepareAddProject>[0],
     "operationFacts"
   >;
+  type AddPlanResult = Awaited<ReturnType<typeof generator.planAdd>>;
+  type AddPlanFailure = Extract<
+    AddPlanResult,
+    { readonly status: "operation-failure" }
+  >;
+  type DefaultAddPlanResult =
+    | Exclude<AddPlanResult, { readonly status: "operation-failure" }>
+    | (Omit<AddPlanFailure, "error"> & {
+        readonly error: AddPlanFailure["error"] & {
+          readonly packageLinkIssue?: PackageLinkValidationIssue;
+          readonly rootToolchainIssue?: RootToolchainDeclarationIssue;
+        };
+      });
 
   async function prepareAddition(
     prepareOptions: PrepareAddOptions,
@@ -753,7 +777,9 @@ export function createDefaultGenerator<
     };
   }
 
-  async function planAddition(planOptions: PlanAddOptions) {
+  async function planAddition(
+    planOptions: PlanAddOptions,
+  ): Promise<DefaultAddPlanResult> {
     const {
       repositoryRoot,
       readFacts: additionalReadFacts,
@@ -804,10 +830,20 @@ export function createDefaultGenerator<
         };
       }
     } catch (error) {
+      const packageLinkIssue =
+        error instanceof PackageLinkValidationError ? error.issue : undefined;
+      const rootToolchainIssue =
+        error instanceof RootToolchainDeclarationError
+          ? error.issue
+          : undefined;
       return {
         status: "operation-failure" as const,
         phase: "preparation" as const,
-        error: { message: errorMessage(error) },
+        error: {
+          message: errorMessage(error),
+          ...(packageLinkIssue === undefined ? {} : { packageLinkIssue }),
+          ...(rootToolchainIssue === undefined ? {} : { rootToolchainIssue }),
+        },
       };
     }
     let before: ReturnType<typeof generator.computeProject>;
@@ -820,6 +856,8 @@ export function createDefaultGenerator<
         error instanceof ProjectBlueprintValidationError
           ? error.packageIdentityIssues
           : [];
+      const packageLinkIssue =
+        error instanceof PackageLinkValidationError ? error.issue : undefined;
       return {
         status: "operation-failure" as const,
         phase: "calculation" as const,
@@ -828,6 +866,7 @@ export function createDefaultGenerator<
           ...(packageIdentityIssues.length === 0
             ? {}
             : { packageIdentityIssues }),
+          ...(packageLinkIssue === undefined ? {} : { packageLinkIssue }),
         },
       };
     }

@@ -217,9 +217,18 @@ const journey: CliJourney = {
         ),
       );
       assert.equal(manifest.name, `@acme/${name}`);
+      const configurationLink =
+        manifest.devDependencies["@acme/tooling-config"];
+      assert.equal(typeof configurationLink, "string");
+      assert.ok(configurationLink.startsWith("workspace:"));
       assert.equal(
-        manifest.devDependencies["@acme/tooling-config"],
-        "workspace:*",
+        path.posix.normalize(
+          path.posix.join(
+            `services/${name}`,
+            configurationLink.slice("workspace:".length),
+          ),
+        ),
+        "packages/tooling-config",
       );
     }
     for (const file of [

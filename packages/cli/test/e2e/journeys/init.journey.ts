@@ -2,12 +2,10 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-import {
-  templatePresets,
-  templateReferencePackages,
-} from "@ykdz/template-content";
+import { templatePresets } from "@ykdz/template-content";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
+import { planPreset } from "../../support/preset-planning.ts";
 import type { CliJourney } from "../journey.ts";
 
 const presets = templatePresets.map((member) => member.definition);
@@ -16,16 +14,16 @@ const initializationPresets = templatePresets.filter((member) =>
 );
 
 function requireAddablePreset() {
-  const preset = presets.find(
-    (candidate) =>
-      candidate.operations.includes("init") &&
-      candidate.operations.includes("add") &&
-      Object.keys(candidate.nodes).length === 1,
+  const member = templatePresets.find(
+    ({ definition }) =>
+      definition.operations.includes("init") &&
+      definition.operations.includes("add") &&
+      Object.keys(definition.nodes).length === 1,
   );
-  if (preset === undefined) {
+  if (member === undefined) {
     throw new Error("init journey requires an addable Preset");
   }
-  return preset;
+  return member;
 }
 
 function requireFixedTopologyPreset() {
@@ -39,9 +37,12 @@ function requireFixedTopologyPreset() {
 }
 
 const addablePreset = requireAddablePreset();
-const addablePresetName = addablePreset.metadata.alias;
-const defaultLeafName = Object.values(addablePreset.nodes)[0]!.reference
-  .defaultLeafName;
+const addablePresetName = addablePreset.definition.metadata.alias;
+const addablePackages = (await planPreset(addablePreset)).packages;
+const defaultPackage = addablePackages[0];
+if (defaultPackage === undefined) {
+  throw new Error("可加包预设的正式规划没有生成所选包");
+}
 const fixedTopologyPresetName = requireFixedTopologyPreset().metadata.alias;
 
 const journey: CliJourney = {
@@ -210,15 +211,19 @@ const journey: CliJourney = {
       defaultPackageScope: "acme",
       todo: false,
     });
-    assert.match(
-      await readFile(
-        path.join(
-          context.workDir,
-          `project/packages/${defaultLeafName}/package.json`,
+    assert.equal(
+      JSON.parse(
+        await readFile(
+          path.join(
+            context.workDir,
+            "project",
+            defaultPackage.path,
+            "package.json",
+          ),
+          "utf8",
         ),
-        "utf8",
-      ),
-      new RegExp(`"name": "@acme/${defaultLeafName}"`, "u"),
+      ).name,
+      defaultPackage.name,
     );
     await assert.rejects(stat(path.join(context.workDir, "project/TODO.md")), {
       code: "ENOENT",
@@ -276,25 +281,18 @@ const journey: CliJourney = {
         await readFile(path.join(project, ".template/blueprint.json"), "utf8"),
       );
       assert.deepEqual(data.blueprint, blueprint);
-      const publicationReferenceName = "@ykdz/reference-npm-publication";
-      const requiresPublication = Object.values(member.definition.nodes).some(
-        ({ reference }) => {
-          const selected = templateReferencePackages.find(
-            (candidate) => candidate.definition === reference,
-          );
-          return selected?.definition.dependencyUses.some(
-            ({
-              name,
-              purposes,
-            }: {
-              readonly name: string;
-              readonly purposes: readonly string[];
-            }) =>
-              name === publicationReferenceName &&
-              purposes.includes("template-execution"),
-          );
-        },
+      const planned = await planPreset(member);
+      const plannedRootManifestEntry = planned.projection.entries.find(
+        ({ path: entryPath }) => entryPath === "package.json",
       );
+      if (plannedRootManifestEntry === undefined) {
+        throw new Error("正式规划没有生成目标根 manifest");
+      }
+      const plannedRootManifest = JSON.parse(
+        new TextDecoder().decode(plannedRootManifestEntry.content),
+      ) as {
+        readonly devDependencies?: Readonly<Record<string, string>>;
+      };
       const rootManifest = JSON.parse(
         await readFile(path.join(project, "package.json"), "utf8"),
       ) as {
@@ -302,7 +300,7 @@ const journey: CliJourney = {
       };
       assert.equal(
         rootManifest.devDependencies?.["@changesets/cli"],
-        requiresPublication ? "catalog:" : undefined,
+        plannedRootManifest.devDependencies?.["@changesets/cli"],
       );
       for (const packageEntry of data.resolved.packages as readonly {
         readonly name: string;

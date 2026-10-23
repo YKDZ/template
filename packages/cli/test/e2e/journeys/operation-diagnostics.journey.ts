@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { contentIdentityKey } from "@ykdz/template-core/content-identity";
-
 import type { CliJourney, CliJourneyCommand } from "../journey.ts";
 
 async function snapshot(
@@ -26,13 +24,6 @@ async function snapshot(
   }
   return files.toSorted((left, right) => left.path.localeCompare(right.path));
 }
-
-const configurationIdentity = {
-  namespace: "ykdz",
-  packageName: "@ykdz/reference-tooling-config",
-  exportPath: "./template",
-} as const;
-const configurationKey = contentIdentityKey(configurationIdentity);
 
 const journey: CliJourney = {
   name: "operation-diagnostics",
@@ -66,6 +57,7 @@ const journey: CliJourney = {
           ) as {
             readonly packages: {
               readonly contentIdentity: { readonly packageName: string };
+              readonly packageDefinitionId: string;
               readonly dependencyBindings: Record<string, string>;
             }[];
           };
@@ -73,11 +65,24 @@ const journey: CliJourney = {
             (record) =>
               record.contentIdentity.packageName === "@ykdz/reference-ts-lib",
           );
-          assert.notEqual(library, undefined);
-          assert.ok(
-            Object.hasOwn(library!.dependencyBindings, configurationKey),
+          const configuration = generation.packages.find(
+            (record) =>
+              record.contentIdentity.packageName ===
+              "@ykdz/reference-tooling-config",
           );
-          delete library!.dependencyBindings[configurationKey];
+          if (library === undefined || configuration === undefined) {
+            throw new Error("生成记录缺少预期的共享配置包实例");
+          }
+          const configurationKey = Object.entries(
+            library.dependencyBindings,
+          ).find(
+            ([, packageDefinitionId]) =>
+              packageDefinitionId === configuration.packageDefinitionId,
+          )?.[0];
+          if (configurationKey === undefined) {
+            throw new Error("生成记录没有共享配置包绑定");
+          }
+          delete library.dependencyBindings[configurationKey];
           await writeFile(
             generationPath,
             `${JSON.stringify(generation, null, 2)}\n`,
@@ -108,11 +113,8 @@ const journey: CliJourney = {
     assert.equal(bindingFailure?.stdout, "");
     const bindingEnvelope = JSON.parse(bindingFailure?.stderr ?? "");
     assert.equal(bindingEnvelope.variant, "operationFailed");
-    assert.match(
-      bindingEnvelope.data.error.message,
-      /@ykdz\/reference-ts-lib.*缺少必要实例绑定.*@ykdz\/reference-tooling-config/u,
-    );
-    assert.match(bindingEnvelope.data.error.suggestion, /生成记录|包绑定/u);
+    assert.match(bindingEnvelope.data.error.message, /生成记录.*依赖绑定/u);
+    assert.match(bindingEnvelope.data.error.suggestion, /配置.*目录/u);
     assert.doesNotMatch(
       bindingEnvelope.data.error.message,
       /file:\/\/|\/(?:tmp|workspaces|root)\//u,

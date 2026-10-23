@@ -80,11 +80,16 @@ const nativePreset = defineNativeContentArtifact(
   },
 );
 
+const rootContribution: DefaultPresetRootContributionOwner<VueHonoJointE2eOwnerFacts> =
+  Object.freeze({
+    prepare: prepareJointE2eAttachment,
+    compose: composeVueHonoJointE2e,
+  });
+
 /** 由默认外层按完整预设身份准备，并交纯组合器消费的根贡献。 */
 export const preset = Object.freeze({
   ...nativePreset,
-  rootContribution: Object.freeze({
-    prepare: prepareJointE2eAttachment,
-    compose: composeVueHonoJointE2e,
-  }) satisfies DefaultPresetRootContributionOwner<VueHonoJointE2eOwnerFacts>,
+  rootContribution,
 });
+
+export type { VueHonoJointE2eOwnerFacts } from "./joint-e2e.ts";

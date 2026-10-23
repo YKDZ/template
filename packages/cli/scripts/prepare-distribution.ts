@@ -138,11 +138,6 @@ try {
   prepared = await prepareContentCollection({
     content: templateContent,
     roots: templateContent,
-    referencePreparation: {
-      specifier: "@ykdz/template-workspace/reference-package",
-      exportName: "defineReferencePackage",
-    },
-
     workspaceRoot: await workspaceRoot(),
     root: path.join(temporaryRoot, "content"),
   });

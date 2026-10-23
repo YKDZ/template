@@ -6,29 +6,32 @@ import { templatePresets } from "@ykdz/template-content";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
 
+import { planPreset } from "../../support/preset-planning.ts";
 import type { CliJourney, CliJourneyCommand } from "../journey.ts";
 
-function requireLinkableAddition(): {
+async function requireLinkableAddition(): Promise<{
   readonly presetName: string;
   readonly consumerPath: string;
-} {
-  const presets = templatePresets.map((member) => member.definition);
-  for (const preset of presets) {
+  readonly role: string;
+}> {
+  for (const member of templatePresets) {
+    const preset = member.definition;
     if (
       !preset.operations.includes("init") ||
       !preset.operations.includes("add")
     ) {
       continue;
     }
-    const [node] = Object.values(preset.nodes);
-    if (
-      node !== undefined &&
-      node.reference.role === "shared-library" &&
-      node.reference.defaultPath !== undefined
-    ) {
+    const plan = await planPreset(member);
+    const consumer = plan.packages.find(
+      ({ path: packagePath, role }) =>
+        packagePath !== "." && role === "shared-library",
+    );
+    if (consumer !== undefined) {
       return {
         presetName: preset.metadata.alias,
-        consumerPath: node.reference.defaultPath,
+        consumerPath: consumer.path,
+        role: consumer.role,
       };
     }
   }
@@ -37,8 +40,11 @@ function requireLinkableAddition(): {
   );
 }
 
-const { presetName: addablePresetName, consumerPath } =
-  requireLinkableAddition();
+const {
+  presetName: addablePresetName,
+  consumerPath,
+  role: addablePresetRole,
+} = await requireLinkableAddition();
 const initializationPresets = templatePresets.filter((member) =>
   member.definition.operations.includes("init"),
 );
@@ -1008,7 +1014,7 @@ const journey: CliJourney = {
       assert.deepEqual(identityConflict.data.conflicts[0].requested, {
         name: "@acme/tooling-config",
         path: "packages/rejected",
-        role: "shared-library",
+        role: addablePresetRole,
       });
     }
     assert.deepEqual(

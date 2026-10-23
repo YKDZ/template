@@ -12,6 +12,7 @@ import {
   runInit,
   type ApplicationRuntime,
 } from "../../src/application.ts";
+import { planPreset } from "../support/preset-planning.ts";
 
 function createRuntime(workspace: string): ApplicationRuntime {
   return {
@@ -27,13 +28,15 @@ void describe("init toolchain snapshot consumption", () => {
     );
     try {
       // 本业务需要一个共享库角色的初始包，从唯一内容集合中选取 Preset。
-      const snapshotInitPreset = templatePresets
-        .map((member) => member.definition)
-        .find((preset) =>
-          Object.values(preset.nodes).some(
-            ({ reference }) => reference.role === "shared-library",
-          ),
-        );
+      let snapshotInitPreset: (typeof templatePresets)[number] | undefined;
+      for (const member of templatePresets) {
+        if (!member.definition.operations.includes("init")) continue;
+        const plan = await planPreset(member);
+        if (plan.packages.some(({ role }) => role === "shared-library")) {
+          snapshotInitPreset = member;
+          break;
+        }
+      }
       if (snapshotInitPreset === undefined)
         throw new Error(
           "Expected a Built-in Preset with a shared-library initial Package",
@@ -41,7 +44,7 @@ void describe("init toolchain snapshot consumption", () => {
       const output = await runInit(
         {
           dir: "project",
-          preset: snapshotInitPreset.metadata.alias,
+          preset: snapshotInitPreset.definition.metadata.alias,
           dryRun: false,
           todo: false,
           scope: "acme",
@@ -166,7 +169,10 @@ void describe("init toolchain snapshot consumption", () => {
       const existing = blueprint.packages.find(
         ({ name }) => name === "@acme/tooling-config",
       );
-      assert.notEqual(existing, undefined);
+      if (existing === undefined) {
+        throw new Error("初始化蓝图未包含已有配置包");
+      }
+      const { name, path: existingPath, role } = existing;
 
       for (const dryRun of [true, false]) {
         const result = await runAddPackage(
@@ -187,7 +193,7 @@ void describe("init toolchain snapshot consumption", () => {
         assert.deepEqual(result.conflicts, [
           {
             kind: "identity",
-            existing,
+            existing: { name, path: existingPath, role },
             requested: {
               name: "@acme/tooling-config",
               path: "packages/rejected",

@@ -69,6 +69,7 @@ import {
   projectDependabotConfig,
   projectNextStepsDocument,
 } from "./project-github.ts";
+import { PackageLinkValidationError } from "./project-requirements.ts";
 import type {
   DefaultCompositionFile,
   DefaultNativeDocument,
@@ -769,7 +770,10 @@ function packageLinks(options: {
         (item) => item.definition.path === packagePath,
       );
       if (linkedConsumer === undefined) {
-        throw new Error(`包连接目标不存在：${packagePath}`);
+        throw new PackageLinkValidationError(
+          { kind: "unknown-consumer", path: packagePath },
+          `包连接目标不存在：${packagePath}`,
+        );
       }
       add(linkedConsumer.packageDefinitionId, consumer.packageDefinitionId);
     }
@@ -907,7 +911,12 @@ function linkedManifestOverrides(options: {
       consumerRole === "native-package" ||
       consumerCurrent.type !== "module"
     ) {
-      throw new Error(
+      throw new PackageLinkValidationError(
+        {
+          kind: "unsupported-link",
+          consumerPath: consumer.package.definition.path,
+          providerPath: provider.package.definition.path,
+        },
         `包连接consumer不能使用Node包名导入：${consumer.package.definition.path}`,
       );
     }
@@ -916,12 +925,22 @@ function linkedManifestOverrides(options: {
       providerRole === "native-package" ||
       (consumerRole === "shared-library" && providerRole !== "shared-library")
     ) {
-      throw new Error(
+      throw new PackageLinkValidationError(
+        {
+          kind: "unsupported-link",
+          consumerPath: consumer.package.definition.path,
+          providerPath: provider.package.definition.path,
+        },
         `包连接违反默认Package Role边界：${consumer.package.definition.path} (${consumerRole}) -> ${provider.package.definition.path} (${providerRole})`,
       );
     }
     if (!exposesPackageRoot(providerCurrent)) {
-      throw new Error(
+      throw new PackageLinkValidationError(
+        {
+          kind: "unsupported-link",
+          consumerPath: consumer.package.definition.path,
+          providerPath: provider.package.definition.path,
+        },
         `包连接provider没有公开可导入包根：${provider.package.definition.path}`,
       );
     }

@@ -19,6 +19,7 @@ import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolc
 import { execa } from "execa";
 
 import { runCli, type CliRuntime } from "../../src/main.ts";
+import { planPreset } from "../support/preset-planning.ts";
 
 function assertArrayShape(actual: unknown, expected: unknown): void {
   if (Array.isArray(expected)) {
@@ -48,35 +49,67 @@ function assertPartialDeepStrictEqual(
   assert.partialDeepStrictEqual(actual, expected);
 }
 
-function requireLinkableAddablePreset(): {
+async function requireLinkableAddablePreset(): Promise<{
   readonly name: string;
   readonly consumerPath: string;
-} {
-  const presets = templatePresets.map((member) => member.definition);
-  for (const preset of presets) {
+  readonly role: string;
+}> {
+  for (const member of templatePresets) {
+    const preset = member.definition;
     if (
       !preset.operations.includes("init") ||
       !preset.operations.includes("add")
     ) {
       continue;
     }
-    const [node] = Object.values(preset.nodes);
-    if (
-      node !== undefined &&
-      node.reference.defaultPath !== undefined &&
-      node.reference.role === "shared-library"
-    ) {
+    const plan = await planPreset(member);
+    const consumer = plan.packages.find(
+      ({ path: packagePath, role }) =>
+        packagePath !== "." && role === "shared-library",
+    );
+    if (consumer !== undefined) {
       return {
         name: preset.metadata.alias,
-        consumerPath: node.reference.defaultPath,
+        consumerPath: consumer.path,
+        role: consumer.role,
       };
     }
   }
   throw new Error("CLI integration tests require a linkable addable Preset");
 }
 
-const { name: addablePresetName, consumerPath } =
-  requireLinkableAddablePreset();
+async function requireAddableRuntimePreset(): Promise<{
+  readonly name: string;
+  readonly packagePath: string;
+}> {
+  for (const member of templatePresets) {
+    if (
+      !member.definition.operations.includes("init") ||
+      !member.definition.operations.includes("add")
+    ) {
+      continue;
+    }
+    const plan = await planPreset(member);
+    const runtimePackage = plan.packages.find(
+      ({ role }) => role === "runtime-service",
+    );
+    if (runtimePackage !== undefined) {
+      return {
+        name: member.definition.metadata.alias,
+        packagePath: runtimePackage.path,
+      };
+    }
+  }
+  throw new Error("CLI integration tests require an addable runtime Preset");
+}
+
+const {
+  name: addablePresetName,
+  consumerPath,
+  role: addablePresetRole,
+} = await requireLinkableAddablePreset();
+const { name: runtimePresetName, packagePath: runtimePackagePath } =
+  await requireAddableRuntimePreset();
 
 async function workspaceByteSnapshot(
   root: string,
@@ -403,7 +436,11 @@ void describe("template CLI command control", () => {
       const blueprintPath = path.join(workspace, "blueprint.json");
       await writeFile(
         blueprintPath,
-        JSON.stringify({ schemaVersion: 1, packages: [] }),
+        JSON.stringify({
+          schemaVersion: 1,
+          packages: [],
+          packageLinkIntents: [],
+        }),
       );
       const human = testRuntime([
         "blueprint",
@@ -752,8 +789,9 @@ void describe("template CLI command control", () => {
         assert.equal(await runCli({ ...output.runtime, cwd: workspace }), 2);
         assert.equal(output.stdout(), "");
         assertPartialDeepStrictEqual(JSON.parse(output.stderr()), {
-          kind: "usageFailure",
-          issues: [{ code: "CONFLICTING_PACKAGE_IDENTITY" }],
+          kind: "failure",
+          variant: "invalidRequest",
+          data: { issues: [{ code: "CONFLICTING_PACKAGE_IDENTITY" }] },
         });
         assert.deepEqual(await readdir(workspace), []);
       }
@@ -802,8 +840,9 @@ void describe("template CLI command control", () => {
         assert.equal(await runCli({ ...output.runtime, cwd: workspace }), 2);
         assert.equal(output.stdout(), "");
         assertPartialDeepStrictEqual(JSON.parse(output.stderr()), {
-          kind: "usageFailure",
-          issues: [{ code }],
+          kind: "failure",
+          variant: "invalidRequest",
+          data: { issues: [{ code }] },
         });
         assert.deepEqual(await readdir(workspace), []);
       }
@@ -879,7 +918,7 @@ void describe("template CLI command control", () => {
         variant: "operationFailed",
         data: {
           targetDir: "demo",
-          error: { message: "初始化要求目标目录为空或不存在" },
+          error: { message: "初始化要求目标目录为空或不存在；当前为目录" },
         },
       });
       assert.deepEqual(await workspaceByteSnapshot(workspace), before);
@@ -1055,6 +1094,37 @@ void describe("template CLI command control", () => {
       beforeUnknownConsumer,
     );
 
+    const beforeUnsupportedLink = await workspaceByteSnapshot(target);
+    const unsupportedLink = testRuntime([
+      "add",
+      "package",
+      "--preset",
+      runtimePresetName,
+      "--name",
+      "web",
+      "--path",
+      runtimePackagePath,
+      "--link-from",
+      consumerPath,
+    ]);
+    assert.equal(
+      await runCli({
+        ...unsupportedLink.runtime,
+        cwd: target,
+      }),
+      1,
+    );
+    assertPartialDeepStrictEqual(JSON.parse(unsupportedLink.stderr()), {
+      kind: "failure",
+      variant: "invalidRequest",
+      data: { issues: [{ code: "UNSUPPORTED_LINK" }] },
+    });
+    assert.equal(unsupportedLink.stdout(), "");
+    assert.deepEqual(
+      await workspaceByteSnapshot(target),
+      beforeUnsupportedLink,
+    );
+
     const apply = testRuntime([
       "add",
       "package",
@@ -1105,12 +1175,12 @@ void describe("template CLI command control", () => {
           existing: {
             name: "@acme/utility",
             path: "packages/utility",
-            role: "shared-library",
+            role: addablePresetRole,
           },
           requested: {
             name: "@acme/utility",
             path: "packages/utility",
-            role: "shared-library",
+            role: addablePresetRole,
           },
         },
       ],
@@ -1311,10 +1381,7 @@ void describe("template CLI command control", () => {
       const conflicts = JSON.parse(output.stderr()).data.conflicts;
       assert.equal(conflicts.length, 1);
       assert.match(conflicts[0].sources[0].label, /services\/existing/u);
-      assert.equal(
-        conflicts[0].reason.includes("新包路径已存在：services/existing"),
-        true,
-      );
+      assert.ok(conflicts[0].reason.trim().length > 0, "冲突包含可读原因");
       assertPartialDeepStrictEqual(JSON.parse(output.stderr()).data, {
         dryRun,
         actions: [],

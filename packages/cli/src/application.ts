@@ -215,6 +215,20 @@ function packageAdditionIdentityConflict(
   };
 }
 
+function samePackageIdentityConflict(
+  left: PackageAdditionIdentityConflict,
+  right: PackageAdditionIdentityConflict,
+): boolean {
+  return (
+    left.existing.name === right.existing.name &&
+    left.existing.path === right.existing.path &&
+    left.existing.role === right.existing.role &&
+    left.requested.name === right.requested.name &&
+    left.requested.path === right.requested.path &&
+    left.requested.role === right.requested.role
+  );
+}
+
 export async function validateBlueprintFile(
   filePath: string,
   runtime: ApplicationRuntime,
@@ -574,15 +588,52 @@ export async function runAddPackage(
     },
   });
   if (planned.status === "operation-failure") {
+    const rootToolchainIssue = planned.error.rootToolchainIssue;
+    if (rootToolchainIssue !== undefined) {
+      return packageUpdateOperationFailure({
+        message: safeGeneratorFailureMessage(
+          planned.error.message,
+          "加包需要有效的根工具链声明。",
+        ),
+        suggestion:
+          rootToolchainIssue.kind === "invalid-node-declaration"
+            ? "请先修改根 package.json 的 engines.node 声明再加包。"
+            : "请先修改根 package.json 的 packageManager 声明再加包。",
+      });
+    }
+    const packageLinkIssue = planned.error.packageLinkIssue;
+    if (packageLinkIssue !== undefined) {
+      return {
+        status: "usage-error",
+        issues: [
+          {
+            code:
+              packageLinkIssue.kind === "unknown-consumer"
+                ? "UNKNOWN_LINK_FROM"
+                : "UNSUPPORTED_LINK",
+          },
+        ],
+      };
+    }
     const identityIssues = planned.error.packageIdentityIssues ?? [];
-    const identityConflicts = identityIssues.filter(
-      (
-        issue,
-      ): issue is Extract<
-        BlueprintPackageIdentityIssue,
-        { readonly kind: "duplicate" }
-      > => issue.kind === "duplicate",
-    );
+    const identityConflicts = identityIssues
+      .filter(
+        (
+          issue,
+        ): issue is Extract<
+          BlueprintPackageIdentityIssue,
+          { readonly kind: "duplicate" }
+        > => issue.kind === "duplicate",
+      )
+      .filter(
+        (issue, index, issues) =>
+          issues.findIndex((candidate) =>
+            samePackageIdentityConflict(
+              packageAdditionIdentityConflict(candidate),
+              packageAdditionIdentityConflict(issue),
+            ),
+          ) === index,
+      );
     if (identityConflicts.length > 0) {
       return {
         status: "conflict",
