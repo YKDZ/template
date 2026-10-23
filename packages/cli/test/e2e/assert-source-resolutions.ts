@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 const publicSourceResolutions = [
   ["@ykdz/template", "/packages/cli/src/main.ts"],
   ["@ykdz/template-content", "/packages/content/src/index.ts"],
-  ["@ykdz/template-generator", "/packages/generator/src/index.ts"],
   ["@ykdz/template-core/project-blueprint", "/src/project-blueprint.ts"],
+  ["@ykdz/template-core/generation-record", "/src/generation-record.ts"],
 ] as const;
 
 function portablePath(value: string): string {

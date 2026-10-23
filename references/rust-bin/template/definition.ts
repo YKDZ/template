@@ -33,7 +33,7 @@ type RustCreationInput = {
   readonly packagePath?: string;
 };
 
-type RustReferenceFacts = {
+export type RustReferenceFacts = {
   readonly cargoManifest: CargoFileSnapshot;
   readonly cargoLock: CargoFileSnapshot;
   readonly toolchainConfiguration: ReturnType<
@@ -333,6 +333,7 @@ export {
   projectRustToolchainDeclaration,
   resolveRustToolchainRequirements,
 } from "./rust-toolchain-projection.ts";
+export type { CargoFileSnapshot } from "./rust-package-projection.ts";
 export type {
   PreparedRustToolchainDeclaration,
   RustToolchainRequirement,
