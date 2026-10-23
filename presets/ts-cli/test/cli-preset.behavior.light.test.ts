@@ -403,6 +403,194 @@ void describe("TypeScript CLI 公开预设", () => {
     );
   });
 
+  void it("预设节点的默认连接读取当前提供者并拒绝失效导出", async () => {
+    const presetNodes = (
+      preset.definition as unknown as {
+        readonly nodes: Readonly<
+          Record<string, Readonly<Record<string, unknown>>>
+        >;
+      }
+    ).nodes;
+    const linkedPreset = {
+      ...preset,
+      definition: {
+        ...preset.definition,
+        nodes: {
+          ...presetNodes,
+          cli: {
+            ...presetNodes.cli!,
+            creationInput: {
+              add: { linkTo: { nodeIdentity: "library" } },
+            },
+          },
+        },
+      },
+    } as unknown as typeof preset;
+    const linkedContent = content.map((member) =>
+      member === preset ? linkedPreset : member,
+    );
+    const targetRoot = await createTargetRoot(
+      "template-ts-cli-preset-default-link-",
+    );
+    const generator = createDefaultGenerator({ content: linkedContent });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { presets: [{ contentIdentity: libraryPreset.identity }] },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+    const valid = await generator.planAdd({
+      repositoryRoot: targetRoot,
+      preset: preset.identity,
+    });
+    assert.strictEqual(valid.status, "planned");
+    if (valid.status !== "planned") {
+      throw new Error("预设默认连接应解析到现存library节点");
+    }
+    assert.strictEqual(valid.blueprint.packageLinkIntents.length, 1);
+    const manifestPath = path.join(targetRoot, "packages/lib/package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<
+      string,
+      any
+    >;
+    delete manifest.exports["."].default;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    const before = await snapshotTree(targetRoot);
+
+    const result = await generator.add({
+      repositoryRoot: targetRoot,
+      preset: preset.identity,
+    });
+
+    assert.strictEqual(result.status, "operation-failure");
+    assert.match(
+      result.status === "operation-failure" ? result.error.message : "",
+      /包连接provider没有公开可导入包根/u,
+    );
+    assert.strictEqual(await snapshotTree(targetRoot), before);
+  });
+
+  void it("唯一性检查采用现存CLI保留的命令定制", async () => {
+    const targetRoot = await createTargetRoot(
+      "template-ts-cli-custom-command-",
+    );
+    const generator = createDefaultGenerator({ content });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { presets: [{ contentIdentity: preset.identity }] },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+    const existingManifestPath = path.join(
+      targetRoot,
+      "packages/cli/package.json",
+    );
+    const existingManifest = JSON.parse(
+      await readFile(existingManifestPath, "utf8"),
+    ) as Record<string, any>;
+    existingManifest.bin = { second: "./dist/cli.js" };
+    await writeFile(
+      existingManifestPath,
+      `${JSON.stringify(existingManifest, null, 2)}\n`,
+    );
+    const before = await snapshotTree(targetRoot);
+
+    const result = await generator.add({
+      repositoryRoot: targetRoot,
+      preset: preset.identity,
+      creationInput: { leafName: "second" },
+    });
+
+    assert.strictEqual(result.status, "operation-failure");
+    assert.match(
+      result.status === "operation-failure" ? result.error.message : "",
+      /CLI命令名称 "second" 重复/u,
+    );
+    assert.strictEqual(await snapshotTree(targetRoot), before);
+  });
+
+  void it("现存CLI命令事实过期时冲突，且不恢复未连接库manifest", async () => {
+    const targetRoot = await createTargetRoot(
+      "template-ts-cli-command-read-fact-",
+    );
+    const generator = createDefaultGenerator({ content });
+    const initialized = await generator.init({
+      targetRoot,
+      selection: { presets: [{ contentIdentity: preset.identity }] },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      initialized.status,
+      "success",
+      JSON.stringify(initialized),
+    );
+    const existingCliManifestPath = path.join(
+      targetRoot,
+      "packages/cli/package.json",
+    );
+    const planned = await generator.planAdd({
+      repositoryRoot: targetRoot,
+      preset: preset.identity,
+      creationInput: { leafName: "next" },
+    });
+    assert.strictEqual(planned.status, "planned");
+    if (planned.status !== "planned") {
+      throw new Error("当前命令名不冲突时应可规划加包");
+    }
+    const existingCliManifest = JSON.parse(
+      await readFile(existingCliManifestPath, "utf8"),
+    ) as Record<string, any>;
+    existingCliManifest.bin = { next: "./dist/cli.js" };
+    await writeFile(
+      existingCliManifestPath,
+      `${JSON.stringify(existingCliManifest, null, 2)}\n`,
+    );
+    const staleCommit = await generator.commitPlan(planned.plan);
+    assert.strictEqual(staleCommit.status, "conflict");
+    await assert.rejects(stat(path.join(targetRoot, "packages/next")));
+
+    const libraryRoot = await createTargetRoot(
+      "template-ts-cli-unlinked-library-",
+    );
+    const libraryInitialized = await generator.init({
+      targetRoot: libraryRoot,
+      selection: { presets: [{ contentIdentity: libraryPreset.identity }] },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      libraryInitialized.status,
+      "success",
+      JSON.stringify(libraryInitialized),
+    );
+    await rm(path.join(libraryRoot, "packages/lib/package.json"));
+    const unlinkedAddition = await generator.add({
+      repositoryRoot: libraryRoot,
+      preset: preset.identity,
+      creationInput: { leafName: "standalone" },
+    });
+    assert.strictEqual(unlinkedAddition.status, "success");
+  });
+
   void it("未知节点身份或不兼容的原生提供者会在写入前拒绝", async () => {
     const targetRoot = await createTargetRoot("template-ts-cli-invalid-link-");
     const generator = createDefaultGenerator({ content });
@@ -731,5 +919,107 @@ void describe("TypeScript CLI 公开预设", () => {
       /CLI命令名称 "cli" 重复：@demo\/cli 与 @demo\/duplicate-tool/u,
     );
     assert.strictEqual(await snapshotTree(targetRoot), before);
+
+    const sharedLibraryRoot = await createTargetRoot(
+      "template-ts-cli-shared-command-",
+    );
+    await mkdir(sharedLibraryRoot);
+    const sharedContent = [...content, duplicateMember];
+    const sharedGenerator = createDefaultGenerator({ content: sharedContent });
+    const sharedInitialized = await sharedGenerator.init({
+      targetRoot: sharedLibraryRoot,
+      selection: {
+        roots: [
+          { nodeIdentity: "workspace", contentIdentity: root.identity },
+          { nodeIdentity: "tool", contentIdentity: duplicateMember.identity },
+        ],
+      },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      sharedInitialized.status,
+      "success",
+      JSON.stringify(sharedInitialized),
+    );
+    const sharedManifestPath = path.join(
+      sharedLibraryRoot,
+      "packages/duplicate-tool/package.json",
+    );
+    const sharedManifest = JSON.parse(
+      await readFile(sharedManifestPath, "utf8"),
+    ) as Record<string, any>;
+    sharedManifest.bin = { second: "./dist/cli.js" };
+    await writeFile(
+      sharedManifestPath,
+      `${JSON.stringify(sharedManifest, null, 2)}\n`,
+    );
+    const sharedBefore = await snapshotTree(sharedLibraryRoot);
+
+    const sharedDuplicate = await sharedGenerator.add({
+      repositoryRoot: sharedLibraryRoot,
+      contentIdentity: cli.identity,
+      nodeIdentity: "cli",
+      creationInput: { leafName: "second" },
+    });
+
+    assert.strictEqual(sharedDuplicate.status, "operation-failure");
+    assert.match(
+      sharedDuplicate.status === "operation-failure"
+        ? sharedDuplicate.error.message
+        : "",
+      /CLI命令名称 "second" 重复/u,
+    );
+    assert.strictEqual(await snapshotTree(sharedLibraryRoot), sharedBefore);
+
+    const staleRoot = await createTargetRoot(
+      "template-ts-cli-shared-command-stale-",
+    );
+    await mkdir(staleRoot);
+    const staleGenerator = createDefaultGenerator({ content: sharedContent });
+    const staleInitialized = await staleGenerator.init({
+      targetRoot: staleRoot,
+      selection: {
+        roots: [
+          { nodeIdentity: "workspace", contentIdentity: root.identity },
+          { nodeIdentity: "tool", contentIdentity: duplicateMember.identity },
+        ],
+      },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      staleInitialized.status,
+      "success",
+      JSON.stringify(staleInitialized),
+    );
+    const stalePlan = await staleGenerator.planAdd({
+      repositoryRoot: staleRoot,
+      contentIdentity: cli.identity,
+      nodeIdentity: "cli",
+      creationInput: { leafName: "release" },
+    });
+    assert.strictEqual(stalePlan.status, "planned");
+    if (stalePlan.status !== "planned") {
+      throw new Error("新命令名无冲突时应可规划");
+    }
+    const staleSharedManifest = JSON.parse(
+      await readFile(
+        path.join(staleRoot, "packages/duplicate-tool/package.json"),
+        "utf8",
+      ),
+    ) as Record<string, any>;
+    staleSharedManifest.bin = { release: "./dist/cli.js" };
+    await writeFile(
+      path.join(staleRoot, "packages/duplicate-tool/package.json"),
+      `${JSON.stringify(staleSharedManifest, null, 2)}\n`,
+    );
+    const staleCommit = await staleGenerator.commitPlan(stalePlan.plan);
+    assert.strictEqual(staleCommit.status, "conflict");
+    await assert.rejects(stat(path.join(staleRoot, "packages/release")));
   });
 });

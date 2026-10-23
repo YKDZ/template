@@ -4,13 +4,34 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
-import { templateContent, type TemplatePreset } from "@ykdz/template-content";
-import { createGenerator } from "@ykdz/template-generator";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+import { loadContentSource } from "@ykdz/template-generator/content-source";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 
-const vuePreset = templateContent.find(
-  (member): member is TemplatePreset =>
+const content = await loadContentSource({
+  namespace: "ykdz",
+  resolve: (specifier) => import.meta.resolve(specifier),
+  members: [
+    {
+      specifier: "@ykdz/reference-workspace-root/template",
+      load: () => import("@ykdz/reference-workspace-root/template"),
+    },
+    {
+      specifier: "@ykdz/reference-tooling-config/template",
+      load: () => import("@ykdz/reference-tooling-config/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vue-app/template",
+      load: () => import("@ykdz/reference-vue-app/template"),
+    },
+    {
+      specifier: "@ykdz/preset-vue-app/template",
+      load: () => import("@ykdz/preset-vue-app/template"),
+    },
+  ],
+});
+
+const vuePreset = content.find(
+  (member) =>
     member.kind === "preset" &&
     member.identity.packageName === "@ykdz/preset-vue-app",
 );
@@ -25,19 +46,13 @@ void describe("公开内容集合中的 Vue 预设", () => {
       rm(temporaryRoot, { recursive: true, force: true }),
     );
     const targetRoot = path.join(temporaryRoot, "demo");
-    const generator = createGenerator({
-      content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
-    });
-    assert.ok(
-      templateContent.includes(vuePreset),
-      "内容集合应提供 Vue 应用预设",
-    );
+    const generator = createDefaultGenerator({ content });
+    assert.ok(content.includes(vuePreset), "内容集合应提供 Vue 应用预设");
 
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: vuePreset.identity }] },
-      strategyInput: {
+      selection: { presets: [{ contentIdentity: vuePreset.identity }] },
+      conventions: {
         repositoryName: "demo",
         defaultPackageScope: "demo",
       },
@@ -57,7 +72,7 @@ void describe("公开内容集合中的 Vue 预设", () => {
       )
         .packages.map((definition: { path: string }) => definition.path)
         .toSorted(),
-      ["apps/web", "packages/tooling-config"].toSorted(),
+      [".", "apps/web", "packages/tooling-config"].toSorted(),
     );
     assert.deepStrictEqual(
       JSON.parse(

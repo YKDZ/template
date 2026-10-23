@@ -71,7 +71,9 @@ const nativePreset = defineNativeContentArtifact(
     exportPath: "./template",
     resources: jointE2eResources.map((path) => ({
       path,
-      source: resourceSource,
+      source: createTemplateSourceHandle(
+        resolveTemplateSource(resourceSource, path),
+      ),
       mode: 0o644,
     })),
     executionDependencies: ["@ykdz/template-workspace-authoring"],

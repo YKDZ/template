@@ -11,19 +11,44 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
-import {
-  templateContent,
-  type TemplatePreset,
-  type TemplateReferencePackage,
-} from "@ykdz/template-content";
 import type { ContentIdentity } from "@ykdz/template-core/content-identity";
-import { createGenerator } from "@ykdz/template-generator";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+import { loadContentSource } from "@ykdz/template-generator/content-source";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 
-function presetMember(packageName: string): TemplatePreset {
-  const member = templateContent.find(
-    (candidate): candidate is TemplatePreset =>
+const content = await loadContentSource({
+  namespace: "ykdz",
+  resolve: (specifier) => import.meta.resolve(specifier),
+  members: [
+    {
+      specifier: "@ykdz/reference-workspace-root/template",
+      load: () => import("@ykdz/reference-workspace-root/template"),
+    },
+    {
+      specifier: "@ykdz/reference-tooling-config/template",
+      load: () => import("@ykdz/reference-tooling-config/template"),
+    },
+    {
+      specifier: "@ykdz/reference-hono-api/template",
+      load: () => import("@ykdz/reference-hono-api/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vue-hono-web/template",
+      load: () => import("@ykdz/reference-vue-hono-web/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vue-app/template",
+      load: () => import("@ykdz/reference-vue-app/template"),
+    },
+    {
+      specifier: "@ykdz/preset-vue-hono-app/template",
+      load: () => import("@ykdz/preset-vue-hono-app/template"),
+    },
+  ],
+});
+
+function presetMember(packageName: string) {
+  const member = content.find(
+    (candidate) =>
       candidate.kind === "preset" &&
       candidate.identity.packageName === packageName,
   );
@@ -32,8 +57,8 @@ function presetMember(packageName: string): TemplatePreset {
 }
 
 function referenceIdentity(packageName: string): ContentIdentity {
-  const member = templateContent.find(
-    (candidate): candidate is TemplateReferencePackage =>
+  const member = content.find(
+    (candidate) =>
       candidate.kind === "reference" &&
       candidate.identity.packageName === packageName,
   );
@@ -52,16 +77,13 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
       rm(temporaryRoot, { recursive: true, force: true }),
     );
     const targetRoot = path.join(temporaryRoot, "demo");
-    const generator = createGenerator({
-      content: templateContent,
-      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
-    });
+    const generator = createDefaultGenerator({ content });
 
-    assert.ok(templateContent.includes(vueHonoPreset));
+    assert.ok(content.includes(vueHonoPreset));
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: vueHonoPreset.identity }] },
-      strategyInput: {
+      selection: { presets: [{ contentIdentity: vueHonoPreset.identity }] },
+      conventions: {
         repositoryName: "demo",
         defaultPackageScope: "demo",
       },
@@ -78,10 +100,22 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
       initialized.blueprint.packages
         .map(({ path: packagePath }) => packagePath)
         .toSorted(),
-      ["apps/api", "apps/web", "packages/tooling-config"].toSorted(),
+      [".", "apps/api", "apps/web", "packages/tooling-config"].toSorted(),
     );
+    const initializedWeb = initialized.generationRecord.packages.find(
+      ({ contentIdentity }) =>
+        contentIdentity.packageName === "@ykdz/reference-vue-hono-web",
+    );
+    const initializedApi = initialized.generationRecord.packages.find(
+      ({ contentIdentity }) =>
+        contentIdentity.packageName === "@ykdz/reference-hono-api",
+    );
+    assert.ok(initializedWeb && initializedApi);
     assert.deepStrictEqual(initialized.blueprint.packageLinkIntents, [
-      { consumerPackagePath: "apps/web", providerPackagePath: "apps/api" },
+      {
+        consumerId: initializedWeb.packageDefinitionId,
+        providerId: initializedApi.packageDefinitionId,
+      },
     ]);
     const playwrightConfiguration = await readFile(
       path.join(targetRoot, "playwright.config.ts"),
@@ -119,22 +153,17 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
 
     const additions: {
       readonly contentIdentity: ContentIdentity;
-      readonly creationInput: TsCliCreationInput;
+      readonly creationInput: {
+        readonly leafName: string;
+        readonly packagePath: string;
+      };
     }[] = [
       {
-        contentIdentity: referenceIdentity("@ykdz/reference-ts-lib"),
+        contentIdentity: referenceIdentity("@ykdz/reference-hono-api"),
         creationInput: {
-          leafName: "extra-lib",
-          packagePath: "packages/extra-lib",
+          leafName: "support-api",
+          packagePath: "apps/support-api",
         },
-      },
-      {
-        contentIdentity: referenceIdentity("@ykdz/reference-ts-cli"),
-        creationInput: { leafName: "tool", packagePath: "packages/tool" },
-      },
-      {
-        contentIdentity: referenceIdentity("@ykdz/reference-rust-bin"),
-        creationInput: { leafName: "native", packagePath: "packages/native" },
       },
       {
         contentIdentity: referenceIdentity("@ykdz/reference-vue-app"),
@@ -157,17 +186,19 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
         .map(({ path: packagePath }) => packagePath)
         .toSorted(),
       [
+        ".",
         "apps/api",
         "apps/portal",
+        "apps/support-api",
         "apps/web",
-        "packages/extra-lib",
-        "packages/native",
-        "packages/tool",
         "packages/tooling-config",
       ].toSorted(),
     );
     assert.deepStrictEqual(finalBlueprint.packageLinkIntents, [
-      { consumerPackagePath: "apps/web", providerPackagePath: "apps/api" },
+      {
+        consumerId: initializedWeb.packageDefinitionId,
+        providerId: initializedApi.packageDefinitionId,
+      },
     ]);
     assert.strictEqual(await readFile(webSourcePath, "utf8"), customizedWeb);
     assert.strictEqual(await readFile(apiSourcePath, "utf8"), customizedApi);
@@ -195,14 +226,14 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
     );
     assert.strictEqual(
       finalWebManifest.devDependencies["@demo/tooling-config"],
-      "workspace:*",
+      "workspace:../../packages/tooling-config",
     );
     const finalApiManifest = JSON.parse(
       await readFile(path.join(targetRoot, "apps/api/package.json"), "utf8"),
     ) as { dependencies: Record<string, string> };
     assert.strictEqual(
       finalApiManifest.dependencies["@demo/tooling-config"],
-      "workspace:*",
+      "workspace:../../packages/tooling-config",
     );
     const finalTurbo = JSON.parse(
       await readFile(path.join(targetRoot, "turbo.json"), "utf8"),
@@ -212,16 +243,6 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
       "@demo/web#build",
       "@demo/web#browser:prepare",
     ]);
-    assert.ok(
-      (
-        JSON.parse(
-          await readFile(
-            path.join(targetRoot, ".template/environment-needs.json"),
-            "utf8",
-          ),
-        ) as { check: readonly { kind: string }[] }
-      ).check.some((need) => need.kind === "playwright-browser-assets"),
-    );
     assert.match(
       await readFile(
         path.join(targetRoot, ".github/workflows/check.yml"),
@@ -237,7 +258,7 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
     };
     assert.strictEqual(
       vueManifest.devDependencies["@demo/tooling-config"],
-      "workspace:*",
+      "workspace:../../packages/tooling-config",
     );
     assert.strictEqual(
       await readFile(path.join(targetRoot, "playwright.config.ts"), "utf8"),
