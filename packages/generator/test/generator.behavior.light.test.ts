@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import {
   chmod,
+  lstat,
+  mkdir,
   mkdtemp,
   readFile,
+  readlink,
   readdir,
+  rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -414,6 +419,132 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
     });
     assert.strictEqual(wrongStrategy.status, "operation-failure");
     assert.strictEqual(await snapshotTree(firstRoot), beforeWrongStrategy);
+  });
+
+  void it("祖先不是目录时加包冲突保留受阻来源且不写入", async () => {
+    for (const blocker of ["file", "symbolic-link"] as const) {
+      const parentRoot = await mkdtemp(
+        path.join(tmpdir(), `template-generator-ancestor-${blocker}-`),
+      );
+      const targetRoot = path.join(parentRoot, "project");
+      const outsideRoot = path.join(parentRoot, "outside");
+      const generator = createDocumentationEngine({
+        policyId: `test-policy:ancestor-${blocker}`,
+        author: "祖先冲突测试",
+      });
+
+      try {
+        const initialized = await generator.init({
+          targetRoot,
+          selection: {
+            roots: [{ nodeIdentity: "guide", contentIdentity: guideIdentity }],
+          },
+          strategyInput: { collection: "north", edition: "draft" },
+        });
+        assert.strictEqual(
+          initialized.status,
+          "success",
+          JSON.stringify(initialized),
+        );
+
+        const ancestorPath = path.join(targetRoot, "packages");
+        if (blocker === "file") {
+          await writeFile(ancestorPath, "由用户管理\n");
+        } else {
+          await mkdir(outsideRoot);
+          await symlink(outsideRoot, ancestorPath, "dir");
+        }
+        const metadataPath = path.join(targetRoot, ".template/generation.json");
+        const metadataBefore = await readFile(metadataPath, "utf8");
+        const planning = await generator.planAdd({
+          repositoryRoot: targetRoot,
+          contentIdentity: guideIdentity,
+          creationInput: { leafName: "new", packagePath: "packages/new" },
+        });
+
+        assert.strictEqual(
+          planning.status,
+          "conflict",
+          JSON.stringify(planning),
+        );
+        if (planning.status !== "conflict") continue;
+        const ancestorConflict = planning.conflicts.find(
+          (conflict) => conflict.path === "packages",
+        );
+        assert.ok(ancestorConflict, JSON.stringify(planning.conflicts));
+        assert.ok(
+          ancestorConflict.sources?.some((source) =>
+            source.label.includes("packages/new"),
+          ),
+          JSON.stringify(ancestorConflict),
+        );
+        assert.strictEqual(
+          await readFile(metadataPath, "utf8"),
+          metadataBefore,
+        );
+        await assert.rejects(
+          stat(path.join(targetRoot, "packages/new/README.md")),
+        );
+        if (blocker === "file") {
+          assert.strictEqual(
+            await readFile(ancestorPath, "utf8"),
+            "由用户管理\n",
+          );
+          assert.strictEqual((await lstat(ancestorPath)).isFile(), true);
+        } else {
+          assert.strictEqual(await readlink(ancestorPath), outsideRoot);
+          assert.deepStrictEqual(await readdir(outsideRoot), []);
+          assert.strictEqual(
+            (await lstat(ancestorPath)).isSymbolicLink(),
+            true,
+          );
+        }
+      } finally {
+        await rm(parentRoot, { recursive: true, force: true });
+      }
+    }
+
+    const normalParent = await mkdtemp(
+      path.join(tmpdir(), "template-generator-ancestor-normal-"),
+    );
+    const normalRoot = path.join(normalParent, "project");
+    const normalGenerator = createDocumentationEngine({
+      policyId: "test-policy:ancestor-normal",
+      author: "正常计划测试",
+    });
+    try {
+      const initialized = await normalGenerator.init({
+        targetRoot: normalRoot,
+        selection: {
+          roots: [{ nodeIdentity: "guide", contentIdentity: guideIdentity }],
+        },
+        strategyInput: { collection: "north", edition: "draft" },
+      });
+      assert.strictEqual(
+        initialized.status,
+        "success",
+        JSON.stringify(initialized),
+      );
+      const planning = await normalGenerator.planAdd({
+        repositoryRoot: normalRoot,
+        contentIdentity: guideIdentity,
+        creationInput: { leafName: "new", packagePath: "packages/new" },
+      });
+      assert.strictEqual(planning.status, "planned", JSON.stringify(planning));
+      if (planning.status !== "planned") return;
+      assert.ok(
+        planning.actions.some(
+          (action) => action.path === "packages/new/README.md",
+        ),
+        JSON.stringify(planning.actions),
+      );
+      await assert.rejects(
+        stat(path.join(normalRoot, "packages/new/README.md")),
+        { code: "ENOENT" },
+      );
+    } finally {
+      await rm(normalParent, { recursive: true, force: true });
+    }
   });
 
   void it("缺少必要文档内容时初始化失败且新目标不存在", async () => {
