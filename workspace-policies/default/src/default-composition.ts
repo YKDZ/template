@@ -800,6 +800,28 @@ function filePath(value: string): string {
   return normalized;
 }
 
+function reuseEquivalentRootDeclarations(
+  declarations: readonly DefaultRootDeclaration[],
+): DefaultRootDeclaration[] {
+  const declarationsBySource = new Map<string, DefaultRootDeclaration[]>();
+  const result: DefaultRootDeclaration[] = [];
+  for (const declaration of declarations) {
+    const sourceKey = contentIdentityKey(declaration.sourceIdentity);
+    const sourceDeclarations = declarationsBySource.get(sourceKey) ?? [];
+    if (
+      sourceDeclarations.some((existing) =>
+        isDeepStrictEqual(existing, declaration),
+      )
+    ) {
+      continue;
+    }
+    sourceDeclarations.push(declaration);
+    declarationsBySource.set(sourceKey, sourceDeclarations);
+    result.push(declaration);
+  }
+  return result;
+}
+
 function compositionFilesForRoot(options: {
   readonly rootId: PackageDefinitionId;
   readonly declarations: readonly DefaultRootDeclaration[];
@@ -1002,7 +1024,7 @@ export function createDefaultComposition(options: {
           contentIdentityKey,
         ),
       );
-      const declarations: DefaultRootDeclaration[] = [
+      const declarations = reuseEquivalentRootDeclarations([
         ...combineOptions.packages.flatMap(({ package: item, contribution }) =>
           contribution.facts.rootDeclaration === undefined
             ? []
@@ -1023,7 +1045,7 @@ export function createDefaultComposition(options: {
                 contentIdentityKey(declaration.sourceIdentity),
               )),
         ),
-      ];
+      ]);
       const rootIdentity = rootPackage.package.contentIdentity;
       const rootSource = sourceLabel(rootIdentity);
       const documents = combineOptions.packages.flatMap(
