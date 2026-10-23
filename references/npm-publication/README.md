@@ -1,11 +1,19 @@
-# npm 发布配置
+# npm 原生发布
 
-本参考包提供 Changesets 原生依赖、配置和 GitHub Actions 工作流。启用发布能力后，生成项目直接使用 Changesets，不复制发布工具项目或辅助脚本。
+本参考内容为相关工作区提供 Changesets 配置、原生发布命令和 GitHub Actions 工作流。ts-lib 与 ts-cli 默认组合这份配置；新增配置不会公开任何包。包是否发布由自己的 `package.json` 决定，默认保持 `private: true`。
 
-目标包以 `private: false` 参与发布，版本与包间依赖使用原生 `package.json` 管理。可以手工修改版本，也可以按需使用 `pnpm exec changeset` 和 `pnpm exec changeset version`；不要求每次提交添加 changeset，不自动创建版本 PR。
+## 准备版本
 
-`pnpm publication:pack` 把未发布版本打包到 `.changeset/packed`；`pnpm publication:publish` 发布同一目录中的制品。打包前由 Turbo 根据工作区依赖顺序统一构建；包内无需发布生命周期脚本。包选择、依赖顺序、已发布版本跳过和发布错误处理遵循 Changesets 的约定。
+准备发布时，在目标包的 `package.json` 中设置真实包名和版本，并将 `private` 改为 `false`；维护该包的 `CHANGELOG.md`，使用 `## <完整版本号>` 作为版本标题。可直接维护 manifest 版本；Changesets 的变更集与 `changeset version` 也是可选用法。
 
-GitHub Actions 通过 `release.yml` 手动触发。检查与打包在只读作业中完成，独立发布作业使用 npm Trusted Publishing 上传官方打包 Action 传递的制品；存在当前版本 CHANGELOG 时，按 Changesets 约定创建 GitHub Release。每个包需在 npm 配置实际 GitHub 仓库、工作流 `release.yml` 和环境 `npm`；首次发布、权限与可信发布者配置使用 npm 官方工具完成。
+首次发布时，先用 `npm login` 登录，再按相同的 Changesets 路径执行 `pnpm publication:pack` 和 `pnpm publication:publish`。Changesets 按原生规则处理待发布包、依赖顺序与已发布版本。首次上传成功后，在 npm 包设置中添加 GitHub Actions Trusted Publisher，填写实际仓库、工作流 `release.yml` 和环境 `npm`；在 GitHub 仓库中创建对应环境。
 
-参考 [Changesets 自动化文档](https://changesets.dev/guide/automating)和 [npm Trusted Publishing 文档](https://docs.npmjs.com/trusted-publishers/)。
+## 后续发布
+
+提交并审核版本、说明和 manifest 变更后，在仓库默认分支手动运行 `release.yml`，也可执行 `gh workflow run release.yml --ref <默认分支>`。工作流先在只读作业中检查、构建、打包和验收，再由官方 Changesets 发布 Action 上传同一份 artifact 并创建 GitHub Release。发布作业通过 npm OIDC 认证；合并、普通 push、tag 或 Release 创建不会自动上传 npm。
+
+官方 Action 从每包 `CHANGELOG.md` 读取 Release 说明。缺少该文件时会跳过 GitHub Release；文件存在但没有匹配完整版本的标题时，Action 可能会将整份文件作为说明。因此，维护者应保留 `## <完整版本号>` 标题，但不需要另加说明解析器或格式门禁。
+
+发布失败后，先查看 Actions 日志，并分别核对 npm 版本和 GitHub Release 是否已创建；之后按 Changesets、npm 和 GitHub 的原生行为诊断或补齐。不要假设重跑会自动恢复所有已完成阶段。
+
+参考：[Changesets 自动化](https://changesets.dev/guide/automating)、[npm Trusted Publishers](https://docs.npmjs.com/trusted-publishers)。
