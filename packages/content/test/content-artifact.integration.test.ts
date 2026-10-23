@@ -29,11 +29,8 @@ import {
   type PreparedContentCollection,
 } from "@ykdz/template-content/artifact-builder";
 import { contentIdentityKey } from "@ykdz/template-core/content-identity";
-import {
-  resolveTemplateSource,
-  type TemplateSourceHandle,
-} from "@ykdz/template-core/renderer";
 import { resolveReferenceDependencyIdentity } from "@ykdz/template-generator";
+import type { DefaultReferencePackageDefinition } from "@ykdz/template-workspace/reference-package";
 import { execa } from "execa";
 
 import { createAuthoredContentFixture } from "../test-support/authored-content-fixture.ts";
@@ -371,6 +368,7 @@ void describe("原生内容制品安装链", () => {
         "@ykdz/reference-npm-publication",
         "@ykdz/reference-ts-lib",
         "@ykdz/reference-tooling-config",
+        "@ykdz/reference-workspace-root",
       ].sort(),
     );
 
@@ -1204,10 +1202,10 @@ void describe("原生内容制品安装链", () => {
           readonly errorMessage: string;
         };
         assert.equal(missingResourceEvidence.status, "operation-failure");
-        assert.equal(missingResourceEvidence.phase, "planning");
+        assert.equal(missingResourceEvidence.phase, "preparation");
         assert.match(
           missingResourceEvidence.errorMessage,
-          /@ykdz\/reference-rust-bin.*prepare 阶段失败.*模板执行数据未包含/u,
+          /@ykdz\/reference-rust-bin\/native\/Cargo\.toml/u,
         );
         assert.deepEqual(
           await snapshotTree(targetRoot),
@@ -1371,7 +1369,7 @@ void describe("原生内容制品安装链", () => {
         .sort(),
       references.map((member) => contentIdentityKey(member.identity)).sort(),
     );
-    assert.equal(prepared.owners.length, 11);
+    assert.equal(prepared.owners.length, 12);
     const vueAppOwner = prepared.owners.find(
       (owner) =>
         owner.member.identity.packageName === "@ykdz/reference-vue-app",
@@ -1394,12 +1392,12 @@ void describe("原生内容制品安装链", () => {
     assert.ok(nativeTypeScript?.from && nativeTypeScript.version);
     const vueAppArchiveManifest = JSON.parse(
       await readFile(
-        path.join(vueAppOwner.installRoot, "package.json"),
+        path.join(vueAppOwner.installRoot, "native", "package.json"),
         "utf8",
       ),
-    ) as { readonly dependencies?: Readonly<Record<string, string>> };
+    ) as { readonly devDependencies?: Readonly<Record<string, string>> };
     assert.equal(
-      vueAppArchiveManifest.dependencies?.["typescript-7"],
+      vueAppArchiveManifest.devDependencies?.["typescript-7"],
       nativeTypeScript.from === "typescript-7"
         ? nativeTypeScript.version
         : `npm:${nativeTypeScript.from}@${nativeTypeScript.version}`,
@@ -1761,7 +1759,11 @@ void describe("原生内容制品安装链", () => {
       featureDefinitionPath,
       "utf8",
     );
-    assert.ok(originalFeatureDefinition.includes('resources: ["src"],'));
+    assert.ok(
+      originalFeatureDefinition.includes(
+        'resources: [{ path: "src/content.ts" }],',
+      ),
+    );
     await mkdir(path.join(featureAuthorRoot, "lib"), { recursive: true });
     await rename(
       path.join(featureAuthorRoot, "src", "content.ts"),
@@ -1774,8 +1776,8 @@ void describe("原生内容制品安装链", () => {
     await writeFile(
       featureDefinitionPath,
       originalFeatureDefinition.replace(
-        'resources: ["src"],',
-        'resources: ["lib"],',
+        'resources: [{ path: "src/content.ts" }],',
+        'resources: [{ path: "lib/content.ts" }],',
       ),
     );
     const content = await buildNativeAuthoredContent(
@@ -1788,52 +1790,18 @@ void describe("原生内容制品安装链", () => {
     );
     assert.ok(feature);
     assert.equal(feature.kind, "reference");
-    const featureDefinition = feature.definition as {
-      readonly source: (resourcePath: string) => TemplateSourceHandle;
-      readonly prepareArtifact: () => {
-        readonly resources: readonly {
-          readonly path: string;
-          readonly data: Uint8Array;
-        }[];
-      };
-    };
-    const featureSource = featureDefinition.source("lib/content.ts");
-    const authoringSdkRoot = await realpath(
-      path.join(
-        fixture.root,
-        namespace,
-        "authors",
-        "feature",
-        "node_modules",
-        "@ykdz",
-        "template-workspace",
-      ),
+    const featureDefinition =
+      feature.definition as DefaultReferencePackageDefinition;
+    const preparedFeatureSnapshot = featureDefinition.prepare({
+      excludedPackagePaths: [],
+    });
+    const snapshotFeatureSource = preparedFeatureSnapshot.resources.find(
+      ({ path: resourcePath }) => resourcePath === "lib/content.ts",
     );
-    const workspaceCoreEntry = import.meta
-      .resolve("@ykdz/template-core/renderer");
-    const workspaceAuthoringEntry = import.meta
-      .resolve("@ykdz/template-workspace/reference-package");
-    const authoringRequire = createRequire(
-      path.join(authoringSdkRoot, "dist", "reference-package.js"),
-    );
-    const archiveCoreEntry = pathToFileURL(
-      authoringRequire.resolve("@ykdz/template-core/renderer"),
-    ).href;
-    const archiveAuthoringEntry = pathToFileURL(
-      path.join(authoringSdkRoot, "dist", "reference-package.js"),
-    ).href;
-    assert.notEqual(archiveCoreEntry, workspaceCoreEntry);
-    assert.notEqual(archiveAuthoringEntry, workspaceAuthoringEntry);
-    let crossSdkHandleFailure: unknown;
-    try {
-      resolveTemplateSource(featureSource, ".");
-    } catch (error) {
-      crossSdkHandleFailure = error;
-    }
-    assert.ok(crossSdkHandleFailure instanceof Error);
-    assert.match(
-      crossSdkHandleFailure.message,
-      /unknown Template Source handle/u,
+    assert.ok(snapshotFeatureSource);
+    assert.equal(
+      Buffer.from(snapshotFeatureSource.content).toString("utf8"),
+      'export const fixtureOrigin = "native-authored:feature";\n',
     );
     const preparedFeature = featureDefinition.prepareArtifact();
     const preparedFeatureSource = preparedFeature.resources.find(
@@ -1845,12 +1813,7 @@ void describe("原生内容制品安装链", () => {
       'export const fixtureOrigin = "native-authored:feature";\n',
     );
     assert.equal(preparedFeatureSource.path, "lib/content.ts");
-    const sdkBoundaryEvidence = {
-      archiveCoreEntry,
-      workspaceCoreEntry,
-      archiveAuthoringEntry,
-      workspaceAuthoringEntry,
-      red: crossSdkHandleFailure.message,
+    const authoredResourceEvidence = {
       green: {
         owner: feature.identity,
         path: preparedFeatureSource.path,
@@ -2511,7 +2474,7 @@ void describe("原生内容制品安装链", () => {
             targetCreated: false,
           },
           missingResource: missingResourceFailures,
-          ownerSdkBoundary: sdkBoundaryEvidence,
+          authoredResource: authoredResourceEvidence,
           existingTargetAfterMissingResource: await snapshotTree(targetRoot),
           missingResourceTargetCreated: false,
         },

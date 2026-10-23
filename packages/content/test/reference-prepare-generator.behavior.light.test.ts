@@ -29,7 +29,14 @@ async function packageFixture(
   options: {
     readonly alias: string;
     readonly packageName: string;
-    readonly resources: readonly { readonly path: string }[];
+    readonly resources: readonly {
+      readonly path: string;
+      readonly targetPath?: string;
+    }[];
+    readonly resourceFiles?: readonly {
+      readonly path: string;
+      readonly content: string;
+    }[];
     readonly manifest?: Readonly<Record<string, unknown>>;
     readonly templateDependencies?: Parameters<
       typeof defineReferencePackage
@@ -75,6 +82,11 @@ async function packageFixture(
     "export const ownerResource = true;\n",
   );
   await writeFile(path.join(root, "README.md"), "不属于资源快照\n");
+  for (const resource of options.resourceFiles ?? []) {
+    const resourcePath = path.join(root, resource.path);
+    await mkdir(path.dirname(resourcePath), { recursive: true });
+    await writeFile(resourcePath, resource.content);
+  }
 
   const definition = defineReferencePackage({
     manifest,
@@ -287,6 +299,63 @@ void it("资源准备只读取显式声明的文件", async (context) => {
     ["src/index.ts"],
   );
   assert.deepEqual(prepared.facts.ownerFacts, { paths: ["src/index.ts"] });
+});
+
+void it("按映射目标识别原生配置并保留普通JSON资源字节", async (context) => {
+  const nativeConfig =
+    '{\n  "compilerOptions" : { "target" : "ES2022", },\n}\n';
+  const ordinaryJson = '{\n  "value" : null,\n}\n';
+  const fixture = await packageFixture(context, {
+    alias: "mapped-config",
+    packageName: "@fixture/mapped-config",
+    resources: [
+      { path: "resources/base-template", targetPath: "tsconfig.json" },
+      { path: "resources/data.json", targetPath: "data.json" },
+    ],
+    resourceFiles: [
+      { path: "resources/base-template", content: nativeConfig },
+      { path: "resources/data.json", content: ordinaryJson },
+    ],
+  });
+  const targetRoot = await mkdtemp(
+    path.join(tmpdir(), "template-reference-mapped-config-"),
+  );
+  context.after(() => rm(targetRoot, { recursive: true, force: true }));
+  const result = await createDefaultGenerator({
+    content: [...templateContent, fixture.member],
+  }).init({
+    targetRoot,
+    selection: {
+      presets: [{ contentIdentity: presetIdentity("ts-lib") }],
+      roots: [
+        {
+          nodeIdentity: "mapped-config",
+          contentIdentity: fixture.identity,
+          creationInput: { packagePath: "packages/mapped-config" },
+        },
+      ],
+    },
+    conventions: {
+      repositoryName: "mapped-config",
+      defaultPackageScope: "mapped-config",
+    },
+  });
+
+  assert.equal(result.status, "success", JSON.stringify(result));
+  assert.equal(
+    await readFile(
+      path.join(targetRoot, "packages/mapped-config/tsconfig.json"),
+      "utf8",
+    ),
+    '{\n  "compilerOptions": {\n    "target": "ES2022"\n  }\n}\n',
+  );
+  assert.equal(
+    await readFile(
+      path.join(targetRoot, "packages/mapped-config/data.json"),
+      "utf8",
+    ),
+    ordinaryJson,
+  );
 });
 
 void it("fresh add解析缺失的owner依赖时不改写项目", async (context) => {

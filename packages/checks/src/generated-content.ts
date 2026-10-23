@@ -199,8 +199,7 @@ async function focusedConsumerPath(options: {
     if (planned.status === "planned") return consumer.path;
     if (
       planned.status === "operation-failure" &&
-      planned.phase === "calculation" &&
-      /包连接|Node包名导入|Package Role/u.test(planned.error.message)
+      planned.error.packageLinkIssue?.kind === "unsupported-link"
     ) {
       continue;
     }
@@ -289,7 +288,7 @@ export async function materializeGeneratedScenario(options: {
     if (consumer === undefined) return { status: "not-applicable" };
     linkFrom = [consumer];
   }
-  const additionResult = await generator.add({
+  const additionPlan = await generator.planAdd({
     repositoryRoot: projectDir,
     preset: options.scenario.addition.identity,
     creationInput: {
@@ -304,12 +303,17 @@ export async function materializeGeneratedScenario(options: {
   });
   if (
     options.scenario.focusedLink === true &&
-    additionResult.status === "operation-failure" &&
-    additionResult.phase === "calculation" &&
-    /包连接|Node包名导入|Package Role/u.test(additionResult.error.message)
+    additionPlan.status === "operation-failure" &&
+    additionPlan.error.packageLinkIssue?.kind === "unsupported-link"
   ) {
     return { status: "not-applicable" };
   }
+  if (additionPlan.status !== "planned") {
+    throw new Error(
+      `${options.scenario.id}: addition planning did not succeed: ${JSON.stringify(additionPlan)}`,
+    );
+  }
+  const additionResult = await generator.commitPlan(additionPlan.plan);
   const result = requireSuccess(additionResult, "addition", options.scenario);
   return {
     status: "generated",

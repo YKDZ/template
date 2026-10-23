@@ -675,6 +675,35 @@ function packageName(options: {
 }
 
 /** 以所属原生manifest和资源快照生成统一ReferencePackageDefinition。 */
+export type DefaultReferencePackageDefinition<
+  CreationInput extends JsonValue = JsonValue,
+  OwnerFacts = undefined,
+> = ReturnType<
+  typeof defineNativeReferenceContentArtifact<
+    ReferencePackageDefinition<
+      DefaultWorkspaceConventions,
+      CreationInput,
+      DefaultReferencePreparedFacts<OwnerFacts>,
+      unknown,
+      unknown,
+      DefaultReferenceContributionFacts<OwnerFacts>
+    >,
+    DefaultReferencePreparedFacts<OwnerFacts>
+  >
+> & {
+  readonly manifest: ReferencePackageManifest;
+  readonly defaultPath: string;
+  readonly role: DefaultPackageRole;
+  readonly dependencyUses: readonly ReferenceDependencyUse[];
+  readonly targetExports: Readonly<Record<string, unknown>>;
+  readonly targetDependencyNames: readonly string[];
+  readonly targetDependencyKeys: readonly string[];
+  readonly rootDeclarationAvailable: boolean;
+  readonly prepareRootDeclaration: (
+    ownerFacts: OwnerFacts,
+  ) => DefaultRootDeclarationData | undefined;
+};
+
 export function defineReferencePackage<
   CreationInput extends JsonValue = JsonValue,
   OwnerFacts = undefined,
@@ -736,31 +765,7 @@ export function defineReferencePackage<
       OwnerFacts
     >,
   ) => Readonly<Record<string, unknown>>;
-}): ReturnType<
-  typeof defineNativeReferenceContentArtifact<
-    ReferencePackageDefinition<
-      DefaultWorkspaceConventions,
-      CreationInput,
-      DefaultReferencePreparedFacts<OwnerFacts>,
-      unknown,
-      unknown,
-      DefaultReferenceContributionFacts<OwnerFacts>
-    >,
-    DefaultReferencePreparedFacts<OwnerFacts>
-  >
-> & {
-  readonly manifest: ReferencePackageManifest;
-  readonly defaultPath: string;
-  readonly role: DefaultPackageRole;
-  readonly dependencyUses: readonly ReferenceDependencyUse[];
-  readonly targetExports: Readonly<Record<string, unknown>>;
-  readonly targetDependencyNames: readonly string[];
-  readonly targetDependencyKeys: readonly string[];
-  readonly rootDeclarationAvailable: boolean;
-  readonly prepareRootDeclaration: (
-    ownerFacts: OwnerFacts,
-  ) => DefaultRootDeclarationData | undefined;
-} {
+}): DefaultReferencePackageDefinition<CreationInput, OwnerFacts> {
   const defaultPath =
     options.defaultPath ?? `packages/${options.defaultLeafName}`;
   const templateDependencies = options.templateDependencies ?? [];
@@ -1175,17 +1180,18 @@ export function defineReferencePackage<
         },
       ];
       for (const resource of snapshot) {
-        if (!isNativeDocumentPath(resource.path)) continue;
         const mapping = mappingsBySourcePath.get(resource.path);
         if (mapping === undefined) {
           throw new Error(`原生配置没有资源映射：${resource.path}`);
         }
-        const document = assertNativeDocument(resource.path, resource.content);
+        const targetPath = mapping.targetPath ?? resource.path;
+        if (!isNativeDocumentPath(targetPath)) continue;
+        const document = assertNativeDocument(targetPath, resource.content);
         const scope = compositionResourcePaths.has(resource.path)
           ? "composition"
           : "package";
         nativeDocuments.push({
-          path: mapping.targetPath ?? resource.path,
+          path: targetPath,
           sourcePath: resource.path,
           value: document,
           mode: resource.mode,

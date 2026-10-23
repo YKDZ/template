@@ -148,10 +148,10 @@ function referenceDefinition(options: {
   return [
     ...(options.templatePrelude ?? []),
     "",
-    'import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";',
+    'import { defineReferencePackage, type DefaultReferencePackageDefinition } from "@ykdz/template-workspace/reference-package";',
     'import manifest from "../package.json" with { type: "json" };',
     "",
-    "export const referencePackage = defineReferencePackage({",
+    "export const referencePackage: DefaultReferencePackageDefinition = defineReferencePackage({",
     "  manifest,",
     '  resourceRoot: new URL("../", import.meta.url),',
     `  alias: ${JSON.stringify(options.alias)},`,
