@@ -43,10 +43,11 @@ type StableCommon = {
   readonly edition: string;
   readonly currentProvider: string;
 };
+type PackageInput = { readonly currentProvider: string };
 type DocumentationComposition = Composition<
   Conventions,
   StableCommon,
-  unknown,
+  PackageInput,
   Contribution["facts"],
   { readonly packageCount: number },
   CreationInput,
@@ -82,6 +83,7 @@ function documentationEngine() {
           readonly facts: {};
         };
         readonly stableCommon: StableCommon;
+        readonly packageInput: PackageInput | undefined;
         readonly bindings: ReadonlyMap<string, PackageBinding>;
         readonly creationInput: CreationInput | undefined;
       }): Contribution;
@@ -143,6 +145,7 @@ function documentationEngine() {
         definition,
         prepared,
         stableCommon,
+        packageInput,
         creationInput,
       }) {
         const source = prepared.resources.find(
@@ -157,7 +160,7 @@ function documentationEngine() {
                 ? ".template"
                 : "README.md",
             content: new TextEncoder().encode(
-              `${stableCommon.edition}:${stableCommon.currentProvider}:${new TextDecoder().decode(source.content)}`,
+              `${stableCommon.edition}:${stableCommon.currentProvider}:${packageInput?.currentProvider}:${new TextDecoder().decode(source.content)}`,
             ),
             mode: 0,
           },
@@ -197,13 +200,18 @@ function documentationEngine() {
       }
       return { edition: (value as { edition: string }).edition };
     },
-    resolve({ conventions, operationFacts }) {
+    resolve({ conventions, operationFacts, packages }) {
       return {
         stableCommon: {
           edition: conventions.edition,
           currentProvider: operationFacts.currentProvider,
         },
-        packageInputs: new Map<PackageDefinitionId, unknown>(),
+        packageInputs: new Map<PackageDefinitionId, PackageInput>(
+          packages.map((item) => [
+            item.packageDefinitionId,
+            { currentProvider: operationFacts.currentProvider },
+          ]),
+        ),
       };
     },
     combine({ blueprint, packages }) {
@@ -322,7 +330,7 @@ void describe("公开生成计算", () => {
         first.projection.entries.find((entry) => entry.path === "README.md")
           ?.content,
       ),
-      "draft:provider-snapshot:guide\n",
+      "draft:provider-snapshot:provider-snapshot:guide\n",
     );
     const ownerPackageCount: number = first.ownerFacts.packageCount;
     const savedEdition: string =
