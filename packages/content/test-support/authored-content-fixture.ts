@@ -294,14 +294,38 @@ async function writePresetPackage(options: {
     path.join(packageRoot, "template", "definition.ts"),
     [
       'import { definePreset, presetOwnerFromManifest } from "@ykdz/template-core/preset-definition";',
+      ...(options.nativeWorkspace
+        ? [
+            'import { defineNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";',
+          ]
+        : []),
       'import presetManifest from "../package.json" with { type: "json" };',
       "",
-      "export const preset = definePreset({",
-      '  metadata: { alias: "authored", title: "Authored fixture", description: "An external package fixture." },',
-      '  operations: ["init"],',
-      '  owner: presetOwnerFromManifest(presetManifest, "./template"),',
-      '  nodes: { feature: { reference: { alias: "feature", instance: "independent" } } },',
-      "});",
+      ...(options.nativeWorkspace
+        ? [
+            "export const preset = defineNativeContentArtifact(",
+            "  definePreset({",
+            '    metadata: { alias: "authored", title: "Authored fixture", description: "An external package fixture." },',
+            '    operations: ["init"],',
+            '    owner: presetOwnerFromManifest(presetManifest, "./template"),',
+            '    nodes: { feature: { reference: { alias: "feature", instance: "independent" } } },',
+            "  }),",
+            "  {",
+            "    manifest: presetManifest,",
+            '    resourceRoot: new URL("../", import.meta.url),',
+            '    exportPath: "./template",',
+            '    executionDependencies: ["@ykdz/template-workspace-authoring"],',
+            "  },",
+            ");",
+          ]
+        : [
+            "export const preset = definePreset({",
+            '  metadata: { alias: "authored", title: "Authored fixture", description: "An external package fixture." },',
+            '  operations: ["init"],',
+            '  owner: presetOwnerFromManifest(presetManifest, "./template"),',
+            '  nodes: { feature: { reference: { alias: "feature", instance: "independent" } } },',
+            "});",
+          ]),
       "",
     ].join("\n"),
   );

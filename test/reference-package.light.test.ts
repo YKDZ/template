@@ -1,12 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -42,7 +35,7 @@ async function fixture(
   context.after(() => rm(root, { recursive: true, force: true }));
   const source = path.join(root, "source");
   const manifest = {
-    ...(options.manifest ?? {}),
+    ...options.manifest,
     name: "@author/application",
     private: true,
     type: "module",
@@ -155,7 +148,7 @@ async function evaluate(
   } = {},
 ) {
   const definition = reference(setup, options);
-  const prepared = await definition.prepare({ excludedPackagePaths: [] });
+  const prepared = definition.prepare({ excludedPackagePaths: [] });
   const packageDefinitionId = "package-application";
   const contribution = definition.evaluate({
     packageDefinitionId,
