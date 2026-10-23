@@ -107,6 +107,7 @@ const nativeReference = defineReferencePackage<
   RustReferenceFacts
 >({
   manifest: referenceManifest,
+  artifactVersion: "0.0.0",
   resourceRoot: new URL("../", import.meta.url),
   alias: "binary",
   instance: "independent",
@@ -135,7 +136,12 @@ const nativeReference = defineReferencePackage<
     { name: "@ykdz/template-core", purpose: "template-execution" },
     { name: "@ykdz/template-workspace", purpose: "template-execution" },
     { name: "@ykdz/reference-workspace-root", purpose: "template-execution" },
+    { name: "@ykdz/reference-tooling-config", purpose: "template-build" },
+    { name: "oxfmt", purpose: "template-build" },
+    { name: "oxlint", purpose: "template-build" },
+    { name: "oxlint-tsgolint", purpose: "template-build" },
     { name: "smol-toml", purpose: "template-execution" },
+    { name: "typescript-7", purpose: "template-build" },
   ],
   executionDependencies: [
     "@ykdz/template-core",
