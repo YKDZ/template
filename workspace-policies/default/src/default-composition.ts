@@ -24,6 +24,7 @@ import type {
   PackageDefinitionId,
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
+import type { CurrentProjectProjectionEntry } from "@ykdz/template-core/project-projection";
 import type { ReferenceDependency } from "@ykdz/template-core/reference-package";
 import { resolveReferenceDependencyIdentity } from "@ykdz/template-generator";
 import { stringify as stringifyYaml } from "yaml";
@@ -32,7 +33,10 @@ import {
   projectDependencyMaintenancePolicy,
   type DependencyMaintenancePolicy,
 } from "./application-requirements.ts";
-import type { CiDiagnosticArtifactDeclaration } from "./ci-diagnostic-artifact.ts";
+import {
+  composeCiDiagnosticArtifacts,
+  type CiDiagnosticArtifactDeclaration,
+} from "./ci-diagnostic-artifact.ts";
 import { assertDefaultProjectBlueprint } from "./default-package-identity.ts";
 import { isDefaultPackageRole } from "./default-package-role.ts";
 import {
@@ -92,6 +96,56 @@ export type DefaultRootAttachmentDependencyFact = {
     | { readonly kind: "error"; readonly message: string };
 };
 
+export type DefaultPresetRootContributionResource = Readonly<{
+  readonly path: string;
+  readonly content: Uint8Array;
+  readonly mode: number;
+}>;
+
+export type DefaultPresetRootContributionPrepared<OwnerFacts = unknown> =
+  Readonly<{
+    readonly ownerFacts: OwnerFacts;
+    readonly readFacts?: readonly CurrentProjectProjectionEntry[];
+  }>;
+
+export type DefaultPresetPackageEvaluation = CompositionPackageEvaluation<
+  DefaultReferenceContributionFacts<unknown>
+>;
+
+export type DefaultPresetRootContributionOwner<OwnerFacts = unknown> =
+  Readonly<{
+    prepare(options: {
+      readonly ownerIdentity: ContentIdentity;
+      readonly repositoryRoot?: string;
+      readonly selection?: GenerationRecordSelection;
+      /** 仅包含该完整预设身份的持久节点，按 nodeIdentity 索引。 */
+      readonly selectedPackages?: ReadonlyMap<string, CompositionPackage>;
+    }):
+      | DefaultPresetRootContributionPrepared<OwnerFacts>
+      | Promise<DefaultPresetRootContributionPrepared<OwnerFacts>>;
+    compose(
+      options: Readonly<{
+        readonly ownerIdentity: ContentIdentity;
+        readonly selection: GenerationRecordSelection;
+        /** 仅包含该持久选择的节点，按 nodeIdentity 索引。 */
+        readonly selectedPackages: ReadonlyMap<
+          string,
+          DefaultPresetPackageEvaluation
+        >;
+        readonly rootPackage: CompositionPackage;
+        readonly ownerFacts: OwnerFacts;
+      }>,
+    ): Readonly<{
+      readonly rootPackageDefinitionId: PackageDefinitionId;
+      readonly rootDeclaration: DefaultRootDeclarationData;
+    }>;
+  }>;
+
+export type PreparedDefaultPresetRootContribution = Readonly<{
+  readonly ownerIdentity: ContentIdentity;
+  readonly ownerFacts: unknown;
+}>;
+
 export type DefaultCompositionFileResource = {
   readonly path: string;
   readonly content: Uint8Array;
@@ -121,6 +175,8 @@ export type DefaultOperationFacts = {
   /** 现存创建输入中的一次性连接已由蓝图固定为实例ID。 */
   readonly existingPackageDefinitionIds: ReadonlySet<PackageDefinitionId>;
   readonly existingPackageLinkIntents: readonly PackageLinkIntent[];
+  readonly presetRootContributions: readonly PreparedDefaultPresetRootContribution[];
+  readonly presetRootContributionReadFacts: readonly CurrentProjectProjectionEntry[];
   /** 本次add明确连接端点读取到的当前manifest；键为恢复后的实例ID。 */
   readonly targetManifests: ReadonlyMap<
     PackageDefinitionId,
@@ -134,6 +190,7 @@ export type DefaultStableCommon = {
   readonly resources: DefaultCompositionResources;
   readonly rootDeclarations: readonly DefaultRootDeclaration[];
   readonly rootAttachmentIdentities: readonly ContentIdentity[];
+  readonly presetRootContributions: readonly PreparedDefaultPresetRootContribution[];
   readonly targetManifests: ReadonlyMap<
     PackageDefinitionId,
     Readonly<Record<string, unknown>>
@@ -166,6 +223,104 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function presetRootContributionOwner(
+  definition: unknown,
+): DefaultPresetRootContributionOwner | undefined {
+  if (!isRecord(definition) || !isRecord(definition.rootContribution)) {
+    return undefined;
+  }
+  const owner = definition.rootContribution;
+  if (
+    typeof owner.prepare !== "function" ||
+    typeof owner.compose !== "function"
+  ) {
+    return undefined;
+  }
+  return owner as unknown as DefaultPresetRootContributionOwner;
+}
+
+function composePresetRootContributionDeclarations(options: {
+  readonly content: readonly DefaultContentMember[];
+  readonly selections: readonly GenerationRecordSelection[];
+  readonly packages: readonly DefaultEvaluation[];
+  readonly preparedContributions: readonly PreparedDefaultPresetRootContribution[];
+}): readonly DefaultRootDeclaration[] {
+  const presetsByIdentity = new Map(
+    options.content
+      .filter((member) => member.kind === "preset")
+      .map((member) => [contentIdentityKey(member.identity), member]),
+  );
+  const preparedByIdentity = new Map(
+    options.preparedContributions.map((prepared) => [
+      contentIdentityKey(prepared.ownerIdentity),
+      prepared.ownerFacts,
+    ]),
+  );
+  const packagesById = new Map(
+    options.packages.map((item) => [item.package.packageDefinitionId, item]),
+  );
+  const rootPackages = options.packages.filter(
+    ({ package: item }) => item.definition.path === ".",
+  );
+  if (rootPackages.length !== 1) {
+    throw new Error("预设根贡献要求唯一的明确根包实例");
+  }
+  const rootPackage = rootPackages[0]!.package;
+  const declarations: DefaultRootDeclaration[] = [];
+  for (const selection of options.selections) {
+    if (selection.presetIdentity === null) continue;
+    const member = presetsByIdentity.get(
+      contentIdentityKey(selection.presetIdentity),
+    );
+    if (member === undefined) {
+      throw new Error(
+        `持久预设选择不存在：${contentIdentityLabel(selection.presetIdentity)}`,
+      );
+    }
+    const owner = presetRootContributionOwner(member.definition);
+    if (owner === undefined) continue;
+    const ownerFacts = preparedByIdentity.get(
+      contentIdentityKey(member.identity),
+    );
+    if (ownerFacts === undefined) {
+      throw new Error(
+        `预设根贡献未按完整身份准备：${contentIdentityLabel(member.identity)}`,
+      );
+    }
+    const selectedPackages = new Map<string, DefaultEvaluation>();
+    for (const [nodeIdentity, packageDefinitionId] of Object.entries(
+      selection.nodes,
+    )) {
+      const selectedEvaluation = packagesById.get(packageDefinitionId);
+      if (selectedEvaluation === undefined) {
+        throw new Error(
+          `持久预设选择缺少节点实例：${contentIdentityLabel(member.identity)}/${nodeIdentity}`,
+        );
+      }
+      selectedPackages.set(nodeIdentity, selectedEvaluation);
+    }
+    const composition = owner.compose({
+      ownerIdentity: member.identity,
+      selection,
+      selectedPackages,
+      rootPackage,
+      ownerFacts,
+    });
+    if (
+      composition.rootPackageDefinitionId !== rootPackage.packageDefinitionId
+    ) {
+      throw new Error(
+        `预设根贡献输出根与默认组合根不匹配：${contentIdentityLabel(member.identity)}`,
+      );
+    }
+    declarations.push({
+      ...composition.rootDeclaration,
+      sourceIdentity: member.identity,
+    });
+  }
+  return Object.freeze(declarations);
 }
 
 function parseConventions(value: unknown): DefaultWorkspaceConventions {
@@ -230,6 +385,8 @@ export function prepareDefaultInitOperationFacts(
   options: {
     readonly rootDeclarations?: readonly DefaultRootDeclaration[];
     readonly rootAttachmentDependencies?: readonly DefaultRootAttachmentDependencyFact[];
+    readonly presetRootContributions?: readonly PreparedDefaultPresetRootContribution[];
+    readonly presetRootContributionReadFacts?: readonly CurrentProjectProjectionEntry[];
     readonly resources?: DefaultCompositionResources;
   } = {},
 ): DefaultOperationFacts {
@@ -241,6 +398,9 @@ export function prepareDefaultInitOperationFacts(
     rootAttachmentDependencies: options.rootAttachmentDependencies ?? [],
     existingPackageDefinitionIds: new Set<PackageDefinitionId>(),
     existingPackageLinkIntents: [],
+    presetRootContributions: options.presetRootContributions ?? [],
+    presetRootContributionReadFacts:
+      options.presetRootContributionReadFacts ?? [],
     targetManifests: new Map(),
   });
 }
@@ -351,6 +511,8 @@ function validateDefaultFacts(
     !Array.isArray(value.rootAttachmentDependencies) ||
     !(value.existingPackageDefinitionIds instanceof Set) ||
     !Array.isArray(value.existingPackageLinkIntents) ||
+    !Array.isArray(value.presetRootContributions) ||
+    !Array.isArray(value.presetRootContributionReadFacts) ||
     !isRecord(value.resources)
   ) {
     throw new Error("默认工作区本次operationFacts无效");
@@ -877,7 +1039,9 @@ function rootFile(options: {
 } {
   const reconciliation = options.reconciliation ?? {
     path: options.path,
-    driver: "text" as const,
+    driver: /\.(?:json|jsonc)$/u.test(options.path)
+      ? ("structured" as const)
+      : ("text" as const),
   };
   return {
     file: {
@@ -1093,6 +1257,8 @@ export function createDefaultComposition(options: {
           resources: resolveOptions.operationFacts.resources,
           rootDeclarations: resolveOptions.operationFacts.rootDeclarations,
           rootAttachmentIdentities,
+          presetRootContributions:
+            resolveOptions.operationFacts.presetRootContributions,
           targetManifests: resolveOptions.operationFacts.targetManifests,
         }),
         packageInputs: new Map(),
@@ -1119,6 +1285,14 @@ export function createDefaultComposition(options: {
       if (rootPackage.package.definition.path !== ".") {
         throw new Error("基础根内容必须拥有目标目录 .");
       }
+      const presetRootContributionDeclarations =
+        composePresetRootContributionDeclarations({
+          content: options.content,
+          selections: combineOptions.selections,
+          packages: combineOptions.packages,
+          preparedContributions:
+            combineOptions.stableCommon.presetRootContributions,
+        });
       const allFacts = combineOptions.packages.map(
         ({ contribution }) => contribution.facts,
       );
@@ -1164,6 +1338,7 @@ export function createDefaultComposition(options: {
                 contentIdentityKey(declaration.sourceIdentity),
               )),
         ),
+        ...presetRootContributionDeclarations,
       ]);
       const rootIdentity = rootPackage.package.contentIdentity;
       const rootSource = sourceLabel(rootIdentity);
@@ -1256,6 +1431,66 @@ export function createDefaultComposition(options: {
         globalDependencies,
         tasks,
       };
+      const rootTypeScriptFact = documents.find(
+        ({ identity, document }) =>
+          contentIdentityKey(identity) === rootKey &&
+          document.path === "tsconfig.config.json" &&
+          document.scope === "package",
+      );
+      const typescriptDeclarations = declarations.filter(
+        (declaration) => declaration.typescript !== undefined,
+      );
+      let rootTypeScript: DefaultNativeDocument | undefined;
+      if (typescriptDeclarations.length > 0) {
+        if (rootTypeScriptFact === undefined) {
+          throw new Error(
+            "根TypeScript声明需要基础根提供tsconfig.config.json原生文档",
+          );
+        }
+        const value = structuredClone(
+          rootTypeScriptFact.document.value,
+        ) as Record<string, unknown>;
+        const baseCompilerOptions = isRecord(value.compilerOptions)
+          ? value.compilerOptions
+          : {};
+        const compilerOptions = mergeEntries({
+          location: "tsconfig.config.json#/compilerOptions",
+          baseSource: rootSource,
+          base: baseCompilerOptions,
+          declarations: typescriptDeclarations.flatMap((declaration) =>
+            declaration.typescript?.compilerOptions === undefined
+              ? []
+              : [
+                  {
+                    source: sourceLabel(declaration.sourceIdentity),
+                    values: declaration.typescript.compilerOptions,
+                  },
+                ],
+          ),
+        });
+        const baseInclude = value.include;
+        if (
+          baseInclude !== undefined &&
+          (!Array.isArray(baseInclude) ||
+            baseInclude.some((item) => typeof item !== "string"))
+        ) {
+          throw new Error("基础根tsconfig.config.json include必须是字符串列表");
+        }
+        const include = [
+          ...new Set([
+            ...((baseInclude as readonly string[] | undefined) ?? []),
+            ...typescriptDeclarations.flatMap(
+              (declaration) => declaration.typescript?.include ?? [],
+            ),
+          ]),
+        ];
+        value.compilerOptions = compilerOptions;
+        value.include = include;
+        rootTypeScript = {
+          ...rootTypeScriptFact.document,
+          value,
+        };
+      }
 
       const generatedManifests = combineOptions.packages.map(
         ({ package: item, contribution }) =>
@@ -1336,13 +1571,20 @@ export function createDefaultComposition(options: {
         resources: combineOptions.stableCommon.resources.developmentContainer,
       });
       const dependencyMaintenance = ownerDependencies(allFacts);
+      const ciDiagnosticArtifacts = composeCiDiagnosticArtifacts({
+        packagePaths: ownerPackagePaths,
+        declarations: [
+          ...allFacts.flatMap((facts) => facts.ciDiagnosticArtifacts),
+          ...declarations.flatMap(
+            (declaration) => declaration.ciDiagnosticArtifacts ?? [],
+          ),
+        ],
+      });
       const checkWorkflow = composeCheckWorkflow(
         projectCheckWorkflow(
           {
             packagePaths: ownerPackagePaths,
-            diagnosticArtifacts: allFacts.flatMap(
-              (facts) => facts.ciDiagnosticArtifacts,
-            ),
+            diagnosticArtifacts: ciDiagnosticArtifacts,
           },
           combineOptions.stableCommon.resources.github.checkWorkflow,
         ),
@@ -1449,6 +1691,10 @@ export function createDefaultComposition(options: {
         const isRootTurbo =
           contentIdentityKey(item.identity) === rootKey &&
           item.document.path === "turbo.json";
+        const isRootTypeScript =
+          contentIdentityKey(item.identity) === rootKey &&
+          item.document.path === "tsconfig.config.json" &&
+          item.document.scope === "package";
         const linkedManifest =
           item.document.path === "package.json"
             ? manifestOverrides.get(item.packageDefinitionId)
@@ -1457,9 +1703,11 @@ export function createDefaultComposition(options: {
           ? { ...item.document, value: manifest }
           : isRootTurbo
             ? { ...item.document, value: turbo }
-            : linkedManifest === undefined
-              ? item.document
-              : { ...item.document, value: linkedManifest };
+            : isRootTypeScript && rootTypeScript !== undefined
+              ? rootTypeScript
+              : linkedManifest === undefined
+                ? item.document
+                : { ...item.document, value: linkedManifest };
         processedDocuments.push({
           packageDefinitionId: item.packageDefinitionId,
           file: {
@@ -1523,7 +1771,13 @@ export function createDefaultComposition(options: {
 
       const checkNeeds: CheckEnvironmentNeed[] = [];
       const deploymentNeeds: DeploymentEnvironmentNeed[] = [];
-      for (const need of allFacts.flatMap((facts) => facts.environmentNeeds)) {
+      for (const need of [
+        ...allFacts.flatMap((facts) => facts.environmentNeeds),
+        ...declarations.flatMap((declaration) => [
+          ...(declaration.environmentNeeds?.check ?? []),
+          ...(declaration.environmentNeeds?.deployment ?? []),
+        ]),
+      ]) {
         if (need.kind === "docker-engine") deploymentNeeds.push(need);
         else checkNeeds.push(need);
       }
@@ -1531,9 +1785,6 @@ export function createDefaultComposition(options: {
         check: checkNeeds,
         deployment: deploymentNeeds,
       });
-      const ciDiagnosticArtifacts = allFacts.flatMap(
-        (facts) => facts.ciDiagnosticArtifacts,
-      );
 
       return {
         files: [...rootFileComposition, ...nonRootDocuments],

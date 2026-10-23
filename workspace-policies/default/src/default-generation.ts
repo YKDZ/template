@@ -1,7 +1,14 @@
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { contentIdentityKey } from "@ykdz/template-core/content-identity";
+import type { CompositionPackage } from "@ykdz/template-core/composition";
+import {
+  contentIdentityKey,
+  contentIdentityLabel,
+  createContentIndex,
+  type ContentSelector,
+} from "@ykdz/template-core/content-identity";
+import type { GenerationRecordSelection } from "@ykdz/template-core/generation-record";
 import type { JsonValue } from "@ykdz/template-core/json";
 import type { CurrentProjectProjectionEntry } from "@ykdz/template-core/project-projection";
 import type {
@@ -15,6 +22,8 @@ import {
   prepareDefaultInitOperationFacts,
   prepareDefaultRootAttachmentDependencies,
   prepareDefaultRootDeclarations,
+  type DefaultPresetRootContributionOwner,
+  type PreparedDefaultPresetRootContribution,
   type DefaultContentMember,
   type DefaultOperationFacts,
 } from "./default-composition.ts";
@@ -48,11 +57,94 @@ function defaultRootIdentity(content: readonly DefaultContentMember[]) {
 
 async function initOperationFacts(
   content: readonly DefaultContentMember[],
+  selectedPresets: readonly ContentSelector[] = [],
+  ownerPrepareContext?: {
+    readonly repositoryRoot?: string;
+    readonly selections?: readonly GenerationRecordSelection[];
+    readonly packages?: readonly CompositionPackage[];
+  },
 ): Promise<DefaultOperationFacts> {
+  const contentIndex = createContentIndex(content);
+  const presetRootContributions: PreparedDefaultPresetRootContribution[] = [];
+  const presetRootContributionReadFacts: CurrentProjectProjectionEntry[] = [];
+  const preparedIdentities = new Set<string>();
+  for (const selector of selectedPresets) {
+    const member = contentIndex.resolve(selector, "preset");
+    const identity = contentIdentityKey(member.identity);
+    if (preparedIdentities.has(identity)) continue;
+    const definition = member.definition;
+    if (!isRecord(definition) || !isRecord(definition.rootContribution)) {
+      continue;
+    }
+    const contribution = definition.rootContribution;
+    if (
+      typeof contribution.prepare !== "function" ||
+      typeof contribution.compose !== "function"
+    ) {
+      continue;
+    }
+    const owner = contribution as unknown as DefaultPresetRootContributionOwner;
+    const selection = ownerPrepareContext?.selections?.find(
+      (candidate) =>
+        candidate.presetIdentity !== null &&
+        contentIdentityKey(candidate.presetIdentity) === identity,
+    );
+    let selectedPackages: Map<string, CompositionPackage> | undefined;
+    if (
+      selection !== undefined &&
+      ownerPrepareContext?.packages !== undefined
+    ) {
+      const packagesById = new Map(
+        ownerPrepareContext.packages.map((item) => [
+          item.packageDefinitionId,
+          item,
+        ]),
+      );
+      selectedPackages = new Map();
+      for (const [nodeIdentity, packageDefinitionId] of Object.entries(
+        selection.nodes,
+      )) {
+        const selectedPackage = packagesById.get(packageDefinitionId);
+        if (selectedPackage === undefined) {
+          throw new Error(
+            `预设prepare缺少持久节点实例：${contentIdentityLabel(member.identity)}/${nodeIdentity}`,
+          );
+        }
+        selectedPackages.set(nodeIdentity, selectedPackage);
+      }
+    }
+    const prepared = await owner.prepare({
+      ownerIdentity: member.identity,
+      ...(ownerPrepareContext?.repositoryRoot === undefined
+        ? {}
+        : { repositoryRoot: ownerPrepareContext.repositoryRoot }),
+      ...(selection === undefined ? {} : { selection }),
+      ...(selectedPackages === undefined ? {} : { selectedPackages }),
+    });
+    if (
+      !isRecord(prepared) ||
+      !Object.hasOwn(prepared, "ownerFacts") ||
+      (prepared.readFacts !== undefined && !Array.isArray(prepared.readFacts))
+    ) {
+      throw new Error(
+        `预设根贡献prepare结果无效：${member.identity.packageName}`,
+      );
+    }
+    presetRootContributions.push(
+      Object.freeze({
+        ownerIdentity: member.identity,
+        ownerFacts: prepared.ownerFacts,
+      }),
+    );
+    presetRootContributionReadFacts.push(...(prepared.readFacts ?? []));
+    preparedIdentities.add(identity);
+  }
   return prepareDefaultInitOperationFacts({
     rootDeclarations: await prepareDefaultRootDeclarations(content),
     rootAttachmentDependencies:
       prepareDefaultRootAttachmentDependencies(content),
+    presetRootContributions,
+    presetRootContributionReadFacts,
   });
 }
 
@@ -402,7 +494,17 @@ async function additionFacts(
       `加包需要根package.json的packageManager为精确pnpm版本，实际收到${JSON.stringify(packageManagerPin ?? null)}`,
     );
   }
-  const baseFacts = await initOperationFacts(content);
+  const selectedPresetSelectors: ContentSelector[] = [
+    ...options.restored.selections.flatMap(({ presetIdentity }) =>
+      presetIdentity === null ? [] : [presetIdentity],
+    ),
+    ...("preset" in options.selection ? [options.selection.preset] : []),
+  ];
+  const baseFacts = await initOperationFacts(content, selectedPresetSelectors, {
+    repositoryRoot,
+    selections: options.restored.selections,
+    packages: options.restored.packages,
+  });
   return {
     operationFacts: {
       ...baseFacts,
@@ -416,7 +518,7 @@ async function additionFacts(
       ),
       existingPackageLinkIntents: options.restored.blueprint.packageLinkIntents,
     },
-    readFacts: currentFacts,
+    readFacts: [...currentFacts, ...baseFacts.presetRootContributionReadFacts],
   };
 }
 
@@ -503,6 +605,9 @@ export function createDefaultGenerator<
             ...(selection.layout === undefined
               ? {}
               : { layout: selection.layout }),
+            ...(selection.dependencyBindings === undefined
+              ? {}
+              : { dependencyBindings: selection.dependencyBindings }),
             ...creationInput,
           };
     let restored: Awaited<ReturnType<typeof generator.restoreProject>>;
@@ -575,13 +680,23 @@ export function createDefaultGenerator<
     async init(initOptions: InitOptions) {
       return generator.init({
         ...initOptions,
-        operationFacts: await initOperationFacts(options.content),
+        operationFacts: await initOperationFacts(
+          options.content,
+          initOptions.selection.presets?.map(
+            ({ contentIdentity }) => contentIdentity,
+          ),
+        ),
       });
     },
     async planInit(planOptions: PlanInitOptions) {
       return generator.planInit({
         ...planOptions,
-        operationFacts: await initOperationFacts(options.content),
+        operationFacts: await initOperationFacts(
+          options.content,
+          planOptions.selection.presets?.map(
+            ({ contentIdentity }) => contentIdentity,
+          ),
+        ),
       });
     },
     add,
@@ -589,7 +704,12 @@ export function createDefaultGenerator<
     async prepareProject(prepareOptions: PrepareProjectOptions) {
       return generator.prepareProject({
         ...prepareOptions,
-        operationFacts: await initOperationFacts(options.content),
+        operationFacts: await initOperationFacts(
+          options.content,
+          prepareOptions.selection.presets?.map(
+            ({ contentIdentity }) => contentIdentity,
+          ),
+        ),
       });
     },
     prepareAddProject: prepareAddition,

@@ -52,6 +52,7 @@
     "@vitest/browser-playwright": "catalog:",
     "@vue/tsconfig": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
+    "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

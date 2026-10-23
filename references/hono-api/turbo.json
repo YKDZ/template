@@ -4,7 +4,7 @@
   "tasks": {
     "build": {
       "cache": true,
-      "dependsOn": ["^build"],
+      "dependsOn": [],
       "outputs": ["dist/**"],
       "tags": ["quality:light"]
     },
