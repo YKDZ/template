@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { it } from "node:test";
@@ -55,6 +62,15 @@ void it("正式机制制品独立安装后复用文档策略完成初始化、�
       tree.stdout,
       /@ykdz\/(?:template-workspace|template-content|template-environment|reference-|preset-)/u,
     );
+    const support = path.join(consumer, "support");
+    const compiled = path.join(consumer, "compiled");
+    await mkdir(support);
+    await copyFile(
+      fileURLToPath(
+        new URL("../test-support/documentation.ts", import.meta.url),
+      ),
+      path.join(support, "documentation.ts"),
+    );
     await run(
       "pnpm",
       [
@@ -69,12 +85,10 @@ void it("正式机制制品独立安装后复用文档策略完成初始化、�
         "es2024",
         "--skipLibCheck",
         "--rootDir",
-        fileURLToPath(new URL("../test-support/", import.meta.url)),
+        support,
         "--outDir",
-        consumer,
-        fileURLToPath(
-          new URL("../test-support/documentation.ts", import.meta.url),
-        ),
+        compiled,
+        path.join(support, "documentation.ts"),
       ],
       { cwd: packageRoot },
     );
@@ -84,7 +98,7 @@ void it("正式机制制品独立安装后复用文档策略完成初始化、�
       [
         'import assert from "node:assert/strict";',
         'import { readFile, writeFile, access } from "node:fs/promises";',
-        'import { createDocumentationEngine, guideIdentity } from "./documentation.js";',
+        'import { createDocumentationEngine, guideIdentity } from "./compiled/documentation.js";',
         "const [phase, root, forbidden] = process.argv.slice(2);",
         'await assert.rejects(readFile(forbidden), { code: "ERR_ACCESS_DENIED" });',
         'for (const specifier of ["@ykdz/template-generator", "@ykdz/template-core/content-identity"]) assert.ok(import.meta.resolve(specifier).startsWith(new URL("./", import.meta.url).href));',
@@ -143,7 +157,8 @@ void it("正式机制制品独立安装后复用文档策略完成初始化、�
         path.join(consumer, "project/.template/generation.json"),
         "utf8",
       ),
-    ) as { strategyIdentity: string };
+    ) as { schemaVersion: number; strategyIdentity: string };
+    assert.equal(record.schemaVersion, 5);
     assert.equal(record.strategyIdentity, "test-policy:installed");
   } finally {
     await rm(root, { recursive: true, force: true });

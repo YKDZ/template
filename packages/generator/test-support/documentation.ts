@@ -78,8 +78,6 @@ export function createDocumentationEngine(options: {
   readonly policyId: string;
   readonly author: string;
   readonly includeGlossary?: boolean;
-  readonly configurableGlossary?: boolean;
-  readonly glossaryUsesGuide?: boolean;
   readonly invalidProjection?: "duplicate" | "unallocated";
 }) {
   const glossary: DocumentationContent = {
@@ -126,23 +124,9 @@ export function createDocumentationEngine(options: {
       defaultLeafName: "overview",
       defaultPath: "docs/overview",
       role: "documentation",
-      normalizeConfiguration(input) {
-        if (!options.configurableGlossary) return null;
-        if (input === undefined) return { glossary: false };
-        if (!isRecord(input) || typeof input.glossary !== "boolean")
-          throw new Error("指南配置必须声明glossary布尔值");
-        return { glossary: input.glossary };
-      },
-      contribute({ context, definition, bindings, configuration }) {
+      contribute({ context, definition, bindings }) {
         const glossaryDefinition = bindings?.get(glossaryIdentityKey);
-        if (
-          glossaryDefinition === undefined &&
-          !(
-            options.configurableGlossary &&
-            isRecord(configuration) &&
-            configuration.glossary === false
-          )
-        ) {
+        if (glossaryDefinition === undefined) {
           throw new Error("文档内容缺少术语表绑定");
         }
         return {
@@ -185,18 +169,8 @@ export function createDocumentationEngine(options: {
       return { targetRoot, ...state };
     },
     parseState: parseDocumentationState,
-    dependencies({ content: selected, configuration }) {
-      if (
-        options.glossaryUsesGuide &&
-        contentIdentityKey(selected.identity) === glossaryIdentityKey
-      )
-        return [guideIdentity];
-      return contentIdentityKey(selected.identity) === guideIdentityKey &&
-        !(
-          options.configurableGlossary &&
-          isRecord(configuration) &&
-          configuration.glossary === false
-        )
+    dependencies({ content: selected }) {
+      return contentIdentityKey(selected.identity) === guideIdentityKey
         ? [glossaryIdentity]
         : [];
     },

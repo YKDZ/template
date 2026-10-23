@@ -211,7 +211,7 @@ void describe("template CLI command control", () => {
         ),
       );
       assert.deepEqual(generationRecord, persistedRecord);
-      assert.equal(generationRecord.schemaVersion, 4);
+      assert.equal(generationRecord.schemaVersion, 5);
       assert.equal(generationRecord.strategyIdentity, "default");
       assert.equal(generationRecord.strategyState.repositoryName, "demo");
       assert.equal(generationRecord.strategyState.defaultPackageScope, "acme");
