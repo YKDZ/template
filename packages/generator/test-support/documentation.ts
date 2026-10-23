@@ -30,6 +30,21 @@ export const indexIdentity: ContentIdentity = {
   packageName: "@fixture/docs-index",
   exportPath: "./template",
 };
+export const boundWebIdentity: ContentIdentity = {
+  namespace: "test-docs",
+  packageName: "@fixture/docs-bound-web",
+  exportPath: "./template",
+};
+export const boundApiIdentity: ContentIdentity = {
+  namespace: "test-docs",
+  packageName: "@fixture/docs-bound-api",
+  exportPath: "./template",
+};
+export const boundPresetIdentity: ContentIdentity = {
+  namespace: "test-docs",
+  packageName: "@fixture/docs-bound-preset",
+  exportPath: "./preset",
+};
 export const presetIdentity: ContentIdentity = {
   namespace: "test-docs",
   packageName: "@fixture/docs-preset",
@@ -239,6 +254,23 @@ export function createDocumentationEngine(options: {
     author: options.author,
     text: "Index resource\n",
   });
+  const boundApi = makeReference({
+    identity: boundApiIdentity,
+    alias: "bound-api",
+    instance: "independent",
+    defaultPath: "apps/api",
+    author: options.author,
+    text: "API resource\n",
+  });
+  const boundWeb = makeReference({
+    identity: boundWebIdentity,
+    alias: "bound-web",
+    instance: "independent",
+    defaultPath: "apps/web",
+    author: options.author,
+    text: "Web resource\n",
+    dependencies: [{ key: "api", contentIdentity: boundApiIdentity }],
+  });
   const preset: LoadedContentMember<
     PresetSelectionDefinition<DocumentationCreationInput>,
     "preset"
@@ -297,12 +329,63 @@ export function createDocumentationEngine(options: {
       },
     },
   };
+  const boundPreset: LoadedContentMember<
+    PresetSelectionDefinition<DocumentationCreationInput>,
+    "preset"
+  > = {
+    identity: boundPresetIdentity,
+    kind: "preset",
+    alias: "bound-web-api",
+    source: {
+      specifier: "@fixture/docs-bound-preset/preset",
+      moduleURL: "file:///fixture/docs-bound-preset/preset.js",
+      manifestURL: "file:///fixture/docs-bound-preset/package.json",
+    },
+    definition: {
+      kind: "preset",
+      operations: ["init", "add"],
+      nodes: {
+        web: {
+          reference: { alias: "bound-web", instance: "independent" },
+          dependencyBindings: { api: "api" },
+          creationInput: {
+            init: { leafName: "web", packagePath: "apps/web" },
+            add: { leafName: "web", packagePath: "apps/web" },
+          },
+        },
+        api: {
+          reference: { alias: "bound-api", instance: "independent" },
+          creationInput: {
+            init: { leafName: "custom-api", packagePath: "apps/custom-api" },
+            add: { leafName: "custom-api", packagePath: "apps/custom-api" },
+          },
+        },
+        "other-api": {
+          reference: { alias: "bound-api", instance: "independent" },
+          creationInput: {
+            init: { leafName: "other-api", packagePath: "apps/other-api" },
+            add: { leafName: "other-api", packagePath: "apps/other-api" },
+          },
+        },
+        index: {
+          reference: { alias: "index", instance: "independent" },
+          creationInput: {
+            init: { leafName: "index", packagePath: "." },
+            add: { leafName: "index", packagePath: "." },
+          },
+        },
+      },
+    },
+  };
   const content = [
     index,
     guide,
+    boundWeb,
+    boundApi,
     ...(options.includeGlossary === false ? [] : [glossary]),
     preset,
     sharedAdditionPreset,
+    boundPreset,
   ];
   const composition: DocumentationComposition = {
     identity: {
