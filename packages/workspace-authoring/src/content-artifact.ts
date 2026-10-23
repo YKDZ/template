@@ -75,13 +75,11 @@ export type PrepareNativeContentArtifactOptions = {
   >;
 };
 
-export type DefineNativeContentArtifactOptions = Omit<
-  PrepareNativeContentArtifactOptions,
-  "dependencyPurposes"
-> & {
-  /** 仅列出package.json devDependencies中真正由模板入口执行的名称。 */
-  readonly executionDependencies?: readonly string[];
-};
+export type DefineNativeContentArtifactOptions =
+  PrepareNativeContentArtifactOptions & {
+    /** 仅列出package.json devDependencies中真正由模板入口执行的名称。 */
+    readonly executionDependencies?: readonly string[];
+  };
 
 export type NativeReferenceContentDefinition = Readonly<{
   readonly alias: string;
@@ -338,6 +336,14 @@ export function defineNativeContentArtifact<Definition extends object>(
       );
     }
   }
+  for (const [name, purposes] of options.dependencyPurposes ?? []) {
+    if (!dependencyPurposes.has(name)) {
+      throw new Error(
+        `所属依赖用途未在原生清单声明：${options.manifest.name}/${name}`,
+      );
+    }
+    dependencyPurposes.set(name, purposes);
+  }
   for (const name of options.executionDependencies ?? []) {
     const declared = dependencyPurposes.get(name);
     if (declared === undefined) {
@@ -345,7 +351,17 @@ export function defineNativeContentArtifact<Definition extends object>(
         `预设模板执行依赖未在所属清单声明：${options.manifest.name}/${name}`,
       );
     }
-    dependencyPurposes.set(name, ["template-execution"]);
+    if (
+      options.dependencyPurposes?.has(name) &&
+      !declared.includes("template-execution")
+    ) {
+      throw new Error(
+        `预设模板执行依赖与显式依赖用途不一致：${options.manifest.name}/${name}`,
+      );
+    }
+    if (!options.dependencyPurposes?.has(name)) {
+      dependencyPurposes.set(name, ["template-execution"]);
+    }
   }
   const { executionDependencies: _executionDependencies, ...artifactOptions } =
     options;
