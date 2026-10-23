@@ -34,6 +34,13 @@ import type {
 } from "@ykdz/template-core/reference-package";
 
 import { createGenerator } from "../src/index.ts";
+import {
+  createDocumentationEngine,
+  glossaryIdentity,
+  guideIdentity,
+  indexIdentity,
+  sharedAdditionPresetIdentity,
+} from "../test-support/documentation.ts";
 
 const referenceIdentity: ContentIdentity = {
   namespace: "fixture",
@@ -84,6 +91,7 @@ type DocumentationComposition = Composition<
 function documentationEngine(
   options: {
     readonly onPrepare?: () => void | Promise<void>;
+    readonly presetNodes?: PresetSelectionDefinition<CreationInput>["nodes"];
   } = {},
 ) {
   const reference: LoadedContentMember<
@@ -257,7 +265,7 @@ function documentationEngine(
     definition: {
       kind: "preset",
       operations: ["init", "add"],
-      nodes: {
+      nodes: options.presetNodes ?? {
         child: {
           reference: { alias: "docs", instance: "independent" },
           creationInput: {
@@ -502,6 +510,177 @@ void describe("公开生成计算", () => {
             item.creationInput !== null &&
             (item.creationInput as CreationInput).path === "docs/faq",
         ),
+      );
+    });
+  });
+
+  void it("按稳定节点身份恢复根顺序不同的同一预设选择", async () => {
+    const presetNodes: PresetSelectionDefinition<CreationInput>["nodes"] = {
+      zroot: {
+        reference: { alias: "docs", instance: "independent" },
+        creationInput: { init: { path: "." }, add: { path: "." } },
+      },
+      aleaf: {
+        reference: { alias: "docs", instance: "independent" },
+        creationInput: {
+          init: { path: "docs/leaf" },
+          add: { path: "docs/leaf" },
+        },
+      },
+    };
+    await withTemporaryTarget(async (targetRoot) => {
+      const initialized = await documentationEngine({
+        presetNodes,
+      }).generator.init({
+        targetRoot,
+        selection: { presets: [{ contentIdentity: presetIdentity }] },
+        conventions: { edition: "draft" },
+        operationFacts: { currentProvider: "provider-snapshot" },
+      });
+      assert.equal(initialized.status, "success", JSON.stringify(initialized));
+
+      const planning = await documentationEngine({
+        presetNodes,
+      }).generator.planAdd({
+        repositoryRoot: targetRoot,
+        preset: presetIdentity,
+        operationFacts: { currentProvider: "provider-snapshot" },
+      });
+      assert.equal(planning.status, "planned", JSON.stringify(planning));
+      if (planning.status !== "planned") return;
+      assert.equal(planning.generationRecord.packages.length, 2);
+      assert.equal(planning.generationRecord.selections.length, 1);
+    });
+  });
+
+  void it("显式初始化共享实例来源不受根遍历顺序影响", async () => {
+    for (const roots of [
+      [
+        { nodeIdentity: "index", contentIdentity: indexIdentity },
+        { nodeIdentity: "guide", contentIdentity: guideIdentity },
+        { nodeIdentity: "glossary", contentIdentity: glossaryIdentity },
+      ],
+      [
+        { nodeIdentity: "index", contentIdentity: indexIdentity },
+        { nodeIdentity: "glossary", contentIdentity: glossaryIdentity },
+        { nodeIdentity: "guide", contentIdentity: guideIdentity },
+      ],
+    ]) {
+      await withTemporaryTarget(async (targetRoot) => {
+        const initialized = await createDocumentationEngine({
+          author: "公开 SDK",
+        }).init({
+          targetRoot,
+          selection: { roots },
+          conventions: { collection: "north", edition: "draft" },
+          operationFacts: { providerVersion: "test" },
+        });
+        assert.equal(
+          initialized.status,
+          "success",
+          JSON.stringify(initialized),
+        );
+        assert.equal(
+          initialized.generationRecord.packages.find(
+            ({ contentIdentity }) =>
+              contentIdentity.packageName === "@fixture/docs-glossary",
+          )?.createdBy,
+          "initialization",
+        );
+      });
+    }
+  });
+
+  void it("显式加选仍保留历史共享依赖的实例标识与来源", async () => {
+    await withTemporaryTarget(async (targetRoot) => {
+      const generator = createDocumentationEngine({ author: "公开 SDK" });
+      const initialized = await generator.init({
+        targetRoot,
+        selection: {
+          roots: [
+            { nodeIdentity: "index", contentIdentity: indexIdentity },
+            { nodeIdentity: "guide", contentIdentity: guideIdentity },
+          ],
+        },
+        conventions: { collection: "north", edition: "draft" },
+        operationFacts: { providerVersion: "test" },
+      });
+      assert.equal(initialized.status, "success", JSON.stringify(initialized));
+      const previous = initialized.generationRecord.packages.find(
+        ({ contentIdentity }) =>
+          contentIdentity.packageName === "@fixture/docs-glossary",
+      );
+      assert.equal(previous?.createdBy, "shared-dependency");
+      assert.ok(previous);
+
+      const planned = await generator.planAdd({
+        repositoryRoot: targetRoot,
+        contentIdentity: glossaryIdentity,
+        operationFacts: { providerVersion: "test" },
+      });
+      assert.equal(planned.status, "planned", JSON.stringify(planned));
+      if (planned.status !== "planned") return;
+      const reused = planned.generationRecord.packages.find(
+        ({ contentIdentity }) =>
+          contentIdentity.packageName === "@fixture/docs-glossary",
+      );
+      assert.equal(reused?.packageDefinitionId, previous.packageDefinitionId);
+      assert.equal(reused?.createdBy, "shared-dependency");
+      const committed = await generator.commitPlan(planned.plan);
+      assert.equal(committed.status, "success", JSON.stringify(committed));
+    });
+  });
+
+  void it("add中新建的显式共享选择保留addition来源", async () => {
+    await withTemporaryTarget(async (targetRoot) => {
+      const generator = createDocumentationEngine({ author: "公开 SDK" });
+      const initialized = await generator.init({
+        targetRoot,
+        selection: {
+          roots: [{ nodeIdentity: "index", contentIdentity: indexIdentity }],
+        },
+        conventions: { collection: "north", edition: "draft" },
+        operationFacts: { providerVersion: "initial" },
+      });
+      assert.equal(initialized.status, "success", JSON.stringify(initialized));
+
+      const addEngine = createDocumentationEngine({
+        author: "公开 SDK",
+      });
+      const planning = await addEngine.planAdd({
+        repositoryRoot: targetRoot,
+        preset: sharedAdditionPresetIdentity,
+        operationFacts: { providerVersion: "addition" },
+      });
+      assert.equal(planning.status, "planned", JSON.stringify(planning));
+      if (planning.status !== "planned") return;
+      const guide = planning.generationRecord.packages.find(
+        ({ contentIdentity }) =>
+          contentIdentity.packageName === "@fixture/docs-guide",
+      );
+      const glossary = planning.generationRecord.packages.find(
+        ({ contentIdentity }) =>
+          contentIdentity.packageName === "@fixture/docs-glossary",
+      );
+      assert.equal(glossary?.createdBy, "addition");
+      assert.ok(guide);
+      assert.ok(glossary);
+      assert.equal(
+        guide.dependencyBindings.glossary,
+        glossary.packageDefinitionId,
+      );
+
+      const committed = await addEngine.commitPlan(planning.plan);
+      assert.equal(committed.status, "success", JSON.stringify(committed));
+      const restored = await createDocumentationEngine({
+        author: "公开 SDK",
+      }).restoreProject({ repositoryRoot: targetRoot });
+      assert.equal(
+        restored.generationRecord.packages.find(
+          ({ contentIdentity }) =>
+            contentIdentity.packageName === "@fixture/docs-glossary",
+        )?.createdBy,
+        "addition",
       );
     });
   });

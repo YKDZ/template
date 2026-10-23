@@ -35,6 +35,11 @@ export const presetIdentity: ContentIdentity = {
   packageName: "@fixture/docs-preset",
   exportPath: "./preset",
 };
+export const sharedAdditionPresetIdentity: ContentIdentity = {
+  namespace: "test-docs",
+  packageName: "@fixture/docs-shared-add-preset",
+  exportPath: "./preset",
+};
 export const guideIdentityKey = contentIdentityKey(guideIdentity);
 export const glossaryIdentityKey = contentIdentityKey(glossaryIdentity);
 
@@ -248,17 +253,46 @@ export function createDocumentationEngine(options: {
     },
     definition: {
       kind: "preset",
-      operations: ["init"],
+      operations: ["init", "add"],
       nodes: {
         index: {
           reference: { alias: "index", instance: "independent" },
-          creationInput: { init: { packagePath: "." } },
+          creationInput: {
+            init: { packagePath: "." },
+            add: { packagePath: "." },
+          },
         },
         guide: {
           reference: { alias: "guide", instance: "independent" },
           creationInput: {
             init: { leafName: "overview", packagePath: "docs/overview" },
+            add: { leafName: "overview", packagePath: "docs/overview" },
           },
+        },
+      },
+    },
+  };
+  const sharedAdditionPreset: LoadedContentMember<
+    PresetSelectionDefinition<DocumentationCreationInput>,
+    "preset"
+  > = {
+    identity: sharedAdditionPresetIdentity,
+    kind: "preset",
+    alias: "shared-addition",
+    source: {
+      specifier: "@fixture/docs-shared-add-preset/preset",
+      moduleURL: "file:///fixture/docs-shared-add-preset/preset.js",
+      manifestURL: "file:///fixture/docs-shared-add-preset/package.json",
+    },
+    definition: {
+      kind: "preset",
+      operations: ["add"],
+      nodes: {
+        guide: {
+          reference: { alias: "guide", instance: "independent" },
+        },
+        glossary: {
+          reference: { alias: "glossary", instance: "shared" },
         },
       },
     },
@@ -268,6 +302,7 @@ export function createDocumentationEngine(options: {
     guide,
     ...(options.includeGlossary === false ? [] : [glossary]),
     preset,
+    sharedAdditionPreset,
   ];
   const composition: DocumentationComposition = {
     identity: {

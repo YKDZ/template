@@ -1260,18 +1260,34 @@ export function createGenerator<
         (candidate) => candidate.selectionId === group.selectionId,
       );
       if (existing !== undefined) {
-        const existingRoots = existing.roots.map((root) => ({
-          nodeIdentity: root.nodeIdentity,
-          identity: contentIdentityKey(root.content.identity),
-          creationInput: root.creationInput ?? null,
-          definition: root.definition,
-        }));
-        const requestedRoots = group.roots.map((root) => ({
-          nodeIdentity: root.nodeIdentity,
-          identity: contentIdentityKey(root.content.identity),
-          creationInput: root.creationInput ?? null,
-          definition: root.definition,
-        }));
+        const existingRoots = existing.roots
+          .map((root) => ({
+            nodeIdentity: root.nodeIdentity,
+            identity: contentIdentityKey(root.content.identity),
+            creationInput: root.creationInput ?? null,
+            definition: root.definition,
+          }))
+          .toSorted((left, right) =>
+            left.nodeIdentity < right.nodeIdentity
+              ? -1
+              : left.nodeIdentity > right.nodeIdentity
+                ? 1
+                : 0,
+          );
+        const requestedRoots = group.roots
+          .map((root) => ({
+            nodeIdentity: root.nodeIdentity,
+            identity: contentIdentityKey(root.content.identity),
+            creationInput: root.creationInput ?? null,
+            definition: root.definition,
+          }))
+          .toSorted((left, right) =>
+            left.nodeIdentity < right.nodeIdentity
+              ? -1
+              : left.nodeIdentity > right.nodeIdentity
+                ? 1
+                : 0,
+          );
         const existingPresetIdentity =
           existing.presetIdentity === null
             ? null
@@ -1595,15 +1611,21 @@ export function createGenerator<
     const sharedNodes = new Map<string, PackageNode>();
     const nodesById = new Map<PackageDefinitionId, PackageNode>();
     const selectionRecords: GenerationRecordSelection[] = [];
-    const explicitlySelectedSharedReferences = new Set(
-      preparedProject.selections.flatMap((selection) =>
-        selection.roots.flatMap((root) =>
-          root.content.definition.instance === "shared"
-            ? [contentIdentityKey(root.content.identity)]
-            : [],
-        ),
-      ),
-    );
+    const explicitlySelectedSharedReferences = new Map<
+      string,
+      "initialization" | "addition"
+    >();
+    for (const selection of preparedProject.selections) {
+      if (selection.createdBy === undefined) continue;
+      for (const root of selection.roots) {
+        if (root.content.definition.instance === "shared") {
+          explicitlySelectedSharedReferences.set(
+            contentIdentityKey(root.content.identity),
+            selection.createdBy,
+          );
+        }
+      }
+    }
 
     const makeNode = (
       prepared: PreparedNode,
@@ -1666,11 +1688,10 @@ export function createGenerator<
       }
       const effectiveCreatedBy =
         prepared.restored?.createdBy ??
-        (sharedKey !== undefined &&
-        explicitlySelectedSharedReferences.has(sharedKey) &&
-        createdBy === "initialization"
-          ? "initialization"
-          : createdBy);
+        (sharedKey === undefined
+          ? undefined
+          : explicitlySelectedSharedReferences.get(sharedKey)) ??
+        createdBy;
       const definition = {
         ...prepared.definition,
         packageDefinitionId:
