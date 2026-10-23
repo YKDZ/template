@@ -26,6 +26,24 @@ export type RootResourceOperation = Extract<
   }
 >;
 
+type SharedRootCiStep =
+  | (Readonly<Record<string, unknown>> & { readonly id: string })
+  | YAMLMap<unknown>;
+
+function isYamlMapStep(value: unknown): value is YAMLMap<unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as {
+    readonly items?: unknown;
+    readonly get?: unknown;
+    readonly clone?: unknown;
+  };
+  return (
+    Array.isArray(candidate.items) &&
+    typeof candidate.get === "function" &&
+    typeof candidate.clone === "function"
+  );
+}
+
 /** 外层拥有者声明共享文件中的领域条目；不向参考包授予根写入权限。 */
 export type SharedRootContribution = {
   readonly kind: "shared-root-files";
@@ -46,9 +64,7 @@ export type SharedRootContribution = {
   /** 每个步骤必须有独占的 id；before 引用已存在的步骤。 */
   readonly ciSteps?: readonly {
     readonly before?: string;
-    readonly steps: readonly (Readonly<Record<string, unknown>> & {
-      readonly id: string;
-    })[];
+    readonly steps: readonly SharedRootCiStep[];
   }[];
   /** 声明根检查作业的名称和超时；同一字段只允许等价来源。 */
   readonly ciJob?: {
@@ -249,7 +265,7 @@ export function composeCheckWorkflow(
   if (insertions.length === 0) return template;
   const workflow = parseDocument(template);
   const steps = workflow.getIn(["jobs", "check", "steps"]) as YAMLSeq<
-    YAMLMap<string>
+    YAMLMap<unknown>
   >;
   const owners = new Map<string, string>();
   for (const step of steps.items) {
@@ -266,20 +282,26 @@ export function composeCheckWorkflow(
         `${insertion.source} 的 CI 步骤锚点不存在：${insertion.before}`,
       );
     for (const step of insertion.steps) {
-      const owner = owners.get(step.id);
+      const id = isYamlMapStep(step) ? step.get("id") : step.id;
+      if (typeof id !== "string") {
+        throw new Error(`${insertion.source} 的 CI 步骤必须声明字符串 id`);
+      }
+      const owner = owners.get(id);
       if (owner !== undefined)
         conflict(
-          `.github/workflows/check.yml#/jobs/check/steps/${pointer(step.id)}`,
+          `.github/workflows/check.yml#/jobs/check/steps/${pointer(id)}`,
           owner,
           insertion.source,
         );
-      owners.set(step.id, insertion.source);
+      owners.set(id, insertion.source);
     }
     steps.items.splice(
       index,
       0,
-      ...insertion.steps.map(
-        (step) => workflow.createNode(step) as unknown as YAMLMap<string>,
+      ...insertion.steps.map((step) =>
+        isYamlMapStep(step)
+          ? (step.clone() as YAMLMap<unknown>)
+          : (workflow.createNode(step) as unknown as YAMLMap<unknown>),
       ),
     );
   }
