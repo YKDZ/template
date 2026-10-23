@@ -1751,6 +1751,33 @@ export function createGenerator<
                   : { packageDefinitionId },
             };
           }
+          const existingRoot = existingSelection.roots.find(
+            (candidate) => candidate.nodeIdentity === root.nodeIdentity,
+          );
+          const existingDependency = existingRoot?.dependencies.find(
+            (candidate) => candidate.key === key,
+          )?.package;
+          const recordedPackageDefinitionId =
+            existingDependency?.restored?.packageDefinitionId;
+          if (
+            existingDependency !== undefined &&
+            recordedPackageDefinitionId !== undefined &&
+            contentIdentityKey(existingDependency.content.identity) ===
+              contentIdentityKey(dependency.content.identity) &&
+            isDeepStrictEqual(
+              existingDependency.creationInput ?? null,
+              dependency.creationInput ?? null,
+            ) &&
+            isDeepStrictEqual(
+              existingDependency.definition,
+              dependency.definition,
+            )
+          ) {
+            return {
+              key,
+              target: { packageDefinitionId: recordedPackageDefinitionId },
+            };
+          }
           return {
             key,
             target: {
