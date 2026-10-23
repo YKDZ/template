@@ -159,6 +159,7 @@ export type PresetSelectionDefinition<
       string,
       {
         readonly reference: PresetReference;
+        readonly dependencyBindings?: Readonly<Record<string, string>>;
         readonly layout?: unknown;
         readonly creationInput?: Partial<Record<"init" | "add", CreationInput>>;
       }

@@ -1,6 +1,9 @@
 import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-workspace/default-environment";
 import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
+/** Hono API 与 web 之间保持稳定的原生依赖绑定键。 */
+export const honoApiDependencyKey = "hono-api";
+
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-vue-hono-web",
   resolve: (specifier) => import.meta.resolve(specifier),
