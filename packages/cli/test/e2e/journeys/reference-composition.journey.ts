@@ -219,17 +219,7 @@ const journey: CliJourney = {
       assert.equal(manifest.name, `@acme/${name}`);
       const configurationLink =
         manifest.devDependencies["@acme/tooling-config"];
-      assert.equal(typeof configurationLink, "string");
-      assert.ok(configurationLink.startsWith("workspace:"));
-      assert.equal(
-        path.posix.normalize(
-          path.posix.join(
-            `services/${name}`,
-            configurationLink.slice("workspace:".length),
-          ),
-        ),
-        "packages/tooling-config",
-      );
+      assert.equal(configurationLink, "workspace:*");
     }
     for (const file of [
       "services/portal/src/stores/counter.ts",
