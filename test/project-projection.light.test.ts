@@ -3,11 +3,9 @@ import {
   chmod,
   mkdir,
   mkdtemp,
-  readdir,
   readFile,
   rm,
   stat,
-  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,518 +14,740 @@ import { describe, it } from "node:test";
 
 import {
   commitProjectProjectionPlan,
-  createProjectProjectionReconciler,
-  materializeProjectProjection,
   planProjectProjections,
   readProjectProjectionCurrent,
-  getProjectProjectionReconciliationPaths,
-  reconcileAndApplyProjectProjections,
   reconcileProjectProjections,
-  validateProjectProjectionPlan,
   type ProjectProjection,
   type ProjectProjectionEntry,
-  type ProjectProjectionSource,
-  type CurrentProjectProjectionEntry,
   type ProjectProjectionMirrorSlot,
+  type ProjectProjectionPathPrecondition,
+  type ProjectProjectionSource,
+  type StructuredIdentitySetPolicy,
 } from "@ykdz/template-core/project-projection";
-import {
-  createTemplateSourceHandle,
-  type RenderOperation,
-} from "@ykdz/template-core/renderer";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const planTemplateSource = createTemplateSourceHandle(
-  "/tmp/project-projection-plan-source",
-);
 
-function textEntry(
-  projectionPath: string,
-  content: string,
+function fileEntry(
+  filePath: string,
+  content: string | Uint8Array,
+  mode = 0,
+  sources?: readonly ProjectProjectionSource[],
 ): ProjectProjectionEntry {
   return {
-    path: projectionPath,
+    path: filePath,
     kind: "file",
-    content: encoder.encode(content),
-    mode: 0,
+    content:
+      typeof content === "string" ? encoder.encode(content) : content.slice(),
+    mode,
+    ...(sources === undefined ? {} : { sources }),
   };
+}
+
+function projection(
+  entries: readonly ProjectProjectionEntry[],
+  reconciliation: ProjectProjection["reconciliation"],
+): ProjectProjection {
+  return { entries, reconciliation };
 }
 
 function textProjection(
-  projectionPath: string,
+  filePath: string,
   content: string,
+  options: {
+    readonly mode?: number;
+    readonly sources?: readonly ProjectProjectionSource[];
+    readonly mirrorSlots?: readonly ProjectProjectionMirrorSlot[];
+  } = {},
 ): ProjectProjection {
-  return {
-    entries: [textEntry(projectionPath, content)],
-    reconciliation: [{ path: projectionPath, driver: "text" }],
-  };
+  const { mode = 0, sources, mirrorSlots } = options;
+  return projection(
+    [fileEntry(filePath, content, mode, sources)],
+    [
+      {
+        path: filePath,
+        driver: "text",
+        ...(sources === undefined ? {} : { sources }),
+        ...(mirrorSlots === undefined ? {} : { mirrorSlots }),
+      },
+    ],
+  );
 }
 
 function structuredProjection(
-  projectionPath: string,
+  filePath: string,
   value: unknown,
+  options: {
+    readonly identitySets?: readonly StructuredIdentitySetPolicy[];
+    readonly mirrorSlots?: readonly ProjectProjectionMirrorSlot[];
+    readonly sources?: readonly ProjectProjectionSource[];
+  } = {},
 ): ProjectProjection {
-  return {
-    entries: [textEntry(projectionPath, `${JSON.stringify(value, null, 2)}\n`)],
-    reconciliation: [{ path: projectionPath, driver: "structured" }],
-  };
+  const { identitySets, mirrorSlots, sources } = options;
+  return projection(
+    [fileEntry(filePath, `${JSON.stringify(value, null, 2)}\n`, 0, sources)],
+    [
+      {
+        path: filePath,
+        driver: "structured",
+        ...(identitySets === undefined ? {} : { identitySets }),
+        ...(mirrorSlots === undefined ? {} : { mirrorSlots }),
+        ...(sources === undefined ? {} : { sources }),
+      },
+    ],
+  );
 }
 
-async function reconcileWithCurrent(options: {
+async function planAtTarget(options: {
+  readonly targetRoot: string;
   readonly before: ProjectProjection;
   readonly after: ProjectProjection;
-  readonly readCurrent: (
-    path: string,
-  ) => Promise<CurrentProjectProjectionEntry | undefined>;
-}) {
-  const current = await Promise.all(
-    getProjectProjectionReconciliationPaths(options).map(
-      async (projectionPath) => {
-        const fact = await options.readCurrent(projectionPath);
-        return fact === undefined
-          ? { path: projectionPath, kind: "missing" as const }
-          : { ...fact, path: projectionPath };
-      },
-    ),
-  );
-  return reconcileProjectProjections({
-    before: options.before,
+  readonly preconditions?: readonly ProjectProjectionPathPrecondition[];
+  readonly additionalPaths?: readonly string[];
+}): Promise<ReturnType<typeof planProjectProjections>> {
+  const { targetRoot, before, after, preconditions, additionalPaths } = options;
+  const current = await readProjectProjectionCurrent({
+    targetRoot,
+    before,
+    after,
+    ...(preconditions === undefined ? {} : { preconditions }),
+    ...(additionalPaths === undefined ? {} : { additionalPaths }),
+  });
+  return planProjectProjections({
+    before,
     current,
-    after: options.after,
+    after,
+    ...(preconditions === undefined ? {} : { preconditions }),
   });
 }
 
-void describe("Project Projection materialization", () => {
-  void it("rejects merging JSON into known non-JSON text during plan preflight", () => {
-    assert.ok(
-      validateProjectProjectionPlan({
-        operations: [
-          {
-            kind: "writeText",
-            to: "config.json",
-            text: "not json\n",
-          },
-          {
-            kind: "mergeJson",
-            to: "config.json",
-            value: { enabled: true },
-          },
-        ],
-      }).includes(
-        "Project Projection mergeJson requires JSON-compatible content: config.json follows writeText",
-      ),
+void describe("期望文件树协调", () => {
+  void it("合并文本中的非重叠生成变化并保留用户插入内容", () => {
+    const before = textProjection("README.md", "first\ncommon\nlast\n");
+    const after = textProjection(
+      "README.md",
+      "first\ncommon\ngenerated\nlast\n",
     );
-  });
-
-  for (const scenario of [
-    {
-      sequence: "writeJson to mergeJson",
-      operations: [
-        { kind: "writeJson", to: "config.json", value: { first: true } },
-        { kind: "mergeJson", to: "config.json", value: { second: true } },
-      ],
-    },
-    {
-      sequence: "copyFile to mergeJson",
-      operations: [
-        {
-          kind: "copyFile",
-          source: planTemplateSource,
-          from: "config.json",
-          to: "config.json",
-        },
-        { kind: "mergeJson", to: "config.json", value: { second: true } },
-      ],
-    },
-  ] satisfies readonly {
-    readonly sequence: string;
-    readonly operations: readonly RenderOperation[];
-  }[]) {
-    void it(`accepts the legal ${scenario.sequence} sequence`, () => {
-      assert.deepStrictEqual(
-        validateProjectProjectionPlan({ operations: scenario.operations }),
-        [],
-      );
-    });
-  }
-
-  void it("materializes planner-owned text at any safe projection path", async () => {
-    assert.deepStrictEqual(
-      await materializeProjectProjection({
-        operations: [
-          {
-            kind: "writeText",
-            to: "policies/custom.rules",
-            text: "allow generated fact\n",
-          },
-        ],
-      }),
-      {
-        entries: [textEntry("policies/custom.rules", "allow generated fact\n")],
-        reconciliation: [{ path: "policies/custom.rules", driver: "text" }],
-      },
-    );
-  });
-
-  void it("uses planner-declared JSON key order instead of recognizing filenames", async () => {
-    const value = {
-      zeta: true,
-      name: "demo",
-      alpha: true,
-      entry: { default: "./dist.js", source: "./src.ts", types: "./dist.d.ts" },
-    };
-    const [generic, declared] = await Promise.all([
-      materializeProjectProjection({
-        operations: [{ kind: "writeJson", to: "package.json", value }],
-      }),
-      materializeProjectProjection({
-        operations: [
-          {
-            kind: "writeJson",
-            to: "arbitrary.data",
-            value,
-            keyOrder: ["name", "zeta", "alpha"],
-            nestedKeyOrder: ["source", "types", "default"],
-          },
-        ],
-      }),
-    ]);
-
-    assert.strictEqual(
-      decoder.decode(generic.entries[0]!.content),
-      '{\n  "alpha": true,\n  "entry": {\n    "default": "./dist.js",\n    "source": "./src.ts",\n    "types": "./dist.d.ts"\n  },\n  "name": "demo",\n  "zeta": true\n}\n',
-    );
-    assert.strictEqual(
-      decoder.decode(declared.entries[0]!.content),
-      '{\n  "name": "demo",\n  "zeta": true,\n  "alpha": true,\n  "entry": {\n    "source": "./src.ts",\n    "types": "./dist.d.ts",\n    "default": "./dist.js"\n  }\n}\n',
-    );
-  });
-
-  void it("rejects isolated setExecutable as an incomplete Project Projection", async () => {
-    await assert.rejects(
-      materializeProjectProjection({
-        operations: [
-          {
-            kind: "setExecutable",
-            path: "scripts/run.sh",
-            executable: true,
-          },
-        ],
-      }),
-      (error) =>
-        error instanceof Error &&
-        error.message.includes(
-          "Project Projection setExecutable requires a preceding content-producing operation: scripts/run.sh",
-        ),
-    );
-  });
-
-  void it("normalizes equivalent final states independently of Renderer operation count and order", async () => {
-    const repeatedOperations = await materializeProjectProjection({
-      operations: [
-        {
-          kind: "writeJson",
-          to: "config.json",
-          value: { enabled: true },
-        },
-        {
-          kind: "mergeJson",
-          to: "config.json",
-          value: { retries: 2 },
-        },
-        {
-          kind: "setExecutable",
-          path: "config.json",
-          executable: true,
-        },
-      ],
-    });
-    const consolidatedOperations = await materializeProjectProjection({
-      operations: [
-        {
-          kind: "writeJson",
-          to: "config.json",
-          value: { enabled: true, retries: 2 },
-        },
-        {
-          kind: "setExecutable",
-          path: "config.json",
-          executable: true,
-        },
-      ],
-    });
-
-    assert.deepStrictEqual(repeatedOperations, consolidatedOperations);
-    assert.deepStrictEqual(repeatedOperations.entries, [
-      {
-        path: "config.json",
-        kind: "file",
-        content: new TextEncoder().encode(
-          '{\n  "enabled": true,\n  "retries": 2\n}\n',
-        ),
-        mode: 0o111,
-      },
-    ]);
-    assert.deepStrictEqual(repeatedOperations.reconciliation, [
-      { path: "config.json", driver: "structured" },
-    ]);
-  });
-
-  void it("uses generic planner reconciliation metadata to select a structured driver", async () => {
-    const projection = await materializeProjectProjection({
-      operations: [
-        {
-          kind: "writeText",
-          to: "policy.md",
-          text: '{"enabled":true}\n',
-        },
-      ],
-      reconciliation: [{ path: "policy.md", driver: "structured" }],
-    });
-
-    assert.deepStrictEqual(projection.reconciliation, [
-      { path: "policy.md", driver: "structured" },
-    ]);
-  });
-
-  void it("reconciles a mode-only final-state delta while preserving compatible Current content", async () => {
-    const contentOperation = {
-      kind: "writeText" as const,
-      to: "README.md",
-      text: "projected\n",
-    };
-    const before = await materializeProjectProjection({
-      operations: [contentOperation],
-    });
-    const after = await materializeProjectProjection({
-      operations: [
-        contentOperation,
-        {
-          kind: "setExecutable",
-          path: "README.md",
-          executable: true,
-        },
-      ],
-    });
-
-    assert.deepStrictEqual(
-      before.entries[0]?.content,
-      after.entries[0]?.content,
-    );
-    assert.strictEqual(before.entries[0]?.mode, 0);
-    assert.strictEqual(after.entries[0]?.mode, 0o111);
-
-    const result = await reconcileWithCurrent({
-      before,
-      after,
-      async readCurrent() {
-        return textEntry("README.md", "user content\n");
-      },
-    });
-
-    assert.strictEqual(result.ok, true);
-    if (!result.ok) return;
-    assert.deepStrictEqual(result.mutations, [
-      {
-        path: "README.md",
-        kind: "file",
-        content: encoder.encode("user content\n"),
-        mode: 0o111,
-      },
-    ]);
-  });
-
-  void it("applies a mode-only delta without replacing Current content", async () => {
-    const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-mode-only-"),
-    );
-    const readmePath = path.join(targetRoot, "README.md");
-    const contentOperation = {
-      kind: "writeText" as const,
-      to: "README.md",
-      text: "projected\n",
-    };
-
-    try {
-      await writeFile(readmePath, "user content\n");
-      await chmod(readmePath, 0o644);
-
-      assert.deepStrictEqual(
-        await reconcileAndApplyProjectProjections({
-          targetRoot,
-          before: { operations: [contentOperation] },
-          after: {
-            operations: [
-              contentOperation,
-              {
-                kind: "setExecutable",
-                path: "README.md",
-                executable: true,
-              },
-            ],
-          },
-        }),
-        {
-          ok: true,
-          changedPaths: ["README.md"],
-          actions: [{ path: "README.md", driver: "text", action: "update" }],
-        },
-      );
-      assert.strictEqual(await readFile(readmePath, "utf8"), "user content\n");
-      assert.strictEqual((await stat(readmePath)).mode & 0o111, 0o111);
-    } finally {
-      await rm(targetRoot, { recursive: true, force: true });
-    }
-  });
-
-  void it("显式事实可纯预览，过期计划提交前拒绝且不写入", async () => {
-    const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-explicit-plan-"),
-    );
-    const before = {
-      entries: [textEntry("README.md", "before\n")],
-      reconciliation: [{ path: "README.md", driver: "text" as const }],
-    };
-    const after = {
-      entries: [
-        textEntry("README.md", "after\n"),
-        textEntry("packages/docs/README.md", "new package\n"),
-      ],
-      reconciliation: [
-        { path: "README.md", driver: "text" as const },
-        { path: "packages/docs/README.md", driver: "text" as const },
-      ],
-    };
-
-    try {
-      await writeFile(path.join(targetRoot, "README.md"), "before\n");
-      const preconditions = [
-        {
-          path: "packages/docs",
-          kind: "must-not-exist" as const,
-          reason: "新包路径已被占用",
-        },
-      ];
-      const current = await readProjectProjectionCurrent({
-        targetRoot,
-        before,
-        after,
-        preconditions,
-      });
-      const planning = planProjectProjections({
-        before,
-        current,
-        after,
-        preconditions,
-      });
-
-      assert.strictEqual(planning.ok, true);
-      if (!planning.ok) return;
-      assert.deepStrictEqual(planning.plan.actions, [
-        { path: "README.md", driver: "text", action: "update" },
-        {
-          path: "packages/docs/README.md",
-          driver: "text",
-          action: "create",
-        },
-      ]);
-      await assert.rejects(stat(path.join(targetRoot, "packages/docs")), {
-        code: "ENOENT",
-      });
-
-      await writeFile(path.join(targetRoot, "README.md"), "latest user edit\n");
-      const committed = await commitProjectProjectionPlan({
-        targetRoot,
-        plan: planning.plan,
-      });
-
-      assert.strictEqual(committed.ok, false);
-      if (committed.ok) return;
-      assert.ok(
-        committed.conflicts.some((conflict) => conflict.path === "README.md"),
-      );
-      assert.strictEqual(
-        await readFile(path.join(targetRoot, "README.md"), "utf8"),
-        "latest user edit\n",
-      );
-      await assert.rejects(
-        stat(path.join(targetRoot, "packages/docs/README.md")),
-        {
-          code: "ENOENT",
-        },
-      );
-    } finally {
-      await rm(targetRoot, { recursive: true, force: true });
-    }
-  });
-
-  void it("投影冲突保留相关来源", () => {
-    const beforeSource: ProjectProjectionSource = {
-      identity: "content:before",
-      label: "前置内容",
-    };
-    const afterSource: ProjectProjectionSource = {
-      identity: "content:after",
-      label: "新增内容",
-    };
-    const currentSource: ProjectProjectionSource = {
-      identity: "workspace:current",
-      label: "工作区声明",
-    };
     const result = reconcileProjectProjections({
-      before: {
-        entries: [
-          { ...textEntry("README.md", "before\n"), sources: [beforeSource] },
-        ],
-        reconciliation: [
-          { path: "README.md", driver: "text", sources: [beforeSource] },
-        ],
-      },
+      before,
+      current: [fileEntry("README.md", "first\nprivate\ncommon\nlast\n")],
+      after,
+    });
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.mutations.length, 1);
+    assert.equal(
+      decoder.decode(result.mutations[0]!.content),
+      "first\nprivate\ncommon\ngenerated\nlast\n",
+    );
+  });
+
+  void it("为同处文本冲突返回位置、双方来源且不产生部分变更", () => {
+    const beforeSource = { identity: "content:before", label: "基础内容" };
+    const currentSource = {
+      identity: "workspace:current",
+      label: "用户文件",
+    };
+    const afterSource = { identity: "content:after", label: "新增内容" };
+    const before = textProjection("README.md", "first\nbase\n", {
+      sources: [beforeSource],
+    });
+    const after = textProjection("README.md", "first\ngenerated\n", {
+      sources: [afterSource],
+    });
+    const result = reconcileProjectProjections({
+      before,
       current: [
-        {
-          ...textEntry("README.md", "consumer\n"),
-          sources: [currentSource],
-        },
+        fileEntry("README.md", "first\nuser edit\n", 0, [currentSource]),
       ],
-      after: {
-        entries: [
-          { ...textEntry("README.md", "after\n"), sources: [afterSource] },
-        ],
-        reconciliation: [
-          { path: "README.md", driver: "text", sources: [afterSource] },
-        ],
-      },
+      after,
     });
 
     assert.equal(result.ok, false);
     if (result.ok) return;
+    assert.equal(Object.hasOwn(result, "mutations"), false);
+    assert.equal(result.conflicts.length, 1);
+    assert.equal(result.conflicts[0]?.path, "README.md");
+    assert.ok(result.conflicts[0]?.region);
     assert.deepEqual(
-      result.conflicts[0]?.sources?.map((source) => source.label),
-      ["前置内容", "工作区声明", "新增内容"],
+      result.conflicts[0]?.sources?.map(({ label }) => label),
+      ["基础内容", "用户文件", "新增内容"],
     );
   });
 
-  void it("提交复查规划实际读取的只读事实并忽略无关变化", async () => {
-    const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-read-facts-"),
+  void it("递归合并结构化对象和显式身份数组并保留 Current 成员", () => {
+    const identitySets = [
+      {
+        location: "/members",
+        identity: { kind: "fields" as const, fields: ["id"] },
+      },
+    ];
+    const before = structuredProjection(
+      "workspace.json",
+      {
+        members: [{ id: "shared", settings: { timeout: 10 } }],
+        enabled: false,
+      },
+      { identitySets },
     );
-    const before = textProjection("README.md", "before\n");
-    const after = textProjection("README.md", "after\n");
+    const after = structuredProjection(
+      "workspace.json",
+      {
+        members: [
+          { id: "shared", settings: { required: true, timeout: 10 } },
+          { id: "generated", settings: {} },
+        ],
+        enabled: true,
+        added: { source: "package-addition" },
+      },
+      { identitySets },
+    );
+    const result = reconcileProjectProjections({
+      before,
+      current: [
+        fileEntry(
+          "workspace.json",
+          `${JSON.stringify(
+            {
+              members: [
+                { id: "user", settings: { retained: true } },
+                { id: "shared", settings: { timeout: 20 } },
+              ],
+              enabled: false,
+              userOnly: true,
+            },
+            null,
+            2,
+          )}\n`,
+        ),
+      ],
+      after,
+    });
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(
+      JSON.parse(decoder.decode(result.mutations[0]!.content)) as unknown,
+      {
+        members: [
+          { id: "user", settings: { retained: true } },
+          { id: "shared", settings: { timeout: 20, required: true } },
+          { id: "generated", settings: {} },
+        ],
+        enabled: true,
+        added: { source: "package-addition" },
+        userOnly: true,
+      },
+    );
+  });
+
+  void it("拒绝身份重复的 Current 数组成员", () => {
+    const identitySets = [
+      {
+        location: "/members",
+        identity: { kind: "fields" as const, fields: ["id"] },
+      },
+    ];
+    const result = reconcileProjectProjections({
+      before: structuredProjection(
+        "workspace.json",
+        { members: [{ id: "base" }] },
+        { identitySets },
+      ),
+      current: [
+        fileEntry(
+          "workspace.json",
+          '{"members":[{"id":"base"},{"id":"base"}]}\n',
+        ),
+      ],
+      after: structuredProjection(
+        "workspace.json",
+        { members: [{ id: "base" }, { id: "generated" }] },
+        { identitySets },
+      ),
+    });
+
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.conflicts[0]?.location, "/members");
+    assert.match(
+      result.conflicts[0]?.reason ?? "",
+      /identities must be unique/u,
+    );
+    assert.equal(Object.hasOwn(result, "mutations"), false);
+  });
+
+  void it("结构化字段、二进制与执行位冲突分别带有定位信息", () => {
+    const structured = reconcileProjectProjections({
+      before: structuredProjection("settings.json", {
+        settings: { timeout: 10 },
+      }),
+      current: [fileEntry("settings.json", '{"settings":{"timeout":20}}\n')],
+      after: structuredProjection("settings.json", {
+        settings: { timeout: 30 },
+      }),
+    });
+
+    assert.equal(structured.ok, false);
+    if (structured.ok) return;
+    assert.deepEqual(
+      {
+        path: structured.conflicts[0]?.path,
+        driver: structured.conflicts[0]?.driver,
+        location: structured.conflicts[0]?.location,
+        reason: structured.conflicts[0]?.reason,
+      },
+      {
+        path: "settings.json",
+        driver: "structured",
+        location: "/settings/timeout",
+        reason: "Current and After contain incompatible scalar changes",
+      },
+    );
+    assert.equal(Object.hasOwn(structured, "mutations"), false);
+
+    const binary = reconcileProjectProjections({
+      before: projection(
+        [fileEntry("assets/icon.bin", new Uint8Array([0xff, 0, 1]))],
+        [{ path: "assets/icon.bin", driver: "text" }],
+      ),
+      current: [fileEntry("assets/icon.bin", new Uint8Array([0xfd, 0, 1]))],
+      after: projection(
+        [fileEntry("assets/icon.bin", new Uint8Array([0xfe, 0, 1]))],
+        [{ path: "assets/icon.bin", driver: "text" }],
+      ),
+    });
+
+    assert.equal(binary.ok, false);
+    if (binary.ok) return;
+    assert.equal(binary.conflicts[0]?.attribute, "binary-content");
+    assert.equal(binary.conflicts[0]?.path, "assets/icon.bin");
+    assert.equal(Object.hasOwn(binary, "mutations"), false);
+
+    const mode = reconcileProjectProjections({
+      before: textProjection("scripts/run.sh", "echo ready\n"),
+      current: [fileEntry("scripts/run.sh", "echo ready\n", 0o100)],
+      after: textProjection("scripts/run.sh", "echo ready\n", { mode: 0o111 }),
+    });
+
+    assert.equal(mode.ok, false);
+    if (mode.ok) return;
+    assert.equal(mode.conflicts[0]?.attribute, "executable-mode");
+    assert.equal(mode.conflicts[0]?.path, "scripts/run.sh");
+    assert.equal(Object.hasOwn(mode, "mutations"), false);
+  });
+
+  void it("拒绝通过缩短 After 期望树删除既有生成路径", () => {
+    assert.throws(
+      () =>
+        reconcileProjectProjections({
+          before: textProjection("docs/existing/README.md", "existing\n"),
+          current: [fileEntry("docs/existing/README.md", "existing\n")],
+          after: { entries: [], reconciliation: [] },
+        }),
+      /Package Addition projection may not delete path: docs\/existing\/README.md/u,
+    );
+  });
+});
+
+void describe("已声明镜像位置", () => {
+  const toolVersion = "24.16.0";
+  const driftedVersion = "999";
+  const configPath = "container/config.json";
+  const mirrorSlots = [
+    {
+      id: "tool-version",
+      location: { kind: "json-pointer" as const, pointer: "/env/TOOL_VERSION" },
+    },
+  ];
+
+  void it("只读取声明的 JSON 镜像路径并恢复根值，同时保留用户字段", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-json-mirror-"),
+    );
+    const beforeConfig = structuredProjection(
+      configPath,
+      { env: { TOOL_VERSION: toolVersion }, name: "demo" },
+      { mirrorSlots },
+    );
+    const beforePlain = textProjection("workspace/plain.txt", "generated\n");
+    const before = projection(
+      [...beforeConfig.entries, ...beforePlain.entries],
+      [...beforeConfig.reconciliation, ...beforePlain.reconciliation],
+    );
+    const after = before;
+    const currentConfigPath = path.join(targetRoot, configPath);
+    const currentPlainPath = path.join(targetRoot, "workspace/plain.txt");
 
     try {
-      await writeFile(path.join(targetRoot, "README.md"), "before\n");
-      await writeFile(path.join(targetRoot, "project-input.json"), "first\n");
+      await mkdir(path.dirname(currentConfigPath), { recursive: true });
+      await mkdir(path.dirname(currentPlainPath), { recursive: true });
+      await writeFile(
+        currentConfigPath,
+        `${JSON.stringify(
+          {
+            env: { TOOL_VERSION: driftedVersion },
+            name: "demo",
+            userOnly: { retained: true },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      await writeFile(currentPlainPath, "用户配置\n");
+
       const current = await readProjectProjectionCurrent({
         targetRoot,
         before,
         after,
-        additionalPaths: ["project-input.json"],
       });
+      assert.ok(current.facts.some((fact) => fact.path === configPath));
+      assert.equal(
+        current.facts.some((fact) => fact.path === "workspace/plain.txt"),
+        false,
+      );
+
       const planning = planProjectProjections({ before, current, after });
       assert.equal(planning.ok, true);
       if (!planning.ok) return;
+      assert.deepEqual(
+        planning.plan.actions.map(({ path: actionPath }) => actionPath),
+        [configPath],
+      );
+      const committed = await commitProjectProjectionPlan({
+        targetRoot,
+        plan: planning.plan,
+      });
+      assert.equal(committed.ok, true);
+      assert.deepEqual(
+        JSON.parse(await readFile(currentConfigPath, "utf8")) as unknown,
+        {
+          env: { TOOL_VERSION: toolVersion },
+          name: "demo",
+          userOnly: { retained: true },
+        },
+      );
+      assert.equal(await readFile(currentPlainPath, "utf8"), "用户配置\n");
+    } finally {
+      await rm(targetRoot, { recursive: true, force: true });
+    }
+  });
 
-      await writeFile(path.join(targetRoot, "project-input.json"), "changed\n");
+  void it("在同一结构化文件中同时协调普通变化和镜像值", () => {
+    const reconciliation = { mirrorSlots };
+    const before = structuredProjection(
+      configPath,
+      {
+        env: { TOOL_VERSION: toolVersion },
+        features: { beta: false },
+      },
+      reconciliation,
+    );
+    const after = structuredProjection(
+      configPath,
+      {
+        env: { ADDITIONAL_TOOL: "1.4.0", TOOL_VERSION: toolVersion },
+        features: { beta: true },
+      },
+      reconciliation,
+    );
+    const result = reconcileProjectProjections({
+      before,
+      current: [
+        fileEntry(
+          configPath,
+          `${JSON.stringify(
+            {
+              env: { TOOL_VERSION: driftedVersion },
+              features: { beta: false },
+              userOnly: { retained: true },
+            },
+            null,
+            2,
+          )}\n`,
+        ),
+      ],
+      after,
+    });
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.mutations.length, 1);
+    assert.deepEqual(
+      JSON.parse(decoder.decode(result.mutations[0]!.content)) as unknown,
+      {
+        env: { ADDITIONAL_TOOL: "1.4.0", TOOL_VERSION: toolVersion },
+        features: { beta: true },
+        userOnly: { retained: true },
+      },
+    );
+  });
+
+  void it("按命名文本锚点恢复生成区并保留区外用户文本", () => {
+    const launcherPath = "deploy/launcher.txt";
+    const anchor = {
+      id: "tool-version-anchor",
+      location: { kind: "text-anchor" as const, name: "TOOL_VERSION" },
+    };
+    const anchoredText = (value: string) =>
+      [
+        "FROM base:1",
+        "# @template-mirror TOOL_VERSION",
+        `ARG TOOL_VERSION="${value}"`,
+        "# @end-template-mirror",
+        "RUN existing step",
+        "",
+      ].join("\n");
+    const mirrorProjection = (value: string) =>
+      textProjection(launcherPath, anchoredText(value), {
+        mirrorSlots: [anchor],
+      });
+    const result = reconcileProjectProjections({
+      before: mirrorProjection(toolVersion),
+      current: [
+        fileEntry(
+          launcherPath,
+          anchoredText(driftedVersion).replace(
+            "RUN existing step\n",
+            "RUN existing step\nRUN user step\n",
+          ),
+        ),
+      ],
+      after: mirrorProjection(toolVersion),
+    });
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(
+      decoder.decode(result.mutations[0]!.content),
+      anchoredText(toolVersion).replace(
+        "RUN existing step\n",
+        "RUN existing step\nRUN user step\n",
+      ),
+    );
+  });
+
+  void it("无法定位仍被引用的锚点时返回阻断冲突", () => {
+    const launcherPath = "deploy/launcher.txt";
+    const anchor = {
+      id: "tool-version-anchor",
+      location: { kind: "text-anchor" as const, name: "TOOL_VERSION" },
+    };
+    const expected = [
+      "FROM base:1",
+      "# @template-mirror TOOL_VERSION",
+      `ARG TOOL_VERSION="24.16.0"`,
+      "# @end-template-mirror",
+      "RUN existing step",
+      "",
+    ].join("\n");
+    const result = reconcileProjectProjections({
+      before: textProjection(launcherPath, expected, {
+        mirrorSlots: [anchor],
+      }),
+      current: [
+        fileEntry(
+          launcherPath,
+          'FROM base:1\nARG TOOL_VERSION="999"\n# @end-template-mirror\nFROM node:${TOOL_VERSION}-slim\n',
+        ),
+      ],
+      after: textProjection(launcherPath, expected, {
+        mirrorSlots: [anchor],
+      }),
+    });
+
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.conflicts.length, 1);
+    assert.equal(result.conflicts[0]?.path, launcherPath);
+    assert.equal(result.conflicts[0]?.location, "TOOL_VERSION");
+    assert.match(
+      result.conflicts[0]?.reason ?? "",
+      /anchor could not be located/u,
+    );
+    assert.equal(Object.hasOwn(result, "mutations"), false);
+  });
+});
+
+void describe("规划与提交", () => {
+  void it("预览不写入，提交合并用户定制、保留既有路径并创建新包文件", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-preview-"),
+    );
+    const beforeReadme = textProjection("README.md", "before\n");
+    const beforePackage = textProjection(
+      "docs/overview/README.md",
+      "template overview\n",
+    );
+    const before = projection(
+      [...beforeReadme.entries, ...beforePackage.entries],
+      [...beforeReadme.reconciliation, ...beforePackage.reconciliation],
+    );
+    const afterReadme = textProjection("README.md", "before\ngenerated\n");
+    const afterPackage = textProjection(
+      "docs/overview/README.md",
+      "template overview\n",
+    );
+    const afterNewPackage = textProjection(
+      "docs/new/README.md",
+      "new package\n",
+    );
+    const after = projection(
+      [
+        ...afterReadme.entries,
+        ...afterPackage.entries,
+        ...afterNewPackage.entries,
+      ],
+      [
+        ...afterReadme.reconciliation,
+        ...afterPackage.reconciliation,
+        ...afterNewPackage.reconciliation,
+      ],
+    );
+    const readmePath = path.join(targetRoot, "README.md");
+    const existingPackagePath = path.join(
+      targetRoot,
+      "docs/overview/README.md",
+    );
+    const newPackagePath = path.join(targetRoot, "docs/new/README.md");
+
+    try {
+      await mkdir(path.dirname(existingPackagePath), { recursive: true });
+      await writeFile(readmePath, "user heading\nbefore\n");
+      await writeFile(existingPackagePath, "user overview\n");
+
+      const planning = await planAtTarget({ targetRoot, before, after });
+      assert.equal(planning.ok, true);
+      if (!planning.ok) return;
+      assert.deepEqual(
+        planning.plan.actions.map(({ path: actionPath, action }) => [
+          actionPath,
+          action,
+        ]),
+        [
+          ["README.md", "update"],
+          ["docs/new/README.md", "create"],
+        ],
+      );
+      assert.equal(
+        await readFile(readmePath, "utf8"),
+        "user heading\nbefore\n",
+      );
+      assert.equal(
+        await readFile(existingPackagePath, "utf8"),
+        "user overview\n",
+      );
+      await assert.rejects(stat(newPackagePath), { code: "ENOENT" });
+
+      const committed = await commitProjectProjectionPlan({
+        targetRoot,
+        plan: planning.plan,
+      });
+      assert.equal(committed.ok, true);
+      assert.equal(
+        await readFile(readmePath, "utf8"),
+        "user heading\nbefore\ngenerated\n",
+      );
+      assert.equal(
+        await readFile(existingPackagePath, "utf8"),
+        "user overview\n",
+      );
+      assert.equal(await readFile(newPackagePath, "utf8"), "new package\n");
+    } finally {
+      await rm(targetRoot, { recursive: true, force: true });
+    }
+  });
+
+  void it("任一文件冲突都阻断整份计划并保留所有目标内容", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-no-partial-plan-"),
+    );
+    const beforeSource = { identity: "content:before", label: "现有参考包" };
+    const afterSource = { identity: "content:after", label: "新增参考包" };
+    const beforeReadme = textProjection("README.md", "base\n", {
+      sources: [beforeSource],
+    });
+    const beforeState = textProjection(".template/state.json", "before\n");
+    const before = projection(
+      [...beforeReadme.entries, ...beforeState.entries],
+      [...beforeReadme.reconciliation, ...beforeState.reconciliation],
+    );
+    const afterReadme = textProjection("README.md", "generated\n", {
+      sources: [afterSource],
+    });
+    const afterState = textProjection(".template/state.json", "after\n");
+    const afterNewPackage = textProjection(
+      "packages/new/README.md",
+      "new package\n",
+      { sources: [afterSource] },
+    );
+    const after = projection(
+      [
+        ...afterReadme.entries,
+        ...afterState.entries,
+        ...afterNewPackage.entries,
+      ],
+      [
+        ...afterReadme.reconciliation,
+        ...afterState.reconciliation,
+        ...afterNewPackage.reconciliation,
+      ],
+    );
+    const readmePath = path.join(targetRoot, "README.md");
+    const statePath = path.join(targetRoot, ".template/state.json");
+    const newPackagePath = path.join(targetRoot, "packages/new/README.md");
+
+    try {
+      await mkdir(path.join(targetRoot, ".template"), { recursive: true });
+      await writeFile(readmePath, "user edit\n");
+      await writeFile(statePath, "before\n");
+
+      const planning = await planAtTarget({ targetRoot, before, after });
+      assert.equal(planning.ok, false);
+      if (planning.ok) return;
+      assert.equal(planning.conflicts.length, 1);
+      assert.equal(planning.conflicts[0]?.path, "README.md");
+      assert.deepEqual(
+        planning.conflicts[0]?.sources?.map(({ label }) => label),
+        ["现有参考包", "新增参考包"],
+      );
+      assert.equal(Object.hasOwn(planning, "plan"), false);
+      assert.equal(await readFile(readmePath, "utf8"), "user edit\n");
+      assert.equal(await readFile(statePath, "utf8"), "before\n");
+      await assert.rejects(stat(newPackagePath), { code: "ENOENT" });
+    } finally {
+      await rm(targetRoot, { recursive: true, force: true });
+    }
+  });
+
+  void it("拒绝过期的相关事实，但允许无关文件变化后提交", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-stale-facts-"),
+    );
+    const before = textProjection("README.md", "first\ncommon\nlast\n");
+    const after = textProjection(
+      "README.md",
+      "first\ncommon\ngenerated\nlast\n",
+    );
+    const readmePath = path.join(targetRoot, "README.md");
+    const providerPath = path.join(targetRoot, "provider.json");
+    const unrelatedPath = path.join(targetRoot, "user-notes.txt");
+
+    try {
+      await writeFile(readmePath, "first\nprivate\ncommon\nlast\n");
+      await writeFile(providerPath, '{"version":"first"}\n');
+
+      const planning = await planAtTarget({
+        targetRoot,
+        before,
+        after,
+        additionalPaths: ["provider.json"],
+      });
+      assert.equal(planning.ok, true);
+      if (!planning.ok) return;
+
+      await writeFile(providerPath, '{"version":"changed"}\n');
       const stale = await commitProjectProjectionPlan({
         targetRoot,
         plan: planning.plan,
@@ -536,2525 +756,229 @@ void describe("Project Projection materialization", () => {
       if (stale.ok) return;
       assert.ok(
         stale.conflicts.some(
-          (conflict) => conflict.path === "project-input.json",
+          ({ path: conflictPath }) => conflictPath === "provider.json",
         ),
       );
       assert.equal(
-        await readFile(path.join(targetRoot, "README.md"), "utf8"),
-        "before\n",
+        await readFile(readmePath, "utf8"),
+        "first\nprivate\ncommon\nlast\n",
       );
 
-      const freshCurrent = await readProjectProjectionCurrent({
+      const freshPlanning = await planAtTarget({
         targetRoot,
         before,
         after,
-        additionalPaths: ["project-input.json"],
-      });
-      const freshPlanning = planProjectProjections({
-        before,
-        current: freshCurrent,
-        after,
+        additionalPaths: ["provider.json"],
       });
       assert.equal(freshPlanning.ok, true);
       if (!freshPlanning.ok) return;
-      await writeFile(path.join(targetRoot, "unrelated.txt"), "unrelated\n");
+      await writeFile(unrelatedPath, "unrelated edit\n");
       const committed = await commitProjectProjectionPlan({
         targetRoot,
         plan: freshPlanning.plan,
       });
       assert.equal(committed.ok, true);
       assert.equal(
-        await readFile(path.join(targetRoot, "README.md"), "utf8"),
-        "after\n",
+        await readFile(readmePath, "utf8"),
+        "first\nprivate\ncommon\ngenerated\nlast\n",
       );
-      assert.equal(
-        await readFile(path.join(targetRoot, "unrelated.txt"), "utf8"),
-        "unrelated\n",
-      );
+      assert.equal(await readFile(unrelatedPath, "utf8"), "unrelated edit\n");
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
   });
 
-  void it("拒绝会让提交读取仓库外路径的 Current 事实", async () => {
-    const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-invalid-fact-"),
-    );
-    const before = textProjection("README.md", "before\n");
-    const after = textProjection("README.md", "after\n");
-
-    try {
-      await writeFile(path.join(targetRoot, "README.md"), "before\n");
-      const current = await readProjectProjectionCurrent({
-        targetRoot,
-        before,
-        after,
-      });
-      assert.throws(
-        () =>
-          planProjectProjections({
-            before,
-            current,
-            after,
-            readFacts: [textEntry("../outside", "untrusted\n")],
-          }),
-        (error) =>
-          error instanceof Error &&
-          error.message.startsWith(
-            "Current 事实路径必须是安全的标准相对路径：",
-          ),
-      );
-    } finally {
-      await rm(targetRoot, { recursive: true, force: true });
-    }
-  });
-
-  void it("复查祖先种类并允许缺失祖先变为目录", async () => {
-    const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-ancestor-facts-"),
-    );
-    const outsideRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-ancestor-target-"),
-    );
-    const before: ProjectProjection = { entries: [], reconciliation: [] };
-    const after = textProjection("nested/README.md", "generated\n");
-
-    try {
-      const current = await readProjectProjectionCurrent({
-        targetRoot,
-        before,
-        after,
-      });
-      const planning = planProjectProjections({ before, current, after });
-      assert.equal(planning.ok, true);
-      if (!planning.ok) return;
-
-      await mkdir(path.join(targetRoot, "nested"));
-      const committed = await commitProjectProjectionPlan({
-        targetRoot,
-        plan: planning.plan,
-      });
-      assert.equal(committed.ok, true);
-      assert.equal(
-        await readFile(path.join(targetRoot, "nested/README.md"), "utf8"),
-        "generated\n",
-      );
-
-      const secondTarget = path.join(targetRoot, "second");
-      await mkdir(secondTarget);
-      const secondAfter = textProjection("linked/README.md", "generated\n");
-      const secondCurrent = await readProjectProjectionCurrent({
-        targetRoot: secondTarget,
-        before,
-        after: secondAfter,
-      });
-      const secondPlanning = planProjectProjections({
-        before,
-        current: secondCurrent,
-        after: secondAfter,
-      });
-      assert.equal(secondPlanning.ok, true);
-      if (!secondPlanning.ok) return;
-
-      await symlink(outsideRoot, path.join(secondTarget, "linked"));
-      const stale = await commitProjectProjectionPlan({
-        targetRoot: secondTarget,
-        plan: secondPlanning.plan,
-      });
-      assert.equal(stale.ok, false);
-      if (stale.ok) return;
-      assert.ok(stale.conflicts.some((conflict) => conflict.path === "linked"));
-      await assert.rejects(stat(path.join(outsideRoot, "README.md")), {
-        code: "ENOENT",
-      });
-    } finally {
-      await Promise.all([
-        rm(targetRoot, { recursive: true, force: true }),
-        rm(outsideRoot, { recursive: true, force: true }),
-      ]);
-    }
-  });
-
-  void it("初始化计划复查目标的空目录或缺失状态", async () => {
+  void it("初始化只接受空目录或缺失目标，并在目标变化后拒绝旧计划", async () => {
     const parentRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-init-precondition-"),
+      path.join(tmpdir(), "template-projection-init-target-"),
     );
     const before: ProjectProjection = { entries: [], reconciliation: [] };
     const after = textProjection("README.md", "generated\n");
-    const preconditions = [
+    const preconditions: readonly ProjectProjectionPathPrecondition[] = [
       {
         path: ".",
-        kind: "directory-empty-or-missing" as const,
+        kind: "directory-empty-or-missing",
         reason: "初始化目标必须为空或不存在",
       },
     ];
+    const missingTarget = path.join(parentRoot, "missing");
+    const occupiedTarget = path.join(parentRoot, "occupied");
 
     try {
-      for (const initial of ["empty-directory", "missing-directory"] as const) {
-        const targetRoot = path.join(parentRoot, initial);
-        if (initial === "empty-directory") await mkdir(targetRoot);
-        const current = await readProjectProjectionCurrent({
-          targetRoot,
-          before,
-          after,
-          preconditions,
-        });
-        const planning = planProjectProjections({
-          before,
-          current,
-          after,
-          preconditions,
-        });
-        assert.equal(planning.ok, true);
-        if (!planning.ok) return;
+      const missingPlan = await planAtTarget({
+        targetRoot: missingTarget,
+        before,
+        after,
+        preconditions,
+      });
+      assert.equal(missingPlan.ok, true);
+      if (!missingPlan.ok) return;
+      await assert.rejects(stat(missingTarget), { code: "ENOENT" });
+      const initialized = await commitProjectProjectionPlan({
+        targetRoot: missingTarget,
+        plan: missingPlan.plan,
+      });
+      assert.equal(initialized.ok, true);
+      assert.equal(
+        await readFile(path.join(missingTarget, "README.md"), "utf8"),
+        "generated\n",
+      );
 
-        if (initial === "empty-directory") {
-          await writeFile(path.join(targetRoot, "OWNER"), "user\n");
-        } else {
-          await mkdir(targetRoot);
-        }
-        const committed = await commitProjectProjectionPlan({
-          targetRoot,
-          plan: planning.plan,
-        });
-        assert.equal(committed.ok, false);
-        if (committed.ok) return;
-        assert.ok(
-          committed.conflicts.some((conflict) => conflict.path === "."),
-        );
-        await assert.rejects(stat(path.join(targetRoot, "README.md")), {
-          code: "ENOENT",
-        });
-        if (initial === "empty-directory") {
-          assert.equal(
-            await readFile(path.join(targetRoot, "OWNER"), "utf8"),
-            "user\n",
-          );
-        } else {
-          assert.deepEqual(await readdir(targetRoot), []);
-        }
-      }
+      await mkdir(occupiedTarget);
+      const occupiedPlan = await planAtTarget({
+        targetRoot: occupiedTarget,
+        before,
+        after,
+        preconditions,
+      });
+      assert.equal(occupiedPlan.ok, true);
+      if (!occupiedPlan.ok) return;
+      await writeFile(path.join(occupiedTarget, "OWNER"), "user data\n");
+      const rejected = await commitProjectProjectionPlan({
+        targetRoot: occupiedTarget,
+        plan: occupiedPlan.plan,
+      });
+      assert.equal(rejected.ok, false);
+      if (rejected.ok) return;
+      assert.ok(
+        rejected.conflicts.some(
+          ({ path: conflictPath }) => conflictPath === ".",
+        ),
+      );
+      assert.equal(
+        await readFile(path.join(occupiedTarget, "OWNER"), "utf8"),
+        "user data\n",
+      );
+      await assert.rejects(stat(path.join(occupiedTarget, "README.md")), {
+        code: "ENOENT",
+      });
     } finally {
       await rm(parentRoot, { recursive: true, force: true });
     }
   });
 
-  void it("reads only the Addition Delta so equal Before/After template output cannot upgrade Current", async () => {
-    const unchanged = textEntry("unchanged.txt", "projected\n");
-    const before: ProjectProjection = {
-      entries: [textEntry("policy.txt", "first\ncommon\nlast\n"), unchanged],
-      reconciliation: [
-        { path: "policy.txt", driver: "text" },
-        { path: "unchanged.txt", driver: "text" },
-      ],
-    };
-    const after: ProjectProjection = {
-      entries: [
-        textEntry("policy.txt", "first\ncommon\ngenerated\nlast\n"),
-        unchanged,
-      ],
-      reconciliation: [
-        { path: "policy.txt", driver: "text" },
-        { path: "unchanged.txt", driver: "text" },
-      ],
-    };
-    const reads: string[] = [];
-
-    const result = await reconcileWithCurrent({
-      before,
-      after,
-      async readCurrent(projectionPath) {
-        reads.push(projectionPath);
-        if (projectionPath !== "policy.txt") {
-          throw new Error(`unexpected read: ${projectionPath}`);
-        }
-        return textEntry(projectionPath, "first\nprivate\ncommon\nlast\n");
-      },
-    });
-
-    assert.deepStrictEqual(reads, ["policy.txt"]);
-    assert.strictEqual(result.ok, true);
-    if (!result.ok) return;
-    assert.strictEqual(result.mutations.length, 1);
-    assert.strictEqual(
-      decoder.decode(result.mutations[0]!.content),
-      "first\nprivate\ncommon\ngenerated\nlast\n",
-    );
-  });
-
-  void it("recursively composes one-sided structured changes without erasing unrelated Current keys", async () => {
-    const before = structuredProjection("config.json", {
-      generated: { enabled: false },
-      settings: { obsolete: true, timeout: 10 },
-    });
-    const after = structuredProjection("config.json", {
-      generated: { enabled: true },
-      required: { source: "package-addition" },
-      settings: { obsolete: true, timeout: 10 },
-    });
-
-    const result = await reconcileWithCurrent({
-      before,
-      after,
-      async readCurrent() {
-        return textEntry(
-          "config.json",
-          `${JSON.stringify(
-            {
-              generated: { enabled: false },
-              settings: { timeout: 20 },
-              userOnly: { retained: true },
-            },
-            null,
-            2,
-          )}\n`,
-        );
-      },
-    });
-
-    assert.strictEqual(result.ok, true);
-    if (!result.ok) return;
-    assert.deepStrictEqual(
-      JSON.parse(decoder.decode(result.mutations[0]!.content)),
-      {
-        generated: { enabled: true },
-        required: { source: "package-addition" },
-        settings: { timeout: 20 },
-        userOnly: { retained: true },
-      },
-    );
-  });
-
-  void it("reports an incompatible concurrent scalar change at its structured location", async () => {
-    const result = await reconcileWithCurrent({
-      before: structuredProjection("config.json", {
-        settings: { timeout: 10 },
-      }),
-      after: structuredProjection("config.json", {
-        settings: { timeout: 30 },
-      }),
-      async readCurrent() {
-        return textEntry("config.json", '{"settings":{"timeout":20}}\n');
-      },
-    });
-
-    assert.ok(!result.ok);
-    assert.strictEqual(Reflect.ownKeys(result).length, 2);
-    assert.ok(Object.hasOwn(result, "ok"));
-    assert.ok(Object.hasOwn(result, "conflicts"));
-    assert.strictEqual(result.conflicts.length, 1);
-    assert.partialDeepStrictEqual(result.conflicts[0], {
-      path: "config.json",
-      driver: "structured",
-      location: "/settings/timeout",
-      reason: "Current and After contain incompatible scalar changes",
-      before: "10",
-      current: "20",
-      after: "30",
-    });
-    assert.ok(!Object.hasOwn(result, "mutations"));
-  });
-
-  for (const scenario of [
-    { beforeKind: "null", beforeValue: null, beforeDiagnostic: "null" },
-    {
-      beforeKind: "string",
-      beforeValue: "legacy",
-      beforeDiagnostic: '"legacy"',
-    },
-    { beforeKind: "number", beforeValue: 7, beforeDiagnostic: "7" },
-    { beforeKind: "boolean", beforeValue: false, beforeDiagnostic: "false" },
-    {
-      beforeKind: "array",
-      beforeValue: ["legacy"],
-      beforeDiagnostic: '["legacy"]',
-    },
-  ] satisfies readonly {
-    readonly beforeKind: string;
-    readonly beforeValue: unknown;
-    readonly beforeDiagnostic: string;
-  }[]) {
-    void it(`conflicts when explicit ${scenario.beforeKind} is concurrently replaced by different objects`, async () => {
-      const { beforeValue, beforeDiagnostic } = scenario;
-      const result = await reconcileWithCurrent({
-        before: structuredProjection("config.json", {
-          setting: beforeValue,
-        }),
-        after: structuredProjection("config.json", {
-          setting: { generated: true },
-        }),
-        async readCurrent() {
-          return textEntry(
-            "config.json",
-            '{"setting":{"userRetained":true}}\n',
-          );
-        },
-      });
-
-      assert.ok(!result.ok);
-      assert.strictEqual(Reflect.ownKeys(result).length, 2);
-      assert.ok(Object.hasOwn(result, "ok"));
-      assert.ok(Object.hasOwn(result, "conflicts"));
-      assert.strictEqual(result.conflicts.length, 1);
-      assert.partialDeepStrictEqual(result.conflicts[0], {
-        path: "config.json",
-        driver: "structured",
-        location: "/setting",
-        reason: "Current and After contain incompatible changes",
-        before: beforeDiagnostic,
-        current: '{"userRetained":true}',
-        after: '{"generated":true}',
-      });
-      assert.ok(!Object.hasOwn(result, "mutations"));
-    });
-  }
-
-  void it("recursively combines concurrent object additions only at a missing location", async () => {
-    const result = await reconcileWithCurrent({
-      before: structuredProjection("config.json", {}),
-      after: structuredProjection("config.json", {
-        setting: { generated: true },
-      }),
-      async readCurrent() {
-        return textEntry("config.json", '{"setting":{"userRetained":true}}\n');
-      },
-    });
-
-    assert.strictEqual(result.ok, true);
-    if (!result.ok) return;
-    assert.deepStrictEqual(
-      JSON.parse(decoder.decode(result.mutations[0]!.content)),
-      {
-        setting: { userRetained: true, generated: true },
-      },
-    );
-  });
-
-  void it("rejects undefined because it is not a JSON structured value", async () => {
-    const result = await reconcileWithCurrent({
-      before: {
-        entries: [textEntry("config.json", '{"setting":undefined}\n')],
-        reconciliation: [{ path: "config.json", driver: "structured" }],
-      },
-      after: structuredProjection("config.json", {
-        setting: { generated: true },
-      }),
-      async readCurrent() {
-        return textEntry("config.json", '{"setting":null}\n');
-      },
-    });
-
-    assert.ok(!result.ok);
-    assert.strictEqual(Reflect.ownKeys(result).length, 2);
-    assert.ok(Object.hasOwn(result, "ok"));
-    assert.ok(Object.hasOwn(result, "conflicts"));
-    assert.strictEqual(result.conflicts.length, 1);
-    assert.partialDeepStrictEqual(result.conflicts[0], {
-      location: "",
-      before: '{"setting":undefined}\n',
-    });
-    assert.ok(
-      result.conflicts[0]!.reason.includes(
-        "Before structured content is not valid JSON",
-      ),
-    );
-  });
-
-  void it("returns a structured parse diagnostic for invalid Current JSON", async () => {
-    const result = await reconcileWithCurrent({
-      before: structuredProjection("config.json", { enabled: false }),
-      after: structuredProjection("config.json", { enabled: true }),
-      async readCurrent() {
-        return textEntry("config.json", '{"enabled":');
-      },
-    });
-
-    assert.ok(!result.ok);
-    assert.strictEqual(Reflect.ownKeys(result).length, 2);
-    assert.ok(Object.hasOwn(result, "ok"));
-    assert.ok(Object.hasOwn(result, "conflicts"));
-    assert.strictEqual(result.conflicts.length, 1);
-    assert.partialDeepStrictEqual(result.conflicts[0], {
-      path: "config.json",
-      driver: "structured",
-      location: "",
-      current: '{"enabled":',
-    });
-    assert.ok(
-      result.conflicts[0]!.reason.includes(
-        "Current structured content is not valid JSON",
-      ),
-    );
-  });
-
-  void it("uses the root pointer for a structured file-level conflict", async () => {
-    const result = await reconcileWithCurrent({
-      before: structuredProjection("config.json", { enabled: false }),
-      after: structuredProjection("config.json", { enabled: true }),
-      async readCurrent() {
-        return undefined;
-      },
-    });
-
-    assert.ok(!result.ok);
-    assert.strictEqual(Reflect.ownKeys(result).length, 2);
-    assert.ok(Object.hasOwn(result, "ok"));
-    assert.ok(Object.hasOwn(result, "conflicts"));
-    assert.strictEqual(result.conflicts.length, 1);
-    assert.partialDeepStrictEqual(result.conflicts[0], {
-      path: "config.json",
-      driver: "structured",
-      location: "",
-      reason: "Path presence changed concurrently",
-    });
-  });
-
-  void it("preserves Current scalar members and appends After members for an explicit identity set", async () => {
-    const identitySetReconciliation = [
-      {
-        path: "config.json",
-        driver: "structured" as const,
-        identitySets: [{ location: "", identity: { kind: "self" as const } }],
-      },
-    ];
-    const result = await reconcileWithCurrent({
-      before: {
-        ...structuredProjection("config.json", ["base"]),
-        reconciliation: identitySetReconciliation,
-      },
-      after: {
-        ...structuredProjection("config.json", ["base", "generated"]),
-        reconciliation: identitySetReconciliation,
-      },
-      async readCurrent() {
-        return textEntry("config.json", '["user-first","base","user-last"]\n');
-      },
-    });
-
-    assert.strictEqual(result.ok, true);
-    if (!result.ok) return;
-    assert.deepStrictEqual(
-      JSON.parse(decoder.decode(result.mutations[0]!.content)),
-      ["user-first", "base", "user-last", "generated"],
-    );
-  });
-
-  void it("recursively reconciles matching object members by stable identity", async () => {
-    const identitySetReconciliation = [
-      {
-        path: "config.json",
-        driver: "structured" as const,
-        identitySets: [
-          {
-            location: "/members",
-            identity: { kind: "fields" as const, fields: ["id"] },
-          },
-        ],
-      },
-    ];
-    const result = await reconcileWithCurrent({
-      before: {
-        ...structuredProjection("config.json", {
-          members: [{ id: "base", settings: { timeout: 10 } }],
-        }),
-        reconciliation: identitySetReconciliation,
-      },
-      after: {
-        ...structuredProjection("config.json", {
-          members: [
-            {
-              id: "base",
-              settings: { required: true, timeout: 10 },
-            },
-            { id: "generated", settings: {} },
-          ],
-        }),
-        reconciliation: identitySetReconciliation,
-      },
-      async readCurrent() {
-        return textEntry(
-          "config.json",
-          JSON.stringify({
-            members: [
-              { id: "user", settings: { retained: true } },
-              { id: "base", settings: { timeout: 20 } },
-            ],
-          }),
-        );
-      },
-    });
-
-    assert.strictEqual(result.ok, true);
-    if (!result.ok) return;
-    assert.deepStrictEqual(
-      JSON.parse(decoder.decode(result.mutations[0]!.content)),
-      {
-        members: [
-          { id: "user", settings: { retained: true } },
-          {
-            id: "base",
-            settings: { timeout: 20, required: true },
-          },
-          { id: "generated", settings: {} },
-        ],
-      },
-    );
-  });
-
-  void it("reconciles generated members by projection identity when visible fields change", async () => {
-    const beforeReconciliation = [
-      {
-        path: "config.json",
-        driver: "structured" as const,
-        identitySets: [
-          {
-            location: "/mounts",
-            identity: {
-              kind: "projection" as const,
-              members: [
-                {
-                  identity: "tool-cache",
-                  match: { target: "/var/cache/tool-v1" },
-                },
-              ],
-              fallback: { fields: ["target"] },
-            },
-          },
-        ],
-      },
-    ];
-    const afterReconciliation = [
-      {
-        path: "config.json",
-        driver: "structured" as const,
-        identitySets: [
-          {
-            location: "/mounts",
-            identity: {
-              kind: "projection" as const,
-              members: [
-                {
-                  identity: "tool-cache",
-                  match: { target: "/var/cache/tool-v2" },
-                },
-              ],
-              fallback: { fields: ["target"] },
-            },
-          },
-        ],
-      },
-    ];
-    const result = await reconcileWithCurrent({
-      before: {
-        ...structuredProjection("config.json", {
-          mounts: [
-            {
-              type: "volume",
-              source: "tool-cache",
-              target: "/var/cache/tool-v1",
-            },
-          ],
-        }),
-        reconciliation: beforeReconciliation,
-      },
-      after: {
-        ...structuredProjection("config.json", {
-          mounts: [
-            {
-              type: "volume",
-              source: "tool-cache",
-              target: "/var/cache/tool-v2",
-            },
-          ],
-        }),
-        reconciliation: afterReconciliation,
-      },
-      async readCurrent() {
-        return textEntry(
-          "config.json",
-          JSON.stringify({
-            mounts: [
-              {
-                type: "bind",
-                source: "${localEnv:HOME}/.user-cache",
-                target: "/var/cache/user",
-              },
-              {
-                type: "volume",
-                source: "tool-cache",
-                target: "/var/cache/tool-v1",
-              },
-            ],
-          }),
-        );
-      },
-    });
-
-    assert.strictEqual(result.ok, true);
-    if (!result.ok) return;
-    assert.deepStrictEqual(
-      JSON.parse(decoder.decode(result.mutations[0]!.content)),
-      {
-        mounts: [
-          {
-            type: "bind",
-            source: "${localEnv:HOME}/.user-cache",
-            target: "/var/cache/user",
-          },
-          {
-            type: "volume",
-            source: "tool-cache",
-            target: "/var/cache/tool-v2",
-          },
-        ],
-      },
-    );
-  });
-
-  void it("distinguishes object members by multiple identity fields", async () => {
-    const reconciliation = [
-      {
-        path: "config.json",
-        driver: "structured" as const,
-        identitySets: [
-          {
-            location: "/members",
-            identity: {
-              kind: "fields" as const,
-              fields: ["owner", "name"],
-            },
-          },
-        ],
-      },
-    ];
-    const result = await reconcileWithCurrent({
-      before: {
-        ...structuredProjection("config.json", {
-          members: [{ owner: "base", name: "shared" }],
-        }),
-        reconciliation,
-      },
-      after: {
-        ...structuredProjection("config.json", {
-          members: [
-            { owner: "base", name: "shared" },
-            { owner: "generated", name: "shared" },
-          ],
-        }),
-        reconciliation,
-      },
-      async readCurrent() {
-        return textEntry(
-          "config.json",
-          JSON.stringify({
-            members: [
-              { owner: "user", name: "shared" },
-              { owner: "base", name: "shared" },
-            ],
-          }),
-        );
-      },
-    });
-
-    assert.strictEqual(result.ok, true);
-    if (!result.ok) return;
-    assert.deepStrictEqual(
-      JSON.parse(decoder.decode(result.mutations[0]!.content)),
-      {
-        members: [
-          { owner: "user", name: "shared" },
-          { owner: "base", name: "shared" },
-          { owner: "generated", name: "shared" },
-        ],
-      },
-    );
-  });
-
-  void it("conflicts when matching object members change the same scalar incompatibly", async () => {
-    const reconciliation = [
-      {
-        path: "config.json",
-        driver: "structured" as const,
-        identitySets: [
-          {
-            location: "/members",
-            identity: { kind: "fields" as const, fields: ["id"] },
-          },
-        ],
-      },
-    ];
-    const result = await reconcileWithCurrent({
-      before: {
-        ...structuredProjection("config.json", {
-          members: [{ id: "shared", value: 1 }],
-        }),
-        reconciliation,
-      },
-      after: {
-        ...structuredProjection("config.json", {
-          members: [{ id: "shared", value: 3 }],
-        }),
-        reconciliation,
-      },
-      async readCurrent() {
-        return textEntry(
-          "config.json",
-          '{"members":[{"id":"user","value":0},{"id":"shared","value":2}]}\n',
-        );
-      },
-    });
-
-    assert.strictEqual(result.ok, false);
-    if (result.ok) return;
-    assert.strictEqual(Reflect.ownKeys(result).length, 2);
-    assert.ok(Object.hasOwn(result, "ok"));
-    assert.ok(Object.hasOwn(result, "conflicts"));
-    assert.strictEqual(result.conflicts.length, 1);
-    assert.partialDeepStrictEqual(result.conflicts[0], {
-      driver: "structured",
-      location: "/members/1/value",
-      reason: "Current and After contain incompatible scalar changes",
-      before: "1",
-      current: "2",
-      after: "3",
-    });
-    assert.ok(!Object.hasOwn(result, "mutations"));
-  });
-
-  void it("decodes identity-set pointers and escapes structured conflict tokens", async () => {
-    const escapedKey = "groups/primary~set";
-    const reconciliation = [
-      {
-        path: "config.json",
-        driver: "structured" as const,
-        identitySets: [
-          {
-            location: "/groups~1primary~0set",
-            identity: { kind: "fields" as const, fields: ["id"] },
-          },
-        ],
-      },
-    ];
-    const result = await reconcileWithCurrent({
-      before: {
-        ...structuredProjection("config.json", {
-          [escapedKey]: [{ id: "shared", value: 1 }],
-        }),
-        reconciliation,
-      },
-      after: {
-        ...structuredProjection("config.json", {
-          [escapedKey]: [{ id: "shared", value: 3 }],
-        }),
-        reconciliation,
-      },
-      async readCurrent() {
-        return textEntry(
-          "config.json",
-          JSON.stringify({
-            [escapedKey]: [{ id: "shared", value: 2 }],
-          }),
-        );
-      },
-    });
-
-    assert.strictEqual(result.ok, false);
-    if (result.ok) return;
-    assert.strictEqual(Reflect.ownKeys(result).length, 2);
-    assert.ok(Object.hasOwn(result, "ok"));
-    assert.ok(Object.hasOwn(result, "conflicts"));
-    assert.strictEqual(result.conflicts.length, 1);
-    assert.partialDeepStrictEqual(result.conflicts[0], {
-      location: "/groups~1primary~0set/0/value",
-      before: "1",
-      current: "2",
-      after: "3",
-    });
-  });
-
-  void it("rejects an identity-set policy whose structured location is not an array", async () => {
-    let reads = 0;
-    const reconciliation = [
-      {
-        path: "config.json",
-        driver: "structured" as const,
-        identitySets: [
-          { location: "/members", identity: { kind: "self" as const } },
-        ],
-      },
-    ];
-
-    await assert.rejects(
-      reconcileWithCurrent({
-        before: {
-          ...structuredProjection("config.json", { members: {} }),
-          reconciliation,
-        },
-        after: {
-          ...structuredProjection("config.json", {
-            enabled: true,
-            members: {},
-          }),
-          reconciliation,
-        },
-        async readCurrent() {
-          reads += 1;
-          return textEntry("config.json", '{"members":{}}\n');
-        },
-      }),
-      (error) =>
-        error instanceof Error &&
-        error.message.includes(
-          "Project Projection identity-set location must reference an array: config.json /members",
-        ),
-    );
-    assert.strictEqual(reads, 0);
-  });
-
-  for (const location of ["members", "/members/~", "/members/~2"]) {
-    void it(`rejects invalid identity-set JSON Pointer ${JSON.stringify(location)} before reading Current`, async () => {
-      let reads = 0;
-      const reconciliation = [
-        {
-          path: "config.json",
-          driver: "structured" as const,
-          identitySets: [{ location, identity: { kind: "self" as const } }],
-        },
-      ];
-
-      await assert.rejects(
-        reconcileWithCurrent({
-          before: {
-            ...structuredProjection("config.json", { members: ["base"] }),
-            reconciliation,
-          },
-          after: {
-            ...structuredProjection("config.json", {
-              enabled: true,
-              members: ["base"],
-            }),
-            reconciliation,
-          },
-          async readCurrent() {
-            reads += 1;
-            return textEntry("config.json", '{"members":["base"]}\n');
-          },
-        }),
-        (error) =>
-          error instanceof Error &&
-          error.message.includes(
-            "Project Projection identity-set location must be an RFC 6901 JSON Pointer",
-          ),
-      );
-      assert.strictEqual(reads, 0);
-    });
-  }
-
-  for (const scenario of [
-    {
-      caseName: "missing",
-      currentMembers: [{ label: "missing-id" }],
-      diagnostic: "is missing its identity",
-    },
-    {
-      caseName: "duplicate",
-      currentMembers: [{ id: "same" }, { id: "same" }],
-      diagnostic: "identities must be unique",
-    },
-  ]) {
-    void it(`returns a policy conflict for ${scenario.caseName} Current member identities`, async () => {
-      const { currentMembers, diagnostic } = scenario;
-      const reconciliation = [
-        {
-          path: "config.json",
-          driver: "structured" as const,
-          identitySets: [
-            {
-              location: "/members",
-              identity: { kind: "fields" as const, fields: ["id"] },
-            },
-          ],
-        },
-      ];
-      const result = await reconcileWithCurrent({
-        before: {
-          ...structuredProjection("config.json", {
-            members: [{ id: "base" }],
-          }),
-          reconciliation,
-        },
-        after: {
-          ...structuredProjection("config.json", {
-            members: [{ id: "base" }, { id: "generated" }],
-          }),
-          reconciliation,
-        },
-        async readCurrent() {
-          return textEntry(
-            "config.json",
-            JSON.stringify({ members: currentMembers }),
-          );
-        },
-      });
-
-      assert.strictEqual(result.ok, false);
-      if (result.ok) return;
-      assert.strictEqual(Reflect.ownKeys(result).length, 2);
-      assert.ok(Object.hasOwn(result, "ok"));
-      assert.ok(Object.hasOwn(result, "conflicts"));
-      assert.strictEqual(result.conflicts.length, 1);
-      const conflict = result.conflicts[0]!;
-      assert.partialDeepStrictEqual(conflict, { location: "/members" });
-      assert.ok(conflict.reason.includes(`Current ${diagnostic}`));
-      assert.ok(!Object.hasOwn(result, "mutations"));
-    });
-  }
-
-  void it("keeps undeclared arrays atomic", async () => {
-    const result = await reconcileWithCurrent({
-      before: structuredProjection("config.json", {
-        members: ["base"],
-      }),
-      after: structuredProjection("config.json", {
-        members: ["base", "generated"],
-      }),
-      async readCurrent() {
-        return textEntry("config.json", '{"members":["base","user"]}\n');
-      },
-    });
-
-    assert.strictEqual(result.ok, false);
-    if (result.ok) return;
-    assert.strictEqual(Reflect.ownKeys(result).length, 2);
-    assert.ok(Object.hasOwn(result, "ok"));
-    assert.ok(Object.hasOwn(result, "conflicts"));
-    assert.strictEqual(result.conflicts.length, 1);
-    assert.partialDeepStrictEqual(result.conflicts[0], {
-      location: "/members",
-      reason: "Current and After contain incompatible atomic array changes",
-    });
-  });
-
-  void it("advances tool-owned state when Current exactly matches Before", async () => {
-    const canonicalReconciliation = [
-      { path: "state.json", driver: "canonical" as const },
-    ];
-    const before = structuredProjection("state.json", {
-      schemaVersion: 1,
-      value: "before",
-    });
-    const after = structuredProjection("state.json", {
-      schemaVersion: 1,
-      value: "after",
-    });
-    const result = await reconcileWithCurrent({
-      before: {
-        ...before,
-        reconciliation: canonicalReconciliation,
-      },
-      after: {
-        ...after,
-        reconciliation: canonicalReconciliation,
-      },
-      async readCurrent() {
-        return before.entries[0];
-      },
-    });
-
-    assert.deepStrictEqual(result, {
-      ok: true,
-      mutations: after.entries,
-    });
-  });
-
-  for (const scenario of [
-    {
-      staleDimension: "content",
-      current: textEntry(
-        "state.json",
-        '{"schemaVersion":1,"unknown":"user","value":"before"}\n',
-      ),
-      currentDescription:
-        '{"schemaVersion":1,"unknown":"user","value":"before"}\n',
-    },
-    {
-      staleDimension: "mode",
-      current: {
-        ...structuredProjection("state.json", {
-          schemaVersion: 1,
-          value: "before",
-        }).entries[0]!,
-        mode: 0o111,
-      },
-      currentDescription: '{\n  "schemaVersion": 1,\n  "value": "before"\n}\n',
-    },
-    {
-      staleDimension: "kind",
-      current: { path: "state.json", kind: "directory" as const },
-      currentDescription: "directory",
-    },
-  ]) {
-    void it(`rejects stale tool-owned ${scenario.staleDimension} unless Current exactly matches Before`, async () => {
-      const { current, currentDescription } = scenario;
-      const canonicalReconciliation = [
-        { path: "state.json", driver: "canonical" as const },
-      ];
-      const result = await reconcileWithCurrent({
-        before: {
-          ...structuredProjection("state.json", {
-            schemaVersion: 1,
-            value: "before",
-          }),
-          reconciliation: canonicalReconciliation,
-        },
-        after: {
-          ...structuredProjection("state.json", {
-            schemaVersion: 1,
-            value: "after",
-          }),
-          reconciliation: canonicalReconciliation,
-        },
-        async readCurrent() {
-          return current;
-        },
-      });
-
-      assert.deepStrictEqual(result, {
-        ok: false,
-        conflicts: [
-          {
-            path: "state.json",
-            driver: "canonical",
-            reason: "Current tool-owned state is stale",
-            before: '{\n  "schemaVersion": 1,\n  "value": "before"\n}\n',
-            current: currentDescription,
-            after: '{\n  "schemaVersion": 1,\n  "value": "after"\n}\n',
-          },
-        ],
-      });
-      assert.ok(!Object.hasOwn(result, "mutations"));
-    });
-  }
-
-  void it("rejects duplicate projection paths before reading Current", async () => {
-    const duplicateBefore: ProjectProjection = {
-      entries: [
-        textEntry("same.txt", "first\n"),
-        textEntry("same.txt", "second\n"),
-      ],
-      reconciliation: [{ path: "same.txt", driver: "text" }],
-    };
-
-    await assert.rejects(
-      reconcileWithCurrent({
-        before: duplicateBefore,
-        after: {
-          entries: [textEntry("same.txt", "after\n")],
-          reconciliation: [{ path: "same.txt", driver: "text" }],
-        },
-        async readCurrent(projectionPath) {
-          throw new Error(`unexpected read: ${projectionPath}`);
-        },
-      }),
-      (error) =>
-        error instanceof Error &&
-        error.message.includes(
-          "Project Projection paths must be unique: same.txt",
-        ),
-    );
-  });
-
-  void it("rejects escaping raw Projection entry paths before reading Current", async () => {
-    let reads = 0;
-
-    await assert.rejects(
-      reconcileWithCurrent({
-        before: textProjection("../escape.txt", "before\n"),
-        after: textProjection("../escape.txt", "after\n"),
-        async readCurrent() {
-          reads += 1;
-          return textEntry("../escape.txt", "before\n");
-        },
-      }),
-      (error) =>
-        error instanceof Error &&
-        error.message.includes(
-          "Project Projection entry path must be a normalized safe relative path: ../escape.txt",
-        ),
-    );
-    assert.strictEqual(reads, 0);
-  });
-
-  void it("rejects non-normalized reconciliation paths before reading Current", async () => {
-    let reads = 0;
-
-    await assert.rejects(
-      reconcileWithCurrent({
-        before: {
-          entries: [textEntry("policy.txt", "before\n")],
-          reconciliation: [{ path: "./policy.txt", driver: "text" }],
-        },
-        after: textProjection("policy.txt", "after\n"),
-        async readCurrent() {
-          reads += 1;
-          return textEntry("policy.txt", "before\n");
-        },
-      }),
-      (error) =>
-        error instanceof Error &&
-        error.message.includes(
-          "Project Projection reconciliation path must be a normalized safe relative path: ./policy.txt",
-        ),
-    );
-    assert.strictEqual(reads, 0);
-  });
-
-  for (const projectionPath of [
-    "",
-    "/absolute.txt",
-    "./policy.txt",
-    "nested/../policy.txt",
-    "nested//policy.txt",
-    "nested/",
-    String.raw`C:\absolute.txt`,
-  ]) {
-    void it(`rejects unsafe raw Projection path ${JSON.stringify(projectionPath)}`, async () => {
-      let reads = 0;
-
-      await assert.rejects(
-        reconcileWithCurrent({
-          before: textProjection(projectionPath, "before\n"),
-          after: textProjection(projectionPath, "after\n"),
-          async readCurrent() {
-            reads += 1;
-            return textEntry(projectionPath, "before\n");
-          },
-        }),
-        (error) =>
-          error instanceof Error &&
-          error.message.includes("must be a normalized safe relative path"),
-      );
-      assert.strictEqual(reads, 0);
-    });
-  }
-
-  void it("does not apply an escaping materialized path outside the target root", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-projection-containment-"),
-    );
-    const targetRoot = path.join(workspace, "project");
-    const outsidePath = path.join(workspace, "outside.json");
-
-    try {
-      await writeFile(outsidePath, '{"owner":"user"}\n');
-
-      await assert.rejects(
-        reconcileAndApplyProjectProjections({
-          targetRoot,
-          before: { operations: [] },
-          after: {
-            operations: [
-              {
-                kind: "writeJson",
-                to: "../outside.json",
-                value: { owner: "template" },
-              },
-            ],
-          },
-        }),
-        (error) =>
-          error instanceof Error &&
-          error.message.includes(
-            "Project Projection path escapes its root: ../outside.json",
-          ),
-      );
-      assert.strictEqual(
-        await readFile(outsidePath, "utf8"),
-        '{"owner":"user"}\n',
-      );
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
-
-  void it("requires one stable reconciliation driver per projected path before reading Current", async () => {
-    await assert.rejects(
-      reconcileWithCurrent({
-        before: textProjection("same.txt", "before\n"),
-        after: {
-          entries: [textEntry("same.txt", "after\n")],
-          reconciliation: [],
-        },
-        async readCurrent(projectionPath) {
-          throw new Error(`unexpected read: ${projectionPath}`);
-        },
-      }),
-      (error) =>
-        error instanceof Error &&
-        error.message.includes(
-          "Project Projection requires one reconciliation driver: same.txt",
-        ),
-    );
-  });
-
-  void it("requires reconciliation policy metadata to remain stable before reading Current", async () => {
-    let reads = 0;
-    const entry = textEntry("config.json", '{"members":["base"]}\n');
-
-    await assert.rejects(
-      reconcileWithCurrent({
-        before: {
-          entries: [entry],
-          reconciliation: [
-            {
-              path: "config.json",
-              driver: "structured",
-              identitySets: [
-                {
-                  location: "/members",
-                  identity: { kind: "self" },
-                },
-              ],
-            },
-          ],
-        },
-        after: {
-          entries: [
-            textEntry("config.json", '{"members":["base","generated"]}\n'),
-          ],
-          reconciliation: [{ path: "config.json", driver: "structured" }],
-        },
-        async readCurrent() {
-          reads += 1;
-          return entry;
-        },
-      }),
-      (error) =>
-        error instanceof Error &&
-        error.message.includes(
-          "Project Projection reconciliation policy changed for config.json",
-        ),
-    );
-    assert.strictEqual(reads, 0);
-  });
-
-  void it("obeys the basic three-way laws and repeated application is idempotent", async () => {
-    const before = textProjection("alpha.txt", "before\n");
-    const after = textProjection("alpha.txt", "after\n");
-    const first = await reconcileWithCurrent({
-      before,
-      after,
-      async readCurrent() {
-        return textEntry("alpha.txt", "before\n");
-      },
-    });
-
-    assert.deepStrictEqual(first, {
-      ok: true,
-      mutations: [textEntry("alpha.txt", "after\n")],
-    });
-    if (!first.ok) return;
-    const repeated = await reconcileWithCurrent({
-      before,
-      after,
-      async readCurrent() {
-        return first.mutations[0];
-      },
-    });
-    assert.deepStrictEqual(repeated, { ok: true, mutations: [] });
-
-    const unchangedProjection = textProjection("stable.txt", "projected\n");
-    assert.deepStrictEqual(
-      await reconcileWithCurrent({
-        before: unchangedProjection,
-        after: unchangedProjection,
-        async readCurrent(projectionPath) {
-          throw new Error(`unexpected read: ${projectionPath}`);
-        },
-      }),
-      { ok: true, mutations: [] },
-    );
-  });
-
-  void it("returns conflicts without a partial mutation result", async () => {
-    const result = await reconcileWithCurrent({
-      before: textProjection("alpha.txt", "shared\n"),
-      after: textProjection("alpha.txt", "generated\n"),
-      async readCurrent() {
-        return textEntry("alpha.txt", "user\n");
-      },
-    });
-
-    assert.strictEqual(result.ok, false);
-    if (result.ok) return;
-    assert.ok(!Object.hasOwn(result, "mutations"));
-    assert.strictEqual(result.conflicts.length, 1);
-    const conflict = result.conflicts[0]!;
-    assert.partialDeepStrictEqual(conflict, {
-      path: "alpha.txt",
-      driver: "text",
-      reason: "Current and After contain incompatible text changes",
-    });
-    assert.ok(typeof conflict.region === "object" && conflict.region !== null);
-  });
-
-  void it("reports each text conflict as a concise line region", async () => {
-    const result = await reconcileWithCurrent({
-      before: textProjection(
-        "policy.txt",
-        "retained header\nbefore policy\nretained footer\n",
-      ),
-      after: textProjection(
-        "policy.txt",
-        "retained header\nafter policy\nretained footer\n",
-      ),
-      async readCurrent() {
-        return textEntry(
-          "policy.txt",
-          "retained header\ncurrent policy\nretained footer\n",
-        );
-      },
-    });
-
-    assert.deepStrictEqual(result, {
-      ok: false,
-      conflicts: [
-        {
-          path: "policy.txt",
-          driver: "text",
-          region: {
-            before: { startLine: 2, lineCount: 1 },
-            current: { startLine: 2, lineCount: 1 },
-            after: { startLine: 2, lineCount: 1 },
-          },
-          reason: "Current and After contain incompatible text changes",
-          before: "before policy\n",
-          current: "current policy\n",
-          after: "after policy\n",
-        },
-      ],
-    });
-  });
-
-  void it("reports incompatible binary content without throwing or serializing bytes", async () => {
-    const binaryProjection = (
-      content: readonly number[],
-    ): ProjectProjection => ({
-      entries: [
-        {
-          path: "asset.bin",
-          kind: "file",
-          content: Uint8Array.from(content),
-          mode: 0,
-        },
-      ],
-      reconciliation: [{ path: "asset.bin", driver: "text" }],
-    });
-
-    const result = await reconcileWithCurrent({
-      before: binaryProjection([0xff, 0x00]),
-      after: binaryProjection([0xfe, 0x00]),
-      async readCurrent() {
-        return binaryProjection([0xfd, 0x00]).entries[0];
-      },
-    });
-
-    assert.strictEqual(result.ok, false);
-    if (result.ok) return;
-    assert.strictEqual(Reflect.ownKeys(result).length, 2);
-    assert.ok(Object.hasOwn(result, "ok"));
-    assert.ok(Object.hasOwn(result, "conflicts"));
-    assert.strictEqual(result.conflicts.length, 1);
-    const conflict = result.conflicts[0]!;
-    const summaryPattern = /^<2 binary bytes; sha256=[a-f0-9]{64}>$/u;
-    assert.match(conflict.before, summaryPattern);
-    assert.match(conflict.current, summaryPattern);
-    assert.match(conflict.after, summaryPattern);
-    assert.deepStrictEqual(result, {
-      ok: false,
-      conflicts: [
-        {
-          path: "asset.bin",
-          driver: "text",
-          attribute: "binary-content",
-          reason: "Current and After contain incompatible binary changes",
-          before: conflict.before,
-          current: conflict.current,
-          after: conflict.after,
-        },
-      ],
-    });
-  });
-
-  void it("reports incompatible executable-mode changes as a file attribute conflict", async () => {
-    const before = textProjection("script.sh", "echo stable\n");
-    const after = {
-      ...before,
-      entries: [{ ...before.entries[0]!, mode: 0o111 }],
-    };
-
-    const result = await reconcileWithCurrent({
-      before,
-      after,
-      async readCurrent() {
-        return { ...before.entries[0]!, mode: 0o100 };
-      },
-    });
-
-    assert.deepStrictEqual(result, {
-      ok: false,
-      conflicts: [
-        {
-          path: "script.sh",
-          driver: "text",
-          attribute: "executable-mode",
-          reason:
-            "Current and After contain incompatible executable-mode changes",
-          before: "000",
-          current: "100",
-          after: "111",
-        },
-      ],
-    });
-  });
-
-  void it("reports a Current file-kind conflict before mutating the workspace", async () => {
+  void it("提交前拒绝被占用的新包路径且保留占用者和既有文件", async () => {
     const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-kind-conflict-"),
+      path.join(tmpdir(), "template-projection-new-package-path-"),
     );
+    const before = textProjection("README.md", "before\n");
+    const afterReadme = textProjection("README.md", "after\n");
+    const afterPackage = textProjection(
+      "packages/new/README.md",
+      "new package\n",
+    );
+    const after = projection(
+      [...afterReadme.entries, ...afterPackage.entries],
+      [...afterReadme.reconciliation, ...afterPackage.reconciliation],
+    );
+    const packagePath = path.join(targetRoot, "packages/new");
+    const ownerPath = path.join(packagePath, "OWNER");
     const readmePath = path.join(targetRoot, "README.md");
+    const preconditions: readonly ProjectProjectionPathPrecondition[] = [
+      {
+        path: "packages/new",
+        kind: "must-not-exist",
+        reason: "新包目录已被占用",
+      },
+    ];
 
     try {
-      await mkdir(readmePath);
-      await writeFile(path.join(readmePath, "retained.txt"), "user data\n");
+      await writeFile(readmePath, "before\n");
+      const planning = await planAtTarget({
+        targetRoot,
+        before,
+        after,
+        preconditions,
+      });
+      assert.equal(planning.ok, true);
+      if (!planning.ok) return;
+      await mkdir(packagePath, { recursive: true });
+      await writeFile(ownerPath, "user data\n");
 
-      assert.deepStrictEqual(
-        await reconcileAndApplyProjectProjections({
-          targetRoot,
-          before: {
-            operations: [
-              { kind: "writeText", to: "README.md", text: "before\n" },
-            ],
-          },
-          after: {
-            operations: [
-              { kind: "writeText", to: "README.md", text: "after\n" },
-            ],
-          },
-        }),
-        {
-          ok: false,
-          conflicts: [
-            {
-              path: "README.md",
-              driver: "text",
-              attribute: "file-kind",
-              reason: "Current file kind is incompatible with Package Addition",
-              before: "file",
-              current: "directory",
-              after: "file",
-            },
-          ],
-        },
+      const rejected = await commitProjectProjectionPlan({
+        targetRoot,
+        plan: planning.plan,
+      });
+      assert.equal(rejected.ok, false);
+      if (rejected.ok) return;
+      assert.ok(
+        rejected.conflicts.some(
+          ({ path: conflictPath }) => conflictPath === "packages/new",
+        ),
       );
-      assert.strictEqual(
-        await readFile(path.join(readmePath, "retained.txt"), "utf8"),
-        "user data\n",
-      );
+      assert.equal(await readFile(readmePath, "utf8"), "before\n");
+      assert.equal(await readFile(ownerPath, "utf8"), "user data\n");
+      await assert.rejects(stat(path.join(packagePath, "README.md")), {
+        code: "ENOENT",
+      });
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
   });
 
-  void it("rolls back repository files and canonical metadata after a commit failure", async () => {
+  void it("真实提交失败时恢复已覆盖文件的内容和完整模式", async () => {
     const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-rollback-"),
+      path.join(tmpdir(), "template-projection-write-rollback-"),
     );
-    const sourceOperation = (text: string) =>
-      ({
-        operations: [
-          { kind: "writeText" as const, to: "alpha.md", text },
-          {
-            kind: "writeJson" as const,
-            to: ".template/state.json",
-            value: { state: text.trim() },
-          },
-        ],
-        reconciliation: [
-          {
-            path: ".template/state.json",
-            driver: "canonical" as const,
-          },
-        ],
-      }) as const;
-    const committedPaths: string[] = [];
-    const reconcile = createProjectProjectionReconciler({
-      async commitMutation(options) {
-        committedPaths.push(options.relativePath);
-        if (committedPaths.length === 2) {
-          throw new Error("injected projection commit failure");
-        }
-        await options.commit();
-      },
-    });
+    const statePath = ".template/state.json";
+    const guidePath = "docs/guide.md";
+    const beforeState = projection(
+      [fileEntry(statePath, '{\n  "state": "before"\n}\n')],
+      [{ path: statePath, driver: "canonical" }],
+    );
+    const beforeGuide = textProjection(guidePath, "before\n");
+    const before = projection(
+      [...beforeState.entries, ...beforeGuide.entries],
+      [...beforeState.reconciliation, ...beforeGuide.reconciliation],
+    );
+    const afterState = projection(
+      [fileEntry(statePath, '{\n  "state": "after"\n}\n')],
+      [{ path: statePath, driver: "canonical" }],
+    );
+    const afterGuide = textProjection(guidePath, "after\n");
+    const after = projection(
+      [...afterState.entries, ...afterGuide.entries],
+      [...afterState.reconciliation, ...afterGuide.reconciliation],
+    );
+    const stateFile = path.join(targetRoot, statePath);
+    const guideFile = path.join(targetRoot, guidePath);
 
     try {
-      await mkdir(path.join(targetRoot, ".template"));
-      await Promise.all([
-        writeFile(path.join(targetRoot, "alpha.md"), "before\n"),
-        writeFile(
-          path.join(targetRoot, ".template/state.json"),
-          '{\n  "state": "before"\n}\n',
-        ),
-      ]);
-      await chmod(path.join(targetRoot, "alpha.md"), 0o751);
-      await chmod(path.join(targetRoot, ".template/state.json"), 0o640);
+      await mkdir(path.dirname(stateFile), { recursive: true });
+      await mkdir(path.dirname(guideFile), { recursive: true });
+      await writeFile(stateFile, '{\n  "state": "before"\n}\n');
+      await writeFile(guideFile, "before\n");
+      await chmod(stateFile, 0o640);
+      await chmod(guideFile, 0o751);
+
+      const planning = await planAtTarget({ targetRoot, before, after });
+      assert.equal(planning.ok, true);
+      if (!planning.ok) return;
 
       await assert.rejects(
-        reconcile({
+        commitProjectProjectionPlan({
           targetRoot,
-          before: sourceOperation("before\n"),
-          after: sourceOperation("after\n"),
+          plan: planning.plan,
+          dependencies: {
+            async commitMutation(options) {
+              if (options.relativePath === guidePath) {
+                throw new Error("injected filesystem write failure");
+              }
+              await options.commit();
+            },
+          },
         }),
-        (error) =>
-          error instanceof Error &&
-          error.message.includes("injected projection commit failure"),
+        /injected filesystem write failure/u,
       );
-      assert.strictEqual(
-        await readFile(path.join(targetRoot, "alpha.md"), "utf8"),
-        "before\n",
-      );
-      assert.strictEqual(
-        await readFile(path.join(targetRoot, ".template/state.json"), "utf8"),
+      assert.equal(
+        await readFile(stateFile, "utf8"),
         '{\n  "state": "before"\n}\n',
       );
-      assert.strictEqual(
-        (await stat(path.join(targetRoot, "alpha.md"))).mode & 0o777,
-        0o751,
-      );
-      assert.strictEqual(
-        (await stat(path.join(targetRoot, ".template/state.json"))).mode &
-          0o777,
-        0o640,
-      );
-      assert.strictEqual(committedPaths.length, 2);
+      assert.equal(await readFile(guideFile, "utf8"), "before\n");
+      assert.equal((await stat(stateFile)).mode & 0o777, 0o640);
+      assert.equal((await stat(guideFile)).mode & 0o777, 0o751);
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
-  });
-
-  void it("rejects a concurrently created reserved path at the atomic commit boundary with zero transaction writes", async () => {
-    const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-path-race-"),
-    );
-    const reconcile = createProjectProjectionReconciler({
-      async beforeCommit() {
-        await mkdir(path.join(targetRoot, "services/race"), {
-          recursive: true,
-        });
-        await writeFile(path.join(targetRoot, "services/race/OWNER"), "user\n");
-      },
-    });
-
-    try {
-      await writeFile(path.join(targetRoot, "root.txt"), "before\n");
-      const result = await reconcile({
-        targetRoot,
-        before: {
-          operations: [{ kind: "writeText", to: "root.txt", text: "before\n" }],
-        },
-        after: {
-          operations: [
-            { kind: "writeText", to: "root.txt", text: "after\n" },
-            {
-              kind: "writeJson",
-              to: "services/race/package.json",
-              value: { name: "@demo/race" },
-            },
-          ],
-        },
-        preconditions: [
-          {
-            path: "services/race",
-            kind: "must-not-exist",
-            reason:
-              "Package Path services/race already exists and cannot be used for a new Package Addition",
-          },
-        ],
-      });
-
-      assert.strictEqual(result.ok, false);
-      if (result.ok) return;
-      assert.strictEqual(result.conflicts.length, 1);
-      assert.partialDeepStrictEqual(result.conflicts[0], {
-        path: "services/race",
-        driver: "precondition",
-      });
-      assert.ok(
-        result.conflicts[0]!.reason.includes(
-          "Package Path services/race already exists",
-        ),
-      );
-      assert.strictEqual(
-        await readFile(path.join(targetRoot, "root.txt"), "utf8"),
-        "before\n",
-      );
-      assert.strictEqual(
-        await readFile(path.join(targetRoot, "services/race/OWNER"), "utf8"),
-        "user\n",
-      );
-      await assert.rejects(
-        stat(path.join(targetRoot, "services/race/package.json")),
-        (error) => {
-          assert.ok(typeof error === "object" && error !== null);
-          assert.ok(Object.hasOwn(error, "code"));
-          assert.strictEqual(Reflect.get(error, "code"), "ENOENT");
-          return true;
-        },
-      );
-    } finally {
-      await rm(targetRoot, { recursive: true, force: true });
-    }
-  });
-
-  void it("rejects projection deletions before reading Current", async () => {
-    const reads: string[] = [];
-
-    await assert.rejects(
-      reconcileWithCurrent({
-        before: {
-          entries: [
-            textEntry("changed.txt", "before\n"),
-            textEntry("removed.txt", "before\n"),
-          ],
-          reconciliation: [
-            { path: "changed.txt", driver: "text" },
-            { path: "removed.txt", driver: "text" },
-          ],
-        },
-        after: textProjection("changed.txt", "after\n"),
-        async readCurrent(projectionPath) {
-          reads.push(projectionPath);
-          return textEntry(projectionPath, "before\n");
-        },
-      }),
-      (error) =>
-        error instanceof Error &&
-        error.message.includes(
-          "Package Addition projection may not delete path: removed.txt",
-        ),
-    );
-    assert.deepStrictEqual(reads, []);
-  });
-});
-
-const rootValue = "24.16.0";
-const driftedValue = "999";
-const declaredConfigPath = "container/config.json";
-const declaredLauncherPath = "deploy/launcher.txt";
-
-const toolSlot: ProjectProjectionMirrorSlot = {
-  id: "tool-version",
-  location: { kind: "json-pointer", pointer: "/env/TOOL_VERSION" },
-};
-const toolAnchorSlot: ProjectProjectionMirrorSlot = {
-  id: "tool-version-anchor",
-  location: { kind: "text-anchor", name: "TOOL_VERSION" },
-};
-
-function mirrorStructuredProjection(
-  value: unknown,
-  projectionPath = declaredConfigPath,
-): ProjectProjection {
-  return {
-    entries: [textEntry(projectionPath, `${JSON.stringify(value, null, 2)}\n`)],
-    reconciliation: [
-      {
-        path: projectionPath,
-        driver: "structured",
-        mirrorSlots: [toolSlot],
-      },
-    ],
-  };
-}
-
-function mirrorTextProjection(text: string): ProjectProjection {
-  return {
-    entries: [textEntry(declaredLauncherPath, text)],
-    reconciliation: [
-      {
-        path: declaredLauncherPath,
-        driver: "text",
-        mirrorSlots: [toolAnchorSlot],
-      },
-    ],
-  };
-}
-
-function anchoredText(defaultValue: string): string {
-  return [
-    "FROM base:1",
-    "# @template-mirror TOOL_VERSION",
-    `ARG TOOL_VERSION="${defaultValue}"`,
-    "# @end-template-mirror",
-    "RUN existing step",
-    "",
-  ].join("\n");
-}
-
-function structuredConfigPlan(value: unknown) {
-  return {
-    operations: [{ kind: "writeJson" as const, to: declaredConfigPath, value }],
-    reconciliation: [
-      {
-        path: declaredConfigPath,
-        driver: "structured" as const,
-        mirrorSlots: [toolSlot],
-      },
-    ],
-  };
-}
-
-function anchoredLauncherPlan(text: string) {
-  return {
-    operations: [
-      { kind: "writeText" as const, to: declaredLauncherPath, text },
-    ],
-    reconciliation: [
-      {
-        path: declaredLauncherPath,
-        driver: "text" as const,
-        mirrorSlots: [toolAnchorSlot],
-      },
-    ],
-  };
-}
-
-void describe("Declared mirror-slot coordination", () => {
-  void it("reads only declared slot paths when Before equals After and restores the root value", async () => {
-    const declared = mirrorStructuredProjection({
-      env: { TOOL_VERSION: rootValue },
-      name: "demo",
-    });
-    const undeclared = structuredProjection("workspace/plain.json", {
-      keep: true,
-    });
-    const projection: ProjectProjection = {
-      entries: [...declared.entries, ...undeclared.entries],
-      reconciliation: [
-        ...declared.reconciliation,
-        ...undeclared.reconciliation,
-      ],
-    };
-    const reads: string[] = [];
-
-    const result = await reconcileWithCurrent({
-      before: projection,
-      after: projection,
-      async readCurrent(projectionPath) {
-        reads.push(projectionPath);
-        if (projectionPath === declaredConfigPath) {
-          return textEntry(
-            projectionPath,
-            `${JSON.stringify(
-              {
-                name: "demo",
-                env: { TOOL_VERSION: driftedValue },
-                userOnly: { retained: true },
-              },
-              null,
-              4,
-            )}\n`,
-          );
-        }
-        return textEntry(
-          projectionPath,
-          `${JSON.stringify({ keep: false }, null, 2)}\n`,
-        );
-      },
-    });
-
-    assert.deepStrictEqual(reads, [declaredConfigPath]);
-    assert.strictEqual(result.ok, true);
-    if (!result.ok) return;
-    assert.strictEqual(result.mutations.length, 1);
-    assert.deepStrictEqual(
-      JSON.parse(decoder.decode(result.mutations[0]!.content)) as unknown,
-      {
-        name: "demo",
-        env: { TOOL_VERSION: rootValue },
-        userOnly: { retained: true },
-      },
-    );
-  });
-
-  void it("carries one update action for a legal same-file delta and the coordinated slot", async () => {
-    const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-slot-delta-"),
-    );
-    const configPath = path.join(targetRoot, declaredConfigPath);
-
-    try {
-      await mkdir(path.dirname(configPath), { recursive: true });
-      await writeFile(
-        configPath,
-        `${JSON.stringify(
-          {
-            env: { TOOL_VERSION: driftedValue },
-            features: { beta: false },
-            userOnly: { retained: true },
-          },
-          null,
-          2,
-        )}\n`,
-      );
-
-      const applied = await reconcileAndApplyProjectProjections({
-        targetRoot,
-        before: structuredConfigPlan({
-          env: { TOOL_VERSION: rootValue },
-          features: { beta: false },
-        }),
-        after: structuredConfigPlan({
-          env: { ADDITIONAL_TOOL: "1.4.0", TOOL_VERSION: rootValue },
-          features: { beta: true },
-        }),
-      });
-
-      assert.deepStrictEqual(applied, {
-        ok: true,
-        changedPaths: [declaredConfigPath],
-        actions: [
-          { path: declaredConfigPath, driver: "structured", action: "update" },
-        ],
-      });
-      const written = await readFile(configPath, "utf8");
-      assert.deepStrictEqual(JSON.parse(written) as unknown, {
-        env: { ADDITIONAL_TOOL: "1.4.0", TOOL_VERSION: rootValue },
-        features: { beta: true },
-        userOnly: { retained: true },
-      });
-
-      const repeated = await reconcileAndApplyProjectProjections({
-        targetRoot,
-        before: structuredConfigPlan({
-          env: { TOOL_VERSION: rootValue },
-          features: { beta: false },
-        }),
-        after: structuredConfigPlan({
-          env: { ADDITIONAL_TOOL: "1.4.0", TOOL_VERSION: rootValue },
-          features: { beta: true },
-        }),
-      });
-      assert.deepStrictEqual(repeated, {
-        ok: true,
-        changedPaths: [],
-        actions: [],
-      });
-      assert.strictEqual(await readFile(configPath, "utf8"), written);
-    } finally {
-      await rm(targetRoot, { recursive: true, force: true });
-    }
-  });
-
-  void it("keeps a deleted slot absent while a legal new key lands in the same file", async () => {
-    const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-slot-deleted-"),
-    );
-    const configPath = path.join(targetRoot, declaredConfigPath);
-
-    try {
-      await mkdir(path.dirname(configPath), { recursive: true });
-      await writeFile(
-        configPath,
-        `${JSON.stringify({ env: {}, userOnly: true }, null, 2)}\n`,
-      );
-
-      assert.deepStrictEqual(
-        await reconcileAndApplyProjectProjections({
-          targetRoot,
-          before: structuredConfigPlan({ env: { TOOL_VERSION: rootValue } }),
-          after: structuredConfigPlan({
-            env: { ADDITIONAL_TOOL: "1.4.0", TOOL_VERSION: rootValue },
-          }),
-        }),
-        {
-          ok: true,
-          changedPaths: [declaredConfigPath],
-          actions: [
-            {
-              path: declaredConfigPath,
-              driver: "structured",
-              action: "update",
-            },
-          ],
-        },
-      );
-      const merged = JSON.parse(await readFile(configPath, "utf8")) as unknown;
-      assert.deepStrictEqual(merged, {
-        env: { ADDITIONAL_TOOL: "1.4.0" },
-        userOnly: true,
-      });
-      const mergedRecord = merged as { env?: unknown };
-      const mergedEnv = mergedRecord.env;
-      assert.ok(
-        !(
-          Object.hasOwn(mergedRecord, "env") &&
-          typeof mergedEnv === "object" &&
-          mergedEnv !== null &&
-          Object.hasOwn(mergedEnv, "TOOL_VERSION")
-        ),
-      );
-    } finally {
-      await rm(targetRoot, { recursive: true, force: true });
-    }
-  });
-
-  void it("adds a slot value that only After declares", async () => {
-    const result = await reconcileWithCurrent({
-      before: mirrorStructuredProjection({ env: { OTHER: "keep" } }),
-      after: mirrorStructuredProjection({
-        env: { OTHER: "keep", TOOL_VERSION: rootValue },
-      }),
-      async readCurrent() {
-        return textEntry(
-          declaredConfigPath,
-          `${JSON.stringify({ env: { OTHER: "keep" } }, null, 2)}\n`,
-        );
-      },
-    });
-
-    assert.strictEqual(result.ok, true);
-    if (!result.ok) return;
-    assert.deepStrictEqual(
-      JSON.parse(decoder.decode(result.mutations[0]!.content)) as unknown,
-      { env: { OTHER: "keep", TOOL_VERSION: rootValue } },
-    );
-  });
-
-  for (const scenario of [
-    { absentShape: "missing file", current: undefined },
-    {
-      absentShape: "directory in place of the file",
-      current: { path: declaredConfigPath, kind: "directory" as const },
-    },
-  ]) {
-    void it(`skips a pure coordination path whose Current is ${scenario.absentShape}`, async () => {
-      const { current } = scenario;
-      const projection = mirrorStructuredProjection({
-        env: { TOOL_VERSION: rootValue },
-      });
-
-      assert.deepStrictEqual(
-        await reconcileWithCurrent({
-          before: projection,
-          after: projection,
-          async readCurrent() {
-            return current;
-          },
-        }),
-        { ok: true, mutations: [] },
-      );
-    });
-  }
-
-  void it("keeps the presence conflict when a declared path also carries a delta", async () => {
-    const result = await reconcileWithCurrent({
-      before: mirrorStructuredProjection({ env: { TOOL_VERSION: rootValue } }),
-      after: mirrorStructuredProjection({
-        env: { TOOL_VERSION: rootValue },
-        features: { beta: true },
-      }),
-      async readCurrent() {
-        return undefined;
-      },
-    });
-
-    assert.strictEqual(result.ok, false);
-    if (result.ok) return;
-    assert.strictEqual(Reflect.ownKeys(result).length, 2);
-    assert.ok(Object.hasOwn(result, "ok"));
-    assert.ok(Object.hasOwn(result, "conflicts"));
-    assert.strictEqual(result.conflicts.length, 1);
-    assert.partialDeepStrictEqual(result.conflicts[0], {
-      path: declaredConfigPath,
-      driver: "structured",
-      reason: "Path presence changed concurrently",
-    });
-  });
-
-  void it("reports no change when a declared slot already equals the root value in another format", async () => {
-    const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-slot-format-"),
-    );
-    const configPath = path.join(targetRoot, declaredConfigPath);
-    const formatted = `${JSON.stringify(
-      { userOnly: { retained: true }, env: { TOOL_VERSION: rootValue } },
-      null,
-      4,
-    )}\n`;
-
-    try {
-      await mkdir(path.dirname(configPath), { recursive: true });
-      await writeFile(configPath, formatted);
-
-      const plan = structuredConfigPlan({
-        env: { TOOL_VERSION: rootValue },
-        name: "demo",
-      });
-      assert.deepStrictEqual(
-        await reconcileAndApplyProjectProjections({
-          targetRoot,
-          before: plan,
-          after: plan,
-        }),
-        { ok: true, changedPaths: [], actions: [] },
-      );
-      assert.strictEqual(await readFile(configPath, "utf8"), formatted);
-    } finally {
-      await rm(targetRoot, { recursive: true, force: true });
-    }
-  });
-
-  for (const scenario of [
-    {
-      unusableShape: "JSON with comments",
-      currentBytes: new TextEncoder().encode(
-        `{\n  // pinned by hand\n  "env": { "TOOL_VERSION": "${rootValue}" }\n}\n`,
-      ),
-      diagnostic: "Current structured content is not valid JSON",
-    },
-    {
-      unusableShape: "non-string slot value",
-      currentBytes: new TextEncoder().encode(
-        '{\n  "env": { "TOOL_VERSION": 24 }\n}\n',
-      ),
-      diagnostic: "holds a non-string Current value",
-    },
-    {
-      unusableShape: "binary bytes",
-      currentBytes: new Uint8Array([0xff, 0xfe, 0xfd, 0xfe, 0xff]),
-      diagnostic: "Current structured content is not valid JSON",
-    },
-  ]) {
-    void it(`fails atomically with zero writes for an unusable ${scenario.unusableShape} declared slot`, async () => {
-      const { currentBytes, diagnostic } = scenario;
-      const targetRoot = await mkdtemp(
-        path.join(tmpdir(), "template-projection-slot-invalid-"),
-      );
-      const configPath = path.join(targetRoot, declaredConfigPath);
-      const reservedPath = path.join(targetRoot, "services/new/package.json");
-
-      try {
-        await mkdir(path.dirname(configPath), { recursive: true });
-        await writeFile(configPath, currentBytes);
-
-        const result = await reconcileAndApplyProjectProjections({
-          targetRoot,
-          before: structuredConfigPlan({
-            env: { TOOL_VERSION: rootValue },
-          }),
-          after: {
-            operations: [
-              ...structuredConfigPlan({ env: { TOOL_VERSION: rootValue } })
-                .operations,
-              {
-                kind: "writeJson",
-                to: "services/new/package.json",
-                value: { name: "@demo/new" },
-              },
-            ],
-            reconciliation: structuredConfigPlan({
-              env: { TOOL_VERSION: rootValue },
-            }).reconciliation,
-          },
-          preconditions: [
-            {
-              path: "services/new",
-              kind: "must-not-exist",
-              reason:
-                "Package Path services/new already exists and cannot be used for a new Package Addition",
-            },
-          ],
-        });
-        assert.strictEqual(result.ok, false);
-        if (result.ok) return;
-        assert.strictEqual(Reflect.ownKeys(result).length, 2);
-        assert.ok(Object.hasOwn(result, "ok"));
-        assert.ok(Object.hasOwn(result, "conflicts"));
-        assert.strictEqual(result.conflicts.length, 1);
-        const conflict = result.conflicts[0]!;
-        assert.partialDeepStrictEqual(conflict, {
-          path: declaredConfigPath,
-          driver: "structured",
-        });
-        assert.ok(conflict.reason.includes(diagnostic));
-        assert.deepStrictEqual(
-          await readFile(configPath),
-          Buffer.from(currentBytes),
-        );
-        await assert.rejects(stat(reservedPath), (error) => {
-          assert.ok(typeof error === "object" && error !== null);
-          assert.ok(Object.hasOwn(error, "code"));
-          assert.strictEqual(Reflect.get(error, "code"), "ENOENT");
-          return true;
-        });
-      } finally {
-        await rm(targetRoot, { recursive: true, force: true });
-      }
-    });
-  }
-
-  void it("restores the anchored default while preserving out-of-region bytes exactly", async () => {
-    const projection = mirrorTextProjection(anchoredText(rootValue));
-    const result = await reconcileWithCurrent({
-      before: projection,
-      after: projection,
-      async readCurrent() {
-        return textEntry(
-          declaredLauncherPath,
-          anchoredText(driftedValue).replace(
-            "RUN existing step\n",
-            "RUN existing step\nRUN user step\n",
-          ),
-        );
-      },
-    });
-
-    assert.strictEqual(result.ok, true);
-    if (!result.ok) return;
-    assert.strictEqual(
-      decoder.decode(result.mutations[0]!.content),
-      anchoredText(rootValue).replace(
-        "RUN existing step\n",
-        "RUN existing step\nRUN user step\n",
-      ),
-    );
-  });
-
-  void it("replaces the owned block when Before has no block and keeps bytes outside it", async () => {
-    const result = await reconcileWithCurrent({
-      before: mirrorTextProjection("FROM base:1\nRUN existing step\n"),
-      after: mirrorTextProjection(anchoredText(rootValue)),
-      async readCurrent() {
-        return textEntry(
-          declaredLauncherPath,
-          anchoredText(driftedValue).replace(
-            "RUN existing step\n",
-            "RUN existing step\nRUN user step\n",
-          ),
-        );
-      },
-    });
-
-    assert.strictEqual(result.ok, true);
-    if (!result.ok) return;
-    assert.strictEqual(result.mutations.length, 1);
-    assert.strictEqual(
-      decoder.decode(result.mutations[0]!.content),
-      anchoredText(rootValue).replace(
-        "RUN existing step\n",
-        "RUN existing step\nRUN user step\n",
-      ),
-    );
-  });
-
-  void it("fails atomically when Before holds the anchor more than once", async () => {
-    const result = await reconcileWithCurrent({
-      before: mirrorTextProjection(
-        anchoredText(rootValue) + anchoredText(rootValue),
-      ),
-      after: mirrorTextProjection(anchoredText(rootValue)),
-      async readCurrent() {
-        return textEntry(declaredLauncherPath, anchoredText(driftedValue));
-      },
-    });
-
-    assert.ok(!Object.hasOwn(result, "mutations"));
-    assert.strictEqual(result.ok, false);
-    if (result.ok) return;
-    assert.strictEqual(Reflect.ownKeys(result).length, 2);
-    assert.ok(Object.hasOwn(result, "ok"));
-    assert.ok(Object.hasOwn(result, "conflicts"));
-    assert.strictEqual(result.conflicts.length, 1);
-    const conflict = result.conflicts[0]!;
-    assert.partialDeepStrictEqual(conflict, {
-      path: declaredLauncherPath,
-      driver: "text",
-      location: "TOOL_VERSION",
-    });
-    assert.ok(conflict.reason.includes("in Before could not be located"));
-  });
-
-  void it("lands a template text delta together with the coordinated anchor", async () => {
-    const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-slot-text-delta-"),
-    );
-    const launcherPath = path.join(targetRoot, declaredLauncherPath);
-
-    try {
-      await mkdir(path.dirname(launcherPath), { recursive: true });
-      await writeFile(
-        launcherPath,
-        anchoredText(driftedValue).replace(
-          "RUN existing step\n",
-          "RUN existing step\nRUN user step\n",
-        ),
-      );
-
-      assert.deepStrictEqual(
-        await reconcileAndApplyProjectProjections({
-          targetRoot,
-          before: anchoredLauncherPlan(anchoredText(rootValue)),
-          after: anchoredLauncherPlan(
-            `# generated header\n${anchoredText(rootValue)}`,
-          ),
-        }),
-        {
-          ok: true,
-          changedPaths: [declaredLauncherPath],
-          actions: [
-            { path: declaredLauncherPath, driver: "text", action: "update" },
-          ],
-        },
-      );
-      assert.strictEqual(
-        await readFile(launcherPath, "utf8"),
-        `# generated header\n${anchoredText(rootValue).replace(
-          "RUN existing step\n",
-          "RUN existing step\nRUN user step\n",
-        )}`,
-      );
-    } finally {
-      await rm(targetRoot, { recursive: true, force: true });
-    }
-  });
-
-  for (const scenario of [
-    {
-      brokenAnchor: "markers removed but the carrier assignment remains",
-      current: `FROM base:1\nARG TOOL_VERSION="${driftedValue}"\n# @end-template-mirror\nRUN existing step\n`,
-    },
-    {
-      brokenAnchor: "marker removed but the reference remains",
-      current: "FROM node:${TOOL_VERSION}-slim\nRUN existing step\n",
-    },
-    {
-      brokenAnchor: "the anchored region is duplicated",
-      current: anchoredText(driftedValue) + anchoredText(driftedValue),
-    },
-    {
-      brokenAnchor: "the anchored region holds two lines",
-      current: anchoredText(driftedValue).replace(
-        `ARG TOOL_VERSION="${driftedValue}"\n`,
-        `ARG TOOL_VERSION="${driftedValue}"\nARG EXTRA_TOOL="1"\n`,
-      ),
-    },
-  ]) {
-    void it(`fails when ${scenario.brokenAnchor} while the carrier or reference is still present`, async () => {
-      const { current } = scenario;
-      const projection = mirrorTextProjection(anchoredText(rootValue));
-      const result = await reconcileWithCurrent({
-        before: projection,
-        after: projection,
-        async readCurrent() {
-          return textEntry(declaredLauncherPath, current);
-        },
-      });
-
-      assert.strictEqual(result.ok, false);
-      if (result.ok) return;
-      assert.strictEqual(Reflect.ownKeys(result).length, 2);
-      assert.ok(Object.hasOwn(result, "ok"));
-      assert.ok(Object.hasOwn(result, "conflicts"));
-      assert.strictEqual(result.conflicts.length, 1);
-      const conflict = result.conflicts[0]!;
-      assert.partialDeepStrictEqual(conflict, {
-        path: declaredLauncherPath,
-        driver: "text",
-        location: "TOOL_VERSION",
-      });
-      assert.ok(conflict.reason.includes("anchor could not be located"));
-    });
-  }
-
-  void it("keeps a text slot absent when the carrier and every reference exited", async () => {
-    const projection = mirrorTextProjection(anchoredText(rootValue));
-
-    assert.deepStrictEqual(
-      await reconcileWithCurrent({
-        before: projection,
-        after: projection,
-        async readCurrent() {
-          return textEntry(
-            declaredLauncherPath,
-            "FROM base:1\nRUN existing step\n",
-          );
-        },
-      }),
-      { ok: true, mutations: [] },
-    );
-  });
-
-  void it("rolls back the coordinated slot together with the other mutations", async () => {
-    const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-projection-slot-rollback-"),
-    );
-    const configPath = path.join(targetRoot, declaredConfigPath);
-    const guidePath = path.join(targetRoot, "docs/guide.md");
-    const committed: string[] = [];
-    const reconcile = createProjectProjectionReconciler({
-      async commitMutation(options) {
-        committed.push(options.relativePath);
-        if (committed.length === 2) {
-          throw new Error("injected mirror-slot commit failure");
-        }
-        await options.commit();
-      },
-    });
-    const before = {
-      operations: [
-        ...structuredConfigPlan({ env: { TOOL_VERSION: rootValue } })
-          .operations,
-        { kind: "writeText" as const, to: "docs/guide.md", text: "before\n" },
-      ],
-      reconciliation: structuredConfigPlan({
-        env: { TOOL_VERSION: rootValue },
-      }).reconciliation,
-    };
-    const after = {
-      operations: [
-        ...structuredConfigPlan({ env: { TOOL_VERSION: rootValue } })
-          .operations,
-        { kind: "writeText" as const, to: "docs/guide.md", text: "after\n" },
-      ],
-      reconciliation: structuredConfigPlan({
-        env: { TOOL_VERSION: rootValue },
-      }).reconciliation,
-    };
-
-    try {
-      await mkdir(path.dirname(configPath), { recursive: true });
-      await mkdir(path.dirname(guidePath), { recursive: true });
-      await writeFile(
-        configPath,
-        `${JSON.stringify({ env: { TOOL_VERSION: driftedValue } }, null, 2)}\n`,
-      );
-      await writeFile(guidePath, "before\n");
-      const driftedConfig = await readFile(configPath, "utf8");
-
-      await assert.rejects(
-        reconcile({ targetRoot, before, after }),
-        (error) =>
-          error instanceof Error &&
-          error.message.includes("injected mirror-slot commit failure"),
-      );
-      assert.strictEqual(await readFile(configPath, "utf8"), driftedConfig);
-      assert.strictEqual(await readFile(guidePath, "utf8"), "before\n");
-    } finally {
-      await rm(targetRoot, { recursive: true, force: true });
-    }
-  });
-
-  for (const scenario of [
-    {
-      malformed: "a JSON Pointer location on the text driver",
-      driver: "text" as const,
-      slot: toolSlot,
-      diagnostic: "text mirror slots require a named text anchor",
-    },
-    {
-      malformed: "a named text anchor on the structured driver",
-      driver: "structured" as const,
-      slot: toolAnchorSlot,
-      diagnostic: "structured mirror slots require a JSON Pointer location",
-    },
-    {
-      malformed: "an invalid JSON Pointer",
-      driver: "structured" as const,
-      slot: {
-        id: "bad-pointer",
-        location: { kind: "json-pointer", pointer: "/env/~2" },
-      } satisfies ProjectProjectionMirrorSlot,
-      diagnostic: "must be an RFC 6901 JSON Pointer",
-    },
-    {
-      malformed: "a repeated slot id",
-      driver: "structured" as const,
-      slot: { id: "tool-version", location: { ...toolSlot.location } },
-      duplicateId: true,
-      diagnostic: "mirror slot ids must be unique and non-empty",
-    },
-    {
-      malformed: "a slot name made of separate words",
-      driver: "text" as const,
-      slot: {
-        id: "spaced",
-        location: { kind: "text-anchor", name: "TOOL VERSION" },
-      } satisfies ProjectProjectionMirrorSlot,
-      diagnostic: "text mirror slot names must be single non-empty tokens",
-    },
-  ]) {
-    void it(`rejects malformed declarations such as ${scenario.malformed} before reading Current`, async () => {
-      const { driver, slot, diagnostic } = scenario;
-      let reads = 0;
-      const slots =
-        "duplicateId" in scenario && scenario.duplicateId
-          ? [slot, toolSlot]
-          : [slot];
-      const projection: ProjectProjection = {
-        entries: [
-          textEntry(declaredConfigPath, '{"env":{"TOOL_VERSION":"x"}}\n'),
-        ],
-        reconciliation: [
-          { path: declaredConfigPath, driver, mirrorSlots: slots },
-        ],
-      };
-
-      await assert.rejects(
-        reconcileWithCurrent({
-          before: projection,
-          after: projection,
-          async readCurrent() {
-            reads += 1;
-            return projection.entries[0];
-          },
-        }),
-        (error) => error instanceof Error && error.message.includes(diagnostic),
-      );
-      assert.strictEqual(reads, 0);
-    });
-  }
-
-  void it("carries the declaration through plan preflight and materialization", async () => {
-    const operations = [
-      {
-        kind: "writeText" as const,
-        to: declaredLauncherPath,
-        text: anchoredText(rootValue),
-      },
-    ];
-    const reconciliation = [
-      {
-        path: declaredLauncherPath,
-        driver: "text" as const,
-        mirrorSlots: [toolAnchorSlot],
-      },
-    ];
-
-    assert.deepStrictEqual(
-      validateProjectProjectionPlan({ operations, reconciliation }),
-      [],
-    );
-    const projection = await materializeProjectProjection({
-      operations,
-      reconciliation,
-    });
-    assert.deepStrictEqual(projection.reconciliation, reconciliation);
-
-    const undeclared = await materializeProjectProjection({ operations });
-    assert.deepStrictEqual(undeclared.reconciliation, [
-      { path: declaredLauncherPath, driver: "text" },
-    ]);
   });
 });
