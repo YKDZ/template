@@ -3,7 +3,7 @@
   "tags": ["library"],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": [],
       "outputs": ["dist/**"],
       "tags": ["quality:light"]
     },

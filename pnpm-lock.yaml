@@ -1269,6 +1269,9 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -1306,6 +1309,9 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -1373,6 +1379,9 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core

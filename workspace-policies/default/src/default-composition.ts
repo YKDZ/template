@@ -76,7 +76,10 @@ import {
   serializeNativeReferenceDocument,
 } from "./reference-package.ts";
 import { releaseToolchainSnapshot } from "./release-toolchain-snapshot.ts";
-import { composeCheckWorkflow } from "./shared-root-files.ts";
+import {
+  composeCheckWorkflow,
+  composeSharedRootFiles,
+} from "./shared-root-files.ts";
 import { vuePnpmDependencyOverrides } from "./vue-policy.ts";
 import {
   dependencyCatalogSnapshot,
@@ -1180,7 +1183,10 @@ function renderNativeDocument(document: DefaultNativeDocument): Uint8Array {
   return serializeNativeReferenceDocument(document);
 }
 
-function ownerDependencies(facts: readonly DefaultContribution[]) {
+function ownerDependencies(
+  facts: readonly DefaultContribution[],
+  rootPolicies: readonly DependencyMaintenancePolicy[],
+) {
   const policies = facts.flatMap((fact) => {
     const dependencyMaintenance = fact.foundation.dependencyMaintenance;
     return isRecord(dependencyMaintenance)
@@ -1196,7 +1202,9 @@ function ownerDependencies(facts: readonly DefaultContribution[]) {
   });
   return projectDependencyMaintenancePolicy({
     contributions: policies,
-    rootContributions: [],
+    rootContributions: rootPolicies.map((dependencyMaintenance) => ({
+      dependencyMaintenance,
+    })),
   });
 }
 
@@ -1507,6 +1515,29 @@ export function createDefaultComposition(options: {
       const packagePaths = combineOptions.blueprint.packages
         .filter(({ path: packagePath }) => packagePath !== ".")
         .map(({ path: packagePath }) => packagePath);
+      const sharedRoot = composeSharedRootFiles({
+        source: rootSource,
+        manifest: {},
+        turboTasks: {},
+        typescript: { compilerOptions: {}, include: [] },
+        packagePaths,
+        declarations: declarations.map((declaration) => ({
+          kind: "shared-root-files" as const,
+          source: sourceLabel(declaration.sourceIdentity),
+          ...(declaration.ciJob === undefined
+            ? {}
+            : { ciJob: declaration.ciJob }),
+          ...(declaration.ciSteps === undefined
+            ? {}
+            : { ciSteps: declaration.ciSteps }),
+          ...(declaration.environmentNeeds === undefined
+            ? {}
+            : { environmentNeeds: declaration.environmentNeeds }),
+          ...(declaration.dependencyMaintenance === undefined
+            ? {}
+            : { dependencyMaintenance: declaration.dependencyMaintenance }),
+        })),
+      });
       const packages = packageGlobs(combineOptions.blueprint);
       const overrides =
         Object.hasOwn(dependencyCatalog, "vue") ||
@@ -1570,7 +1601,10 @@ export function createDefaultComposition(options: {
         nodeVersion: combineOptions.stableCommon.nodeDeclaration,
         resources: combineOptions.stableCommon.resources.developmentContainer,
       });
-      const dependencyMaintenance = ownerDependencies(allFacts);
+      const dependencyMaintenance = ownerDependencies(
+        allFacts,
+        sharedRoot.dependencyMaintenance,
+      );
       const ciDiagnosticArtifacts = composeCiDiagnosticArtifacts({
         packagePaths: ownerPackagePaths,
         declarations: [
@@ -1580,11 +1614,16 @@ export function createDefaultComposition(options: {
           ),
         ],
       });
+      const ciJob =
+        Object.keys(sharedRoot.ciJob).length === 0
+          ? undefined
+          : sharedRoot.ciJob;
       const checkWorkflow = composeCheckWorkflow(
         projectCheckWorkflow(
           {
             packagePaths: ownerPackagePaths,
             diagnosticArtifacts: ciDiagnosticArtifacts,
+            ...(ciJob === undefined ? {} : { job: ciJob }),
           },
           combineOptions.stableCommon.resources.github.checkWorkflow,
         ),
@@ -1592,7 +1631,7 @@ export function createDefaultComposition(options: {
           combineOptions.stableCommon.rootDeclarations[0]?.sourceIdentity ??
             rootIdentity,
         ),
-        [],
+        sharedRoot.ciSteps,
       );
       const dependabot = projectDependabotConfig(
         dependencyMaintenance,
@@ -1773,10 +1812,8 @@ export function createDefaultComposition(options: {
       const deploymentNeeds: DeploymentEnvironmentNeed[] = [];
       for (const need of [
         ...allFacts.flatMap((facts) => facts.environmentNeeds),
-        ...declarations.flatMap((declaration) => [
-          ...(declaration.environmentNeeds?.check ?? []),
-          ...(declaration.environmentNeeds?.deployment ?? []),
-        ]),
+        ...sharedRoot.environmentNeeds.check,
+        ...sharedRoot.environmentNeeds.deployment,
       ]) {
         if (need.kind === "docker-engine") deploymentNeeds.push(need);
         else checkNeeds.push(need);

@@ -4,28 +4,47 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { createGenerator } from "@ykdz/template-generator";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 import { execa } from "execa";
 
 const content = await loadContentSource({
   namespace: "ykdz",
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
-    "@ykdz/reference-vike-web/template",
-    "@ykdz/reference-vike-db/template",
-    "@ykdz/reference-vike-migrations/template",
-    "@ykdz/reference-ts-lib/template",
-    "@ykdz/reference-tooling-config/template",
-    "@ykdz/preset-vike-app/template",
+    {
+      specifier: "@ykdz/reference-workspace-root/template",
+      load: () => import("@ykdz/reference-workspace-root/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vike-web/template",
+      load: () => import("@ykdz/reference-vike-web/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vike-db/template",
+      load: () => import("@ykdz/reference-vike-db/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vike-migrations/template",
+      load: () => import("@ykdz/reference-vike-migrations/template"),
+    },
+    {
+      specifier: "@ykdz/reference-tooling-config/template",
+      load: () => import("@ykdz/reference-tooling-config/template"),
+    },
+    {
+      specifier: "@ykdz/reference-ts-lib/template",
+      load: () => import("@ykdz/reference-ts-lib/template"),
+    },
+    {
+      specifier: "@ykdz/reference-npm-publication/template",
+      load: () => import("@ykdz/reference-npm-publication/template"),
+    },
+    {
+      specifier: "@ykdz/preset-vike-app/template",
+      load: () => import("@ykdz/preset-vike-app/template"),
+    },
   ],
-  prepareReferenceDefinition(definition) {
-    return defineReferencePackage(
-      definition as Parameters<typeof defineReferencePackage>[0],
-    );
-  },
 });
 const preset = content.find(
   (member) =>
@@ -47,13 +66,10 @@ void describe("Vike 应用公开预设安装行为", () => {
         rm(workspace, { recursive: true, force: true }),
       );
 
-      const initialized = await createGenerator({
-        content,
-        strategy: createDefaultWorkspaceStrategy(),
-      }).init({
+      const initialized = await createDefaultGenerator({ content }).init({
         targetRoot,
-        selection: { roots: [{ preset: preset.identity }] },
-        strategyInput: {
+        selection: { presets: [{ contentIdentity: preset.identity }] },
+        conventions: {
           repositoryName: "demo-vike",
           defaultPackageScope: "demo",
         },

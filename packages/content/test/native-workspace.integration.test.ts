@@ -46,12 +46,28 @@ const content = await loadContentSource({
       load: () => import("@ykdz/reference-npm-publication/template"),
     },
     {
+      specifier: "@ykdz/reference-vike-web/template",
+      load: () => import("@ykdz/reference-vike-web/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vike-db/template",
+      load: () => import("@ykdz/reference-vike-db/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vike-migrations/template",
+      load: () => import("@ykdz/reference-vike-migrations/template"),
+    },
+    {
       specifier: "@ykdz/preset-ts-cli/template",
       load: () => import("@ykdz/preset-ts-cli/template"),
     },
     {
       specifier: "@ykdz/preset-ts-lib/template",
       load: () => import("@ykdz/preset-ts-lib/template"),
+    },
+    {
+      specifier: "@ykdz/preset-vike-app/template",
+      load: () => import("@ykdz/preset-vike-app/template"),
     },
   ],
 });
@@ -397,6 +413,243 @@ await it(
             tarball: libraryArchive,
             consumerImport: "greet('Ada') => Hello, Ada",
           },
+        }),
+      );
+    } finally {
+      await prepared?.cleanup();
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+await it(
+  "通过正式归档初始化Vike并在新进程加库后保留数据库部署",
+  { timeout: 300_000 },
+  async () => {
+    const temporaryRoot = await mkdtemp(
+      path.join(tmpdir(), "native-vike-consumer-"),
+    );
+    const preparedRoot = path.join(temporaryRoot, "prepared");
+    let prepared:
+      | Awaited<ReturnType<typeof prepareContentCollection>>
+      | undefined;
+    try {
+      await execa(
+        "pnpm",
+        [
+          "exec",
+          "turbo",
+          "run",
+          "build:template",
+          "--filter=@ykdz/preset-vike-app",
+          "--filter=@ykdz/preset-ts-lib",
+          "--force",
+        ],
+        { cwd: workspaceRoot },
+      );
+      await execa(
+        "pnpm",
+        [
+          "exec",
+          "turbo",
+          "run",
+          "build",
+          "--filter=@ykdz/template-workspace",
+          "--force",
+        ],
+        { cwd: workspaceRoot },
+      );
+
+      const vikePreset = content.find(
+        (member) =>
+          member.kind === "preset" &&
+          member.identity.packageName === "@ykdz/preset-vike-app",
+      );
+      const libraryPreset = content.find(
+        (member) =>
+          member.kind === "preset" &&
+          member.identity.packageName === "@ykdz/preset-ts-lib",
+      );
+      assert.ok(vikePreset && libraryPreset);
+      prepared = await prepareContentCollection({
+        content,
+        roots: [vikePreset, libraryPreset],
+        workspaceRoot,
+        root: preparedRoot,
+      });
+      const webOwner = prepared.owners.find(
+        ({ member }) =>
+          member.kind === "reference" &&
+          member.identity.packageName === "@ykdz/reference-vike-web",
+      );
+      assert.ok(webOwner);
+      assert.deepEqual(
+        webOwner.artifact.dependencies.find(({ name }) => name === "vike")
+          ?.purposes,
+        ["target"],
+      );
+      const webArchiveManifest = JSON.parse(
+        await readFile(path.join(webOwner.installRoot, "package.json"), "utf8"),
+      ) as { readonly dependencies?: Readonly<Record<string, string>> };
+      assert.equal(webArchiveManifest.dependencies?.vike, undefined);
+      assert.ok(!prepared.sdkPackages.some(({ name }) => name === "vike"));
+      const workspaceSdk = prepared.sdkPackages.find(
+        ({ name }) => name === "@ykdz/template-workspace",
+      );
+      assert.ok(workspaceSdk);
+
+      const consumerRoot = path.join(temporaryRoot, "consumer");
+      await installContentCollection(prepared, consumerRoot);
+      await execa("pnpm", ["add", workspaceSdk.tarball], {
+        cwd: consumerRoot,
+      });
+      const targetRoot = path.join(consumerRoot, "project", "vike-demo");
+      const installedCollection = path.join(
+        consumerRoot,
+        "node_modules",
+        ...prepared.collection.name.split("/"),
+      );
+      const initDriverPath = path.join(
+        installedCollection,
+        "vike-init-driver.mjs",
+      );
+      const addDriverPath = path.join(
+        installedCollection,
+        "vike-add-driver.mjs",
+      );
+      const baselinePath = path.join(consumerRoot, "vike-init.json");
+      await writeFile(
+        initDriverPath,
+        [
+          'import assert from "node:assert/strict";',
+          'import { writeFile } from "node:fs/promises";',
+          'import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";',
+          'import { templateContent } from "@ykdz/template-content";',
+          'const preset = templateContent.find((member) => member.kind === "preset" && member.identity.packageName === "@ykdz/preset-vike-app");',
+          "assert.ok(preset);",
+          'const result = await createDefaultGenerator({ content: templateContent }).init({ targetRoot: process.argv[2], selection: { presets: [{ contentIdentity: preset.identity }] }, conventions: { repositoryName: "packed-vike-demo", defaultPackageScope: "demo" } });',
+          'assert.equal(result.status, "success", JSON.stringify(result));',
+          'if (result.status !== "success") process.exit(2);',
+          "const selection = result.generationRecord.selections.find((item) => item.presetIdentity?.packageName === preset.identity.packageName);",
+          "assert.ok(selection);",
+          "const packages = new Map(result.generationRecord.packages.map((item) => [item.packageDefinitionId, item]));",
+          "const web = packages.get(selection.nodes.web);",
+          "const database = packages.get(selection.nodes.database);",
+          "const migrations = packages.get(selection.nodes.migrations);",
+          "assert.ok(web && database && migrations);",
+          'assert.equal(database.createdBy, "initialization");',
+          "assert.equal(web.dependencyBindings.database, database.packageDefinitionId);",
+          "assert.equal(migrations.dependencyBindings.database, database.packageDefinitionId);",
+          "await writeFile(process.argv[3], JSON.stringify({ selection, packages: [web, database, migrations] }));",
+          "console.log(JSON.stringify({ status: result.status }));",
+        ].join("\n"),
+      );
+      await writeFile(
+        addDriverPath,
+        [
+          'import assert from "node:assert/strict";',
+          'import { readFile } from "node:fs/promises";',
+          'import { contentIdentityKey } from "@ykdz/template-core/content-identity";',
+          'import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";',
+          'import { templateContent } from "@ykdz/template-content";',
+          'const vikePreset = templateContent.find((member) => member.kind === "preset" && member.identity.packageName === "@ykdz/preset-vike-app");',
+          'const libraryPreset = templateContent.find((member) => member.kind === "preset" && member.identity.packageName === "@ykdz/preset-ts-lib");',
+          "assert.ok(vikePreset && libraryPreset);",
+          'const baseline = JSON.parse(await readFile(process.argv[3], "utf8"));',
+          'const result = await createDefaultGenerator({ content: templateContent }).add({ repositoryRoot: process.argv[2], preset: libraryPreset.identity, creationInput: { leafName: "extra-library" } });',
+          'assert.equal(result.status, "success", JSON.stringify(result));',
+          'if (result.status !== "success") process.exit(3);',
+          "assert.ok(result.generationRecord.selections.some((item) => item.presetIdentity !== null && contentIdentityKey(item.presetIdentity) === contentIdentityKey(vikePreset.identity)));",
+          "assert.ok(result.generationRecord.selections.some((item) => item.presetIdentity !== null && contentIdentityKey(item.presetIdentity) === contentIdentityKey(libraryPreset.identity)));",
+          "for (const previous of baseline.packages) { const current = result.generationRecord.packages.find((item) => item.packageDefinitionId === previous.packageDefinitionId); assert.ok(current); assert.deepEqual(current.dependencyBindings, previous.dependencyBindings); }",
+          'const workflow = await readFile(`${process.argv[2]}/.github/workflows/check.yml`, "utf8");',
+          "assert.match(workflow, /name: Full Check/);",
+          "assert.match(workflow, /id: prepare-deployment/);",
+          "assert.match(workflow, /uses: docker\\/setup-buildx-action@/);",
+          'const manifest = JSON.parse(await readFile(`${process.argv[2]}/package.json`, "utf8"));',
+          'assert.match(manifest.scripts["database:prepare:e2e"], /DATABASE_PROFILE=e2e/);',
+          "assert.match(manifest.scripts.deployment, /check-standalone-deployment/);",
+          'for (const path of ["Dockerfile", ".dockerignore", "scripts/container-entrypoint.sh", "scripts/check-standalone-deployment.ts"]) await readFile(`${process.argv[2]}/${path}`);',
+          "console.log(JSON.stringify({ status: result.status }));",
+        ].join("\n"),
+      );
+
+      const driverOptions = {
+        cwd: consumerRoot,
+        env: {
+          ...process.env,
+          NODE_OPTIONS: "--no-global-search-paths",
+          NODE_PATH: "",
+        },
+      };
+      const initialized = await execa(
+        process.execPath,
+        [initDriverPath, targetRoot, baselinePath],
+        driverOptions,
+      );
+      assert.equal(JSON.parse(initialized.stdout).status, "success");
+      const retainedPaths = [
+        "Dockerfile",
+        ".dockerignore",
+        "scripts/container-entrypoint.sh",
+        "scripts/check-standalone-deployment.ts",
+        ".github/workflows/check.yml",
+      ] as const;
+      const retainedBeforeAdd = await Promise.all(
+        retainedPaths.map(
+          async (relativePath) =>
+            await readFile(path.join(targetRoot, relativePath), "utf8"),
+        ),
+      );
+      const initialManifest = JSON.parse(
+        await readFile(path.join(targetRoot, "package.json"), "utf8"),
+      ) as { readonly scripts: Readonly<Record<string, string>> };
+
+      const added = await execa(
+        process.execPath,
+        [addDriverPath, targetRoot, baselinePath],
+        driverOptions,
+      );
+      assert.equal(JSON.parse(added.stdout).status, "success");
+      assert.deepEqual(
+        await Promise.all(
+          retainedPaths.map(
+            async (relativePath) =>
+              await readFile(path.join(targetRoot, relativePath), "utf8"),
+          ),
+        ),
+        retainedBeforeAdd,
+      );
+      const addedManifest = JSON.parse(
+        await readFile(path.join(targetRoot, "package.json"), "utf8"),
+      ) as { readonly scripts: Readonly<Record<string, string>> };
+      for (const script of [
+        "database:prepare:dev",
+        "database:prepare:test",
+        "database:prepare:e2e",
+        "deployment",
+      ]) {
+        assert.equal(
+          addedManifest.scripts[script],
+          initialManifest.scripts[script],
+        );
+      }
+      console.log(
+        JSON.stringify({
+          collection: {
+            name: prepared.collection.name,
+            version: prepared.collection.version,
+            sha256: prepared.collection.sha256,
+          },
+          owners: prepared.owners.map(({ member, packed }) => ({
+            identity: member.identity,
+            name: packed.name,
+            version: packed.version,
+            sha256: packed.sha256,
+          })),
+          sdkPackages: prepared.sdkPackages.map(
+            ({ name, version, sha256 }) => ({ name, version, sha256 }),
+          ),
         }),
       );
     } finally {

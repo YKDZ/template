@@ -38,6 +38,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
+    "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",
