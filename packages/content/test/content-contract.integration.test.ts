@@ -120,6 +120,7 @@ async function prepareSourceCollection(
               types: "./dist/index.d.ts",
               default: "./dist/index.js",
             },
+            "./source": "./src/index.ts",
           },
           dependencies,
         },
@@ -171,7 +172,7 @@ async function prepareSourceCollection(
   await mkdir(path.join(sourceRoot, "src"), { recursive: true });
   const providerImports = providers.map(
     (provider, index) =>
-      `import { templateContent as provider${index} } from ${JSON.stringify(provider.name)};`,
+      `import { templateContent as provider${index} } from ${JSON.stringify(`${provider.name}/source`)};`,
   );
   await writeFile(
     path.join(sourceRoot, "package.json"),

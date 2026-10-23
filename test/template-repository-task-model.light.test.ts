@@ -125,6 +125,7 @@ void describe("Template Repository native task model", () => {
     ] as const)
       assert.ok(packageTags.get(name)?.includes(tag));
     assert.ok(packageTags.has("@ykdz/reference-tooling-config"));
+    assert.ok(packageTags.get("@ykdz/tooling-config")?.includes("native"));
 
     for (const task of nativeTaskByName(directory).values()) {
       if (task.command !== null) {
@@ -173,6 +174,14 @@ void describe("Template Repository native task model", () => {
         ?.tags,
       [],
     );
+    const staticConfigBuild = buildTasks.get("@ykdz/tooling-config#build");
+    assert.ok(staticConfigBuild);
+    assert.equal(staticConfigBuild.command, "<NONEXISTENT>");
+    assert.deepEqual(staticConfigBuild.resolvedTaskDefinition.dependsOn, []);
+    assert.deepEqual(
+      nativeTaskByName(directory).get("@ykdz/tooling-config#build")?.tags,
+      [],
+    );
     for (const [consumer, dependencies] of [
       [
         "@ykdz/template#build",
@@ -181,19 +190,20 @@ void describe("Template Repository native task model", () => {
           "@ykdz/template-content#build",
           "@ykdz/template-core#build",
           "@ykdz/template-workspace#build",
+          "@ykdz/tooling-config#build",
         ],
       ],
       [
         "@ykdz/template-checks#build",
         [
           "@ykdz/reference-ts-cli#build",
-          "@ykdz/reference-tooling-config#build",
           "@ykdz/template-content#build",
           "@ykdz/template-core#build",
           "@ykdz/template-generator#build",
           "@ykdz/template-workspace#build",
           "@ykdz/template-workspace-authoring#build",
           "@ykdz/reference-workspace-root#build",
+          "@ykdz/tooling-config#build",
         ],
       ],
     ] as const)

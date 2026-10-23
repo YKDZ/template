@@ -60,6 +60,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@ykdz/tooling-config": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

@@ -74,6 +74,7 @@ export const referencePackage = defineReferencePackage({
     { path: "vitest.config.ts" },
   ],
   templateDependencies: [
+    { name: "@ykdz/tooling-config", purpose: "template-build" },
     { name: "@ykdz/reference-tooling-config", purpose: "target" },
     {
       name: "@ykdz/reference-tooling-config",

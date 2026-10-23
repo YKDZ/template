@@ -46,6 +46,7 @@ export const referencePackage = defineReferencePackage({
     { path: "turbo.json" },
   ],
   templateDependencies: [
+    { name: "@ykdz/tooling-config", purpose: "template-build" },
     {
       name: "@ykdz/reference-tooling-config",
       purpose: "target",

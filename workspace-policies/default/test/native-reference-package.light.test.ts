@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
 import type { PackageBinding } from "@ykdz/template-core/reference-package";
+import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
 
 import { defineReferencePackage } from "../src/reference-package.ts";
 
@@ -140,6 +141,192 @@ await test("原生作者factory只准备快照并把完整原生文档留给组�
       contribution.facts.manifest,
       manifest,
       "manifest暴露事实应与最终原生文档使用同一值",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+await test("通过公开来源别名投影外部资源且求值只用准备快照", async () => {
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "native-reference-source-"),
+  );
+  const staticRoot = path.join(root, "static");
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await mkdir(path.join(root, "template-dist"), { recursive: true });
+    await mkdir(staticRoot, { recursive: true });
+    const configContent = '{"strict":true}\n';
+    await writeFile(
+      path.join(root, "src/index.ts"),
+      'import type { Tool } from "@fixture/tooling-source/node.json";\n',
+    );
+    await writeFile(
+      path.join(root, "tsconfig.json"),
+      JSON.stringify({ extends: "@fixture/tooling-source/node.json" }),
+    );
+    await writeFile(path.join(root, "template-dist/definition.js"), "");
+    await writeFile(path.join(root, "template-dist/definition.d.ts"), "");
+    await writeFile(path.join(staticRoot, "base.json"), configContent);
+    await chmod(path.join(staticRoot, "base.json"), 0o751);
+
+    const owner = defineReferencePackage({
+      manifest: {
+        name: "@fixture/library",
+        version: "1.0.0",
+        type: "module",
+        exports: {
+          "./reference": "./package.json",
+          "./template": {
+            types: "./template-dist/definition.d.ts",
+            default: "./template-dist/definition.js",
+          },
+        },
+        devDependencies: {
+          "@fixture/tooling-source": "workspace:*",
+          "@fixture/tooling-config": "workspace:*",
+          "@fixture/template-runtime": "workspace:*",
+        },
+      },
+      resourceRoot: pathToFileURL(`${root}${path.sep}`),
+      alias: "library",
+      instance: "independent",
+      defaultLeafName: "lib",
+      role: "shared-library",
+      resources: [
+        { path: "src/index.ts" },
+        { path: "tsconfig.json" },
+        {
+          path: "base.json",
+          targetPath: "base.json",
+          source: createTemplateSourceHandle(
+            path.join(staticRoot, "base.json"),
+          ),
+          mode: 0o751,
+        },
+      ],
+      targetExports: { "./base.json": "./base.json" },
+      templateScripts: [],
+      templateExports: ["./reference", "./template"],
+      templateDependencies: [
+        { name: "@fixture/tooling-source", purpose: "template-build" },
+        { name: "@fixture/template-runtime", purpose: "template-execution" },
+      ],
+      executionDependencies: ["@fixture/template-runtime"],
+      dependencies: [
+        {
+          key: "tooling-config",
+          ownerLocal: {
+            specifier: "@fixture/tooling-config/template",
+            resolve: () =>
+              "file:///fixture/tooling-config/template/definition.js",
+          },
+        },
+      ],
+    });
+
+    const prepared = owner.prepare({ excludedPackagePaths: [] });
+    const artifact = owner.prepareArtifact();
+    const preparedConfig = prepared.resources.find(
+      ({ path: resourcePath }) => resourcePath === "base.json",
+    );
+    const artifactConfig = artifact.resources.find(
+      ({ path: resourcePath }) => resourcePath === "base.json",
+    );
+    assert.ok(preparedConfig);
+    assert.ok(artifactConfig);
+    assert.equal(
+      new TextDecoder().decode(preparedConfig.content),
+      configContent,
+    );
+    assert.deepEqual(artifactConfig.data, preparedConfig.content);
+    assert.equal(preparedConfig.mode, 0o111);
+    assert.equal(artifactConfig.mode, 0o751);
+
+    await rm(root, { recursive: true, force: true });
+    const contribution = owner.evaluate({
+      packageDefinitionId:
+        "package-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      definition: {
+        packageDefinitionId:
+          "package-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        ...owner.createDefinition({
+          conventions: {
+            repositoryName: "sample",
+            defaultPackageScope: "sample",
+          },
+          creationInput: undefined,
+        }),
+      },
+      createdBy: "initialization",
+      creationInput: undefined,
+      prepared,
+      bindings: new Map([
+        [
+          "tooling-config",
+          {
+            packageDefinitionId:
+              "package-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            contentIdentity: {
+              namespace: "fixture",
+              packageName: "@fixture/tooling-config",
+              exportPath: "./template",
+            },
+            definition: {
+              packageDefinitionId:
+                "package-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              name: "@sample/tooling-config",
+              path: "packages/tooling-config",
+              role: "shared-library",
+            },
+            facts: { sourcePackageName: "@fixture/tooling-source" },
+          } satisfies PackageBinding,
+        ],
+      ]),
+      conventions: { repositoryName: "sample", defaultPackageScope: "sample" },
+      stableCommon: undefined,
+      packageInput: undefined,
+    });
+
+    const index = contribution.files.find(({ path: filePath }) =>
+      filePath.endsWith("src/index.ts"),
+    );
+    assert.ok(index);
+    assert.match(
+      new TextDecoder().decode(index.content),
+      /@sample\/tooling-config\/node\.json/u,
+    );
+    const config = contribution.files.find(
+      ({ path: filePath }) => filePath === "base.json",
+    );
+    assert.ok(config);
+    assert.deepEqual(config.content, preparedConfig.content);
+    assert.equal(config.mode, 0o111);
+    const tsconfig = contribution.facts.nativeDocuments.find(
+      ({ path: documentPath }) => documentPath === "tsconfig.json",
+    );
+    assert.equal(
+      tsconfig?.value.extends as string | undefined,
+      "@sample/tooling-config/node.json",
+    );
+    const manifest = contribution.facts.nativeDocuments.find(
+      ({ path: documentPath }) => documentPath === "package.json",
+    )?.value;
+    assert.ok(manifest);
+    assert.deepEqual(manifest.exports, {
+      "./base.json": "./base.json",
+    });
+    assert.equal(
+      (manifest.devDependencies as Record<string, string>)[
+        "@sample/tooling-source"
+      ],
+      undefined,
+    );
+    assert.equal(
+      (manifest.devDependencies as Record<string, string>)[
+        "@sample/tooling-config"
+      ],
+      "workspace:*",
     );
   } finally {
     await rm(root, { recursive: true, force: true });

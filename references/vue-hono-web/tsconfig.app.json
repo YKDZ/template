@@ -1,7 +1,7 @@
 {
   "extends": [
     "@vue/tsconfig/tsconfig.dom.json",
-    "@ykdz/reference-tooling-config/base.json"
+    "@ykdz/tooling-config/base.json"
   ],
   "compilerOptions": {
     "composite": true,

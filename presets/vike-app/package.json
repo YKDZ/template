@@ -47,6 +47,7 @@
     "@ykdz/reference-ts-lib": "workspace:*",
     "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
+    "@ykdz/tooling-config": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

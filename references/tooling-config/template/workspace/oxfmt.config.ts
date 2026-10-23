@@ -1,1 +1,1 @@
-export { default } from "@ykdz/reference-tooling-config/oxfmt";
+export { default } from "@ykdz/tooling-config/oxfmt";

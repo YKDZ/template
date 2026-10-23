@@ -6,6 +6,7 @@ import {
   readFile,
   readdir,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -142,6 +143,37 @@ await it(
           "@ykdz/reference-workspace-root",
         ].toSorted(),
       );
+      const staticManifest = JSON.parse(
+        await readFile(
+          fileURLToPath(import.meta.resolve("@ykdz/tooling-config/reference")),
+          "utf8",
+        ),
+      ) as { readonly exports: Readonly<Record<string, string>> };
+      const staticExports = Object.entries(staticManifest.exports).filter(
+        ([exportPath]) => exportPath !== "./reference",
+      );
+      const toolingOwner = prepared.owners.find(
+        ({ member }) =>
+          member.identity.packageName === "@ykdz/reference-tooling-config",
+      );
+      assert.ok(toolingOwner);
+      for (const [exportPath, resourceTarget] of staticExports) {
+        const resourcePath = resourceTarget.slice(2);
+        const sourcePath = fileURLToPath(
+          import.meta.resolve(`@ykdz/tooling-config${exportPath.slice(1)}`),
+        );
+        const artifactResource:
+          | (typeof toolingOwner.artifact.resources)[number]
+          | undefined = toolingOwner.artifact.resources.find(
+          ({ path: artifactPath }) => artifactPath === resourcePath,
+        );
+        assert.ok(artifactResource);
+        assert.deepEqual(artifactResource.data, await readFile(sourcePath));
+        assert.equal(
+          artifactResource.mode,
+          (await stat(sourcePath)).mode & 0o777,
+        );
+      }
       const workspaceSdk = prepared.sdkPackages.find(
         ({ name }) => name === "@ykdz/template-workspace",
       );
@@ -197,10 +229,54 @@ await it(
         readonly devDependencies: Readonly<Record<string, string>>;
         readonly scripts: Readonly<Record<string, string>>;
       };
+      const generatedToolingManifest = JSON.parse(
+        await readFile(
+          path.join(targetRoot, "packages/tooling-config/package.json"),
+          "utf8",
+        ),
+      ) as {
+        readonly exports: Readonly<Record<string, unknown>>;
+        readonly devDependencies: Readonly<Record<string, string>>;
+      };
+      assert.deepEqual(
+        generatedToolingManifest.exports,
+        Object.fromEntries(staticExports),
+      );
+      assert.equal(
+        rootManifest.devDependencies["@ykdz/tooling-config"],
+        undefined,
+      );
+      assert.equal(
+        generatedToolingManifest.devDependencies["@ykdz/tooling-config"],
+        undefined,
+      );
       assert.equal(rootManifest.private, true);
       assert.equal(
         rootManifest.devDependencies["@demo/tooling-config"],
         "workspace:./packages/tooling-config",
+      );
+      assert.equal(
+        JSON.parse(
+          await readFile(path.join(targetRoot, "tsconfig.config.json"), "utf8"),
+        ).extends,
+        "@demo/tooling-config/node.json",
+      );
+      assert.equal(
+        JSON.parse(
+          await readFile(
+            path.join(targetRoot, "packages/lib/tsconfig.node.json"),
+            "utf8",
+          ),
+        ).extends,
+        "@demo/tooling-config/node.json",
+      );
+      assert.match(
+        await readFile(path.join(targetRoot, "oxlint.config.ts"), "utf8"),
+        /@demo\/tooling-config\/oxlint/u,
+      );
+      assert.match(
+        await readFile(path.join(targetRoot, "oxfmt.config.ts"), "utf8"),
+        /@demo\/tooling-config\/oxfmt/u,
       );
       assert.equal(
         rootManifest.scripts["publication:pack"],

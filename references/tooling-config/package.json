@@ -4,16 +4,12 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./base.json": "./base.json",
-    "./oxlint": "./oxlint.config.ts",
-    "./oxfmt": "./oxfmt.config.ts",
     "./reference": "./package.json",
     "./template": {
       "source": "./template/definition.ts",
       "types": "./template-dist/definition.d.ts",
       "default": "./template-dist/definition.js"
-    },
-    "./node.json": "./node.json"
+    }
   },
   "scripts": {
     "check:author-planning-roles": "pnpm --workspace-root run author-planning-roles:workspace -- --owner-directory \"$PWD\"",
@@ -26,7 +22,9 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@ykdz/template-core": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
+    "@ykdz/tooling-config": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

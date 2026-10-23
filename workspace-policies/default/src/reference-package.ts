@@ -15,7 +15,10 @@ import type {
   ReferencePackageDefinition,
   ResourceFileSnapshot,
 } from "@ykdz/template-core/reference-package";
-import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
+import {
+  createTemplateSourceHandle,
+  type TemplateSourceHandle,
+} from "@ykdz/template-core/template-source";
 import {
   defineNativeReferenceContentArtifact,
   type NativeContentArtifactResource,
@@ -149,6 +152,8 @@ export type ReferenceDependencyUse = {
 export type NativeReferenceResourceMapping = {
   /** 所属包内的资源路径。 */
   readonly path: string;
+  /** 由所属作者通过公开包入口解析得到的外部资源句柄。 */
+  readonly source?: TemplateSourceHandle;
   /** 生成目标包内的路径；组合资源不属于当前包时省略。 */
   readonly targetPath?: string;
   /** 只作为 owner 准备输入，不复制到目标包。 */
@@ -247,25 +252,29 @@ function ownerResource(
   mapping: NativeReferenceResourceMapping,
 ): NativeContentArtifactResource {
   const resourcePath = normalizeResourcePath(mapping.path);
-  const absolutePath = path.resolve(
-    fileURLToPath(resourceRoot),
-    ...resourcePath.split("/"),
-  );
-  const rootPath = path.resolve(fileURLToPath(resourceRoot));
-  const relative = path.relative(rootPath, absolutePath);
-  if (
-    relative === ".." ||
-    relative.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relative)
-  ) {
-    throw new Error(`原生参考包资源越过所属包目录：${mapping.path}`);
+  let source = mapping.source;
+  if (source === undefined) {
+    const absolutePath = path.resolve(
+      fileURLToPath(resourceRoot),
+      ...resourcePath.split("/"),
+    );
+    const rootPath = path.resolve(fileURLToPath(resourceRoot));
+    const relative = path.relative(rootPath, absolutePath);
+    if (
+      relative === ".." ||
+      relative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relative)
+    ) {
+      throw new Error(`原生参考包资源越过所属包目录：${mapping.path}`);
+    }
+    source = createTemplateSourceHandle(absolutePath);
   }
   return {
     path: resourcePath,
     ...(mapping.targetPath === undefined
       ? {}
       : { targetPath: normalizeResourcePath(mapping.targetPath) }),
-    source: createTemplateSourceHandle(absolutePath),
+    source,
     mode: mapping.mode ?? 0o644,
   };
 }
@@ -475,12 +484,14 @@ function isNativeDocumentPath(resourcePath: string): boolean {
 
 function packageNameMapping(options: {
   readonly ownerPackageName: string;
+  readonly sourcePackageName: string;
   readonly definition: { readonly name: string; readonly path: string };
   readonly dependencies: readonly ReferenceDependency[];
   readonly bindings: ReadonlyMap<string, PackageBinding>;
 }): Map<string, string> {
   const names = new Map<string, string>([
     [options.ownerPackageName, options.definition.name],
+    [options.sourcePackageName, options.definition.name],
   ]);
   for (const dependency of options.dependencies) {
     const binding = options.bindings.get(dependency.key);
@@ -488,6 +499,12 @@ function packageNameMapping(options: {
       throw new Error(`原生参考依赖缺少提供者绑定：${dependency.key}`);
     }
     names.set(binding.contentIdentity.packageName, binding.definition.name);
+    if (
+      isRecord(binding.facts) &&
+      typeof binding.facts.sourcePackageName === "string"
+    ) {
+      names.set(binding.facts.sourcePackageName, binding.definition.name);
+    }
   }
   return names;
 }
@@ -504,7 +521,7 @@ function outputManifest(options: {
   readonly dependencies: readonly ReferenceDependency[];
   readonly templateDependencies: readonly ReferenceTemplateDependency[];
   readonly templateScripts: readonly string[];
-  readonly templateExports: readonly string[];
+  readonly targetExports: Readonly<Record<string, unknown>>;
   readonly names: ReadonlyMap<string, string>;
 }): Readonly<Record<string, unknown>> {
   const manifest = mapPackageNamesInJson(
@@ -513,14 +530,10 @@ function outputManifest(options: {
   ) as Record<string, unknown>;
   manifest.name = options.definition.name;
 
-  const exports = isRecord(manifest.exports) ? { ...manifest.exports } : {};
-  for (const name of [
-    "./reference",
-    "./template",
-    ...options.templateExports,
-  ]) {
-    delete exports[name];
-  }
+  const exports = mapPackageNamesInJson(
+    structuredClone(options.targetExports),
+    options.names,
+  ) as Record<string, unknown>;
   if (Object.keys(exports).length > 0) manifest.exports = exports;
   else delete manifest.exports;
 
@@ -709,6 +722,10 @@ export function defineReferencePackage<
   OwnerFacts = undefined,
 >(options: {
   readonly manifest: ReferencePackageManifest;
+  /** 可选的作者包名别名；生成时映射到当前目标包。 */
+  readonly sourcePackageName?: string;
+  /** 原生内容为目标清单提供的完整公开导出面。 */
+  readonly targetExports?: Readonly<Record<string, unknown>>;
   readonly artifactVersion?: string;
   readonly resourceRoot: URL;
   readonly alias: string;
@@ -854,11 +871,13 @@ export function defineReferencePackage<
     ...templateExports,
   ]);
   const targetExports = Object.freeze(
-    Object.fromEntries(
-      Object.entries(options.manifest.exports ?? {}).filter(
-        ([name]) => !removedExports.has(name),
-      ),
-    ),
+    options.targetExports === undefined
+      ? Object.fromEntries(
+          Object.entries(options.manifest.exports ?? {}).filter(
+            ([name]) => !removedExports.has(name),
+          ),
+        )
+      : { ...options.targetExports },
   );
   const targetDependencyKeys = Object.freeze(
     contentDependencies
@@ -930,6 +949,7 @@ export function defineReferencePackage<
     ): PackageContribution<DefaultReferenceContributionFacts<OwnerFacts>> {
       const names = packageNameMapping({
         ownerPackageName: options.manifest.name,
+        sourcePackageName: options.sourcePackageName ?? options.manifest.name,
         definition: input.definition,
         dependencies: contentDependencies,
         bindings: input.bindings,
@@ -943,7 +963,7 @@ export function defineReferencePackage<
         dependencies: contentDependencies,
         templateDependencies,
         templateScripts,
-        templateExports,
+        targetExports,
         names,
       });
       const manifest =
@@ -1102,7 +1122,7 @@ export function defineReferencePackage<
           ? options.ciDiagnosticArtifacts(evaluationContext)
           : (options.ciDiagnosticArtifacts ?? []);
       const facts: DefaultReferenceContributionFacts<OwnerFacts> = {
-        sourcePackageName: options.manifest.name,
+        sourcePackageName: options.sourcePackageName ?? options.manifest.name,
         manifest,
         exposure: {
           exports: exposureExports,
