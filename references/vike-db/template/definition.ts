@@ -64,7 +64,8 @@ export const referencePackage = defineReferencePackage({
       name: "@ykdz/template-workspace",
       purpose: "template-execution",
     },
-    { name: "typescript-7", purpose: "template-execution" },
+    { name: "typescript-7", purpose: "target" },
+    { name: "typescript-7", purpose: "template-build" },
   ],
   executionDependencies: [
     "@ykdz/template-core",

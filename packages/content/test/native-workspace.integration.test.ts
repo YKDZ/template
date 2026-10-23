@@ -483,6 +483,33 @@ await it(
           member.identity.packageName === "@ykdz/reference-vike-web",
       );
       assert.ok(webOwner);
+      for (const owner of prepared.owners.filter(({ member }) =>
+        [
+          "@ykdz/reference-vike-web",
+          "@ykdz/reference-vike-db",
+          "@ykdz/reference-vike-migrations",
+        ].includes(member.identity.packageName),
+      )) {
+        assert.deepEqual(
+          owner.artifact.dependencies.find(
+            ({ name }) => name === "typescript-7",
+          )?.purposes,
+          owner.member.identity.packageName === "@ykdz/reference-vike-web"
+            ? []
+            : ["target"],
+        );
+        const archiveManifest = JSON.parse(
+          await readFile(path.join(owner.installRoot, "package.json"), "utf8"),
+        ) as {
+          readonly dependencies?: Readonly<Record<string, string>>;
+          readonly devDependencies?: Readonly<Record<string, string>>;
+        };
+        assert.equal(archiveManifest.dependencies?.["typescript-7"], undefined);
+        assert.equal(
+          archiveManifest.devDependencies?.["typescript-7"],
+          undefined,
+        );
+      }
       assert.deepEqual(
         webOwner.artifact.dependencies.find(({ name }) => name === "vike")
           ?.purposes,
@@ -503,6 +530,35 @@ await it(
       await execa("pnpm", ["add", workspaceSdk.tarball], {
         cwd: consumerRoot,
       });
+      const installedPackages = JSON.parse(
+        (
+          await execa("pnpm", ["list", "--depth", "Infinity", "--json"], {
+            cwd: consumerRoot,
+          })
+        ).stdout,
+      ) as readonly {
+        readonly dependencies?: Readonly<Record<string, unknown>>;
+      }[];
+      const installedDependencyNames = new Set<string>();
+      const visitDependencies = (
+        dependencies: Readonly<Record<string, unknown>> | undefined,
+      ): void => {
+        for (const [name, dependency] of Object.entries(dependencies ?? {})) {
+          installedDependencyNames.add(name);
+          if (typeof dependency !== "object" || dependency === null) continue;
+          const nested = dependency as {
+            readonly dependencies?: Readonly<Record<string, unknown>>;
+            readonly optionalDependencies?: Readonly<Record<string, unknown>>;
+          };
+          visitDependencies(nested.dependencies);
+          visitDependencies(nested.optionalDependencies);
+        }
+      };
+      for (const installedPackage of installedPackages) {
+        visitDependencies(installedPackage.dependencies);
+      }
+      assert.ok(installedDependencyNames.has("typescript"));
+      assert.ok(!installedDependencyNames.has("typescript-7"));
       const targetRoot = path.join(consumerRoot, "project", "vike-demo");
       const installedCollection = path.join(
         consumerRoot,

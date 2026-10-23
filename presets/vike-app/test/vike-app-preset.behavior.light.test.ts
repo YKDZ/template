@@ -222,6 +222,21 @@ void describe("Vike 应用组合预设公开行为", () => {
     );
     assert.equal(database.createdBy, "initialization");
 
+    const webManifest = await readJson<{
+      devDependencies?: Record<string, string>;
+    }>(path.join(targetRoot, "apps/web/package.json"));
+    assert.ok(webManifest.devDependencies?.typescript);
+    assert.equal(webManifest.devDependencies?.["typescript-7"], undefined);
+    for (const packagePath of ["packages/db", "packages/db-migrations"]) {
+      const manifest = await readJson<{
+        devDependencies?: Record<string, string>;
+      }>(path.join(targetRoot, packagePath, "package.json"));
+      assert.ok(
+        manifest.devDependencies?.["typescript-7"],
+        `${packagePath} 应声明运行其目标 TypeScript 检查所需的编译器`,
+      );
+    }
+
     const rootManifest = await readJson<{
       scripts: Record<string, string>;
     }>(path.join(targetRoot, "package.json"));
