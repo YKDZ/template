@@ -49,10 +49,12 @@ import {
   selectTemplateDependencyCatalogEntries,
 } from "./dependency-catalog.ts";
 import {
+  browserTestDevelopmentContainerToolLayer,
   prepareBuiltInDevelopmentContainerResources,
   prepareBuiltInEditorCustomizationDeclarations,
   projectBuiltInDevelopmentContainer,
   projectBuiltInEditorCustomization,
+  shellCheckDevelopmentContainerToolLayer,
 } from "./development-environment.ts";
 import type { EditorCustomizationCapability } from "./editor-customization.ts";
 import type {
@@ -1686,12 +1688,51 @@ export function createDefaultComposition(options: {
         }),
         combineOptions.stableCommon.resources.editor,
       );
+      const checkNeeds: CheckEnvironmentNeed[] = [];
+      const deploymentNeeds: DeploymentEnvironmentNeed[] = [];
+      for (const need of [
+        ...allFacts.flatMap((facts) => facts.environmentNeeds),
+        ...sharedRoot.environmentNeeds.check,
+        ...sharedRoot.environmentNeeds.deployment,
+      ]) {
+        if (need.kind === "docker-engine") deploymentNeeds.push(need);
+        else checkNeeds.push(need);
+      }
+      const environmentNeeds = normalizeEnvironmentNeeds({
+        check: checkNeeds,
+        deployment: deploymentNeeds,
+      });
       const developmentContainerLayers = allFacts.flatMap((facts) => {
         const layers = facts.foundation.developmentContainerToolLayers;
         return Array.isArray(layers)
           ? (layers as DevelopmentContainerToolLayer[])
           : [];
       });
+      if (
+        environmentNeeds.check.some(
+          (need) => need.kind === "playwright-browser-assets",
+        )
+      ) {
+        const playwrightVersion =
+          dependencyCatalog["@playwright/test"] ?? dependencyCatalog.playwright;
+        if (playwrightVersion === undefined) {
+          throw new Error(
+            "声明Playwright浏览器环境需求的内容必须在实际模板依赖目录中提供playwright或@playwright/test版本",
+          );
+        }
+        developmentContainerLayers.push(
+          browserTestDevelopmentContainerToolLayer(playwrightVersion),
+        );
+      }
+      if (
+        environmentNeeds.check.some(
+          (need) => need.kind === "shellcheck-command",
+        )
+      ) {
+        developmentContainerLayers.push(
+          shellCheckDevelopmentContainerToolLayer(),
+        );
+      }
       const developmentContainer = projectBuiltInDevelopmentContainer({
         nodeVersion: combineOptions.stableCommon.nodeDeclaration,
         layers: developmentContainerLayers,
@@ -1975,20 +2016,6 @@ export function createDefaultComposition(options: {
         }
       }
 
-      const checkNeeds: CheckEnvironmentNeed[] = [];
-      const deploymentNeeds: DeploymentEnvironmentNeed[] = [];
-      for (const need of [
-        ...allFacts.flatMap((facts) => facts.environmentNeeds),
-        ...sharedRoot.environmentNeeds.check,
-        ...sharedRoot.environmentNeeds.deployment,
-      ]) {
-        if (need.kind === "docker-engine") deploymentNeeds.push(need);
-        else checkNeeds.push(need);
-      }
-      const environmentNeeds = normalizeEnvironmentNeeds({
-        check: checkNeeds,
-        deployment: deploymentNeeds,
-      });
       const dockerfileText =
         dockerfile.kind === "writeText" ? dockerfile.text : "";
 
