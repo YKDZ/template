@@ -191,6 +191,7 @@ export type DefaultStableCommon = {
   readonly rootDeclarations: readonly DefaultRootDeclaration[];
   readonly rootAttachmentIdentities: readonly ContentIdentity[];
   readonly presetRootContributions: readonly PreparedDefaultPresetRootContribution[];
+  readonly existingPackageDefinitionIds: ReadonlySet<PackageDefinitionId>;
   readonly targetManifests: ReadonlyMap<
     PackageDefinitionId,
     Readonly<Record<string, unknown>>
@@ -811,6 +812,7 @@ function requestsInjectedProvider(
 function linkedManifestOverrides(options: {
   readonly packages: readonly DefaultEvaluation[];
   readonly intents: readonly PackageLinkIntent[];
+  readonly existingPackageDefinitionIds: DefaultStableCommon["existingPackageDefinitionIds"];
   readonly targetManifests: DefaultStableCommon["targetManifests"];
 }): ReadonlyMap<PackageDefinitionId, Readonly<Record<string, unknown>>> {
   const byId = new Map(
@@ -821,10 +823,10 @@ function linkedManifestOverrides(options: {
   const getOverride = (item: DefaultEvaluation): Record<string, unknown> => {
     const existing = overrides.get(item.package.packageDefinitionId);
     if (existing !== undefined) return existing;
-    const next = structuredClone(item.contribution.facts.manifest) as Record<
-      string,
-      unknown
-    >;
+    const next = structuredClone(
+      options.targetManifests.get(item.package.packageDefinitionId) ??
+        item.contribution.facts.manifest,
+    ) as Record<string, unknown>;
     overrides.set(item.package.packageDefinitionId, next);
     return next;
   };
@@ -837,10 +839,30 @@ function linkedManifestOverrides(options: {
     }
     const consumerSource = consumer.contribution.facts.manifest;
     const providerSource = provider.contribution.facts.manifest;
-    const consumerCurrent =
-      options.targetManifests.get(intent.consumerId) ?? consumerSource;
-    const providerCurrent =
-      options.targetManifests.get(intent.providerId) ?? providerSource;
+    const currentManifest = (
+      item: DefaultEvaluation,
+      id: PackageDefinitionId,
+      source: Readonly<Record<string, unknown>>,
+    ): Readonly<Record<string, unknown>> => {
+      const current = options.targetManifests.get(id);
+      if (current !== undefined) return current;
+      if (options.existingPackageDefinitionIds.has(id)) {
+        throw new Error(
+          `包连接缺少当前manifest事实：${item.package.definition.path}`,
+        );
+      }
+      return source;
+    };
+    const consumerCurrent = currentManifest(
+      consumer,
+      intent.consumerId,
+      consumerSource,
+    );
+    const providerCurrent = currentManifest(
+      provider,
+      intent.providerId,
+      providerSource,
+    );
     for (const [item, manifest] of [
       [consumer, consumerCurrent],
       [provider, providerCurrent],
@@ -936,6 +958,7 @@ function linkedManifestOverrides(options: {
 
 function assertUniqueWorkspaceBinaryNames(options: {
   readonly packages: readonly DefaultEvaluation[];
+  readonly targetManifests: DefaultStableCommon["targetManifests"];
   readonly manifestOverrides: ReadonlyMap<
     PackageDefinitionId,
     Readonly<Record<string, unknown>>
@@ -945,6 +968,7 @@ function assertUniqueWorkspaceBinaryNames(options: {
   for (const { package: item, contribution } of options.packages) {
     const manifest =
       options.manifestOverrides.get(item.packageDefinitionId) ??
+      options.targetManifests.get(item.packageDefinitionId) ??
       contribution.facts.manifest;
     if (!isRecord(manifest.bin)) continue;
     for (const commandName of Object.keys(manifest.bin)) {
@@ -1259,6 +1283,8 @@ export function createDefaultComposition(options: {
           rootAttachmentIdentities,
           presetRootContributions:
             resolveOptions.operationFacts.presetRootContributions,
+          existingPackageDefinitionIds:
+            resolveOptions.operationFacts.existingPackageDefinitionIds,
           targetManifests: resolveOptions.operationFacts.targetManifests,
         }),
         packageInputs: new Map(),
@@ -1299,10 +1325,13 @@ export function createDefaultComposition(options: {
       const manifestOverrides = linkedManifestOverrides({
         packages: combineOptions.packages,
         intents: combineOptions.blueprint.packageLinkIntents,
+        existingPackageDefinitionIds:
+          combineOptions.stableCommon.existingPackageDefinitionIds,
         targetManifests: combineOptions.stableCommon.targetManifests,
       });
       assertUniqueWorkspaceBinaryNames({
         packages: combineOptions.packages,
+        targetManifests: combineOptions.stableCommon.targetManifests,
         manifestOverrides,
       });
       const requiredTemplateDependencies = new Set(
