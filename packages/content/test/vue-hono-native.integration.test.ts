@@ -45,8 +45,16 @@ const content = await loadContentSource({
       load: () => import("@ykdz/reference-vue-hono-web/template"),
     },
     {
+      specifier: "@ykdz/reference-vue-app/template",
+      load: () => import("@ykdz/reference-vue-app/template"),
+    },
+    {
       specifier: "@ykdz/preset-vue-hono-app/template",
       load: () => import("@ykdz/preset-vue-hono-app/template"),
+    },
+    {
+      specifier: "@ykdz/preset-vue-app/template",
+      load: () => import("@ykdz/preset-vue-app/template"),
     },
   ],
 });
@@ -56,6 +64,12 @@ const preset = content.find(
     member.identity.packageName === "@ykdz/preset-vue-hono-app",
 );
 assert.ok(preset);
+const vuePreset = content.find(
+  (member) =>
+    member.kind === "preset" &&
+    member.identity.packageName === "@ykdz/preset-vue-app",
+);
+assert.ok(vuePreset);
 
 async function withUnreadableAuthorDirectories<Result>(
   directories: readonly { readonly path: string; readonly mode: number }[],
@@ -77,34 +91,42 @@ async function withUnreadableAuthorDirectories<Result>(
 }
 
 void it(
-  "正式安装Vue-Hono内容后以新进程初始化、加包并运行生成项目任务",
+  "正式安装Vue与Vue-Hono内容后以新进程初始化、加包并运行生成项目任务",
   { timeout: 600_000 },
   async () => {
     const temporaryRoot = await mkdtemp(
-      path.join(tmpdir(), "vue-hono-installed-content-"),
+      path.join(tmpdir(), "vue-vue-hono-installed-content-"),
     );
     await chmod(temporaryRoot, 0o755);
     const preparedRoot = path.join(temporaryRoot, "prepared");
     const consumerRoot = path.join(temporaryRoot, "consumer");
     const projectRoot = path.join(consumerRoot, "project");
     const targetRoot = path.join(projectRoot, "workspace");
+    const vueTargetRoot = path.join(projectRoot, "vue-workspace");
     const temporaryDirectory = path.join(consumerRoot, "tmp");
     const resultPath = path.join(projectRoot, "result.json");
     const snapshotPath = path.join(projectRoot, "init-snapshot.json");
+    const vueResultPath = path.join(projectRoot, "vue-result.json");
+    const vueSnapshotPath = path.join(projectRoot, "vue-init-snapshot.json");
     const authorRootsPath = path.join(projectRoot, "author-roots.json");
     let prepared: PreparedContentCollection | undefined;
     let authorModes: readonly number[] = [];
     let workspaceMode = 0;
     let initialization: unknown;
     let addition: unknown;
+    let vueInitialization: unknown;
+    let vueAddition: unknown;
     let installStdout = "";
     let buildStdout = "";
     let e2eStdout = "";
+    let vueInstallStdout = "";
+    let vueBuildStdout = "";
+    let vueE2eStdout = "";
 
     try {
       prepared = await prepareContentCollection({
         content,
-        roots: [preset],
+        roots: [preset, vuePreset],
         workspaceRoot,
         root: preparedRoot,
       });
@@ -114,8 +136,10 @@ void it(
           .toSorted(),
         [
           "@ykdz/preset-vue-hono-app",
+          "@ykdz/preset-vue-app",
           "@ykdz/reference-hono-api",
           "@ykdz/reference-tooling-config",
+          "@ykdz/reference-vue-app",
           "@ykdz/reference-vue-hono-web",
           "@ykdz/reference-workspace-root",
         ].toSorted(),
@@ -146,61 +170,101 @@ void it(
         JSON.stringify([...authorRoots, workspaceRoot]),
       );
 
-      const driverPath = path.join(projectRoot, "vue-hono-driver.mjs");
+      const driverPath = path.join(projectRoot, "vue-vue-hono-driver.mjs");
       await writeFile(
         driverPath,
         [
           'import assert from "node:assert/strict";',
-          'import { readFile, readdir, writeFile } from "node:fs/promises";',
+          'import { chmod, readFile, readdir, stat, writeFile } from "node:fs/promises";',
           'import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";',
           'import { templateContent } from "@ykdz/template-content";',
           "const [phase, targetRoot, snapshotPath, resultPath, authorRootsPath] = process.argv.slice(2);",
+          'const vueOnly = phase.startsWith("vue-");',
+          'const initialize = phase.endsWith("init");',
+          'const presetName = vueOnly ? "@ykdz/preset-vue-app" : "@ykdz/preset-vue-hono-app";',
+          'const additionName = vueOnly ? "@ykdz/reference-vue-app" : "@ykdz/reference-hono-api";',
+          'const additionInput = vueOnly ? { leafName: "portal", packagePath: "apps/portal" } : { leafName: "support-api", packagePath: "apps/support-api" };',
           'for (const root of JSON.parse(await readFile(authorRootsPath, "utf8"))) await assert.rejects(readdir(root), { code: "EACCES" });',
-          'const preset = templateContent.find((member) => member.kind === "preset" && member.identity.packageName === "@ykdz/preset-vue-hono-app");',
-          'const api = templateContent.find((member) => member.kind === "reference" && member.identity.packageName === "@ykdz/reference-hono-api");',
-          "assert.ok(preset && api);",
+          'const preset = templateContent.find((member) => member.kind === "preset" && member.identity.packageName === presetName);',
+          'const additionContent = templateContent.find((member) => member.kind === "reference" && member.identity.packageName === additionName);',
+          "assert.ok(preset && additionContent);",
           "const generator = createDefaultGenerator({ content: templateContent });",
-          'const result = phase === "init"',
-          '  ? await generator.init({ targetRoot, selection: { presets: [{ contentIdentity: preset.identity }] }, conventions: { repositoryName: "installed-vue-hono", defaultPackageScope: "demo" } })',
-          '  : await generator.add({ repositoryRoot: targetRoot, contentIdentity: api.identity, creationInput: { leafName: "support-api", packagePath: "apps/support-api" } });',
+          'const readText = async (relativePath) => await readFile(`${targetRoot}/${relativePath}`, "utf8");',
+          "let customizedWeb;",
+          "let customizedApi;",
+          "if (!initialize) {",
+          '  const webSourcePath = "apps/web/src/App.vue";',
+          "  customizedWeb = `${await readText(webSourcePath)}\\n<!-- 用户页面定制 -->\\n`;",
+          "  await writeFile(`${targetRoot}/${webSourcePath}`, customizedWeb);",
+          "  await chmod(`${targetRoot}/${webSourcePath}`, 0o640);",
+          "  if (!vueOnly) {",
+          '    const apiSourcePath = "apps/api/src/server.ts";',
+          "    customizedApi = `${await readText(apiSourcePath)}\\n// 用户 API 定制\\n`;",
+          "    await writeFile(`${targetRoot}/${apiSourcePath}`, customizedApi);",
+          "  }",
+          '  const rootManifest = JSON.parse(await readText("package.json"));',
+          '  rootManifest.scripts["custom:workspace"] = "echo retained";',
+          "  await writeFile(`${targetRoot}/package.json`, `${JSON.stringify(rootManifest, null, 2)}\\n`);",
+          "}",
+          "const result = initialize",
+          '  ? await generator.init({ targetRoot, selection: { presets: [{ contentIdentity: preset.identity }] }, conventions: { repositoryName: vueOnly ? "installed-vue" : "installed-vue-hono", defaultPackageScope: "demo" } })',
+          "  : await generator.add({ repositoryRoot: targetRoot, contentIdentity: additionContent.identity, creationInput: additionInput });",
           'assert.equal(result.status, "success", JSON.stringify(result));',
           'const root = result.blueprint.packages.find(({ path }) => path === ".");',
           "assert.ok(root);",
-          'const readText = async (relativePath) => await readFile(`${targetRoot}/${relativePath}`, "utf8");',
-          'const files = Object.fromEntries(await Promise.all(["playwright.config.ts", "test/e2e/app.spec.ts", "test/e2e/fixtures.ts"].map(async (path) => [path, await readText(path)])));',
+          'const files = vueOnly ? {} : Object.fromEntries(await Promise.all(["playwright.config.ts", "test/e2e/app.spec.ts", "test/e2e/fixtures.ts"].map(async (path) => [path, await readText(path)])));',
           'const rootManifest = JSON.parse(await readText("package.json"));',
           'const turbo = JSON.parse(await readText("turbo.json"));',
           "const record = result.generationRecord;",
-          'const selection = record.selections.find(({ presetIdentity }) => presetIdentity?.packageName === "@ykdz/preset-vue-hono-app");',
+          "const selection = record.selections.find(({ presetIdentity }) => presetIdentity?.packageName === presetName);",
           "assert.ok(selection);",
           "const web = record.packages.find(({ packageDefinitionId }) => packageDefinitionId === selection.nodes.web);",
-          "const apiInstance = record.packages.find(({ packageDefinitionId }) => packageDefinitionId === selection.nodes.api);",
-          "assert.ok(web && apiInstance);",
-          'assert.equal(web.dependencyBindings["hono-api"], apiInstance.packageDefinitionId);',
-          "const current = { packagePaths: result.blueprint.packages.map(({ path }) => path).toSorted(), packageDefinitionIds: record.packages.map(({ packageDefinitionId }) => packageDefinitionId).toSorted(), packageLinks: result.blueprint.packageLinkIntents, files, rootScripts: rootManifest.scripts, rootName: rootManifest.name, rootPath: root.path, apiId: apiInstance.packageDefinitionId, webId: web.packageDefinitionId, turboTasks: turbo.tasks };",
-          'if (phase === "init") {',
-          '  assert.equal(rootManifest.scripts["test:e2e"], "playwright test");',
-          "  const apiDefinition = result.blueprint.packages.find(({ packageDefinitionId }) => packageDefinitionId === apiInstance.packageDefinitionId);",
+          "const apiInstance = vueOnly ? undefined : record.packages.find(({ packageDefinitionId }) => packageDefinitionId === selection.nodes.api);",
+          "assert.ok(web && (vueOnly || apiInstance));",
+          'if (!vueOnly) assert.equal(web.dependencyBindings["hono-api"], apiInstance.packageDefinitionId);',
+          "const current = { packagePaths: result.blueprint.packages.map(({ path }) => path).toSorted(), packageDefinitionIds: record.packages.map(({ packageDefinitionId }) => packageDefinitionId).toSorted(), packageLinks: result.blueprint.packageLinkIntents, files, rootScripts: rootManifest.scripts, rootName: rootManifest.name, rootPath: root.path, apiId: apiInstance?.packageDefinitionId, webId: web.packageDefinitionId, turboTasks: turbo.tasks };",
+          "if (initialize) {",
           "  const webDefinition = result.blueprint.packages.find(({ packageDefinitionId }) => packageDefinitionId === web.packageDefinitionId);",
-          "  assert.ok(apiDefinition && webDefinition);",
-          "  const apiManifest = JSON.parse(await readText(`${apiDefinition.path}/package.json`));",
+          "  assert.ok(webDefinition);",
           "  const webManifest = JSON.parse(await readText(`${webDefinition.path}/package.json`));",
-          '  assert.equal(webManifest.dependencies[apiManifest.name], "workspace:*");',
-          '  assert.ok(files["playwright.config.ts"].includes(`const apiPackageName = ${JSON.stringify(apiManifest.name)};`));',
-          '  assert.ok(files["playwright.config.ts"].includes(`const webPackageName = ${JSON.stringify(webManifest.name)};`));',
-          '  assert.deepEqual(turbo.tasks["//#test:e2e"].dependsOn, [`${apiManifest.name}#build`, `${webManifest.name}#build`, `${webManifest.name}#browser:prepare`]);',
-          "  await writeFile(snapshotPath, JSON.stringify(current));",
+          "  if (vueOnly) {",
+          '    assert.equal(webManifest.scripts["test:e2e"], "playwright test");',
+          '    assert.equal(rootManifest.scripts["test:e2e"], undefined);',
+          "    await writeFile(snapshotPath, JSON.stringify(current));",
+          "  } else {",
+          '    assert.equal(rootManifest.scripts["test:e2e"], "playwright test");',
+          "    const apiDefinition = result.blueprint.packages.find(({ packageDefinitionId }) => packageDefinitionId === apiInstance.packageDefinitionId);",
+          "    assert.ok(apiDefinition);",
+          "    const apiManifest = JSON.parse(await readText(`${apiDefinition.path}/package.json`));",
+          '    assert.equal(webManifest.dependencies[apiManifest.name], "workspace:*");',
+          '    assert.ok(files["playwright.config.ts"].includes(`const apiPackageName = ${JSON.stringify(apiManifest.name)};`));',
+          '    assert.ok(files["playwright.config.ts"].includes(`const webPackageName = ${JSON.stringify(webManifest.name)};`));',
+          '    assert.deepEqual(turbo.tasks["//#test:e2e"].dependsOn, [`${apiManifest.name}#build`, `${webManifest.name}#build`, `${webManifest.name}#browser:prepare`]);',
+          "    await writeFile(snapshotPath, JSON.stringify(current));",
+          "  }",
           "} else {",
           '  const before = JSON.parse(await readFile(snapshotPath, "utf8"));',
           "  assert.ok(before.packageDefinitionIds.every((id) => record.packages.some((entry) => entry.packageDefinitionId === id)));",
           "  assert.deepEqual(current.files, before.files);",
-          "  assert.deepEqual(current.rootScripts, before.rootScripts);",
+          '  assert.equal(current.rootScripts["test:e2e"], before.rootScripts["test:e2e"]);',
+          '  assert.equal(current.rootScripts["custom:workspace"], "echo retained");',
           "  assert.equal(current.rootName, before.rootName);",
-          '  assert.deepEqual(current.turboTasks["//#test:e2e"], before.turboTasks["//#test:e2e"]);',
-          '  const supportApi = record.packages.find(({ contentIdentity, creationInput }) => contentIdentity.packageName === "@ykdz/reference-hono-api" && creationInput?.packagePath === "apps/support-api");',
-          "  assert.ok(supportApi);",
-          '  assert.equal(supportApi.createdBy, "addition");',
-          '  assert.equal(result.blueprint.packages.find(({ packageDefinitionId }) => packageDefinitionId === supportApi.packageDefinitionId)?.path, "apps/support-api");',
+          "  assert.deepEqual(current.turboTasks, before.turboTasks);",
+          '  const customizedWebAfter = await readText("apps/web/src/App.vue");',
+          "  assert.equal(customizedWebAfter, customizedWeb);",
+          "  assert.equal((await stat(`${targetRoot}/apps/web/src/App.vue`)).mode & 0o777, 0o640);",
+          "  if (!vueOnly) {",
+          '    assert.equal(await readText("apps/api/src/server.ts"), customizedApi);',
+          "    const supportApi = record.packages.find(({ contentIdentity, creationInput }) => contentIdentity.packageName === additionName && creationInput?.packagePath === additionInput.packagePath);",
+          "    assert.ok(supportApi);",
+          '    assert.equal(supportApi.createdBy, "addition");',
+          "    assert.equal(result.blueprint.packages.find(({ packageDefinitionId }) => packageDefinitionId === supportApi.packageDefinitionId)?.path, additionInput.packagePath);",
+          "  } else {",
+          "    const addedApp = record.packages.find(({ contentIdentity, creationInput }) => contentIdentity.packageName === additionName && creationInput?.packagePath === additionInput.packagePath);",
+          "    assert.ok(addedApp);",
+          '    assert.equal(addedApp.createdBy, "addition");',
+          "    assert.equal(result.blueprint.packages.find(({ packageDefinitionId }) => packageDefinitionId === addedApp.packageDefinitionId)?.path, additionInput.packagePath);",
+          "  }",
           "}",
           "await writeFile(resultPath, JSON.stringify({ phase, status: result.status, current }));",
         ].join("\n"),
@@ -208,7 +272,12 @@ void it(
 
       const paths = [...authorRoots, workspaceRoot];
       const modes = [...authorModes, workspaceMode];
-      const runInstalledPhase = async (phase: "init" | "add") => {
+      const runInstalledPhase = async (
+        phase: "init" | "add" | "vue-init" | "vue-add",
+        phaseTargetRoot: string,
+        phaseSnapshotPath: string,
+        phaseResultPath: string,
+      ) => {
         await withUnreadableAuthorDirectories(
           paths.map((directory, index) => ({
             path: directory,
@@ -220,9 +289,9 @@ void it(
               [
                 driverPath,
                 phase,
-                targetRoot,
-                snapshotPath,
-                resultPath,
+                phaseTargetRoot,
+                phaseSnapshotPath,
+                phaseResultPath,
                 authorRootsPath,
               ],
               {
@@ -238,10 +307,32 @@ void it(
               },
             ),
         );
-        return JSON.parse(await readFile(resultPath, "utf8")) as unknown;
+        return JSON.parse(await readFile(phaseResultPath, "utf8")) as unknown;
       };
-      initialization = await runInstalledPhase("init");
-      addition = await runInstalledPhase("add");
+      initialization = await runInstalledPhase(
+        "init",
+        targetRoot,
+        snapshotPath,
+        resultPath,
+      );
+      addition = await runInstalledPhase(
+        "add",
+        targetRoot,
+        snapshotPath,
+        resultPath,
+      );
+      vueInitialization = await runInstalledPhase(
+        "vue-init",
+        vueTargetRoot,
+        vueSnapshotPath,
+        vueResultPath,
+      );
+      vueAddition = await runInstalledPhase(
+        "vue-add",
+        vueTargetRoot,
+        vueSnapshotPath,
+        vueResultPath,
+      );
 
       const install = await execa("pnpm", ["install"], {
         cwd: targetRoot,
@@ -260,6 +351,31 @@ void it(
         { cwd: targetRoot, env: { ...process.env, CI: "true" } },
       );
       e2eStdout = e2e.stdout;
+
+      const vueInstall = await execa("pnpm", ["install"], {
+        cwd: vueTargetRoot,
+        env: { ...process.env, CI: "true" },
+      });
+      vueInstallStdout = vueInstall.stdout;
+      const vueBuild = await execa(
+        "pnpm",
+        ["exec", "turbo", "run", "build", "--force"],
+        { cwd: vueTargetRoot },
+      );
+      vueBuildStdout = vueBuild.stdout;
+      const vueE2e = await execa(
+        "pnpm",
+        [
+          "exec",
+          "turbo",
+          "run",
+          "test:e2e",
+          "--filter=@demo/portal",
+          "--force",
+        ],
+        { cwd: vueTargetRoot, env: { ...process.env, CI: "true" } },
+      );
+      vueE2eStdout = vueE2e.stdout;
 
       const evidenceRoot = process.env.TEMPLATE_CONTENT_ARTIFACT_EVIDENCE_DIR;
       if (evidenceRoot !== undefined) {
@@ -284,6 +400,8 @@ void it(
               ),
               initialization,
               addition,
+              vueInitialization,
+              vueAddition,
               generatedProject: {
                 rootInstall: "pnpm install",
                 rootInstallOutput: installStdout,
@@ -291,6 +409,13 @@ void it(
                 buildOutput: buildStdout,
                 jointPlaywright: "pnpm exec turbo run test:e2e --force",
                 jointPlaywrightOutput: e2eStdout,
+                vueRootInstall: "pnpm install",
+                vueRootInstallOutput: vueInstallStdout,
+                vueBuild: "pnpm exec turbo run build --force",
+                vueBuildOutput: vueBuildStdout,
+                vuePlaywright:
+                  "pnpm exec turbo run test:e2e --filter=@demo/portal --force",
+                vuePlaywrightOutput: vueE2eStdout,
               },
             },
             null,
