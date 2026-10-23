@@ -29,6 +29,19 @@ export type LoadedContentMember<
   }>;
 }>;
 
+export type DerivedContentMembers<
+  Content extends readonly LoadedContentMember[],
+> = Readonly<{
+  readonly presets: readonly Extract<
+    Content[number],
+    { readonly kind: "preset" }
+  >[];
+  readonly referencePackages: readonly Extract<
+    Content[number],
+    { readonly kind: "reference" }
+  >[];
+}>;
+
 export type ContentIndex<
   Member extends LoadedContentMember = LoadedContentMember,
 > = Readonly<{
@@ -56,6 +69,26 @@ export function contentIdentityKey(identity: ContentIdentity): string {
 
 export function contentIdentityLabel(identity: ContentIdentity): string {
   return `${identity.namespace}:${identity.packageName}#${identity.exportPath}`;
+}
+
+/** 从唯一显式集合按种类派生成员，保留定义与种类的类型关联。 */
+export function deriveContentMembers<
+  const Content extends readonly LoadedContentMember[],
+>(content: Content): DerivedContentMembers<Content> {
+  const presets = content.filter(
+    (member): member is Extract<Content[number], { readonly kind: "preset" }> =>
+      member.kind === "preset",
+  );
+  const referencePackages = content.filter(
+    (
+      member,
+    ): member is Extract<Content[number], { readonly kind: "reference" }> =>
+      member.kind === "reference",
+  );
+  return Object.freeze({
+    presets: Object.freeze(presets),
+    referencePackages: Object.freeze(referencePackages),
+  });
 }
 
 export function isContentIdentity(value: unknown): value is ContentIdentity {

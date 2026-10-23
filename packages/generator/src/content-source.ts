@@ -17,6 +17,50 @@ export type ContentSourceOptions = Readonly<{
   readonly prepareReferenceDefinition?: (definition: unknown) => unknown;
 }>;
 
+/** 以公开specifier和字面量import共同选择一个内容模块。 */
+export type ContentSourceEntry<Module = unknown> = Readonly<{
+  readonly specifier: string;
+  readonly load: () => Promise<Module>;
+}>;
+
+type DefinitionFromModule<Module> = Module extends {
+  readonly referencePackage: infer Definition;
+}
+  ? Module extends { readonly preset: unknown }
+    ? never
+    : LoadedContentMember<Definition, "reference">
+  : Module extends { readonly preset: infer Definition }
+    ? Module extends { readonly referenceDefinition: unknown }
+      ? never
+      : LoadedContentMember<Definition, "preset">
+    : Module extends { readonly referenceDefinition: unknown }
+      ? LoadedContentMember<unknown, "reference">
+      : never;
+
+/** 从公开原生模块导出推导一个来源成员的定义与种类。 */
+export type LoadedContentSourceMember<Module = unknown> =
+  DefinitionFromModule<Module>;
+
+/** 保留每个选择回调中真实模块的主定义类型和种类。 */
+export type LoadedContentSourceMembers<
+  Entries extends readonly ContentSourceEntry[],
+> = {
+  readonly [Index in keyof Entries]: LoadedContentSourceMember<
+    Awaited<ReturnType<Entries[Index]["load"]>>
+  >;
+};
+
+export type DynamicLoadedSourceMember =
+  | LoadedContentMember<unknown, "reference">
+  | LoadedContentMember<unknown, "preset">;
+
+type ContentSourceBaseOptions = Omit<ContentSourceOptions, "members">;
+type RuntimeContentSourceEntry = ContentSourceEntry<unknown>;
+type RuntimeContentSourceOptions = ContentSourceBaseOptions &
+  Readonly<{
+    readonly members: readonly (string | RuntimeContentSourceEntry)[];
+  }>;
+
 type NativeManifest = Readonly<Record<string, unknown>> & {
   readonly name: string;
   readonly exports: Readonly<Record<string, unknown>>;
@@ -37,18 +81,28 @@ type PresetDefinition = Readonly<{
   }>;
 }>;
 
-export type LoadedSourceMember = LoadedContentMember;
+export type LoadedSourceMember = DynamicLoadedSourceMember;
 
 /** 经来源自己的Node解析器，从公开代码与数据入口装载本次内容集合。 */
-export async function loadContentSource(
+export function loadContentSource<
+  const Entries extends readonly ContentSourceEntry[],
+>(
+  options: ContentSourceBaseOptions & Readonly<{ readonly members: Entries }>,
+): Promise<LoadedContentSourceMembers<Entries>>;
+export function loadContentSource(
   options: ContentSourceOptions,
+): Promise<readonly LoadedSourceMember[]>;
+export async function loadContentSource(
+  options: RuntimeContentSourceOptions,
 ): Promise<readonly LoadedSourceMember[]> {
   if (options.namespace.trim().length === 0) {
     throw new Error("内容来源命名空间不能为空");
   }
   const members = await Promise.all(
-    options.members.map(
-      async (specifier) => await loadMember(options, specifier),
+    options.members.map(async (entry) =>
+      typeof entry === "string"
+        ? await loadMember(options, entry)
+        : await loadMember(options, entry.specifier, entry.load),
     ),
   );
   createContentIndex(members);
@@ -56,8 +110,9 @@ export async function loadContentSource(
 }
 
 async function loadMember(
-  options: ContentSourceOptions,
+  options: RuntimeContentSourceOptions,
   specifier: string,
+  typeLoader?: () => Promise<unknown>,
 ): Promise<LoadedSourceMember> {
   const address = publicSpecifierAddress(specifier);
   const resolvedModuleURL = resolveLocalURL(
@@ -74,6 +129,14 @@ async function loadMember(
     import(resolvedModuleURL),
     import(resolvedManifestURL, { with: { type: "json" } }),
   ]);
+  if (typeLoader !== undefined) {
+    const typedNamespace = await typeLoader();
+    if (typedNamespace !== moduleNamespace) {
+      throw new Error(
+        `内容${specifier}的类型回调与resolver解析的公开代码入口不一致`,
+      );
+    }
+  }
   const manifestValue = isRecord(manifestNamespace)
     ? manifestNamespace.default
     : undefined;
@@ -95,7 +158,10 @@ async function loadMember(
     specifier,
   );
   if (loaded.kind === "reference") {
-    if (!isDeepStrictEqual(loaded.definition.manifest, manifest)) {
+    if (
+      "manifest" in loaded.definition &&
+      !isDeepStrictEqual(loaded.definition.manifest, manifest)
+    ) {
       throw new Error(`内容${specifier}的参考包准备结果与原生清单不一致`);
     }
   } else if (
@@ -269,12 +335,20 @@ function assertNativeManifest(
 }
 
 function isPreparedReference(value: unknown): value is PreparedReference {
-  return (
-    isRecord(value) &&
-    typeof value.alias === "string" &&
-    (value.instance === "shared" || value.instance === "independent") &&
-    isRecord(value.manifest)
-  );
+  if (
+    !isRecord(value) ||
+    typeof value.alias !== "string" ||
+    (value.instance !== "shared" && value.instance !== "independent")
+  ) {
+    return false;
+  }
+  const newDefinition =
+    typeof value.prepare === "function" &&
+    typeof value.parseCreationInput === "function" &&
+    typeof value.createDefinition === "function" &&
+    typeof value.evaluate === "function";
+  const existingPreparedDefinition = isRecord(value.manifest);
+  return newDefinition || existingPreparedDefinition;
 }
 
 function requireAlias(value: unknown, specifier: string): string {

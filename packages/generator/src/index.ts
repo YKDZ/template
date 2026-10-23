@@ -678,9 +678,13 @@ function excludedPackagePaths(
   definition: PackageDefinition,
   selectedPaths: readonly string[],
 ): string[] {
-  return selectedPaths.filter((candidate) =>
-    isNestedDirectory(definition.path, candidate),
-  );
+  return selectedPaths
+    .filter((candidate) => isNestedDirectory(definition.path, candidate))
+    .map((candidate) =>
+      definition.path === "."
+        ? candidate
+        : candidate.slice(definition.path.length + 1),
+    );
 }
 
 function packageNodePaths(roots: readonly PackageNodeDraft[]): string[] {

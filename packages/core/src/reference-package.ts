@@ -107,7 +107,7 @@ export type ReferencePackageDefinition<
   readonly alias: string;
   readonly instance: "shared" | "independent";
   prepare(options?: {
-    /** 已知嵌套包的目标路径，作者在收集资源前排除这些子作用域。 */
+    /** 当前包目标目录内由嵌套包拥有的相对路径；收集资源前可排除这些作用域。 */
     readonly excludedPackagePaths: readonly string[];
   }):
     | PreparedReference<PreparedFacts>

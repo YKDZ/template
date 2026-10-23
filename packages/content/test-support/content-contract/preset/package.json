@@ -1,0 +1,28 @@
+{
+  "name": "@fixture/content-contract-preset",
+  "version": "1.0.0",
+  "private": true,
+  "files": [
+    "template-dist"
+  ],
+  "type": "module",
+  "exports": {
+    "./reference": "./package.json",
+    "./template": {
+      "source": "./template/definition.ts",
+      "types": "./template-dist/definition.d.ts",
+      "default": "./template-dist/definition.js"
+    }
+  },
+  "scripts": {
+    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false"
+  },
+  "dependencies": {
+    "@fixture/content-contract-reference": "workspace:*",
+    "@ykdz/template-core": "0.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@ykdz/template-workspace-authoring": "0.0.0"
+  }
+}

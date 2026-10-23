@@ -1,49 +1,106 @@
-import {
-  loadTemplateContent,
-  type LoadedTemplateContentMember,
-} from "./collection.ts";
-import type { TemplateContentTypes } from "./template-content-types.ts";
-import { deriveTemplateMembers as deriveContentMembers } from "./template-members.ts";
+import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+
+import { loadTemplateContent } from "./collection.ts";
 
 /** 所有可选择内容只在这里登记一次，并从原生公开入口装载。 */
-export const templateContent = (await loadTemplateContent({
+export const templateContent = await loadTemplateContent({
   namespace: "ykdz",
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
-    "@ykdz/reference-ts-lib/template",
-    "@ykdz/reference-npm-publication/template",
-    "@ykdz/reference-tooling-config/template",
-    "@ykdz/preset-ts-lib/template",
-    "@ykdz/reference-ts-cli/template",
-    "@ykdz/preset-ts-cli/template",
-    "@ykdz/reference-rust-bin/template",
-    "@ykdz/preset-rust-bin/template",
-    "@ykdz/reference-vue-app/template",
-    "@ykdz/preset-vue-app/template",
-    "@ykdz/reference-hono-api/template",
-    "@ykdz/reference-vue-hono-web/template",
-    "@ykdz/preset-vue-hono-app/template",
-    "@ykdz/reference-vike-web/template",
-    "@ykdz/reference-vike-db/template",
-    "@ykdz/reference-vike-migrations/template",
-    "@ykdz/preset-vike-app/template",
+    {
+      specifier: "@ykdz/reference-ts-lib/template",
+      load: () => import("@ykdz/reference-ts-lib/template"),
+    },
+    {
+      specifier: "@ykdz/reference-npm-publication/template",
+      load: () => import("@ykdz/reference-npm-publication/template"),
+    },
+    {
+      specifier: "@ykdz/reference-tooling-config/template",
+      load: () => import("@ykdz/reference-tooling-config/template"),
+    },
+    {
+      specifier: "@ykdz/preset-ts-lib/template",
+      load: () => import("@ykdz/preset-ts-lib/template"),
+    },
+    {
+      specifier: "@ykdz/reference-ts-cli/template",
+      load: () => import("@ykdz/reference-ts-cli/template"),
+    },
+    {
+      specifier: "@ykdz/preset-ts-cli/template",
+      load: () => import("@ykdz/preset-ts-cli/template"),
+    },
+    {
+      specifier: "@ykdz/reference-rust-bin/template",
+      load: () => import("@ykdz/reference-rust-bin/template"),
+    },
+    {
+      specifier: "@ykdz/preset-rust-bin/template",
+      load: () => import("@ykdz/preset-rust-bin/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vue-app/template",
+      load: () => import("@ykdz/reference-vue-app/template"),
+    },
+    {
+      specifier: "@ykdz/preset-vue-app/template",
+      load: () => import("@ykdz/preset-vue-app/template"),
+    },
+    {
+      specifier: "@ykdz/reference-hono-api/template",
+      load: () => import("@ykdz/reference-hono-api/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vue-hono-web/template",
+      load: () => import("@ykdz/reference-vue-hono-web/template"),
+    },
+    {
+      specifier: "@ykdz/preset-vue-hono-app/template",
+      load: () => import("@ykdz/preset-vue-hono-app/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vike-web/template",
+      load: () => import("@ykdz/reference-vike-web/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vike-db/template",
+      load: () => import("@ykdz/reference-vike-db/template"),
+    },
+    {
+      specifier: "@ykdz/reference-vike-migrations/template",
+      load: () => import("@ykdz/reference-vike-migrations/template"),
+    },
+    {
+      specifier: "@ykdz/preset-vike-app/template",
+      load: () => import("@ykdz/preset-vike-app/template"),
+    },
   ],
-})) as readonly LoadedTemplateContentMember[];
+  prepareReferenceDefinition(definition) {
+    return defineReferencePackage(
+      definition as Parameters<typeof defineReferencePackage>[0],
+    );
+  },
+});
 
 export type { ContentKind } from "./collection.ts";
-type ContentTypes = TemplateContentTypes<typeof templateContent>;
-export type TemplateContentMember = ContentTypes["member"];
-
-/** 从唯一内容集合派生的可选择预设成员。 */
-export type TemplatePreset = ContentTypes["preset"];
-
-/** 从唯一内容集合派生的原生参考包闭包。 */
-export type TemplateReferencePackage = ContentTypes["reference"];
+export type TemplateContentMember = (typeof templateContent)[number];
+export type TemplatePreset = Extract<
+  TemplateContentMember,
+  { readonly kind: "preset" }
+>;
+export type TemplateReferencePackage = Extract<
+  TemplateContentMember,
+  { readonly kind: "reference" }
+>;
 
 export { deriveTemplateMembers } from "./template-members.ts";
 
-const templateMembers = deriveContentMembers(templateContent);
 export const templatePresets: readonly TemplatePreset[] =
-  templateMembers.presets;
+  templateContent.filter(
+    (member): member is TemplatePreset => member.kind === "preset",
+  );
 export const templateReferencePackages: readonly TemplateReferencePackage[] =
-  templateMembers.referencePackages;
+  templateContent.filter(
+    (member): member is TemplateReferencePackage => member.kind === "reference",
+  );

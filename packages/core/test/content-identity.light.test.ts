@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   contentIdentityKey,
   createContentIndex,
+  deriveContentMembers,
   type LoadedContentMember,
 } from "../src/content-identity.ts";
 
@@ -35,6 +36,52 @@ function member(options: {
 }
 
 void describe("规范内容身份索引", () => {
+  void it("按唯一集合保留参考包和预设定义的类型关联", () => {
+    const reference: LoadedContentMember<
+      { readonly marker: "reference" },
+      "reference"
+    > = {
+      ...member({
+        namespace: "typed",
+        packageName: "@example/reference",
+        exportPath: "./template",
+        alias: "reference",
+        kind: "reference",
+        value: "reference",
+      }),
+      kind: "reference",
+      definition: { marker: "reference" },
+    };
+    const preset: LoadedContentMember<{ readonly marker: 42 }, "preset"> = {
+      ...member({
+        namespace: "typed",
+        packageName: "@example/preset",
+        exportPath: "./template",
+        alias: "preset",
+        kind: "preset",
+        value: "preset",
+      }),
+      kind: "preset",
+      definition: { marker: 42 },
+    };
+    const derived = deriveContentMembers([reference, preset] as const);
+    const referenceMarker: "reference" =
+      derived.referencePackages[0]!.definition.marker;
+    const presetMarker: 42 = derived.presets[0]!.definition.marker;
+    // @ts-expect-error 参考包派生结果不能包含预设定义。
+    const invalidReference: 42 =
+      derived.referencePackages[0]!.definition.marker;
+    // @ts-expect-error 预设派生结果不能包含参考包定义。
+    const invalidPreset: "reference" = derived.presets[0]!.definition.marker;
+
+    assert.deepEqual(derived.referencePackages, [reference]);
+    assert.deepEqual(derived.presets, [preset]);
+    assert.equal(referenceMarker, "reference");
+    assert.equal(presetMarker, 42);
+    void invalidReference;
+    void invalidPreset;
+  });
+
   void it("使用三个身份分量编码，并按限定别名或规范身份精确选择", () => {
     const alpha = member({
       namespace: "alpha",
