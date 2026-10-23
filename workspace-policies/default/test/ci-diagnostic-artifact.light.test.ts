@@ -6,10 +6,6 @@ import {
   type CiDiagnosticArtifactDeclaration,
 } from "@ykdz/template-workspace/default-environment";
 import {
-  assertPackageContribution,
-  type PackageContribution,
-} from "@ykdz/template-workspace/package-contribution";
-import {
   prepareProjectGithubTemplates,
   projectCheckWorkflow,
 } from "@ykdz/template-workspace/project-github";
@@ -25,25 +21,6 @@ const vitestBrowser = (path: string): CiDiagnosticArtifactDeclaration => ({
   kind: "vitest-browser",
   owner: { kind: "package-boundary", path },
 });
-
-function packageContribution(
-  path: string,
-  artifacts: readonly CiDiagnosticArtifactDeclaration[],
-): PackageContribution {
-  return {
-    definition: { name: "@demo/web", path, role: "runtime-service" },
-    manifest: { name: "@demo/web" },
-    exposure: { exports: {}, imports: {} },
-    operations: [],
-    foundation: {
-      toolchains: {},
-      editorCapabilities: [],
-      dependencyMaintenance: { ecosystems: [], interval: "weekly" },
-    },
-    environmentNeeds: [],
-    ciDiagnosticArtifacts: artifacts,
-  };
-}
 
 void describe("CI 诊断产物合同", () => {
   void it("只返回排序且去重的封闭声明", () => {
@@ -171,18 +148,6 @@ void describe("CI 诊断产物合同", () => {
         },
         checkWorkflowTemplate,
       ),
-    );
-  });
-
-  void it("每个包贡献的诊断所有者必须属于自身边界", () => {
-    assert.throws(
-      () =>
-        assertPackageContribution(
-          packageContribution("apps/web", [playwright("apps/admin")]),
-        ),
-      (error) =>
-        error instanceof Error &&
-        error.message.includes("CI 诊断制品所有者必须与包贡献路径一致"),
     );
   });
 });

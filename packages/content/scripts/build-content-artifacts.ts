@@ -73,11 +73,6 @@ export type PrepareContentCollectionOptions = {
   readonly content: readonly NativeMember[];
   /** 从同一已加载集合中选择任意预设或参考入口作为闭包根。 */
   readonly roots: readonly NativeMember[];
-  /** raw参考声明的拥有者公开准备入口；已准备内容无需提供。 */
-  readonly referencePreparation?: {
-    readonly specifier: string;
-    readonly exportName: string;
-  };
   readonly workspaceRoot?: string;
   readonly packageName?: string;
   /** 外部作者工作区集合的原生清单版本。 */
@@ -795,24 +790,9 @@ async function linkPackage(
   await symlink(packageRoot, linkPath, "dir");
 }
 
-function specifierPackageName(specifier: string): string {
-  if (
-    specifier.startsWith(".") ||
-    specifier.startsWith("/") ||
-    specifier.includes(":")
-  ) {
-    throw new Error(`准备入口必须使用公开包specifier：${specifier}`);
-  }
-  return specifier
-    .split("/")
-    .slice(0, specifier.startsWith("@") ? 2 : 1)
-    .join("/");
-}
-
 function generatedCollectionSource(
   namespace: string,
   members: readonly NativeMember[],
-  preparation: PrepareContentCollectionOptions["referencePreparation"],
 ): string {
   const memberTypes = members.map(
     (member) =>
@@ -822,11 +802,6 @@ function generatedCollectionSource(
     memberTypes.length === 0 ? "never" : memberTypes.join(" | ");
   return [
     'import { loadContentSource, type LoadedContentSourceMember } from "@ykdz/template-generator/content-source";',
-    ...(preparation === undefined
-      ? []
-      : [
-          `import { ${preparation.exportName} as prepareReferenceDefinition } from ${JSON.stringify(preparation.specifier)};`,
-        ]),
     "",
     `export type TemplateContentMember = ${memberType};`,
     "export const templateContent: readonly TemplateContentMember[] = await loadContentSource({",
@@ -838,15 +813,6 @@ function generatedCollectionSource(
         `    { specifier: ${JSON.stringify(member.source.specifier)}, load: () => import(${JSON.stringify(member.source.specifier)}) },`,
     ),
     "  ],",
-    ...(preparation === undefined
-      ? []
-      : [
-          "  prepareReferenceDefinition(definition) {",
-          "    return prepareReferenceDefinition(",
-          "      definition as Parameters<typeof prepareReferenceDefinition>[0],",
-          "    );",
-          "  },",
-        ]),
     "});",
     "",
     "",
@@ -996,7 +962,6 @@ async function createContentProviderRoot(options: {
   readonly root: string;
   readonly namespace: string;
   readonly members: readonly NativeMember[];
-  readonly referencePreparation?: PrepareContentCollectionOptions["referencePreparation"];
   readonly owners: ReadonlyMap<
     string,
     {
@@ -1029,9 +994,6 @@ async function createContentProviderRoot(options: {
   }
   for (const name of [
     "@ykdz/template-generator",
-    ...(options.referencePreparation === undefined
-      ? []
-      : [specifierPackageName(options.referencePreparation.specifier)]),
   ]) {
     const version = options.sdkVersions.get(name);
     if (version === undefined)
@@ -1045,7 +1007,6 @@ async function createContentProviderRoot(options: {
     source: generatedCollectionSource(
       options.namespace,
       options.members,
-      options.referencePreparation,
     ),
     dependencies,
     packageRoots,
@@ -1192,9 +1153,6 @@ export async function prepareContentCollection(
   const sdkRoots = [
     ...new Set([
       "@ykdz/template-generator",
-      ...(options.referencePreparation === undefined
-        ? []
-        : [specifierPackageName(options.referencePreparation.specifier)]),
       ...owners.flatMap(({ artifact }) =>
         artifact.dependencies
           .filter((dependency) =>
@@ -1292,9 +1250,6 @@ export async function prepareContentCollection(
       root,
       namespace,
       members: namespaceMembers,
-      ...(options.referencePreparation === undefined
-        ? {}
-        : { referencePreparation: options.referencePreparation }),
       owners: ownerByIdentity,
       sdkPackageRoots,
       sdkVersions,

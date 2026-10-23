@@ -57,6 +57,7 @@ import {
 import type {
   PreparedReference,
   PackageBinding,
+  ReferenceDependency,
   ReferencePackageDefinition,
   ReferenceSelectionRoot,
   PresetSelectionDefinition,
@@ -151,7 +152,16 @@ type PackageSelectionDraft<CreationInput extends JsonValue = JsonValue> = {
 type RestoredProject = {
   readonly blueprint: ProjectBlueprint;
   readonly generationRecord: GenerationRecord;
+  readonly normalizedDependencies?: readonly GeneratorDependencyIdentity[];
 };
+
+export type GeneratorDependencyIdentity = {
+  readonly consumerContentIdentity: ContentIdentity;
+  readonly key: string;
+  readonly contentIdentity: ContentIdentity;
+};
+
+type DependencyIdentityCache = Map<string, GeneratorDependencyIdentity>;
 
 export type GeneratorRestoredProject<
   CreationInput extends JsonValue = JsonValue,
@@ -160,6 +170,7 @@ export type GeneratorRestoredProject<
   readonly packages: readonly CompositionPackage<CreationInput>[];
   readonly selections: readonly GenerationRecordSelection[];
   readonly readFacts: readonly CurrentProjectProjectionEntry[];
+  readonly normalizedDependencies: readonly GeneratorDependencyIdentity[];
 };
 
 export type PreparedProject<
@@ -486,6 +497,58 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function publicReferenceSpecifierAddress(specifier: string): {
+  readonly packageName: string;
+  readonly exportPath: string;
+} {
+  if (
+    specifier.trim() !== specifier ||
+    specifier.length === 0 ||
+    specifier.startsWith(".") ||
+    specifier.startsWith("/") ||
+    specifier.startsWith("file:") ||
+    specifier.includes("\\")
+  ) {
+    throw new Error(`原生依赖必须使用规范公开包specifier：${specifier}`);
+  }
+  const parts = specifier.split("/");
+  const packageLength = specifier.startsWith("@") ? 2 : 1;
+  if (
+    parts.length < packageLength ||
+    parts.slice(0, packageLength).some((part) => part.length === 0) ||
+    parts.slice(packageLength).some((part) => part.length === 0)
+  ) {
+    throw new Error(`原生依赖的公开包specifier无效：${specifier}`);
+  }
+  const packageName = parts.slice(0, packageLength).join("/");
+  const exportSegments = parts.slice(packageLength);
+  return {
+    packageName,
+    exportPath:
+      exportSegments.length === 0 ? "." : `./${exportSegments.join("/")}`,
+  };
+}
+
+function canonicalModuleURL(value: string, label: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch (error) {
+    throw new Error(`${label}不是绝对模块URL：${value}`, { cause: error });
+  }
+  if (url.protocol !== "file:") {
+    throw new Error(`${label}必须是文件URL：${value}`);
+  }
+  return url.href;
+}
+
+function dependencyIdentityCacheKey(
+  consumer: ContentIdentity,
+  dependencyKey: string,
+): string {
+  return JSON.stringify([contentIdentityKey(consumer), dependencyKey]);
+}
+
 function conflictReason(
   conflicts: readonly ProjectProjectionConflict[],
 ): string {
@@ -805,6 +868,92 @@ export function createGenerator<
   const resolveReference = (selector: ContentSelector): RuntimeReference =>
     contentIndex.resolve(selector, "reference") as RuntimeReference;
 
+  const normalizeDependencyIdentity = (
+    consumer: RuntimeReference,
+    dependency: ReferenceDependency,
+    cache: DependencyIdentityCache,
+  ): ContentIdentity => {
+    const cacheKey = dependencyIdentityCacheKey(
+      consumer.identity,
+      dependency.key,
+    );
+    const cached = cache.get(cacheKey);
+    if (cached !== undefined) return cached.contentIdentity;
+
+    let identity: ContentIdentity;
+    if ("contentIdentity" in dependency) {
+      assertContentIdentity(dependency.contentIdentity);
+      identity = dependency.contentIdentity;
+    } else {
+      const address = publicReferenceSpecifierAddress(
+        dependency.ownerLocal.specifier,
+      );
+      let resolved: string;
+      try {
+        resolved = dependency.ownerLocal.resolve(
+          dependency.ownerLocal.specifier,
+        );
+      } catch (error) {
+        throw new Error(
+          `原生依赖公开入口解析失败：${dependency.ownerLocal.specifier}：${errorMessage(error)}`,
+          { cause: error },
+        );
+      }
+      const resolvedURL = canonicalModuleURL(resolved, "原生依赖解析结果");
+      const namespaceCandidates = contentIndex.members.filter(
+        (member): member is RuntimeReference =>
+          member.kind === "reference" &&
+          member.identity.namespace === consumer.identity.namespace &&
+          member.identity.packageName === address.packageName &&
+          member.identity.exportPath === address.exportPath,
+      );
+      const resolvedCandidates = namespaceCandidates.filter(
+        (member) =>
+          canonicalModuleURL(
+            member.source.moduleURL,
+            "内容成员公开模块入口",
+          ) === resolvedURL,
+      );
+      if (resolvedCandidates.length > 1) {
+        throw new Error(
+          `原生依赖解析到同一公开身份的多个内容修订，不能猜选：${dependency.ownerLocal.specifier}`,
+        );
+      }
+      if (resolvedCandidates.length === 1) {
+        identity = resolvedCandidates[0]!.identity;
+      } else if (namespaceCandidates.length > 0) {
+        throw new Error(
+          `原生依赖 ${dependency.ownerLocal.specifier} 未解析到当前内容修订的公开模块入口`,
+        );
+      } else {
+        const sameNamespaceModuleCandidates = contentIndex.members.filter(
+          (member): member is RuntimeReference =>
+            member.kind === "reference" &&
+            member.identity.namespace === consumer.identity.namespace &&
+            canonicalModuleURL(
+              member.source.moduleURL,
+              "内容成员公开模块入口",
+            ) === resolvedURL,
+        );
+        if (sameNamespaceModuleCandidates.length > 0) {
+          throw new Error(
+            `原生依赖公开地址与实际内容入口不一致：${dependency.ownerLocal.specifier}`,
+          );
+        }
+        throw new Error(
+          `原生依赖 ${dependency.ownerLocal.specifier} 必须由消费内容的同一命名空间公开，且解析到当前修订`,
+        );
+      }
+    }
+
+    cache.set(cacheKey, {
+      consumerContentIdentity: consumer.identity,
+      key: dependency.key,
+      contentIdentity: identity,
+    });
+    return identity;
+  };
+
   const makePackageNodeDraft = (request: {
     readonly content: RuntimeReference;
     readonly nodeIdentity: string;
@@ -820,6 +969,7 @@ export function createGenerator<
       string,
       PackageNodeDraft<ContentCreationInput<Members>>
     >;
+    readonly dependencyIdentities: DependencyIdentityCache;
   }): PackageNodeDraft<ContentCreationInput<Members>> => {
     const identityKey = contentIdentityKey(request.content.identity);
     if (request.ancestry.includes(identityKey)) {
@@ -860,7 +1010,6 @@ export function createGenerator<
       package: PackageNodeDraft<ContentCreationInput<Members>>;
     }[] = [];
     for (const dependency of dependencies) {
-      assertContentIdentity(dependency.contentIdentity);
       if (
         dependency.key.trim().length === 0 ||
         dependencyKeys.has(dependency.key)
@@ -868,7 +1017,12 @@ export function createGenerator<
         throw new Error(`参考包依赖键不能为空且不能重复：${dependency.key}`);
       }
       dependencyKeys.add(dependency.key);
-      const provider = resolveReference(dependency.contentIdentity);
+      const providerIdentity = normalizeDependencyIdentity(
+        request.content,
+        dependency,
+        request.dependencyIdentities,
+      );
+      const provider = resolveReference(providerIdentity);
       const providerCreationInput = requireParsedCreationInput(
         provider,
         dependency.creationInput,
@@ -887,6 +1041,7 @@ export function createGenerator<
         layout: undefined,
         conventions: request.conventions,
         ancestry: [...request.ancestry, identityKey],
+        dependencyIdentities: request.dependencyIdentities,
         ...(request.sharedDrafts === undefined
           ? {}
           : { sharedDrafts: request.sharedDrafts }),
@@ -942,8 +1097,24 @@ export function createGenerator<
 
   const restoredSelectionDrafts = (
     restored: RestoredProject,
+    dependencyIdentities: DependencyIdentityCache = new Map(),
   ): PackageSelectionDraft<ContentCreationInput<Members>>[] => {
     const { generationRecord, blueprint } = restored;
+    for (const requirement of restored.normalizedDependencies ?? []) {
+      const key = dependencyIdentityCacheKey(
+        requirement.consumerContentIdentity,
+        requirement.key,
+      );
+      const existing = dependencyIdentities.get(key);
+      if (
+        existing !== undefined &&
+        contentIdentityKey(existing.contentIdentity) !==
+          contentIdentityKey(requirement.contentIdentity)
+      ) {
+        throw new Error("缓存的内容依赖身份不一致");
+      }
+      dependencyIdentities.set(key, requirement);
+    }
     if (
       contentIdentityKey(generationRecord.composition.identity) !==
       contentIdentityKey(composition.identity)
@@ -1050,6 +1221,15 @@ export function createGenerator<
         throw new Error(`生成记录中的依赖绑定与当前参考包不一致：${id}`);
       }
       const dependencies = declarations.map((dependency) => {
+        const consumer = contentsById.get(id);
+        if (consumer === undefined) {
+          throw new Error(`生成记录引用了未知内容实例：${id}`);
+        }
+        const declaredIdentity = normalizeDependencyIdentity(
+          consumer,
+          dependency,
+          dependencyIdentities,
+        );
         const providerId = item.dependencyBindings[dependency.key];
         const providerRecord =
           providerId === undefined ? undefined : recordsById.get(providerId);
@@ -1060,7 +1240,7 @@ export function createGenerator<
           providerRecord === undefined ||
           providerContent === undefined ||
           contentIdentityKey(providerContent.identity) !==
-            contentIdentityKey(dependency.contentIdentity)
+            contentIdentityKey(declaredIdentity)
         ) {
           throw new Error(
             `生成记录包含无效依赖绑定：${id} → ${dependency.key}`,
@@ -1189,6 +1369,7 @@ export function createGenerator<
       readonly conventions?: unknown;
       readonly restored?: RestoredProject;
       readonly operation: "init" | "add";
+      readonly dependencyIdentities?: DependencyIdentityCache;
     } & OperationFactsInput<CompositionOperationFacts<CompositionDefinition>>,
   ): Promise<
     PreparedProject<
@@ -1215,8 +1396,11 @@ export function createGenerator<
     ) {
       throw new Error("生成记录中的组合约定不符合当前组合定义");
     }
+    const dependencyIdentities =
+      prepareOptions.dependencyIdentities ??
+      new Map<string, GeneratorDependencyIdentity>();
     const selectionDrafts = prepareOptions.restored
-      ? restoredSelectionDrafts(prepareOptions.restored)
+      ? restoredSelectionDrafts(prepareOptions.restored, dependencyIdentities)
       : [];
     const sharedDrafts = new Map<
       string,
@@ -1343,6 +1527,7 @@ export function createGenerator<
           conventions,
           ancestry: [],
           sharedDrafts,
+          dependencyIdentities,
         }),
       );
       requireUniqueNodes(roots);
@@ -1426,6 +1611,7 @@ export function createGenerator<
           conventions,
           ancestry: [],
           sharedDrafts,
+          dependencyIdentities,
         }),
       );
       requireUniqueNodes(roots);
@@ -1509,7 +1695,9 @@ export function createGenerator<
   }): Promise<GeneratorRestoredProject<ContentCreationInput<Members>>> {
     const targetRoot = path.resolve(restoreOptions.repositoryRoot);
     const { restored, readFacts } = await readRestoredProject(targetRoot);
-    restoredSelectionDrafts(restored);
+    const dependencyIdentities: DependencyIdentityCache = new Map();
+    restoredSelectionDrafts(restored, dependencyIdentities);
+    const normalizedDependencies = [...dependencyIdentities.values()];
     const definitionsById = new Map(
       restored.blueprint.packages.map((definition) => [
         definition.packageDefinitionId,
@@ -1532,6 +1720,7 @@ export function createGenerator<
       packages,
       selections: restored.generationRecord.selections,
       readFacts,
+      normalizedDependencies,
     };
   }
 
@@ -1581,11 +1770,22 @@ export function createGenerator<
     const restored: RestoredProject = {
       blueprint: prepareOptions.restored.blueprint,
       generationRecord: prepareOptions.restored.generationRecord,
+      normalizedDependencies: prepareOptions.restored.normalizedDependencies,
     };
+    const dependencyIdentities: DependencyIdentityCache = new Map(
+      restored.normalizedDependencies?.map((requirement) => [
+        dependencyIdentityCacheKey(
+          requirement.consumerContentIdentity,
+          requirement.key,
+        ),
+        requirement,
+      ]),
+    );
     const common = {
       restored,
       operation: "add" as const,
       operationFacts: prepareOptions.operationFacts,
+      dependencyIdentities,
     };
     const before = await prepareProjectInternal(common);
     const after = await prepareProjectInternal({

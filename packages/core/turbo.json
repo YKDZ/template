@@ -11,7 +11,7 @@
       "persistent": false
     },
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": [],
       "tags": ["quality:light"],
       "cache": true,
       "inputs": ["$TURBO_DEFAULT$"],
