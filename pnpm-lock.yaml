@@ -780,6 +780,9 @@ importers:
       '@ykdz/reference-ts-lib':
         specifier: workspace:*
         version: link:../../references/ts-lib
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../../references/workspace-root
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../../packages/generator
@@ -1134,6 +1137,9 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -1269,6 +1275,9 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -1306,6 +1315,9 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -1373,6 +1385,9 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core

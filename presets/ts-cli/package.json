@@ -32,12 +32,12 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@ykdz/preset-ts-lib": "workspace:*",
     "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-rust-bin": "workspace:*",
     "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/reference-ts-lib": "workspace:*",
     "@ykdz/reference-workspace-root": "workspace:*",
-    "@ykdz/preset-ts-lib": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*",

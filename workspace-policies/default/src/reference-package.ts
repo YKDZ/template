@@ -25,6 +25,7 @@ import { mapPackageNamesInJson } from "@ykdz/template-workspace-authoring/packag
 import { mapTypeScriptModuleSpecifiers } from "@ykdz/template-workspace-authoring/typescript-module-specifiers";
 import { parse, type ParseError } from "jsonc-parser";
 
+import type { ApplicationRequirements } from "./application-requirements.ts";
 import type { CiDiagnosticArtifactDeclaration } from "./ci-diagnostic-artifact.ts";
 import type { DefaultPackageRole } from "./default-package-role.ts";
 import type {
@@ -92,6 +93,8 @@ export type DefaultRootDeclarationData = {
   readonly dependencyMaintenance?: SharedRootContribution["dependencyMaintenance"];
   /** 根级 CI 工作流的诊断制品声明。 */
   readonly ciDiagnosticArtifacts?: readonly CiDiagnosticArtifactDeclaration[];
+  /** 工具 owner 在准备阶段声明的本次工作区共同要求。 */
+  readonly applicationRequirements?: ApplicationRequirements;
   /** 根位置的独占原生资源；由默认组合校验来源与路径冲突。 */
   readonly files?: readonly DefaultCompositionFile[];
 };
@@ -148,6 +151,8 @@ export type NativeReferenceResourceMapping = {
   readonly path: string;
   /** 生成目标包内的路径；组合资源不属于当前包时省略。 */
   readonly targetPath?: string;
+  /** 只作为 owner 准备输入，不复制到目标包。 */
+  readonly prepareOnly?: boolean;
   /** 默认普通文件；有执行位的资源由owner显式声明。 */
   readonly mode?: number;
 };
@@ -161,6 +166,7 @@ export type DefaultReferenceEvaluationContext<
   readonly creationInput: CreationInput | undefined;
   readonly bindings: ReadonlyMap<string, PackageBinding>;
   readonly ownerFacts: OwnerFacts;
+  readonly stableCommon: unknown;
 };
 
 export type DefaultReferenceManifestTransformOptions<
@@ -678,7 +684,11 @@ export function defineReferencePackage<
   readonly executionDependencies?: readonly string[];
   readonly templateScripts?: readonly string[];
   readonly templateExports?: readonly string[];
-  readonly foundation?: Readonly<Record<string, unknown>>;
+  readonly foundation?:
+    | Readonly<Record<string, unknown>>
+    | ((
+        context: DefaultReferenceEvaluationContext<CreationInput, OwnerFacts>,
+      ) => Readonly<Record<string, unknown>>);
   readonly environmentNeeds?:
     | readonly (CheckEnvironmentNeed | DeploymentEnvironmentNeed)[]
     | ((
@@ -691,6 +701,7 @@ export function defineReferencePackage<
       ) => readonly CiDiagnosticArtifactDeclaration[]);
   readonly rootDeclaration?: (
     ownerFacts: OwnerFacts,
+    stableCommon?: unknown,
   ) => DefaultRootDeclarationData | undefined;
   readonly prepareFacts?: (
     resources: readonly ResourceFileSnapshot[],
@@ -971,6 +982,7 @@ export function defineReferencePackage<
         if (mapping === undefined) {
           throw new Error(`准备结果包含未声明资源：${resource.path}`);
         }
+        if (mapping.prepareOnly === true) continue;
         const document = documentBySourcePath.get(resource.path);
         if (document !== undefined) {
           if (document.scope === "composition") {
@@ -1042,9 +1054,6 @@ export function defineReferencePackage<
       const exposureImports = isRecord(manifest.imports)
         ? manifest.imports
         : {};
-      const rootDeclaration = options.rootDeclaration?.(
-        input.prepared.facts.ownerFacts,
-      );
       const evaluationContext: DefaultReferenceEvaluationContext<
         CreationInput,
         OwnerFacts
@@ -1054,7 +1063,16 @@ export function defineReferencePackage<
         creationInput: input.creationInput,
         bindings: input.bindings,
         ownerFacts: input.prepared.facts.ownerFacts,
+        stableCommon: input.stableCommon,
       };
+      const rootDeclaration = options.rootDeclaration?.(
+        input.prepared.facts.ownerFacts,
+        input.stableCommon,
+      );
+      const foundation =
+        typeof options.foundation === "function"
+          ? options.foundation(evaluationContext)
+          : (options.foundation ?? {});
       const environmentNeeds =
         typeof options.environmentNeeds === "function"
           ? options.environmentNeeds(evaluationContext)
@@ -1074,7 +1092,7 @@ export function defineReferencePackage<
         compositionFiles,
         dependencyUses,
         templateDependencies: Object.freeze([...templateDependencies]),
-        foundation: options.foundation ?? {},
+        foundation,
         environmentNeeds,
         ciDiagnosticArtifacts,
         ...(rootDeclaration === undefined ? {} : { rootDeclaration }),

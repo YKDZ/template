@@ -3,7 +3,7 @@
   "tags": ["app"],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["@ykdz/reference-vike-db#build"],
       "outputs": ["dist/**"],
       "tags": ["quality:light"]
     },
