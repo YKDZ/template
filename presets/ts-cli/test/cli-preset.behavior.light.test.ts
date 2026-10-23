@@ -919,5 +919,107 @@ void describe("TypeScript CLI 公开预设", () => {
       /CLI命令名称 "cli" 重复：@demo\/cli 与 @demo\/duplicate-tool/u,
     );
     assert.strictEqual(await snapshotTree(targetRoot), before);
+
+    const sharedLibraryRoot = await createTargetRoot(
+      "template-ts-cli-shared-command-",
+    );
+    await mkdir(sharedLibraryRoot);
+    const sharedContent = [...content, duplicateMember];
+    const sharedGenerator = createDefaultGenerator({ content: sharedContent });
+    const sharedInitialized = await sharedGenerator.init({
+      targetRoot: sharedLibraryRoot,
+      selection: {
+        roots: [
+          { nodeIdentity: "workspace", contentIdentity: root.identity },
+          { nodeIdentity: "tool", contentIdentity: duplicateMember.identity },
+        ],
+      },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      sharedInitialized.status,
+      "success",
+      JSON.stringify(sharedInitialized),
+    );
+    const sharedManifestPath = path.join(
+      sharedLibraryRoot,
+      "packages/duplicate-tool/package.json",
+    );
+    const sharedManifest = JSON.parse(
+      await readFile(sharedManifestPath, "utf8"),
+    ) as Record<string, any>;
+    sharedManifest.bin = { second: "./dist/cli.js" };
+    await writeFile(
+      sharedManifestPath,
+      `${JSON.stringify(sharedManifest, null, 2)}\n`,
+    );
+    const sharedBefore = await snapshotTree(sharedLibraryRoot);
+
+    const sharedDuplicate = await sharedGenerator.add({
+      repositoryRoot: sharedLibraryRoot,
+      contentIdentity: cli.identity,
+      nodeIdentity: "cli",
+      creationInput: { leafName: "second" },
+    });
+
+    assert.strictEqual(sharedDuplicate.status, "operation-failure");
+    assert.match(
+      sharedDuplicate.status === "operation-failure"
+        ? sharedDuplicate.error.message
+        : "",
+      /CLI命令名称 "second" 重复/u,
+    );
+    assert.strictEqual(await snapshotTree(sharedLibraryRoot), sharedBefore);
+
+    const staleRoot = await createTargetRoot(
+      "template-ts-cli-shared-command-stale-",
+    );
+    await mkdir(staleRoot);
+    const staleGenerator = createDefaultGenerator({ content: sharedContent });
+    const staleInitialized = await staleGenerator.init({
+      targetRoot: staleRoot,
+      selection: {
+        roots: [
+          { nodeIdentity: "workspace", contentIdentity: root.identity },
+          { nodeIdentity: "tool", contentIdentity: duplicateMember.identity },
+        ],
+      },
+      conventions: {
+        repositoryName: "demo",
+        defaultPackageScope: "demo",
+      },
+    });
+    assert.strictEqual(
+      staleInitialized.status,
+      "success",
+      JSON.stringify(staleInitialized),
+    );
+    const stalePlan = await staleGenerator.planAdd({
+      repositoryRoot: staleRoot,
+      contentIdentity: cli.identity,
+      nodeIdentity: "cli",
+      creationInput: { leafName: "release" },
+    });
+    assert.strictEqual(stalePlan.status, "planned");
+    if (stalePlan.status !== "planned") {
+      throw new Error("新命令名无冲突时应可规划");
+    }
+    const staleSharedManifest = JSON.parse(
+      await readFile(
+        path.join(staleRoot, "packages/duplicate-tool/package.json"),
+        "utf8",
+      ),
+    ) as Record<string, any>;
+    staleSharedManifest.bin = { release: "./dist/cli.js" };
+    await writeFile(
+      path.join(staleRoot, "packages/duplicate-tool/package.json"),
+      `${JSON.stringify(staleSharedManifest, null, 2)}\n`,
+    );
+    const staleCommit = await staleGenerator.commitPlan(stalePlan.plan);
+    assert.strictEqual(staleCommit.status, "conflict");
+    await assert.rejects(stat(path.join(staleRoot, "packages/release")));
   });
 });

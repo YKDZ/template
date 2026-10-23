@@ -343,7 +343,22 @@ async function additionFacts(
     await readPackageManifest(packageId);
   }
   for (const currentPackage of options.restored.blueprint.packages) {
-    if (currentPackage.role !== "cli-tool") continue;
+    const restoredPackage = restoredById.get(
+      currentPackage.packageDefinitionId,
+    );
+    const member =
+      restoredPackage === undefined
+        ? undefined
+        : contentByIdentity.get(
+            contentIdentityKey(restoredPackage.contentIdentity),
+          );
+    const nativeManifest =
+      member !== undefined && isRecord(member.definition)
+        ? member.definition.manifest
+        : undefined;
+    const declaresNativeBinary =
+      isRecord(nativeManifest) && isRecord(nativeManifest.bin);
+    if (currentPackage.role !== "cli-tool" && !declaresNativeBinary) continue;
     await readPackageManifest(currentPackage.packageDefinitionId);
   }
   for (const packageId of linkedProviderIds) {
