@@ -25,6 +25,15 @@ export const referencePackage = defineReferencePackage({
       },
     },
   ],
+  rootAttachmentDependencies: [
+    {
+      key: "npm-publication",
+      ownerLocal: {
+        specifier: "@ykdz/reference-npm-publication/template",
+        resolve: (specifier) => import.meta.resolve(specifier),
+      },
+    },
+  ],
   resources: [
     { path: ".gitignore" },
     { path: ".npmignore" },

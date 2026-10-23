@@ -327,8 +327,82 @@ function assertNativeDocument(
   return value;
 }
 
-function serialize(value: unknown): Uint8Array {
-  return new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`);
+function formatJsonValue(
+  value: unknown,
+  depth: number,
+  column: number,
+  pathSegments: readonly string[],
+  multilineArrayPaths: ReadonlySet<string>,
+  trailingComma = false,
+): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  const indent = "  ".repeat(depth);
+  if (Array.isArray(value)) {
+    const scalarItems = value.every(
+      (item) => item === null || typeof item !== "object",
+    );
+    if (scalarItems) {
+      const inline = `[${value
+        .map((item) => JSON.stringify(item) ?? "null")
+        .join(", ")}]`;
+      if (
+        !multilineArrayPaths.has(pathSegments.join(".")) &&
+        column + inline.length + (trailingComma ? 1 : 0) <= 80
+      ) {
+        return inline;
+      }
+    }
+    if (value.length === 0) return "[]";
+    const itemIndent = "  ".repeat(depth + 1);
+    return `[\n${itemIndent}${value
+      .map((item, index) =>
+        formatJsonValue(
+          item,
+          depth + 1,
+          itemIndent.length,
+          [...pathSegments, String(index)],
+          multilineArrayPaths,
+          index < value.length - 1,
+        ),
+      )
+      .join(`,\n${itemIndent}`)}\n${indent}]`;
+  }
+  if (!isRecord(value)) {
+    throw new Error("原生JSON文档只能包含普通对象");
+  }
+  const entries = Object.entries(value);
+  if (entries.length === 0) return "{}";
+  const childIndent = "  ".repeat(depth + 1);
+  return `{\n${childIndent}${entries
+    .map(([key, child], index) => {
+      const prefix = `${JSON.stringify(key)}: `;
+      return `${prefix}${formatJsonValue(
+        child,
+        depth + 1,
+        childIndent.length + prefix.length,
+        [...pathSegments, key],
+        multilineArrayPaths,
+        index < entries.length - 1,
+      )}`;
+    })
+    .join(`,\n${childIndent}`)}\n${indent}}`;
+}
+
+export function serializeNativeJson(
+  value: unknown,
+  options: { readonly multilineArrayPaths?: readonly string[] } = {},
+): Uint8Array {
+  return new TextEncoder().encode(
+    `${formatJsonValue(
+      value,
+      0,
+      0,
+      [],
+      new Set(options.multilineArrayPaths ?? []),
+    )}\n`,
+  );
 }
 
 function reconciliationDriver(resourcePath: string): "text" | "canonical" {
@@ -441,7 +515,10 @@ function outputManifest(options: {
         binding.definition.path,
       );
       const protocol = specifier.startsWith("link:") ? "link:" : "workspace:";
-      dependencies[binding.definition.name] = `${protocol}${relative}`;
+      const relativeSpecifier = relative.startsWith(".")
+        ? relative
+        : `./${relative}`;
+      dependencies[binding.definition.name] = `${protocol}${relativeSpecifier}`;
     }
     manifest[field] = dependencies;
   }
@@ -551,6 +628,8 @@ export function defineReferencePackage<
   readonly resources: readonly NativeReferenceResourceMapping[];
   readonly compositionResources?: readonly NativeReferenceResourceMapping[];
   readonly dependencies?: readonly ReferenceDependency<CreationInput>[];
+  /** 不创建包实例、只声明所需原生根附件owner的引用。 */
+  readonly rootAttachmentDependencies?: readonly ReferenceDependency[];
   readonly templateDependencies?: readonly ReferenceTemplateDependency[];
   readonly executionDependencies?: readonly string[];
   readonly templateScripts?: readonly string[];
@@ -649,6 +728,23 @@ export function defineReferencePackage<
       Object.freeze(dependency),
     ),
   );
+  const rootAttachmentDependencies = Object.freeze(
+    [...(options.rootAttachmentDependencies ?? [])].map((dependency) =>
+      Object.freeze(dependency),
+    ),
+  );
+  const rootAttachmentKeys = new Set<string>();
+  for (const dependency of rootAttachmentDependencies) {
+    if (
+      dependency.key.trim().length === 0 ||
+      rootAttachmentKeys.has(dependency.key)
+    ) {
+      throw new Error(
+        `原生根附件依赖键不能为空且不能重复：${options.manifest.name}/${dependency.key}`,
+      );
+    }
+    rootAttachmentKeys.add(dependency.key);
+  }
   const templateScripts = Object.freeze([...(options.templateScripts ?? [])]);
   const templateExports = Object.freeze([...(options.templateExports ?? [])]);
   const removedExports = new Set([
@@ -690,6 +786,7 @@ export function defineReferencePackage<
     targetDependencyKeys,
     rootDeclarationAvailable: options.rootDeclaration !== undefined,
     dependencies: contentDependencies,
+    rootAttachmentDependencies,
     prepareRootDeclaration(ownerFacts: OwnerFacts) {
       return options.rootDeclaration?.(ownerFacts);
     },
@@ -753,12 +850,24 @@ export function defineReferencePackage<
         if (document.path === "package.json" && document.scope === "package") {
           return { ...document, value: manifest };
         }
+        const value = mapPackageNamesInJson(document.value, names) as Record<
+          string,
+          unknown
+        >;
+        if (
+          (document.path === "turbo.json" || document.path === "turbo.jsonc") &&
+          isRecord(value.tasks)
+        ) {
+          const tasks = { ...value.tasks };
+          for (const script of templateScripts) {
+            delete tasks[script];
+            delete tasks[`${input.definition.name}#${script}`];
+          }
+          value.tasks = tasks;
+        }
         return {
           ...document,
-          value: mapPackageNamesInJson(document.value, names) as Record<
-            string,
-            unknown
-          >,
+          value,
         };
       });
       const documentBySourcePath = new Map(
@@ -914,6 +1023,7 @@ export function defineReferencePackage<
     readonly targetExports: Readonly<Record<string, unknown>>;
     readonly targetDependencyKeys: readonly string[];
     readonly rootDeclarationAvailable: boolean;
+    readonly rootAttachmentDependencies: readonly ReferenceDependency[];
     readonly prepareRootDeclaration: (
       ownerFacts: OwnerFacts,
     ) => DefaultRootDeclarationData | undefined;
@@ -984,24 +1094,39 @@ export function defineReferencePackage<
 export function serializeNativeReferenceDocument(
   document: DefaultNativeDocument,
 ): Uint8Array {
-  return serialize(
-    document.path === "package.json"
-      ? Object.fromEntries(
-          Object.entries(document.value).sort(([left], [right]) => {
-            const leftIndex = packageManifestKeyOrder.indexOf(
-              left as (typeof packageManifestKeyOrder)[number],
-            );
-            const rightIndex = packageManifestKeyOrder.indexOf(
-              right as (typeof packageManifestKeyOrder)[number],
-            );
-            if (leftIndex === -1 && rightIndex === -1) {
-              return left.localeCompare(right);
-            }
-            if (leftIndex === -1) return 1;
-            if (rightIndex === -1) return -1;
-            return leftIndex - rightIndex;
-          }),
-        )
-      : document.value,
+  if (document.path !== "package.json") {
+    return serializeNativeJson(document.value);
+  }
+  const manifest = Object.fromEntries(
+    Object.entries(document.value).sort(([left], [right]) => {
+      const leftIndex = packageManifestKeyOrder.indexOf(
+        left as (typeof packageManifestKeyOrder)[number],
+      );
+      const rightIndex = packageManifestKeyOrder.indexOf(
+        right as (typeof packageManifestKeyOrder)[number],
+      );
+      if (leftIndex === -1 && rightIndex === -1) {
+        return left.localeCompare(right);
+      }
+      if (leftIndex === -1) return 1;
+      if (rightIndex === -1) return -1;
+      return leftIndex - rightIndex;
+    }),
   );
+  for (const field of [
+    "dependencies",
+    "devDependencies",
+    "optionalDependencies",
+    "peerDependencies",
+  ]) {
+    const value = manifest[field];
+    if (isRecord(value)) {
+      manifest[field] = Object.fromEntries(
+        Object.entries(value).sort(([left], [right]) =>
+          left.localeCompare(right),
+        ),
+      );
+    }
+  }
+  return serializeNativeJson(manifest, { multilineArrayPaths: ["files"] });
 }
