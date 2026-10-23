@@ -6,6 +6,7 @@ import {
   type ContentKind,
   type LoadedContentMember,
 } from "@ykdz/template-core/content-identity";
+import type { ReferencePackageDefinition } from "@ykdz/template-core/reference-package";
 
 export type ContentSourceOptions = Readonly<{
   readonly namespace: string;
@@ -13,8 +14,6 @@ export type ContentSourceOptions = Readonly<{
   readonly resolve: (specifier: string) => string;
   /** 每个成员只登记一个实际公开代码入口。 */
   readonly members: readonly string[];
-  /** 仅用于现存公开raw referenceDefinition的正式authoring准备接缝。 */
-  readonly prepareReferenceDefinition?: (definition: unknown) => unknown;
 }>;
 
 /** 以公开specifier和字面量import共同选择一个内容模块。 */
@@ -30,12 +29,8 @@ type DefinitionFromModule<Module> = Module extends {
     ? never
     : LoadedContentMember<Definition, "reference">
   : Module extends { readonly preset: infer Definition }
-    ? Module extends { readonly referenceDefinition: unknown }
-      ? never
-      : LoadedContentMember<Definition, "preset">
-    : Module extends { readonly referenceDefinition: unknown }
-      ? LoadedContentMember<unknown, "reference">
-      : never;
+    ? LoadedContentMember<Definition, "preset">
+    : never;
 
 /** 从公开原生模块导出推导一个来源成员的定义与种类。 */
 export type LoadedContentSourceMember<Module = unknown> =
@@ -65,12 +60,6 @@ type NativeManifest = Readonly<Record<string, unknown>> & {
   readonly name: string;
   readonly exports: Readonly<Record<string, unknown>>;
 };
-
-type PreparedReference = Readonly<{
-  readonly alias: string;
-  readonly instance: "shared" | "independent";
-  readonly manifest: Readonly<Record<string, unknown>>;
-}>;
 
 type PresetDefinition = Readonly<{
   readonly kind: "preset";
@@ -152,17 +141,13 @@ async function loadMember(
     );
   }
 
-  const loaded = await primaryDefinition(
-    moduleNamespace,
-    options.prepareReferenceDefinition,
-    specifier,
-  );
+  const loaded = primaryDefinition(moduleNamespace, specifier);
   if (loaded.kind === "reference") {
     if (
       "manifest" in loaded.definition &&
       !isDeepStrictEqual(loaded.definition.manifest, manifest)
     ) {
-      throw new Error(`内容${specifier}的参考包准备结果与原生清单不一致`);
+      throw new Error(`内容${specifier}的参考包定义清单与原生清单不一致`);
     }
   } else if (
     loaded.definition.owner !== undefined &&
@@ -190,22 +175,20 @@ async function loadMember(
   });
 }
 
-async function primaryDefinition(
+function primaryDefinition(
   moduleNamespace: unknown,
-  prepareReferenceDefinition: ContentSourceOptions["prepareReferenceDefinition"],
   specifier: string,
-): Promise<
+):
   | {
       readonly kind: "reference";
       readonly alias: string;
-      readonly definition: PreparedReference;
+      readonly definition: ReferencePackageDefinition;
     }
   | {
       readonly kind: "preset";
       readonly alias: string;
       readonly definition: PresetDefinition;
-    }
-> {
+    } {
   if (!isRecord(moduleNamespace)) {
     throw new Error(`内容${specifier}的公开代码入口未导出对象`);
   }
@@ -218,12 +201,6 @@ async function primaryDefinition(
     candidates.push({
       kind: "reference",
       value: moduleNamespace.referencePackage,
-    });
-  }
-  if (Object.hasOwn(moduleNamespace, "referenceDefinition")) {
-    candidates.push({
-      kind: "reference",
-      value: moduleNamespace.referenceDefinition,
     });
   }
   if (candidates.length !== 1) {
@@ -246,17 +223,9 @@ async function primaryDefinition(
     };
   }
 
-  let definition = candidate.value;
-  if (Object.hasOwn(moduleNamespace, "referenceDefinition")) {
-    if (prepareReferenceDefinition === undefined) {
-      throw new Error(
-        `内容${specifier}公开raw参考声明，但来源未提供正式准备函数`,
-      );
-    }
-    definition = prepareReferenceDefinition(definition);
-  }
-  if (!isPreparedReference(definition)) {
-    throw new Error(`内容${specifier}的公开定义不是已准备参考包`);
+  const definition = candidate.value;
+  if (!isReferencePackageDefinition(definition)) {
+    throw new Error(`内容${specifier}的公开定义不是有效参考包定义`);
   }
   return {
     kind: "reference",
@@ -334,7 +303,9 @@ function assertNativeManifest(
   return value as NativeManifest;
 }
 
-function isPreparedReference(value: unknown): value is PreparedReference {
+function isReferencePackageDefinition(
+  value: unknown,
+): value is ReferencePackageDefinition {
   if (
     !isRecord(value) ||
     typeof value.alias !== "string" ||
@@ -342,13 +313,12 @@ function isPreparedReference(value: unknown): value is PreparedReference {
   ) {
     return false;
   }
-  const newDefinition =
+  return (
     typeof value.prepare === "function" &&
     typeof value.parseCreationInput === "function" &&
     typeof value.createDefinition === "function" &&
-    typeof value.evaluate === "function";
-  const existingPreparedDefinition = isRecord(value.manifest);
-  return newDefinition || existingPreparedDefinition;
+    typeof value.evaluate === "function"
+  );
 }
 
 function requireAlias(value: unknown, specifier: string): string {

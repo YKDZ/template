@@ -6,12 +6,16 @@ import { after, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
 
+import type { Composition } from "@ykdz/template-core/composition";
 import {
   createContentIndex,
+  type ContentIdentity,
   type LoadedContentMember,
 } from "@ykdz/template-core/content-identity";
+import type { PackageDefinitionId } from "@ykdz/template-core/project-blueprint";
 
 import { loadContentSource } from "../src/content-source.ts";
+import { createGenerator } from "../src/index.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -56,7 +60,7 @@ async function createSource(options: {
     path.join(packageRoot, "template", "definition.mjs"),
     [
       'import manifest from "../package.json" with { type: "json" };',
-      `export const referencePackage = { alias: "shared", instance: "independent", defaultLeafName: "shared", defaultPath: "packages/shared", role: "shared-library", manifest, resolve: (specifier) => import.meta.resolve(specifier), value: ${JSON.stringify(options.body)} };`,
+      `export const referencePackage = { alias: "shared", instance: "independent", manifest, value: ${JSON.stringify(options.body)}, prepare() { return { resources: [], facts: {} }; }, parseCreationInput() { return {}; }, createDefinition() { return { name: "shared", path: "packages/shared", role: "shared-library" }; }, evaluate({ packageDefinitionId }) { return { packageDefinitionId, files: [], facts: {} }; } };`,
       "",
     ].join("\n"),
   );
@@ -68,6 +72,32 @@ async function createSource(options: {
     resolve: source.resolve as (specifier: string) => string,
     members: ["@example/shared/template"],
   });
+}
+
+function testComposition(): Composition {
+  const identity: ContentIdentity = {
+    namespace: "test",
+    packageName: "@fixture/test-composition",
+    exportPath: "./composition",
+  };
+  return {
+    identity,
+    parseConventions(value) {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new Error("约定必须是对象");
+      }
+      return {};
+    },
+    resolve({ conventions }) {
+      return {
+        stableCommon: conventions,
+        packageInputs: new Map<PackageDefinitionId, unknown>(),
+      };
+    },
+    combine() {
+      return { facts: {} };
+    },
+  };
 }
 
 after(async () => {
@@ -187,6 +217,43 @@ void describe("类型化来源公开入口", () => {
 });
 
 void describe("来源公开入口装载", () => {
+  void it("合法参考定义可由公开加载器装载并完成规划和初始化", async () => {
+    const members = await createSource({
+      namespace: "new-contract",
+      body: "valid",
+    });
+    const member = members[0];
+    assert.ok(member);
+    const generator = createGenerator({
+      content: members,
+      composition: testComposition(),
+    });
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-content-source-target-"),
+    );
+    temporaryDirectories.push(targetRoot);
+
+    const planned = await generator.planInit({
+      targetRoot,
+      selection: {
+        roots: [{ nodeIdentity: "shared", contentIdentity: member.identity }],
+      },
+      conventions: {},
+      operationFacts: null,
+    });
+    assert.equal(planned.status, "planned", JSON.stringify(planned));
+
+    const initialized = await generator.init({
+      targetRoot,
+      selection: {
+        roots: [{ nodeIdentity: "shared", contentIdentity: member.identity }],
+      },
+      conventions: {},
+      operationFacts: null,
+    });
+    assert.equal(initialized.status, "success", JSON.stringify(initialized));
+  });
+
   void it("以各集合自己的resolver装载同名包并保留两份真实定义", async () => {
     const alpha = await createSource({
       namespace: "alpha",
