@@ -223,6 +223,12 @@ void contributionOwnerRevision;
 void proveNegativeTypes;
 
 export async function runContentContractInitialization(targetRoot: string) {
+  const preparedResources = requiredReference.definition
+    .prepare()
+    .resources.map(({ path, content }) => ({
+      path,
+      content: new TextDecoder().decode(content),
+    }));
   const planned = await generator.planInit({
     targetRoot,
     selection: { presets: [{ contentIdentity: preset.identity }] },
@@ -244,6 +250,7 @@ export async function runContentContractInitialization(targetRoot: string) {
     packagePaths: committed.blueprint.packages.map(({ path }) => path),
     ownerPackageCount: committed.ownerFacts.packageCount,
     plannedOwnerCount,
+    preparedResources,
     references: derived.referencePackages.map(({ identity, definition }) => ({
       namespace: identity.namespace,
       packageName: identity.packageName,

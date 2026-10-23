@@ -464,6 +464,16 @@ void it("同一份严格TypeScript消费代码通过源码和正式安装制品"
       packagePaths: ["packages/contract-starter"],
       ownerPackageCount: 1,
       plannedOwnerCount: 1,
+      preparedResources: [
+        {
+          path: "resources/README.md",
+          content: "由中立参考包拥有的资源字节。\n",
+        },
+        {
+          path: "resources/latent.txt",
+          content: "由参考包声明、当前求值未直接读取的完整资源。\n",
+        },
+      ],
       references: [
         {
           namespace: "alpha",
@@ -530,6 +540,51 @@ void it("同一份严格TypeScript消费代码通过源码和正式安装制品"
       ({ member }) => member.kind === "reference",
     );
     assert.equal(referenceArchives.length, 2);
+    const alphaReferenceArchive = referenceArchives.find(
+      ({ member }) => member.identity.namespace === "alpha",
+    );
+    assert.ok(alphaReferenceArchive);
+    const alphaDependencyPurposes = new Map(
+      alphaReferenceArchive.artifact.dependencies.map(({ name, purposes }) => [
+        name,
+        purposes,
+      ]),
+    );
+    assert.deepEqual(
+      alphaDependencyPurposes.get("@ykdz/template-workspace-authoring"),
+      ["template-execution"],
+    );
+    assert.deepEqual(
+      alphaDependencyPurposes.get("never-install-target-application"),
+      [],
+    );
+    const alphaInstalledManifest = JSON.parse(
+      await readFile(
+        path.join(alphaReferenceArchive.installRoot, "package.json"),
+        "utf8",
+      ),
+    ) as { readonly dependencies: Readonly<Record<string, string>> };
+    assert.equal(
+      alphaInstalledManifest.dependencies["@ykdz/template-workspace-authoring"],
+      "0.0.0",
+    );
+    assert.equal(
+      alphaInstalledManifest.dependencies["never-install-target-application"],
+      undefined,
+    );
+    const sdkPackageNames = prepared.sdkPackages.map(({ name }) => name);
+    assert.ok(sdkPackageNames.includes("@ykdz/template-core"));
+    assert.ok(sdkPackageNames.includes("@ykdz/template-generator"));
+    assert.ok(sdkPackageNames.includes("@ykdz/template-workspace-authoring"));
+    assert.ok(
+      !sdkPackageNames.some(
+        (name) =>
+          name === "@ykdz/template-workspace" ||
+          name.startsWith("@ykdz/reference-") ||
+          name.startsWith("@ykdz/preset-") ||
+          name === "never-install-target-application",
+      ),
+    );
     const archiveEvidence = referenceArchives.map(({ member, packed }) => {
       assert.match(packed.sha256, /^[0-9a-f]{64}$/u);
       assert.equal(
@@ -615,6 +670,16 @@ void it("同一份严格TypeScript消费代码通过源码和正式安装制品"
         packagePaths: ["packages/contract-starter"],
         ownerPackageCount: 1,
         plannedOwnerCount: 1,
+        preparedResources: [
+          {
+            path: "resources/README.md",
+            content: "由中立参考包拥有的资源字节。\n",
+          },
+          {
+            path: "resources/latent.txt",
+            content: "由参考包声明、当前求值未直接读取的完整资源。\n",
+          },
+        ],
         references: [
           {
             namespace: "alpha",

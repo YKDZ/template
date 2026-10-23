@@ -140,6 +140,13 @@ export const referencePackage = defineNativeReferenceContentArtifact(
         ),
         mode: 0o644,
       },
+      {
+        path: "resources/latent.txt",
+        source: createTemplateSourceHandle(
+          fileURLToPath(new URL("../resources/latent.txt", import.meta.url)),
+        ),
+        mode: 0o644,
+      },
     ],
     executionDependencies: ["@ykdz/template-workspace-authoring"],
     prepareFacts(resources) {
