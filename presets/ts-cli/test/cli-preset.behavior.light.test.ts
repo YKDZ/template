@@ -608,6 +608,8 @@ void describe("TypeScript CLI 公开预设", () => {
     const targetRoot = await createTargetRoot(
       "template-ts-cli-duplicate-command-",
     );
+    await mkdir(targetRoot);
+    const before = await snapshotTree(targetRoot);
     const result = await createDefaultGenerator({
       content: [...content, duplicateMember],
     }).init({
@@ -629,6 +631,6 @@ void describe("TypeScript CLI 公开预设", () => {
       result.status === "operation-failure" ? result.error.message : "",
       /CLI命令名称 "cli" 重复：@demo\/cli 与 @demo\/duplicate-tool/u,
     );
-    await assert.rejects(stat(targetRoot), { code: "ENOENT" });
+    assert.strictEqual(await snapshotTree(targetRoot), before);
   });
 });
