@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { contentIdentityKey } from "@ykdz/template-core/content-identity";
+import type { GenerationRecord } from "@ykdz/template-core/generation-record";
 import {
+  type BlueprintPackageIdentityIssue,
   validateProjectBlueprint,
   type ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
@@ -10,9 +13,6 @@ import {
   type ProjectProjectionConflict,
   type ProjectProjectionSource,
 } from "@ykdz/template-core/project-projection";
-import type { GenerationRecord } from "@ykdz/template-generator";
-import { isDefaultWorkspaceMissingLinkConflict } from "@ykdz/template-workspace/default-workspace-strategy";
-import type { DefaultWorkspaceOwnerFacts } from "@ykdz/template-workspace/default-workspace-strategy";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 import {
@@ -21,12 +21,7 @@ import {
   type InitializationInputIssue,
   type PackageAdditionInputIssue,
 } from "./input-validation.ts";
-import {
-  cliGenerator,
-  cliPresets,
-  cliWorkspaceStrategy,
-  presetByAlias,
-} from "./preset-catalog.ts";
+import { cliGenerator, cliPresets, presetByAlias } from "./preset-catalog.ts";
 
 export type ApplicationRuntime = {
   readonly cwd: string;
@@ -70,7 +65,7 @@ export type InitCommandResult =
       readonly blueprint: ProjectBlueprint;
       readonly generationRecord: GenerationRecord;
       readonly toolchain: ReturnType<typeof toolchainReport>;
-      readonly nextSteps: DefaultWorkspaceOwnerFacts["nextSteps"];
+      readonly nextSteps: readonly { readonly display: string }[];
       readonly followUpDocument: {
         readonly enabled: boolean;
         readonly path?: string;
@@ -83,12 +78,6 @@ export type InitCommandResult =
     }
   | {
       readonly status: "operation-failure";
-      readonly phase:
-        | "preset"
-        | "planning"
-        | "preflight"
-        | "materialization"
-        | "render";
       readonly targetDir: string;
       readonly error: { readonly message: string; readonly suggestion: string };
     };
@@ -144,23 +133,21 @@ type PackageAdditionCoreConflict = Omit<
   };
 };
 
-type PackageAdditionBusinessConflict = {
-  readonly kind: "identity" | "missing-link";
-  readonly existing: {
-    readonly name: string;
-    readonly path: string;
-    readonly role: string;
-  };
-  readonly requested: {
-    readonly name: string;
-    readonly path: string;
-    readonly role: string;
-  };
-  readonly missingLink?: {
-    readonly consumerPackagePath: string;
-    readonly providerPackagePath: string;
-  };
+type PackageAdditionIdentityConflict = {
+  readonly kind: "identity";
+  readonly existing: Extract<
+    BlueprintPackageIdentityIssue,
+    { readonly kind: "duplicate" }
+  >["existing"];
+  readonly requested: Extract<
+    BlueprintPackageIdentityIssue,
+    { readonly kind: "duplicate" }
+  >["requested"];
 };
+
+type PackageAdditionConflict =
+  | PackageAdditionCoreConflict
+  | PackageAdditionIdentityConflict;
 
 export type PackageAdditionCommandResult =
   | {
@@ -172,10 +159,7 @@ export type PackageAdditionCommandResult =
       readonly status: "conflict";
       readonly dryRun: boolean;
       readonly actions: readonly [];
-      readonly conflicts: readonly (
-        | PackageAdditionCoreConflict
-        | PackageAdditionBusinessConflict
-      )[];
+      readonly conflicts: readonly PackageAdditionConflict[];
     }
   | {
       readonly status: "usage-error";
@@ -183,7 +167,6 @@ export type PackageAdditionCommandResult =
     }
   | {
       readonly status: "operation-failure";
-      readonly phase: "metadata" | "default" | "planning" | "reconciliation";
       readonly error: { readonly message: string; readonly suggestion: string };
     };
 
@@ -216,6 +199,19 @@ function packageAdditionConflict(
     ...details,
     ...(sources === undefined ? {} : { sources: [...sources] }),
     context: { before, current, after },
+  };
+}
+
+function packageAdditionIdentityConflict(
+  conflict: Extract<
+    BlueprintPackageIdentityIssue,
+    { readonly kind: "duplicate" }
+  >,
+): PackageAdditionIdentityConflict {
+  return {
+    kind: "identity",
+    existing: conflict.existing,
+    requested: conflict.requested,
   };
 }
 
@@ -305,16 +301,12 @@ function readBlueprintFailure(
 }
 
 function initOperationFailure(options: {
-  readonly phase: "metadata" | "planning" | "render" | "reconciliation";
   readonly targetDir: string;
   readonly message?: string;
 }): Extract<InitCommandResult, { readonly status: "operation-failure" }> {
-  const phase = options.phase === "render" ? "render" : "planning";
-  const phaseName = phase === "planning" ? "生成规划" : "目标目录渲染";
-  const fallbackMessage = `${phaseName}失败。`;
+  const fallbackMessage = "初始化失败。";
   return {
     status: "operation-failure",
-    phase,
     targetDir: options.targetDir,
     error: {
       message:
@@ -347,8 +339,20 @@ function initPackageIdentities(
 ): ResolvedInitialization["packages"] {
   const preset = presetByAlias(presetAlias);
   if (preset === undefined) throw new Error("初始化预设在结果映射时不存在");
-  return Object.keys(preset.definition.nodes).map((nodeIdentity) => {
-    const packageDefinitionId = generationRecord.nodeInstances[nodeIdentity];
+  const selection = generationRecord.selections.find(
+    (candidate) =>
+      candidate.presetIdentity !== null &&
+      contentIdentityKey(candidate.presetIdentity) ===
+        contentIdentityKey(preset.identity),
+  );
+  if (selection === undefined) {
+    throw new Error("生成结果缺少预设选择对应的包实例");
+  }
+  return Object.entries(preset.definition.nodes).map(([nodeIdentity]) => {
+    const packageDefinitionId = selection.nodes[nodeIdentity];
+    if (packageDefinitionId === undefined) {
+      throw new Error("生成结果缺少预设节点对应的包实例：" + nodeIdentity);
+    }
     const record = generationRecord.packages.find(
       (candidate) => candidate.packageDefinitionId === packageDefinitionId,
     );
@@ -398,45 +402,52 @@ export async function runInit(
           ...(options.name === undefined ? {} : { leafName: options.name }),
           ...(options.path === undefined ? {} : { packagePath: options.path }),
         };
-  const result = await cliGenerator.init({
+  const planned = await cliGenerator.planInit({
     targetRoot: targetDir,
     selection: {
-      roots: [
+      presets: [
         {
-          preset: preset.identity,
+          contentIdentity: preset.identity,
           ...(creationInput === undefined ? {} : { creationInput }),
         },
       ],
     },
-    strategyInput: { repositoryName, defaultPackageScope, todo: options.todo },
-    dryRun: options.dryRun,
+    conventions: { repositoryName, defaultPackageScope, todo: options.todo },
   });
+  if (planned.status === "operation-failure") {
+    return initializationFailureFromPlanning({
+      targetDir: options.dir,
+      message: planned.error.message,
+      ...(planned.error.packageIdentityIssues === undefined
+        ? {}
+        : { packageIdentityIssues: planned.error.packageIdentityIssues }),
+      inputOverrides: {
+        ...(options.name === undefined ? {} : { name: options.name }),
+        ...(options.scope === undefined ? {} : { scope: options.scope }),
+      },
+    });
+  }
+  if (planned.status === "conflict") {
+    return initOperationFailure({
+      targetDir: options.dir,
+      message: planned.reason,
+    });
+  }
+
+  const result = options.dryRun
+    ? { ...planned, status: "success" as const, dryRun: true }
+    : await cliGenerator.commitPlan(planned.plan);
   if (result.status === "operation-failure") {
     return initOperationFailure({
-      phase: result.phase,
       targetDir: options.dir,
       message: result.error.message,
     });
   }
-  if (result.status === "input-invalid") {
-    return {
-      status: "usage-error",
-      targetDir: options.dir,
-      issues: result.issues.map(({ code }) => ({
-        code: code as InitializationInputIssue["code"],
-      })),
-    };
-  }
   if (result.status === "conflict") {
-    return initOperationFailure({ phase: "render", targetDir: options.dir });
-  }
-
-  const strategyState = cliWorkspaceStrategy.parseState(
-    result.generationRecord.strategyState,
-  );
-  const ownerFacts = result.projection?.ownerFacts;
-  if (ownerFacts === undefined) {
-    throw new Error("默认工作区策略未返回初始化事实");
+    return initOperationFailure({
+      targetDir: options.dir,
+      message: result.reason,
+    });
   }
   return {
     status: "success",
@@ -453,32 +464,78 @@ export async function runInit(
         result.generationRecord,
         result.blueprint,
       ),
-      scope: strategyState.defaultPackageScope,
+      scope: defaultPackageScope,
     },
     blueprint: result.blueprint,
     generationRecord: result.generationRecord,
     toolchain: toolchainReport(),
-    nextSteps: ownerFacts.nextSteps,
+    nextSteps: [
+      { display: "pnpm install" },
+      { display: "pnpm run fix" },
+      { display: "pnpm run check" },
+    ],
     followUpDocument: {
-      enabled: strategyState.todo,
-      ...(strategyState.todo ? { path: "TODO.md" } : {}),
+      enabled: options.todo,
+      ...(options.todo ? { path: "TODO.md" } : {}),
     },
   };
 }
 
+function initializationFailureFromPlanning(options: {
+  readonly targetDir: string;
+  readonly message: string;
+  readonly packageIdentityIssues?: readonly BlueprintPackageIdentityIssue[];
+  readonly inputOverrides: {
+    readonly name?: string;
+    readonly scope?: string;
+  };
+}): InitCommandResult {
+  const identityIssues = options.packageIdentityIssues ?? [];
+  const issues = identityIssues.map((issue) => {
+    if (issue.kind === "duplicate") {
+      return { code: "CONFLICTING_PACKAGE_IDENTITY" as const };
+    }
+    if (issue.field === "name") {
+      return {
+        code:
+          options.inputOverrides.name !== undefined
+            ? ("INVALID_PACKAGE_NAME" as const)
+            : options.inputOverrides.scope !== undefined
+              ? ("INVALID_PACKAGE_SCOPE" as const)
+              : ("INVALID_REPOSITORY_SCOPE" as const),
+      };
+    }
+    return {
+      code:
+        issue.kind === "reserved"
+          ? ("RESERVED_PACKAGE_PATH" as const)
+          : ("INVALID_PACKAGE_PATH" as const),
+    };
+  });
+  if (issues.length > 0) {
+    return {
+      status: "usage-error",
+      targetDir: options.targetDir,
+      issues: issues.filter(
+        (issue, index) =>
+          issues.findIndex((candidate) => candidate.code === issue.code) ===
+          index,
+      ),
+    };
+  }
+  return initOperationFailure(options);
+}
+
 function packageUpdateOperationFailure(
-  phase: "metadata" | "planning" | "render" | "reconciliation",
   diagnostic?: { readonly message: string; readonly suggestion: string },
   message?: string,
-  fallbackMessage = "添加 Package 时发生操作失败。",
+  fallbackMessage = "添加包时发生操作失败。",
 ): Extract<
   PackageAdditionCommandResult,
   { readonly status: "operation-failure" }
 > {
-  const mappedPhase = phase === "render" ? "reconciliation" : phase;
   return {
     status: "operation-failure",
-    phase: mappedPhase,
     error: diagnostic ?? {
       message:
         message === undefined
@@ -486,8 +543,8 @@ function packageUpdateOperationFailure(
           : safeGeneratorFailureMessage(message, fallbackMessage),
       suggestion:
         message === undefined
-          ? "检查生成仓库元数据与工作区状态后重试；若问题持续发生，请人工处理。"
-          : "根据错误信息检查生成记录、包绑定或所属内容资源后重试；若问题持续发生，请人工处理。",
+          ? "检查目标仓库与运行环境后重试；若问题持续发生，请人工处理。"
+          : "检查目标项目的配置与目录内容后重试；若问题持续发生，请人工处理。",
     },
   };
 }
@@ -505,7 +562,7 @@ export async function runAddPackage(
   if (validation.status === "input-invalid") {
     return { status: "usage-error", issues: validation.issues };
   }
-  const result = await cliGenerator.add({
+  const planned = await cliGenerator.planAdd({
     repositoryRoot: runtime.cwd,
     preset: validation.preset.identity,
     creationInput: {
@@ -515,49 +572,66 @@ export async function runAddPackage(
         ? {}
         : { linkFrom: validation.linkFrom }),
     },
-    dryRun: options.dryRun,
   });
-  if (result.status === "operation-failure") {
-    return packageUpdateOperationFailure(
-      result.phase,
-      result.error.diagnostic,
-      result.error.message,
+  if (planned.status === "operation-failure") {
+    const identityIssues = planned.error.packageIdentityIssues ?? [];
+    const identityConflicts = identityIssues.filter(
+      (
+        issue,
+      ): issue is Extract<
+        BlueprintPackageIdentityIssue,
+        { readonly kind: "duplicate" }
+      > => issue.kind === "duplicate",
     );
-  }
-  if (result.status === "input-invalid") {
-    return {
-      status: "usage-error",
-      issues: result.issues.map(({ code }) => ({
-        code: code as PackageAdditionInputIssue["code"],
-      })),
-    };
-  }
-  if (result.status === "conflict") {
-    const missingLinkConflict = isDefaultWorkspaceMissingLinkConflict(
-      result.ownerConflict,
-    )
-      ? {
-          kind: "missing-link" as const,
-          ...result.ownerConflict.facts,
-        }
-      : undefined;
-    if (
-      result.ownerConflict !== undefined &&
-      missingLinkConflict === undefined
-    ) {
-      return packageUpdateOperationFailure("planning");
+    if (identityConflicts.length > 0) {
+      return {
+        status: "conflict",
+        dryRun: options.dryRun,
+        actions: [],
+        conflicts: identityConflicts.map(packageAdditionIdentityConflict),
+      };
     }
+    const usageIssues = identityIssues.map((issue) => ({
+      code:
+        issue.field === "name"
+          ? ("INVALID_PACKAGE_NAME" as const)
+          : issue.kind === "reserved"
+            ? ("RESERVED_PACKAGE_PATH" as const)
+            : ("INVALID_PACKAGE_PATH" as const),
+    }));
+    if (usageIssues.length > 0) {
+      return {
+        status: "usage-error",
+        issues: usageIssues.filter(
+          (issue, index) =>
+            usageIssues.findIndex(
+              (candidate) => candidate.code === issue.code,
+            ) === index,
+        ),
+      };
+    }
+    return packageUpdateOperationFailure(undefined, planned.error.message);
+  }
+  if (planned.status === "conflict") {
     return {
       status: "conflict",
       dryRun: options.dryRun,
       actions: [],
-      conflicts: [
-        ...(result.identityConflict === undefined
-          ? []
-          : [{ kind: "identity" as const, ...result.identityConflict }]),
-        ...(missingLinkConflict === undefined ? [] : [missingLinkConflict]),
-        ...result.conflicts.map(packageAdditionConflict),
-      ],
+      conflicts: planned.conflicts.map(packageAdditionConflict),
+    };
+  }
+  const result = options.dryRun
+    ? { status: "success" as const, dryRun: true, actions: planned.actions }
+    : await cliGenerator.commitPlan(planned.plan);
+  if (result.status === "operation-failure") {
+    return packageUpdateOperationFailure(undefined, result.error.message);
+  }
+  if (result.status === "conflict") {
+    return {
+      status: "conflict",
+      dryRun: options.dryRun,
+      actions: [],
+      conflicts: result.conflicts.map(packageAdditionConflict),
     };
   }
   return {

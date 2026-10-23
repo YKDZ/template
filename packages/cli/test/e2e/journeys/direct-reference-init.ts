@@ -39,103 +39,35 @@ async function loadPublicModule(specifier: string): Promise<{
   };
 }
 
-const [contentEntry, generatorEntry, strategyEntry, publicationEntry] =
-  await Promise.all([
-    loadPublicModule("@ykdz/template-content"),
-    loadPublicModule("@ykdz/template-generator"),
-    loadPublicModule("@ykdz/template-workspace/default-workspace-strategy"),
-    loadPublicModule("@ykdz/reference-npm-publication/template"),
-  ]);
-const templateContent = contentEntry.module.templateContent as readonly {
-  readonly kind: string;
-  readonly identity: {
-    readonly namespace: string;
-    readonly packageName: string;
-    readonly exportPath: string;
-  };
-  readonly definition?: {
-    readonly dependencyUses: readonly {
-      readonly name: string;
-      readonly purposes: readonly string[];
-    }[];
-  };
-}[];
-const projectPublicationWorkspace = publicationEntry.module
-  .projectPublicationWorkspace as (
-  options: Record<string, unknown>,
-) => readonly unknown[];
-const createGenerator = generatorEntry.module.createGenerator as (
-  options: Record<string, unknown>,
-) => {
-  init(options: Record<string, unknown>): Promise<Record<string, unknown>>;
-};
-const createDefaultWorkspaceStrategy = strategyEntry.module
-  .createDefaultWorkspaceStrategy as (
-  options?: Record<string, unknown>,
-) => unknown;
-const projectSelectedPublicationWorkspace = (
-  options: Record<string, unknown>,
-) => {
-  const packages = options.packages as readonly {
-    readonly contentIdentity: {
-      readonly namespace: string;
-      readonly packageName: string;
-      readonly exportPath: string;
-    };
-  }[];
-  return projectPublicationWorkspace({
-    references: packages.map((record) => {
-      const reference = templateContent.find(
-        (candidate) =>
-          candidate.kind === "reference" &&
-          candidate.identity.namespace === record.contentIdentity.namespace &&
-          candidate.identity.packageName ===
-            record.contentIdentity.packageName &&
-          candidate.identity.exportPath === record.contentIdentity.exportPath,
-      );
-      if (reference?.definition === undefined) {
-        throw new Error(
-          `唯一内容集合缺少参考包 ${record.contentIdentity.packageName}`,
-        );
-      }
-      return reference.definition;
-    }),
-  });
-};
-function requireReference(packageName: string) {
-  const member = templateContent.find(
-    (candidate) =>
-      candidate.kind === "reference" &&
-      candidate.identity.packageName === packageName,
-  );
-  if (member === undefined) {
-    throw new Error(`唯一内容集合缺少参考包 ${packageName}`);
-  }
-  return member as {
-    readonly identity: Record<string, unknown>;
-  };
+const contentEntry = await loadPublicModule("@ykdz/template-content");
+const contentModule =
+  contentEntry.module as typeof import("@ykdz/template-content");
+const { templateContent } = contentModule;
+const library = templateContent.find(
+  (member) => member.identity.packageName === "@ykdz/reference-ts-lib",
+);
+const configuration = templateContent.find(
+  (member) => member.identity.packageName === "@ykdz/reference-tooling-config",
+);
+if (library?.kind !== "reference" || configuration?.kind !== "reference") {
+  throw new Error("唯一内容集合缺少直接参考初始化所需的参考包");
 }
-
-const library = requireReference("@ykdz/reference-ts-lib");
-const configuration = requireReference("@ykdz/reference-tooling-config");
-const generator = createGenerator({
-  content: templateContent,
-  strategy: createDefaultWorkspaceStrategy({
-    project: projectSelectedPublicationWorkspace,
-  }),
-});
+const generator = contentModule.createGenerator();
 const result = await generator.init({
   targetRoot: path.resolve(targetRoot),
   selection: {
     roots: [
-      { nodeIdentity: "library", contentIdentity: library.identity },
+      {
+        nodeIdentity: "library",
+        contentIdentity: library.identity,
+      },
       {
         nodeIdentity: "tooling-configuration",
         contentIdentity: configuration.identity,
       },
     ],
   },
-  strategyInput: {
+  conventions: {
     repositoryName: "direct-references",
     defaultPackageScope: "acme",
     todo: false,
@@ -151,8 +83,6 @@ console.log(
     mode,
     modules: {
       content: contentEntry.entry,
-      generator: generatorEntry.entry,
-      strategy: strategyEntry.entry,
     },
   }),
 );

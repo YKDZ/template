@@ -66,7 +66,7 @@ const journey: CliJourney = {
           ) as {
             readonly packages: {
               readonly contentIdentity: { readonly packageName: string };
-              readonly bindings: Record<string, string>;
+              readonly dependencyBindings: Record<string, string>;
             }[];
           };
           const library = generation.packages.find(
@@ -74,8 +74,10 @@ const journey: CliJourney = {
               record.contentIdentity.packageName === "@ykdz/reference-ts-lib",
           );
           assert.notEqual(library, undefined);
-          assert.ok(Object.hasOwn(library!.bindings, configurationKey));
-          delete library!.bindings[configurationKey];
+          assert.ok(
+            Object.hasOwn(library!.dependencyBindings, configurationKey),
+          );
+          delete library!.dependencyBindings[configurationKey];
           await writeFile(
             generationPath,
             `${JSON.stringify(generation, null, 2)}\n`,
@@ -106,7 +108,6 @@ const journey: CliJourney = {
     assert.equal(bindingFailure?.stdout, "");
     const bindingEnvelope = JSON.parse(bindingFailure?.stderr ?? "");
     assert.equal(bindingEnvelope.variant, "operationFailed");
-    assert.equal(bindingEnvelope.data.phase, "metadata");
     assert.match(
       bindingEnvelope.data.error.message,
       /@ykdz\/reference-ts-lib.*缺少必要实例绑定.*@ykdz\/reference-tooling-config/u,

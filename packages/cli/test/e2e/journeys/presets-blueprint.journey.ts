@@ -12,7 +12,8 @@ const journey: CliJourney = {
       writeFile(
         path.join(context.workDir, "valid-blueprint.json"),
         JSON.stringify({
-          schemaVersion: 3,
+          schemaVersion: 4,
+          packageLinkIntents: [],
           packages: [
             {
               name: "@demo/library",

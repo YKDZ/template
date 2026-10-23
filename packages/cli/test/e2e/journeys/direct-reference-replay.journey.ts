@@ -3,7 +3,6 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { templatePresets } from "@ykdz/template-content";
-import { contentIdentityKey } from "@ykdz/template-core/content-identity";
 
 import type { CliJourney } from "../journey.ts";
 import { requireReferencePresetName } from "../reference-preset.ts";
@@ -20,11 +19,18 @@ if (vuePresetDefinition?.kind !== "preset") {
 }
 
 type GenerationRecord = {
-  readonly schemaVersion: number;
-  readonly strategyIdentity: string;
-  readonly strategyState: {
-    readonly defaultPackageScope: string;
-    readonly repositoryName: string;
+  readonly schemaVersion: 6;
+  readonly composition: {
+    readonly identity: {
+      readonly namespace: string;
+      readonly packageName: string;
+      readonly exportPath: string;
+    };
+    readonly conventions: {
+      readonly defaultPackageScope: string;
+      readonly repositoryName: string;
+      readonly todo?: boolean;
+    };
   };
   readonly packages: readonly {
     readonly contentIdentity: {
@@ -34,13 +40,16 @@ type GenerationRecord = {
     };
     readonly createdBy: string;
     readonly packageDefinitionId: string;
-    readonly bindings: Readonly<Record<string, string>>;
+    readonly dependencyBindings: Readonly<Record<string, string>>;
   }[];
-  readonly nodeInstances: Readonly<Record<string, string>>;
-  readonly presetSelections: readonly {
-    readonly namespace: string;
-    readonly packageName: string;
-    readonly exportPath: string;
+  readonly selections: readonly {
+    readonly selectionId: string;
+    readonly presetIdentity: {
+      readonly namespace: string;
+      readonly packageName: string;
+      readonly exportPath: string;
+    } | null;
+    readonly nodes: Readonly<Record<string, string>>;
   }[];
 };
 
@@ -82,9 +91,18 @@ function presetSelected(
   record: GenerationRecord,
   packageName: string,
 ): boolean {
-  return record.presetSelections.some(
-    (selection) => selection.packageName === packageName,
+  return record.selections.some(
+    (selection) => selection.presetIdentity?.packageName === packageName,
   );
+}
+
+function selectedPackageId(
+  record: GenerationRecord,
+  nodeIdentity: string,
+): string | undefined {
+  return record.selections.find((selection) =>
+    Object.hasOwn(selection.nodes, nodeIdentity),
+  )?.nodes[nodeIdentity];
 }
 
 const journey: CliJourney = {
@@ -275,32 +293,35 @@ const journey: CliJourney = {
       "@ykdz/reference-tooling-config",
     );
     const cli = packageRecord(finalRecord, "@ykdz/reference-ts-cli");
-    const configKey = contentIdentityKey(configuration.contentIdentity);
-
-    assert.equal(initialRecord.schemaVersion, 5);
-    assert.equal(initialRecord.strategyIdentity, "default");
-    assert.equal(initialRecord.presetSelections.length, 0);
-    assert.equal(finalRecord.schemaVersion, 5);
-    assert.equal(finalRecord.strategyIdentity, initialRecord.strategyIdentity);
-    assert.deepEqual(finalRecord.strategyState, initialRecord.strategyState);
-    assert.equal(finalRecord.strategyState.repositoryName, "direct-references");
-    assert.equal(finalRecord.strategyState.defaultPackageScope, "acme");
+    assert.equal(initialRecord.schemaVersion, 6);
+    assert.equal(finalRecord.schemaVersion, 6);
+    assert.deepEqual(finalRecord.composition, initialRecord.composition);
+    assert.deepEqual(finalRecord.composition.conventions, {
+      repositoryName: "direct-references",
+      defaultPackageScope: "acme",
+      todo: false,
+    });
+    assert.equal(initialRecord.selections.length, 1);
+    assert.equal(initialRecord.selections[0]?.presetIdentity, null);
     assert.deepEqual(library, initialLibrary);
     assert.deepEqual(configuration, initialConfiguration);
     assert.equal(
-      library.bindings[configKey],
+      library.dependencyBindings["tooling-config"],
       configuration.packageDefinitionId,
     );
     assert.equal(cli.createdBy, "addition");
-    assert.equal(cli.bindings[configKey], configuration.packageDefinitionId);
+    assert.equal(
+      cli.dependencyBindings["tooling-config"],
+      configuration.packageDefinitionId,
+    );
     assert.ok(presetSelected(finalRecord, "@ykdz/preset-ts-cli"));
     assert.ok(presetSelected(finalRecord, "@ykdz/preset-vue-app"));
     assert.equal(
-      finalRecord.nodeInstances.library,
+      selectedPackageId(finalRecord, "library"),
       library.packageDefinitionId,
     );
     assert.equal(
-      finalRecord.nodeInstances["tooling-configuration"],
+      selectedPackageId(finalRecord, "tooling-configuration"),
       configuration.packageDefinitionId,
     );
     assert.equal(

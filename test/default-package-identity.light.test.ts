@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { ProjectBlueprintValidationError } from "@ykdz/template-core/project-blueprint";
 import {
   assertDefaultProjectBlueprintDraft,
   isValidDefaultNpmPackageName,
@@ -16,8 +17,9 @@ function blueprintWithPackage(
   role = "cli-tool",
 ) {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     packages: [{ packageDefinitionId, name, path: packagePath, role }],
+    packageLinkIntents: [],
   } as const;
 }
 
@@ -87,6 +89,7 @@ void describe("默认策略包名合同", () => {
               path: ".packages[0].name",
               message:
                 "Package name must be a valid npm package name for new packages",
+              packageIdentityIssue: { kind: "invalid", field: "name" },
             },
           ],
         },
@@ -167,6 +170,7 @@ void describe("默认策略包角色与目录合同", () => {
             {
               path: ".packages[0].path",
               message: `Package Path ${packagePath} uses reserved workspace collection ${workspaceCollection}`,
+              packageIdentityIssue: { kind: "reserved", field: "path" },
             },
           ],
         },
@@ -178,7 +182,7 @@ void describe("默认策略包角色与目录合同", () => {
     assert.throws(
       () =>
         assertDefaultProjectBlueprintDraft({
-          schemaVersion: 3,
+          schemaVersion: 4,
           packages: [
             {
               name: "@demo/evil",
@@ -187,11 +191,15 @@ void describe("默认策略包角色与目录合同", () => {
             },
           ],
         }),
-      (error) =>
-        error instanceof Error &&
-        error.message.includes(
+      (error) => {
+        if (!(error instanceof ProjectBlueprintValidationError)) return false;
+        assert.deepStrictEqual(error.packageIdentityIssues, [
+          { kind: "reserved", field: "path" },
+        ]);
+        return error.message.includes(
           ".packages[0].path: Package Path dist/evil uses reserved workspace collection dist",
-        ),
+        );
+      },
     );
   });
 });

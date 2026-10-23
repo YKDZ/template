@@ -6,11 +6,7 @@ import {
   validateDefaultPackagePath,
 } from "@ykdz/template-workspace/default-package-identity";
 
-import {
-  presetByAlias,
-  workspaceConfigurationIdentityForPreset,
-  type CliPreset,
-} from "./preset-catalog.ts";
+import { presetByAlias, type CliPreset } from "./preset-catalog.ts";
 
 export type InitializationInputIssue = {
   readonly code:
@@ -69,15 +65,6 @@ function deduplicateIssues<T extends { readonly code: string }>(
   );
 }
 
-function validScope(value: string, preset: CliPreset): boolean {
-  const configuration = workspaceConfigurationIdentityForPreset(preset, value);
-  return (
-    isValidDefaultPackageScope(value) &&
-    (configuration === undefined ||
-      isValidDefaultNpmPackageName(configuration.name))
-  );
-}
-
 export function validateInitializationInput(
   input: InitializationInput,
 ): InitializationInputValidation {
@@ -125,11 +112,11 @@ export function validateInitializationInput(
   const validScopeOverride =
     normalizedScope !== undefined &&
     scopeInput === scopeInput?.trim() &&
-    validScope(normalizedScope, preset);
+    isValidDefaultPackageScope(normalizedScope);
   if (normalizedScope !== undefined && !validScopeOverride) {
     issues.push({ code: "INVALID_PACKAGE_SCOPE" });
   }
-  const validRepositoryScope = validScope(repositoryName, preset);
+  const validRepositoryScope = isValidDefaultPackageScope(repositoryName);
   if (normalizedScope === undefined && !validRepositoryScope) {
     issues.push({ code: "INVALID_REPOSITORY_SCOPE" });
   }
@@ -139,42 +126,6 @@ export function validateInitializationInput(
     : validRepositoryScope
       ? repositoryName
       : "repository";
-  const configurationIdentity = workspaceConfigurationIdentityForPreset(
-    preset,
-    defaultPackageScope,
-  );
-  const nodeLeafNames = Object.values(definition.nodes).map(
-    ({ reference }) => reference.defaultLeafName,
-  );
-  if (
-    nodeLeafNames.some(
-      (leafName) =>
-        !isValidDefaultNpmPackageName(`@${defaultPackageScope}/${leafName}`),
-    ) ||
-    (configurable &&
-      validName &&
-      !isValidDefaultNpmPackageName(`@${defaultPackageScope}/${override.name}`))
-  ) {
-    issues.push({
-      code:
-        override?.name !== undefined
-          ? "INVALID_PACKAGE_NAME"
-          : scopeInput !== undefined
-            ? "INVALID_PACKAGE_SCOPE"
-            : "INVALID_REPOSITORY_SCOPE",
-    });
-  }
-
-  if (
-    (override?.name !== undefined &&
-      configurationIdentity?.name ===
-        `@${defaultPackageScope}/${override.name}`) ||
-    (override?.path !== undefined &&
-      configurationIdentity?.path === override.path)
-  ) {
-    issues.push({ code: "CONFLICTING_PACKAGE_IDENTITY" });
-  }
-
   if (issues.length > 0) {
     return {
       status: "input-invalid",

@@ -10,11 +10,6 @@ import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolc
 
 import type { CliJourney } from "../journey.ts";
 
-const snapshotNodeMajor = releaseToolchainSnapshot.nodeVersion.slice(
-  0,
-  releaseToolchainSnapshot.nodeVersion.indexOf("."),
-);
-
 const presets = templatePresets.map((member) => member.definition);
 const initializationPresets = templatePresets.filter((member) =>
   member.definition.operations.includes("init"),
@@ -201,15 +196,19 @@ const journey: CliJourney = {
       ),
     ) as {
       readonly schemaVersion: number;
-      readonly strategyState: {
-        readonly toolchain: Record<string, unknown>;
+      readonly composition: {
+        readonly conventions: {
+          readonly repositoryName: string;
+          readonly defaultPackageScope: string;
+          readonly todo: boolean;
+        };
       };
     };
-    assert.equal(generationRecord.schemaVersion, 5);
-    assert.deepEqual(generationRecord.strategyState.toolchain, {
-      nodeLtsMajor: snapshotNodeMajor,
-      nodeVersion: releaseToolchainSnapshot.nodeVersion,
-      packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+    assert.equal(generationRecord.schemaVersion, 6);
+    assert.deepEqual(generationRecord.composition.conventions, {
+      repositoryName: "project",
+      defaultPackageScope: "acme",
+      todo: false,
     });
     assert.match(
       await readFile(
@@ -243,16 +242,33 @@ const journey: CliJourney = {
       const project = path.join(context.workDir, projectName);
       const generationRecord = JSON.parse(
         await readFile(path.join(project, ".template/generation.json"), "utf8"),
-      );
+      ) as {
+        readonly schemaVersion: number;
+        readonly composition: {
+          readonly conventions: {
+            readonly repositoryName: string;
+            readonly defaultPackageScope: string;
+          };
+        };
+        readonly selections: readonly {
+          readonly presetIdentity: { readonly packageName: string } | null;
+        }[];
+      };
       assert.deepEqual(data.generationRecord, generationRecord);
-      assert.equal(generationRecord.schemaVersion, 5);
-      assert.equal(generationRecord.strategyIdentity, "default");
-      assert.equal(generationRecord.strategyState.repositoryName, projectName);
-      assert.equal(generationRecord.strategyState.defaultPackageScope, "acme");
+      assert.equal(generationRecord.schemaVersion, 6);
+      assert.equal(
+        generationRecord.composition.conventions.repositoryName,
+        projectName,
+      );
+      assert.equal(
+        generationRecord.composition.conventions.defaultPackageScope,
+        "acme",
+      );
       assert.ok(
-        generationRecord.presetSelections.some(
-          (selection: { readonly packageName: string }) =>
-            selection.packageName === member.identity.packageName,
+        generationRecord.selections.some(
+          (selection) =>
+            selection.presetIdentity?.packageName ===
+            member.identity.packageName,
         ),
       );
 
@@ -267,7 +283,13 @@ const journey: CliJourney = {
             (candidate) => candidate.definition === reference,
           );
           return selected?.definition.dependencyUses.some(
-            ({ name, purposes }) =>
+            ({
+              name,
+              purposes,
+            }: {
+              readonly name: string;
+              readonly purposes: readonly string[];
+            }) =>
               name === publicationReferenceName &&
               purposes.includes("template-execution"),
           );

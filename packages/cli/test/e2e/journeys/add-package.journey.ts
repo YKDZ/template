@@ -3,7 +3,6 @@ import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { templatePresets } from "@ykdz/template-content";
-import { canLinkNodePackageRoles } from "@ykdz/template-workspace/project-linking";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
 
@@ -24,8 +23,8 @@ function requireLinkableAddition(): {
     const [node] = Object.values(preset.nodes);
     if (
       node !== undefined &&
-      node.reference.defaultPath !== undefined &&
-      canLinkNodePackageRoles(node.reference.role, node.reference.role)
+      node.reference.role === "shared-library" &&
+      node.reference.defaultPath !== undefined
     ) {
       return {
         presetName: preset.metadata.alias,
@@ -98,19 +97,6 @@ async function rewriteRootManifest(
   manifest.engines = { node: toolchain.node };
   manifest.packageManager = toolchain.packageManager;
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-}
-
-async function readGenerationRecordToolchain(project: string) {
-  const record = JSON.parse(
-    await readFile(path.join(project, ".template/generation.json"), "utf8"),
-  ) as {
-    readonly schemaVersion: number;
-    readonly strategyState: {
-      readonly toolchain: { readonly nodeLtsMajor: string };
-    };
-  };
-  assert.equal(record.schemaVersion, 5);
-  return record.strategyState.toolchain;
 }
 
 const upgradedNode = "22";
@@ -197,12 +183,10 @@ const journey: CliJourney = {
         name: "add package on the target root current toolchain",
         cwd: project,
         async prepare() {
-          const record = await readGenerationRecordToolchain(project);
           const root = await readRootManifest(project);
           await writeFile(
             path.join(context.workDir, "toolchain-history.json"),
             JSON.stringify({
-              recordNodeLtsMajor: record.nodeLtsMajor,
               rootNode: root.engines?.node,
               rootPackageManager: root.packageManager,
             }),
@@ -436,6 +420,68 @@ const journey: CliJourney = {
         },
       );
     }
+    const identityProject = path.join(
+      context.workDir,
+      "identity-conflict-project",
+    );
+    const identitySnapshot = path.join(
+      context.workDir,
+      "identity-conflict-before.json",
+    );
+    commands.push(
+      {
+        name: "为新增包身份冲突初始化项目",
+        args: [
+          "init",
+          "identity-conflict-project",
+          "--preset",
+          addablePresetName,
+          "--scope",
+          "acme",
+        ],
+      },
+      {
+        name: "身份冲突预览保持零写入",
+        cwd: identityProject,
+        async prepare() {
+          await writeFile(
+            identitySnapshot,
+            JSON.stringify(await snapshot(identityProject)),
+          );
+        },
+        args: [
+          "add",
+          "package",
+          "--preset",
+          addablePresetName,
+          "--name",
+          "tooling-config",
+          "--path",
+          "packages/rejected",
+          "--dry-run",
+        ],
+      },
+      {
+        name: "身份冲突提交保持零写入",
+        cwd: identityProject,
+        async prepare() {
+          assert.deepEqual(
+            await snapshot(identityProject),
+            JSON.parse(await readFile(identitySnapshot, "utf8")),
+          );
+        },
+        args: [
+          "add",
+          "package",
+          "--preset",
+          addablePresetName,
+          "--name",
+          "tooling-config",
+          "--path",
+          "packages/rejected",
+        ],
+      },
+    );
     return commands;
   },
   async assertions({ context, results }) {
@@ -475,7 +521,6 @@ const journey: CliJourney = {
         "utf8",
       ),
     ) as {
-      readonly recordNodeLtsMajor: string;
       readonly rootNode: string;
       readonly rootPackageManager: string;
     };
@@ -489,14 +534,8 @@ const journey: CliJourney = {
       releaseToolchainSnapshot.packageManagerPin,
       "初始化根 packageManager 应为 CLI 发版快照的精确 pnpm pin",
     );
-    assert.equal(
-      history.recordNodeLtsMajor,
-      /^(\d+)\./.exec(history.rootNode)?.[1],
-      "Generation Record 只应保存由目标根现行精确值派生的大版本",
-    );
     assert.notEqual(history.rootNode, upgradedNode);
     assert.notEqual(history.rootPackageManager, upgradedPackageManager);
-    assert.notEqual(history.recordNodeLtsMajor, upgradedNode);
 
     assert.equal(results[5]?.exitCode, 0);
     assert.equal(JSON.parse(results[5]?.stdout ?? "").kind, "data");
@@ -518,19 +557,13 @@ const journey: CliJourney = {
     ) as RootManifest;
     assert.equal(rootAfterAddition.engines?.node, upgradedNode);
     assert.equal(rootAfterAddition.packageManager, upgradedPackageManager);
-    assert.equal(
-      (await readGenerationRecordToolchain(project)).nodeLtsMajor,
-      history.recordNodeLtsMajor,
-    );
 
     const rejectedResult = JSON.parse(results[7]?.stderr ?? "");
     assert.equal(rejectedResult.variant, "operationFailed");
     const rejected = rejectedResult.data as {
-      readonly phase: string;
       readonly error: { readonly message: string; readonly suggestion: string };
     };
     assert.equal(results[7]?.exitCode, 1);
-    assert.equal(rejected.phase, "metadata");
     // JSON 输出必须点名无效字段与其实际值，并给出修正动作。
     assert.match(rejected.error.message, /engines\.node/u);
     assert.ok(
@@ -550,10 +583,6 @@ const journey: CliJourney = {
         path.join(context.workDir, "invalid-root-package.json"),
         "utf8",
       ),
-    );
-    assert.equal(
-      (await readGenerationRecordToolchain(project)).nodeLtsMajor,
-      history.recordNodeLtsMajor,
     );
 
     // 文本输出负例：缺失 packageManager 声明同样给出字段级可行动诊断。
@@ -839,7 +868,6 @@ const journey: CliJourney = {
       assert.equal(result.stdout, "");
       const failure = JSON.parse(result.stderr);
       assert.equal(failure.variant, "operationFailed");
-      assert.equal(failure.data.phase, "metadata");
       assert.equal(typeof failure.data.error.message, "string");
       assert.notEqual(failure.data.error.message.length, 0);
     }
@@ -857,7 +885,11 @@ const journey: CliJourney = {
       { code: "ENOENT" },
     );
 
-    const matrixResults = results.slice(matrixCommandOffset);
+    const matrixResultCount = presetMatrix.length * 2;
+    const matrixResults = results.slice(
+      matrixCommandOffset,
+      matrixCommandOffset + matrixResultCount,
+    );
     assert.equal(matrixResults.length, presetMatrix.length * 2);
     for (const [
       index,
@@ -938,7 +970,7 @@ const journey: CliJourney = {
       const generationRecord = JSON.parse(
         await readFile(path.join(project, ".template/generation.json"), "utf8"),
       );
-      assert.equal(generationRecord.schemaVersion, 5);
+      assert.equal(generationRecord.schemaVersion, 6);
       assert.ok(
         generationRecord.packages.some(
           (record: { readonly packageDefinitionId: string }) =>
@@ -946,12 +978,48 @@ const journey: CliJourney = {
         ),
       );
       assert.ok(
-        generationRecord.presetSelections.some(
-          (selection: { readonly packageName: string }) =>
-            selection.packageName === addition.identity.packageName,
+        generationRecord.selections.some(
+          (selection: {
+            readonly presetIdentity: { readonly packageName: string } | null;
+          }) =>
+            selection.presetIdentity?.packageName ===
+            addition.identity.packageName,
         ),
       );
     }
+
+    const identityConflictResult =
+      results[matrixCommandOffset + matrixResultCount + 1];
+    const identityCommitConflictResult =
+      results[matrixCommandOffset + matrixResultCount + 2];
+    assert.equal(identityConflictResult?.exitCode, 1);
+    assert.equal(identityCommitConflictResult?.exitCode, 1);
+    for (const [result, dryRun] of [
+      [identityConflictResult, true],
+      [identityCommitConflictResult, false],
+    ] as const) {
+      assert.equal(result?.stdout, "");
+      const identityConflict = JSON.parse(result?.stderr ?? "{}");
+      assert.equal(identityConflict.variant, "conflict");
+      assert.equal(identityConflict.data.dryRun, dryRun);
+      assert.deepEqual(identityConflict.data.actions, []);
+      assert.equal(identityConflict.data.conflicts.length, 1);
+      assert.equal(identityConflict.data.conflicts[0].kind, "identity");
+      assert.deepEqual(identityConflict.data.conflicts[0].requested, {
+        name: "@acme/tooling-config",
+        path: "packages/rejected",
+        role: "shared-library",
+      });
+    }
+    assert.deepEqual(
+      await snapshot(path.join(context.workDir, "identity-conflict-project")),
+      JSON.parse(
+        await readFile(
+          path.join(context.workDir, "identity-conflict-before.json"),
+          "utf8",
+        ),
+      ),
+    );
   },
 };
 

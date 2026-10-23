@@ -2,6 +2,7 @@ import { isBuiltin } from "node:module";
 
 import {
   assertProjectBlueprintDraft,
+  ProjectBlueprintValidationError,
   validateProjectBlueprint,
   type BlueprintValidationIssue,
   type BlueprintValidationResult,
@@ -104,6 +105,7 @@ function defaultPackageIssues(
     issues.push({
       path: `${itemPath}.name`,
       message: "Package name must be a valid npm package name for new packages",
+      packageIdentityIssue: { kind: "invalid", field: "name" },
     });
   }
   const isNativeWorkspaceRoot =
@@ -114,11 +116,13 @@ function defaultPackageIssues(
       issues.push({
         path: `${itemPath}.path`,
         message: `Package Path ${definition.path} uses reserved workspace collection ${pathValidation.reservedWorkspaceCollection}`,
+        packageIdentityIssue: { kind: "reserved", field: "path" },
       });
     } else if (!pathValidation.hasValidShape) {
       issues.push({
         path: `${itemPath}.path`,
         message: "Package Path must be exactly two safe path segments",
+        packageIdentityIssue: { kind: "invalid", field: "path" },
       });
     }
   }
@@ -148,9 +152,7 @@ export function assertDefaultProjectBlueprintDraft(
   const blueprint = assertProjectBlueprintDraft(value);
   const issues = defaultBlueprintIssues(blueprint);
   if (issues.length > 0) {
-    throw new Error(
-      issues.map((issue) => `${issue.path}: ${issue.message}`).join("\n"),
-    );
+    throw new ProjectBlueprintValidationError(issues);
   }
   return blueprint;
 }
@@ -161,11 +163,7 @@ export function assertDefaultProjectBlueprint(
 ): ProjectBlueprint {
   const result = validateDefaultProjectBlueprint(value);
   if (!result.ok) {
-    throw new Error(
-      result.issues
-        .map((issue) => `${issue.path}: ${issue.message}`)
-        .join("\n"),
-    );
+    throw new ProjectBlueprintValidationError(result.issues);
   }
   return result.value;
 }
@@ -176,9 +174,7 @@ export function assertDefaultPackageDefinition(
 ): PackageDefinition {
   const issues = defaultPackageIssues(definition, 0);
   if (issues.length > 0) {
-    throw new Error(
-      issues.map((issue) => `${issue.path}: ${issue.message}`).join("\n"),
-    );
+    throw new ProjectBlueprintValidationError(issues);
   }
   return definition;
 }

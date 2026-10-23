@@ -1,5 +1,5 @@
+import { generationRecordSchema } from "@ykdz/template-core/generation-record";
 import { projectBlueprintSchema } from "@ykdz/template-core/project-blueprint";
-import { generationRecordSchema } from "@ykdz/template-generator";
 import * as v from "valibot";
 
 import { standardSchema } from "./standard-schema.ts";
@@ -42,16 +42,16 @@ const packageUpdateSchema = v.object({
 
 export const packageAdditionSchema = standardSchema(packageUpdateSchema);
 
-const packageIdentity = v.object({
-  name: v.string(),
-  path: v.string(),
-  role: v.string(),
-});
 const projectProjectionSource = v.object({
   identity: v.string(),
   label: v.string(),
 });
 const region = v.object({ startLine: v.number(), lineCount: v.number() });
+const packageIdentity = v.object({
+  name: v.string(),
+  path: v.string(),
+  role: v.string(),
+});
 export const packageConflictSchema = standardSchema(
   v.object({
     dryRun: v.boolean(),
@@ -59,15 +59,9 @@ export const packageConflictSchema = standardSchema(
     conflicts: v.array(
       v.union([
         v.object({
-          kind: v.picklist(["identity", "missing-link"]),
+          kind: v.literal("identity"),
           existing: packageIdentity,
           requested: packageIdentity,
-          missingLink: v.optional(
-            v.object({
-              consumerPackagePath: v.string(),
-              providerPackagePath: v.string(),
-            }),
-          ),
         }),
         v.object({
           path: v.string(),

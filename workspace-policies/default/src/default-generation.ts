@@ -10,6 +10,7 @@ import {
 } from "@ykdz/template-core/content-identity";
 import type { GenerationRecordSelection } from "@ykdz/template-core/generation-record";
 import type { JsonValue } from "@ykdz/template-core/json";
+import { ProjectBlueprintValidationError } from "@ykdz/template-core/project-blueprint";
 import type { CurrentProjectProjectionEntry } from "@ykdz/template-core/project-projection";
 import type {
   GeneratorAdditionSelection,
@@ -745,10 +746,19 @@ export function createDefaultGenerator<
       before = generator.computeProject(preparation.before);
       after = generator.computeProject(preparation.after);
     } catch (error) {
+      const packageIdentityIssues =
+        error instanceof ProjectBlueprintValidationError
+          ? error.packageIdentityIssues
+          : [];
       return {
         status: "operation-failure" as const,
         phase: "calculation" as const,
-        error: { message: errorMessage(error) },
+        error: {
+          message: errorMessage(error),
+          ...(packageIdentityIssues.length === 0
+            ? {}
+            : { packageIdentityIssues }),
+        },
       };
     }
     return generator.planComputedAdd({ preparation, before, after });
