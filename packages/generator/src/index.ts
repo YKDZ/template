@@ -34,12 +34,16 @@ import {
   type PackageContribution,
 } from "@ykdz/template-core/package-contribution";
 import type {
+  BlueprintPackageIdentityIssue,
   PackageDefinition,
   PackageDefinitionId,
   PersistedPackageDefinition,
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
-import { assertProjectBlueprint } from "@ykdz/template-core/project-blueprint";
+import {
+  assertProjectBlueprint,
+  ProjectBlueprintValidationError,
+} from "@ykdz/template-core/project-blueprint";
 import {
   commitProjectProjectionPlan,
   planProjectProjections,
@@ -280,7 +284,10 @@ export type GeneratorResult<
         | "calculation"
         | "planning"
         | "commit";
-      readonly error: { readonly message: string };
+      readonly error: {
+        readonly message: string;
+        readonly packageIdentityIssues?: readonly BlueprintPackageIdentityIssue[];
+      };
     };
 
 export type GeneratorPlanningResult<
@@ -311,7 +318,10 @@ export type GeneratorPlanningResult<
         | "calculation"
         | "planning"
         | "commit";
-      readonly error: { readonly message: string };
+      readonly error: {
+        readonly message: string;
+        readonly packageIdentityIssues?: readonly BlueprintPackageIdentityIssue[];
+      };
     };
 
 export type GeneratorAdditionOptions<
@@ -2795,10 +2805,19 @@ export function createGenerator<
     try {
       computed = computeProject(prepared);
     } catch (error) {
+      const packageIdentityIssues =
+        error instanceof ProjectBlueprintValidationError
+          ? error.packageIdentityIssues
+          : [];
       return {
         status: "operation-failure",
         phase: "calculation",
-        error: { message: errorMessage(error) },
+        error: {
+          message: errorMessage(error),
+          ...(packageIdentityIssues.length === 0
+            ? {}
+            : { packageIdentityIssues }),
+        },
       };
     }
 
@@ -3074,10 +3093,19 @@ export function createGenerator<
       before = computeProject(preparation.before);
       after = computeProject(preparation.after);
     } catch (error) {
+      const packageIdentityIssues =
+        error instanceof ProjectBlueprintValidationError
+          ? error.packageIdentityIssues
+          : [];
       return {
         status: "operation-failure",
         phase: "calculation",
-        error: { message: errorMessage(error) },
+        error: {
+          message: errorMessage(error),
+          ...(packageIdentityIssues.length === 0
+            ? {}
+            : { packageIdentityIssues }),
+        },
       };
     }
     return planComputedAdd({

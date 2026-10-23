@@ -11,6 +11,7 @@ import path from "node:path";
 import { templatePresets } from "@ykdz/template-content";
 import { parse as parseYaml } from "yaml";
 
+import { planPreset } from "../../support/preset-planning.ts";
 import type { CliJourney } from "../journey.ts";
 
 type WorkspaceEntry = {
@@ -58,52 +59,61 @@ async function workspaceSnapshot(
   return entries.toSorted((left, right) => left.path.localeCompare(right.path));
 }
 
-function diagnosticScenario(): {
+async function diagnosticScenario(): Promise<{
   readonly basePreset: string;
   readonly diagnosticPreset: string;
   readonly firstPackagePath: string;
   readonly secondPackagePath: string;
-} {
-  const presets = templatePresets.map((member) => member.definition);
-  const base = presets.find(
-    (preset) =>
-      preset.operations.includes("init") &&
-      Object.values(preset.nodes).some(
-        ({ reference }) => reference.role === "shared-library",
-      ),
-  );
-  const diagnostic = presets.find(
-    (preset) =>
-      preset.operations.includes("add") &&
-      Object.values(preset.nodes).some(
-        ({ reference }) => reference.role === "runtime-service",
-      ),
-  );
+}> {
+  let base: (typeof templatePresets)[number] | undefined;
+  for (const member of templatePresets) {
+    if (!member.definition.operations.includes("init")) continue;
+    const plan = await planPreset(member);
+    if (plan.packages.some(({ role }) => role === "shared-library")) {
+      base = member;
+      break;
+    }
+  }
+  let diagnostic:
+    | {
+        readonly member: (typeof templatePresets)[number];
+        readonly packagePath: string;
+      }
+    | undefined;
+  for (const member of templatePresets) {
+    if (
+      !member.definition.operations.includes("init") ||
+      !member.definition.operations.includes("add")
+    ) {
+      continue;
+    }
+    const plan = await planPreset(member);
+    const runtimePackage = plan.packages.find(
+      ({ role }) => role === "runtime-service",
+    );
+    if (runtimePackage !== undefined) {
+      diagnostic = { member, packagePath: runtimePackage.path };
+      break;
+    }
+  }
   if (base === undefined || diagnostic === undefined) {
     throw new Error(
       "diagnostic-add-package journey requires base and application presets from the content collection",
     );
   }
-  const diagnosticNode = Object.values(diagnostic.nodes)[0];
-  const defaultPath = diagnosticNode?.reference.defaultPath;
-  if (defaultPath === undefined) {
-    throw new Error(
-      "diagnostic-add-package journey requires an application default path",
-    );
-  }
   const secondPackagePath = path.posix.join(
-    path.posix.dirname(defaultPath),
+    path.posix.dirname(diagnostic.packagePath),
     "admin",
   );
   return {
-    basePreset: base.metadata.alias,
-    diagnosticPreset: diagnostic.metadata.alias,
-    firstPackagePath: defaultPath,
+    basePreset: base.definition.metadata.alias,
+    diagnosticPreset: diagnostic.member.definition.metadata.alias,
+    firstPackagePath: diagnostic.packagePath,
     secondPackagePath,
   };
 }
 
-const scenario = diagnosticScenario();
+const scenario = await diagnosticScenario();
 
 const journey: CliJourney = {
   name: "diagnostic-add-package",

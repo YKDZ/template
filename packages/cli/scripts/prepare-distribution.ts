@@ -138,11 +138,6 @@ try {
   prepared = await prepareContentCollection({
     content: templateContent,
     roots: templateContent,
-    referencePreparation: {
-      specifier: "@ykdz/template-workspace/reference-package",
-      exportName: "defineReferencePackage",
-    },
-
     workspaceRoot: await workspaceRoot(),
     root: path.join(temporaryRoot, "content"),
   });
@@ -170,7 +165,6 @@ try {
       `pnpm 原生安装 CLI 内容闭包失败：${install.stderr || install.stdout}`,
     );
   }
-
   await rm(destination, { recursive: true, force: true });
   await cp(stage, destination, { recursive: true });
   console.log(`CLI 分发目录已准备：${destination}`);

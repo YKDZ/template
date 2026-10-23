@@ -1,18 +1,6 @@
-import { projectPublicationWorkspace } from "@ykdz/reference-npm-publication/template";
 import { deriveTemplateMembers, templateContent } from "@ykdz/template-content";
-import {
-  contentIdentityKey,
-  createContentIndex,
-} from "@ykdz/template-core/content-identity";
-import type { GeneratorSelectionRoot } from "@ykdz/template-core/workspace-strategy";
-import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
-import type { GeneratorPackageState } from "@ykdz/template-core/workspace-strategy";
-import { createGenerator } from "@ykdz/template-generator";
-import {
-  createDefaultWorkspaceStrategy,
-  selectedWorkspaceConfigurationIdentity,
-  type DefaultWorkspaceCreationInput,
-} from "@ykdz/template-workspace/default-workspace-strategy";
+import { createContentIndex } from "@ykdz/template-core/content-identity";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 
 export type CliPreset = Extract<
   (typeof templateContent)[number],
@@ -22,62 +10,13 @@ export type CliPreset = Extract<
 const templateMembers = deriveTemplateMembers(templateContent);
 export const cliPresets: readonly CliPreset[] = templateMembers.presets;
 const presetIndex = createContentIndex(cliPresets);
-const referencePackages = templateMembers.referencePackages;
-const referenceIndex = createContentIndex(referencePackages);
-
-/** CLI 外层按已持久参考声明装配原生发布根贡献。 */
-function projectSelectedPublicationWorkspace(options: {
-  readonly packages: readonly GeneratorPackageState[];
-}) {
-  return projectPublicationWorkspace({
-    references: options.packages.map(
-      (record) =>
-        referenceIndex.resolve(record.contentIdentity, "reference").definition,
-    ),
-  });
-}
 
 export function presetByAlias(alias: string): CliPreset | undefined {
   if (!cliPresets.some((preset) => preset.alias === alias)) return undefined;
   return presetIndex.resolve(alias, "preset");
 }
 
-/** 从预设依赖图取得工具配置参考内容公开的默认身份。 */
-export function workspaceConfigurationIdentityForPreset(
-  preset: CliPreset,
-  scope: string,
-): ReturnType<typeof selectedWorkspaceConfigurationIdentity> {
-  const selection = Object.entries(preset.definition.nodes).map(
-    ([nodeIdentity, node]): GeneratorSelectionRoot => ({
-      nodeIdentity,
-      ...(node.layout === undefined ? {} : { layout: node.layout }),
-      ...(node.creationInput?.init === undefined
-        ? {}
-        : { creationInput: node.creationInput.init }),
-      contentIdentity: referenceIndex.resolve(
-        { alias: node.reference.alias, namespace: preset.identity.namespace },
-        "reference",
-      ).identity,
-    }),
-  );
-  const contentByIdentity = new Map(
-    referencePackages.map((member) => [
-      contentIdentityKey(member.identity),
-      member,
-    ]),
-  );
-  return selectedWorkspaceConfigurationIdentity({
-    selection,
-    contentByIdentity,
-    scope,
-  });
-}
-
-export const cliWorkspaceStrategy = createDefaultWorkspaceStrategy<
-  DefaultWorkspaceCreationInput<PackageCreationInput>
->({ project: projectSelectedPublicationWorkspace });
-
-export const cliGenerator = createGenerator({
+/** 命令和检查共享同一正式内容集合对应的默认生成器。 */
+export const cliGenerator = createDefaultGenerator({
   content: templateContent,
-  strategy: cliWorkspaceStrategy,
 });
