@@ -1,4 +1,4 @@
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+import { createDefaultGenerator as createDefaultGeneratorForContent } from "@ykdz/template-workspace/default-generation";
 
 import { loadTemplateContent } from "./collection.ts";
 
@@ -7,6 +7,10 @@ export const templateContent = await loadTemplateContent({
   namespace: "ykdz",
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
+    {
+      specifier: "@ykdz/reference-workspace-root/template",
+      load: () => import("@ykdz/reference-workspace-root/template"),
+    },
     {
       specifier: "@ykdz/reference-ts-lib/template",
       load: () => import("@ykdz/reference-ts-lib/template"),
@@ -76,11 +80,6 @@ export const templateContent = await loadTemplateContent({
       load: () => import("@ykdz/preset-vike-app/template"),
     },
   ],
-  prepareReferenceDefinition(definition) {
-    return defineReferencePackage(
-      definition as Parameters<typeof defineReferencePackage>[0],
-    );
-  },
 });
 
 export type { ContentKind } from "./collection.ts";
@@ -104,3 +103,8 @@ export const templateReferencePackages: readonly TemplateReferencePackage[] =
   templateContent.filter(
     (member): member is TemplateReferencePackage => member.kind === "reference",
   );
+
+/** 默认公开SDK以真实原生内容装配器提供计算、规划和提交。 */
+export function createGenerator() {
+  return createDefaultGeneratorForContent({ content: templateContent });
+}

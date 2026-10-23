@@ -1,34 +1,48 @@
 import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
+import referenceManifest from "../package.json" with { type: "json" };
+
 export const referencePackage = defineReferencePackage({
-  packageName: "@ykdz/reference-workspace-root",
-  resolve: (specifier) => import.meta.resolve(specifier),
+  manifest: referenceManifest,
   resourceRoot: new URL("../", import.meta.url),
   alias: "root",
   instance: "shared",
   defaultLeafName: "workspace",
   defaultPath: ".",
   role: "native-package",
-  resources: [
-    "scripts/task-gates.ts",
-    "tsconfig.json",
-    "tsconfig.config.json",
-    "tsconfig.scripts.json",
+  dependencies: [
+    {
+      key: "tooling-config",
+      ownerLocal: {
+        specifier: "@ykdz/reference-tooling-config/template",
+        resolve: (specifier) => import.meta.resolve(specifier),
+      },
+    },
   ],
-  template: {
-    dependencies: [
-      { name: "@ykdz/template-core", purpose: "template-execution" },
-      { name: "@ykdz/template-workspace", purpose: "template-execution" },
-    ],
-    scripts: [
-      "build:template",
-      "check:author-planning-roles",
-      "typecheck:owner",
-    ],
-    exports: ["./task-gates"],
-    resources: ["template", "tsconfig.template.json", "turbo.json"],
-  },
-  environmentNeeds: [],
+  resources: [
+    { path: "scripts/task-gates.ts" },
+    { path: "tsconfig.json" },
+    { path: "tsconfig.config.json" },
+    { path: "tsconfig.scripts.json" },
+    { path: "template/files/turbo.json", targetPath: "turbo.json" },
+  ],
+  templateDependencies: [
+    {
+      name: "@ykdz/template-core",
+      purpose: "template-build",
+    },
+    {
+      name: "@ykdz/template-workspace",
+      purpose: "template-execution",
+    },
+  ],
+  executionDependencies: ["@ykdz/template-workspace"],
+  templateScripts: [
+    "build:template",
+    "check:author-planning-roles",
+    "typecheck:owner",
+  ],
+  templateExports: ["./reference", "./template", "./task-gates"],
   foundation: {
     toolchains: {},
     editorCapabilities: ["oxc-format-lint"],
@@ -37,4 +51,5 @@ export const referencePackage = defineReferencePackage({
       interval: "weekly",
     },
   },
+  environmentNeeds: [],
 });

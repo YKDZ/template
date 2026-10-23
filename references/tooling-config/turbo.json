@@ -2,11 +2,6 @@
   "extends": ["//"],
   "tags": ["library"],
   "tasks": {
-    "build": {
-      "dependsOn": ["^build"],
-      "inputs": [],
-      "outputs": []
-    },
     "format:check": {
       "inputs": [],
       "outputs": [],
@@ -39,7 +34,7 @@
     },
     "build:template": {
       "tags": ["work:preparation"],
-      "dependsOn": [],
+      "dependsOn": ["@ykdz/template-workspace#build"],
       "outputs": ["template-dist/**"]
     },
     "check:author-planning-roles": {

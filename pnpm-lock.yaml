@@ -606,6 +606,9 @@ importers:
       '@ykdz/reference-vue-hono-web':
         specifier: workspace:*
         version: link:../../references/vue-hono-web
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../../references/workspace-root
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
@@ -863,9 +866,15 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../../references/workspace-root
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../../packages/generator
@@ -1137,6 +1146,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/template-workspace':
+        specifier: workspace:*
+        version: link:../../workspace-policies/default
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -1208,6 +1220,9 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../../workspace-policies/default

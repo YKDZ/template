@@ -301,7 +301,7 @@ void describe("owner-local内容依赖", () => {
     );
   });
 
-  void it("拒绝同namespace同URL多入口及resolver指向其他修订", async () => {
+  void it("按完整公开地址解析同模块别名并拒绝错误入口或其他修订", async () => {
     const dependency = {
       key: "tooling",
       ownerLocal: {
@@ -317,7 +317,7 @@ void describe("owner-local内容依赖", () => {
     };
     const consumer = referenceDefinition("consumer", dependency);
     const provider = referenceDefinition("tooling");
-    const ambiguousEngine = createEngine([
+    const aliasedEngine = createEngine([
       loadedReference(
         "source",
         "@fixture/consumer",
@@ -334,15 +334,72 @@ void describe("owner-local内容依赖", () => {
       ),
       loadedReference(
         "source",
-        "@fixture/other-entry",
-        "./template",
+        "@fixture/tooling",
+        "./alias",
         "file:///fixture/tooling/template.js",
-        referenceDefinition("other-entry"),
+        referenceDefinition("tooling-alias"),
+      ),
+    ]);
+    const resolved = await aliasedEngine.prepareProject({
+      selection: {
+        roots: [
+          {
+            nodeIdentity: "consumer",
+            contentIdentity: identity,
+            creationInput: { path: "packages/consumer" },
+          },
+        ],
+      },
+      conventions: { edition: "stable" },
+      operationFacts: null,
+    });
+    assert.deepEqual(
+      aliasedEngine
+        .computeProject(resolved)
+        .blueprint.packages.map(({ path: packagePath }) => packagePath),
+      ["packages/consumer", "packages/tooling"],
+    );
+
+    const wrongAddressEngine = createEngine([
+      loadedReference(
+        "source",
+        "@fixture/consumer",
+        "./template",
+        "file:///fixture/consumer/template.js",
+        consumer,
+      ),
+      loadedReference(
+        "source",
+        "@fixture/tooling",
+        "./alias",
+        "file:///fixture/tooling/template.js",
+        provider,
       ),
     ]);
     await assert.rejects(
-      prepareOne(ambiguousEngine, identity),
-      /多个公开内容入口/u,
+      prepareOne(wrongAddressEngine, identity),
+      /公开地址与实际内容入口不一致/u,
+    );
+
+    assert.throws(
+      () =>
+        createEngine([
+          loadedReference(
+            "source",
+            "@fixture/tooling",
+            "./template",
+            "file:///fixture/tooling/template.js",
+            provider,
+          ),
+          loadedReference(
+            "source",
+            "@fixture/tooling",
+            "./template",
+            "file:///fixture/tooling/another-revision.js",
+            provider,
+          ),
+        ]),
+      /同一规范身份存在多个未明确选择的来源修订/u,
     );
 
     const wrongRevisionEngine = createEngine([
@@ -363,7 +420,7 @@ void describe("owner-local内容依赖", () => {
     ]);
     await assert.rejects(
       prepareOne(wrongRevisionEngine, identity),
-      /同一命名空间/u,
+      /未解析到当前内容修订/u,
     );
   });
 

@@ -1,11 +1,63 @@
+import type { JsonValue } from "@ykdz/template-core/json";
+import type { ResourceFileSnapshot } from "@ykdz/template-core/reference-package";
 import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
-import type { ReferencePackage } from "@ykdz/template-workspace/reference-package";
+import type {
+  DefaultCompositionFile,
+  DefaultRootDeclarationData,
+  ReferencePackageManifest,
+} from "@ykdz/template-workspace/reference-package";
 
-import { projectChangesetsWorkspace } from "./workspace.ts";
+import referenceManifest from "../package.json" with { type: "json" };
 
-export const referencePackage = defineReferencePackage({
-  packageName: "@ykdz/reference-npm-publication",
-  resolve: (specifier) => import.meta.resolve(specifier),
+type PublicationOwnerFacts = {
+  readonly gitignoreFragment: string;
+  readonly files: readonly DefaultCompositionFile[];
+};
+
+function resource(
+  resources: readonly ResourceFileSnapshot[],
+  resourcePath: string,
+): ResourceFileSnapshot {
+  const snapshot = resources.find(({ path }) => path === resourcePath);
+  if (snapshot === undefined) {
+    throw new Error(`npm publication缺少所属资源：${resourcePath}`);
+  }
+  return snapshot;
+}
+
+function rootDeclaration(
+  ownerFacts: PublicationOwnerFacts,
+): DefaultRootDeclarationData {
+  const manifest = referenceManifest as ReferencePackageManifest;
+  const scripts = Object.fromEntries(
+    Object.entries(manifest.scripts ?? {}).filter(([name]) =>
+      name.startsWith("publication:"),
+    ),
+  );
+  return {
+    requiredTemplateDependency: manifest.name,
+    manifest: {
+      devDependencies: {
+        "@changesets/cli": manifest.devDependencies!["@changesets/cli"]!,
+      },
+      scripts,
+    },
+    turboTasks: Object.fromEntries(
+      Object.keys(scripts).map((name) => [
+        `//#${name}`,
+        { tags: ["work:release"], cache: false },
+      ]),
+    ),
+    gitignoreFragments: [ownerFacts.gitignoreFragment],
+    files: ownerFacts.files,
+  };
+}
+
+export const referencePackage = defineReferencePackage<
+  JsonValue,
+  PublicationOwnerFacts
+>({
+  manifest: referenceManifest,
   resourceRoot: new URL("../", import.meta.url),
   alias: "npm-publication",
   instance: "shared",
@@ -13,20 +65,21 @@ export const referencePackage = defineReferencePackage({
   defaultPath: "tools/npm-publication",
   role: "shared-library",
   resources: [
-    "README.md",
-    ".changeset/config.json",
-    "resources/gitignore",
-    "resources/release.yml",
+    { path: "README.md" },
+    { path: ".changeset/config.json" },
+    { path: "resources/gitignore" },
+    { path: "resources/release.yml" },
   ],
-  template: {
-    dependencies: [
-      { name: "@ykdz/template-core", purpose: "template-execution" },
-      { name: "@ykdz/template-workspace", purpose: "template-execution" },
-    ],
-    scripts: ["build:template"],
-    resources: ["template", "tsconfig.template.json"],
-  },
-  environmentNeeds: [],
+  templateDependencies: [
+    { name: "@ykdz/template-core", purpose: "template-build" },
+    { name: "@ykdz/template-workspace", purpose: "template-execution" },
+  ],
+  executionDependencies: ["@ykdz/template-workspace"],
+  templateScripts: [
+    "build:template",
+    "publication:pack",
+    "publication:publish",
+  ],
   foundation: {
     toolchains: {},
     editorCapabilities: ["oxc-format-lint"],
@@ -35,20 +88,30 @@ export const referencePackage = defineReferencePackage({
       interval: "weekly",
     },
   },
+  environmentNeeds: [],
+  prepareFacts(resources) {
+    const config = resource(resources, ".changeset/config.json");
+    const release = resource(resources, "resources/release.yml");
+    const gitignore = resource(resources, "resources/gitignore");
+    return {
+      gitignoreFragment: new TextDecoder("utf-8", { fatal: true }).decode(
+        gitignore.content,
+      ),
+      files: [
+        {
+          path: ".changeset/config.json",
+          content: config.content.slice(),
+          mode: config.mode,
+          sourcePath: config.path,
+        },
+        {
+          path: ".github/workflows/release.yml",
+          content: release.content.slice(),
+          mode: release.mode,
+          sourcePath: release.path,
+        },
+      ],
+    };
+  },
+  rootDeclaration,
 });
-
-type PublicationConsumer = Pick<ReferencePackage, "dependencyUses">;
-
-/** 只有显式依赖本参考模板内容的组合才取得 Changesets 根贡献。 */
-export function projectPublicationWorkspace(options: {
-  readonly references: readonly PublicationConsumer[];
-}) {
-  const required = options.references.some((reference) =>
-    reference.dependencyUses.some(
-      ({ name, purposes }) =>
-        name === referencePackage.manifest.name &&
-        purposes.includes("template-execution"),
-    ),
-  );
-  return required ? projectChangesetsWorkspace(referencePackage.manifest) : [];
-}

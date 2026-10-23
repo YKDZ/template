@@ -900,37 +900,50 @@ export function createGenerator<
         );
       }
       const resolvedURL = canonicalModuleURL(resolved, "原生依赖解析结果");
-      const urlCandidates = contentIndex.members.filter(
+      const namespaceCandidates = contentIndex.members.filter(
         (member): member is RuntimeReference =>
           member.kind === "reference" &&
+          member.identity.namespace === consumer.identity.namespace &&
+          member.identity.packageName === address.packageName &&
+          member.identity.exportPath === address.exportPath,
+      );
+      const resolvedCandidates = namespaceCandidates.filter(
+        (member) =>
           canonicalModuleURL(
             member.source.moduleURL,
             "内容成员公开模块入口",
           ) === resolvedURL,
       );
-      const namespaceCandidates = urlCandidates.filter(
-        (member) => member.identity.namespace === consumer.identity.namespace,
-      );
-      if (namespaceCandidates.length === 0) {
+      if (resolvedCandidates.length > 1) {
+        throw new Error(
+          `原生依赖解析到同一公开身份的多个内容修订，不能猜选：${dependency.ownerLocal.specifier}`,
+        );
+      }
+      if (resolvedCandidates.length === 1) {
+        identity = resolvedCandidates[0]!.identity;
+      } else if (namespaceCandidates.length > 0) {
+        throw new Error(
+          `原生依赖 ${dependency.ownerLocal.specifier} 未解析到当前内容修订的公开模块入口`,
+        );
+      } else {
+        const sameNamespaceModuleCandidates = contentIndex.members.filter(
+          (member): member is RuntimeReference =>
+            member.kind === "reference" &&
+            member.identity.namespace === consumer.identity.namespace &&
+            canonicalModuleURL(
+              member.source.moduleURL,
+              "内容成员公开模块入口",
+            ) === resolvedURL,
+        );
+        if (sameNamespaceModuleCandidates.length > 0) {
+          throw new Error(
+            `原生依赖公开地址与实际内容入口不一致：${dependency.ownerLocal.specifier}`,
+          );
+        }
         throw new Error(
           `原生依赖 ${dependency.ownerLocal.specifier} 必须由消费内容的同一命名空间公开，且解析到当前修订`,
         );
       }
-      if (namespaceCandidates.length > 1) {
-        throw new Error(
-          `原生依赖解析到同一模块下的多个公开内容入口，不能猜选：${dependency.ownerLocal.specifier}`,
-        );
-      }
-      const provider = namespaceCandidates[0]!;
-      if (
-        provider.identity.packageName !== address.packageName ||
-        provider.identity.exportPath !== address.exportPath
-      ) {
-        throw new Error(
-          `原生依赖公开地址与实际内容入口不一致：${dependency.ownerLocal.specifier}`,
-        );
-      }
-      identity = provider.identity;
     }
 
     cache.set(cacheKey, {
