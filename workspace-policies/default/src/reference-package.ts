@@ -71,8 +71,20 @@ export type DefaultRootDeclarationData = {
     readonly devDependencies?: Readonly<Record<string, string>>;
   }>;
   readonly turboTasks?: Readonly<Record<string, unknown>>;
+  /** 根 TypeScript 项目的完整编译选项与有序 include 片段。 */
+  readonly typescript?: Readonly<{
+    readonly compilerOptions?: Readonly<Record<string, unknown>>;
+    readonly include?: readonly string[];
+  }>;
   /** 作为有序片段连接，包含反向规则时不得排序。 */
   readonly gitignoreFragments?: readonly string[];
+  /** 根检查与部署运行所需的封闭环境声明。 */
+  readonly environmentNeeds?: Readonly<{
+    readonly check?: readonly CheckEnvironmentNeed[];
+    readonly deployment?: readonly DeploymentEnvironmentNeed[];
+  }>;
+  /** 根级 CI 工作流的诊断制品声明。 */
+  readonly ciDiagnosticArtifacts?: readonly CiDiagnosticArtifactDeclaration[];
   /** 根位置的独占原生资源；由默认组合校验来源与路径冲突。 */
   readonly files?: readonly DefaultCompositionFile[];
 };

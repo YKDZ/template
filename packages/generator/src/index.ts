@@ -60,6 +60,7 @@ import type {
   ReferenceDependency,
   ReferencePackageDefinition,
   ReferenceSelectionRoot,
+  SelectionDependencyBindingTarget,
   PresetSelectionDefinition,
   PresetSelectionRequest,
 } from "@ykdz/template-core/reference-package";
@@ -332,6 +333,9 @@ export type GeneratorAdditionSelection<
       readonly contentIdentity: ContentSelector;
       readonly nodeIdentity?: string;
       readonly layout?: unknown;
+      readonly dependencyBindings?: Readonly<
+        Record<string, SelectionDependencyBindingTarget>
+      >;
     }
   | { readonly preset: ContentSelector }
 );
@@ -1024,7 +1028,13 @@ export function createGenerator<
       string,
       PackageNodeDraft<ContentCreationInput<Members>>
     >;
-    readonly dependencyBindings?: Readonly<Record<string, string>>;
+    readonly restoredTargets?: ReadonlyMap<
+      PackageDefinitionId,
+      PackageNodeDraft<ContentCreationInput<Members>>
+    >;
+    readonly dependencyBindings?: Readonly<
+      Record<string, SelectionDependencyBindingTarget>
+    >;
   }): void => {
     const { draft } = options;
     const identityKey = contentIdentityKey(draft.content.identity);
@@ -1038,16 +1048,28 @@ export function createGenerator<
     const bindings = options.dependencyBindings ?? {};
     const bindingEntries = Object.entries(bindings);
     for (const [key, target] of bindingEntries) {
-      if (
-        key.trim().length === 0 ||
-        typeof target !== "string" ||
-        target.trim().length === 0
-      ) {
-        throw new Error(`预设节点依赖绑定无效：${draft.nodeIdentity}/${key}`);
+      if (key.trim().length === 0) {
+        throw new Error(`选择节点依赖绑定无效：${draft.nodeIdentity}/${key}`);
       }
-      if (!options.explicitTargets?.has(target)) {
+      if (typeof target === "string") {
+        if (
+          target.trim().length === 0 ||
+          !options.explicitTargets?.has(target)
+        ) {
+          throw new Error(
+            `选择节点依赖绑定目标不存在：${draft.nodeIdentity}/${key}`,
+          );
+        }
+      } else if (
+        !isRecord(target) ||
+        typeof target.packageDefinitionId !== "string" ||
+        target.packageDefinitionId.trim().length === 0 ||
+        !options.restoredTargets?.has(
+          target.packageDefinitionId as PackageDefinitionId,
+        )
+      ) {
         throw new Error(
-          `预设节点依赖绑定目标不存在：${draft.nodeIdentity}/${key}`,
+          `选择节点依赖绑定目标不存在：${draft.nodeIdentity}/${key}`,
         );
       }
     }
@@ -1067,14 +1089,15 @@ export function createGenerator<
         dependency,
         options.dependencyIdentities,
       );
-      const selectedTargetIdentity = bindings[dependency.key];
-      if (selectedTargetIdentity !== undefined) {
-        const selectedTarget = options.explicitTargets?.get(
-          selectedTargetIdentity,
-        );
+      const bindingTarget = bindings[dependency.key];
+      if (bindingTarget !== undefined) {
+        const selectedTarget =
+          typeof bindingTarget === "string"
+            ? options.explicitTargets?.get(bindingTarget)
+            : options.restoredTargets?.get(bindingTarget.packageDefinitionId);
         if (selectedTarget === undefined) {
           throw new Error(
-            `预设节点依赖绑定目标不存在：${draft.nodeIdentity}/${dependency.key}`,
+            `选择节点依赖绑定目标不存在：${draft.nodeIdentity}/${dependency.key}`,
           );
         }
         if (
@@ -1082,7 +1105,7 @@ export function createGenerator<
           contentIdentityKey(providerIdentity)
         ) {
           throw new Error(
-            `预设节点依赖绑定身份不一致：${draft.nodeIdentity}/${dependency.key}`,
+            `选择节点依赖绑定身份不一致：${draft.nodeIdentity}/${dependency.key}`,
           );
         }
         if (dependency.creationInput !== undefined) {
@@ -1097,7 +1120,7 @@ export function createGenerator<
             )
           ) {
             throw new Error(
-              `预设节点依赖创建输入不一致：${draft.nodeIdentity}/${dependency.key}`,
+              `选择节点依赖创建输入不一致：${draft.nodeIdentity}/${dependency.key}`,
             );
           }
         }
@@ -1136,7 +1159,7 @@ export function createGenerator<
     for (const [key] of bindingEntries) {
       if (!dependencyKeys.has(key)) {
         throw new Error(
-          `预设节点依赖绑定键不存在：${draft.nodeIdentity}/${key}`,
+          `选择节点依赖绑定键不存在：${draft.nodeIdentity}/${key}`,
         );
       }
     }
@@ -1479,10 +1502,7 @@ export function createGenerator<
           dependency.creationInput,
         );
         if (
-          !(
-            explicitProviderId !== undefined &&
-            dependency.creationInput === undefined
-          ) &&
+          dependency.creationInput !== undefined &&
           !isDeepStrictEqual(
             inputsById.get(providerId) ?? null,
             expectedInput ?? null,
@@ -1634,6 +1654,25 @@ export function createGenerator<
     const selectionDrafts = prepareOptions.restored
       ? restoredSelectionDrafts(prepareOptions.restored, dependencyIdentities)
       : [];
+    const restoredTargetsById = new Map<
+      PackageDefinitionId,
+      PackageNodeDraft<ContentCreationInput<Members>>
+    >();
+    const indexRestoredTargets = (
+      roots: readonly PackageNodeDraft<ContentCreationInput<Members>>[],
+    ): void => {
+      for (const root of roots) {
+        if (root.restored !== undefined) {
+          restoredTargetsById.set(root.restored.packageDefinitionId, root);
+        }
+        indexRestoredTargets(
+          root.dependencies.map(({ package: item }) => item),
+        );
+      }
+    };
+    for (const selectionDraft of selectionDrafts) {
+      indexRestoredTargets(selectionDraft.roots);
+    }
     const sharedDrafts = new Map<
       string,
       PackageNodeDraft<ContentCreationInput<Members>>
@@ -1675,6 +1714,35 @@ export function createGenerator<
         })),
       });
 
+    const selectionRootFacts = (
+      root: PackageNodeDraft<ContentCreationInput<Members>>,
+    ) => ({
+      nodeIdentity: root.nodeIdentity,
+      identity: contentIdentityKey(root.content.identity),
+      creationInput: root.creationInput ?? null,
+      definition: root.definition,
+      dependencies: root.dependencies
+        .map(({ key, package: dependency }) => ({
+          key,
+          target:
+            dependency.restored !== undefined
+              ? { packageDefinitionId: dependency.restored.packageDefinitionId }
+              : dependency.explicitRoot !== undefined
+                ? {
+                    selectionId: dependency.explicitRoot.selectionId,
+                    nodeIdentity: dependency.explicitRoot.nodeIdentity,
+                  }
+                : {
+                    identity: contentIdentityKey(dependency.content.identity),
+                    creationInput: dependency.creationInput ?? null,
+                    definition: dependency.definition,
+                  },
+        }))
+        .toSorted((left, right) =>
+          left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
+        ),
+    });
+
     const appendSelection = (
       group: PackageSelectionDraft<ContentCreationInput<Members>>,
     ): void => {
@@ -1683,12 +1751,7 @@ export function createGenerator<
       );
       if (existing !== undefined) {
         const existingRoots = existing.roots
-          .map((root) => ({
-            nodeIdentity: root.nodeIdentity,
-            identity: contentIdentityKey(root.content.identity),
-            creationInput: root.creationInput ?? null,
-            definition: root.definition,
-          }))
+          .map(selectionRootFacts)
           .toSorted((left, right) =>
             left.nodeIdentity < right.nodeIdentity
               ? -1
@@ -1697,12 +1760,7 @@ export function createGenerator<
                 : 0,
           );
         const requestedRoots = group.roots
-          .map((root) => ({
-            nodeIdentity: root.nodeIdentity,
-            identity: contentIdentityKey(root.content.identity),
-            creationInput: root.creationInput ?? null,
-            definition: root.definition,
-          }))
+          .map(selectionRootFacts)
           .toSorted((left, right) =>
             left.nodeIdentity < right.nodeIdentity
               ? -1
@@ -1737,6 +1795,7 @@ export function createGenerator<
         nodeIdentity: root.nodeIdentity,
         rawCreationInput: root.creationInput,
         layout: root.layout,
+        dependencyBindings: root.dependencyBindings,
       }));
       const preparedRoots = selectedRoots.map((root) => {
         const creationInput = requireParsedCreationInput(
@@ -1772,13 +1831,25 @@ export function createGenerator<
         });
       });
       requireUniqueNodes(roots);
+      const rootsByIdentity = new Map(
+        roots.map((root) => [root.nodeIdentity, root]),
+      );
       for (const root of roots) {
+        const dependencyBindings = directRoots.find(
+          ({ nodeIdentity }) => nodeIdentity === root.nodeIdentity,
+        )?.dependencyBindings;
+        if (dependencyBindings !== undefined && !isRecord(dependencyBindings)) {
+          throw new Error(`选择节点依赖绑定无效：${root.nodeIdentity}`);
+        }
         populatePackageNodeDraft({
           draft: root,
           conventions,
           ancestry: [],
           sharedDrafts,
           dependencyIdentities,
+          explicitTargets: rootsByIdentity,
+          restoredTargets: restoredTargetsById,
+          ...(dependencyBindings === undefined ? {} : { dependencyBindings }),
         });
       }
       appendSelection({
@@ -2058,6 +2129,9 @@ export function createGenerator<
               ...(selection.layout === undefined
                 ? {}
                 : { layout: selection.layout }),
+              ...(selection.dependencyBindings === undefined
+                ? {}
+                : { dependencyBindings: selection.dependencyBindings }),
             },
           ],
         };

@@ -9,7 +9,7 @@
     },
     "build": {
       "cache": true,
-      "dependsOn": ["^build"],
+      "dependsOn": ["@ykdz/reference-hono-api#build"],
       "outputs": ["dist/**"],
       "tags": ["quality:light"]
     },

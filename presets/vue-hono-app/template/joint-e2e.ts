@@ -7,10 +7,13 @@ import {
 } from "@ykdz/template-core/content-identity";
 import type { GenerationRecordSelection } from "@ykdz/template-core/generation-record";
 import type {
-  CompositionFile,
-  CompositionReconciliation,
-} from "@ykdz/template-core/package-contribution";
-import type { PackageDefinitionId } from "@ykdz/template-core/project-blueprint";
+  DefaultPresetPackageEvaluation,
+  DefaultPresetRootContributionResource,
+} from "@ykdz/template-workspace/default-composition";
+import type {
+  DefaultCompositionFile,
+  DefaultRootDeclarationData,
+} from "@ykdz/template-workspace/reference-package";
 
 export const vueHonoJointE2eResourcePaths = Object.freeze({
   configuration: "resources/joint-e2e/playwright.config.ts",
@@ -18,61 +21,35 @@ export const vueHonoJointE2eResourcePaths = Object.freeze({
   fixtures: "resources/joint-e2e/test/e2e/fixtures.ts",
 });
 
-export type VueHonoJointE2eResourceSnapshot = Readonly<{
-  readonly path: string;
-  readonly content: Uint8Array;
-  readonly mode: number;
-}>;
+export type VueHonoJointE2eResourceSnapshot =
+  DefaultPresetRootContributionResource;
 
-export type VueHonoJointE2eResource = Readonly<{
+type PreparedResource = Readonly<{
   readonly content: Uint8Array;
   readonly mode: number;
 }>;
 
 export type PreparedVueHonoJointE2eResources = Readonly<{
-  readonly configuration: VueHonoJointE2eResource;
-  readonly appSpec: VueHonoJointE2eResource;
-  readonly fixtures: VueHonoJointE2eResource;
+  readonly configuration: PreparedResource;
+  readonly appSpec: PreparedResource;
+  readonly fixtures: PreparedResource;
 }>;
 
-export type VueHonoJointRootDeclaration = Readonly<{
-  readonly manifest: Readonly<{
-    readonly scripts: Readonly<Record<string, string>>;
-    readonly devDependencies: Readonly<Record<string, string>>;
-  }>;
-  readonly turboTasks: Readonly<Record<string, unknown>>;
-  readonly typescript: Readonly<{ readonly include: readonly string[] }>;
-  readonly ciDiagnosticArtifacts: readonly {
-    readonly kind: "playwright";
-    readonly owner: Readonly<{
-      readonly kind: "workspace-orchestration";
-      readonly path: ".";
-    }>;
-  }[];
-  readonly environmentNeeds: Readonly<{
-    readonly check: readonly {
-      readonly kind: "playwright-browser-assets";
-      readonly browser: "chromium";
-      readonly owner: Readonly<{
-        readonly kind: "workspace-orchestration";
-        readonly path: ".";
-      }>;
-    }[];
-  }>;
-}>;
+export type VueHonoJointRootDeclaration = DefaultRootDeclarationData;
 
 export type VueHonoJointE2eComposition = Readonly<{
-  readonly rootDeclaration: VueHonoJointRootDeclaration & {
-    readonly sourceIdentity: ContentIdentity;
-  };
-  readonly files: readonly CompositionFile[];
-  readonly reconciliation: readonly CompositionReconciliation[];
+  readonly rootPackageDefinitionId: CompositionPackage["packageDefinitionId"];
+  readonly rootDeclaration: VueHonoJointRootDeclaration;
+}>;
+
+export type VueHonoJointE2eOwnerFacts = Readonly<{
+  readonly resources: readonly VueHonoJointE2eResourceSnapshot[];
 }>;
 
 function requireResource(
   resources: readonly VueHonoJointE2eResourceSnapshot[],
   path: string,
-): VueHonoJointE2eResource {
+): PreparedResource {
   const matches = resources.filter((resource) => resource.path === path);
   if (matches.length !== 1) {
     throw new Error(
@@ -88,7 +65,7 @@ function requireResource(
   });
 }
 
-/** 从外层准备的不可变资源快照中选出联合验收所需字节。 */
+/** 从外层准备的不可变字节快照中选出联合验收所需资源。 */
 export function prepareVueHonoJointE2eResources(
   resources: readonly VueHonoJointE2eResourceSnapshot[],
 ): PreparedVueHonoJointE2eResources {
@@ -103,7 +80,7 @@ export function prepareVueHonoJointE2eResources(
 }
 
 function requireNode(
-  selectedPackages: ReadonlyMap<PackageDefinitionId, CompositionPackage>,
+  selectedPackages: ReadonlyMap<string, DefaultPresetPackageEvaluation>,
   selection: GenerationRecordSelection,
   nodeName: "web" | "api",
 ): CompositionPackage {
@@ -111,7 +88,8 @@ function requireNode(
   if (packageDefinitionId === undefined) {
     throw new Error(`Vue-Hono 预设缺少节点 ${nodeName}`);
   }
-  const selectedPackage = selectedPackages.get(packageDefinitionId);
+  const selectedEvaluation = selectedPackages.get(nodeName);
+  const selectedPackage = selectedEvaluation?.package;
   if (
     selectedPackage === undefined ||
     selectedPackage.packageDefinitionId !== packageDefinitionId
@@ -128,12 +106,10 @@ function sameIdentity(left: ContentIdentity, right: ContentIdentity): boolean {
 }
 
 function rootDeclaration(
-  sourceIdentity: ContentIdentity,
   api: CompositionPackage,
   web: CompositionPackage,
-): VueHonoJointRootDeclaration & { readonly sourceIdentity: ContentIdentity } {
+): VueHonoJointRootDeclaration {
   return Object.freeze({
-    sourceIdentity,
     manifest: Object.freeze({
       scripts: Object.freeze({ "test:e2e": "playwright test" }),
       devDependencies: Object.freeze({ "@playwright/test": "catalog:" }),
@@ -175,15 +151,10 @@ function rootDeclaration(
 }
 
 function outputFiles(options: {
-  readonly sourceIdentity: ContentIdentity;
-  readonly rootPackageDefinitionId: PackageDefinitionId;
   readonly api: CompositionPackage;
   readonly web: CompositionPackage;
   readonly resources: PreparedVueHonoJointE2eResources;
-}): {
-  readonly files: readonly CompositionFile[];
-  readonly reconciliation: readonly CompositionReconciliation[];
-} {
+}): readonly DefaultCompositionFile[] {
   let configuration: string;
   try {
     configuration = new TextDecoder("utf-8", { fatal: true }).decode(
@@ -218,55 +189,26 @@ function outputFiles(options: {
         JSON.stringify(options.web.definition.name),
       ),
   );
-  const sources = Object.freeze([
-    Object.freeze({
-      identity: contentIdentityKey(options.sourceIdentity),
-      label: contentIdentityLabel(options.sourceIdentity),
-    }),
+  return Object.freeze([
+    {
+      path: "playwright.config.ts",
+      content: outputConfiguration,
+      mode: options.resources.configuration.mode,
+      sourcePath: vueHonoJointE2eResourcePaths.configuration,
+    },
+    {
+      path: "test/e2e/app.spec.ts",
+      content: options.resources.appSpec.content.slice(),
+      mode: options.resources.appSpec.mode,
+      sourcePath: vueHonoJointE2eResourcePaths.appSpec,
+    },
+    {
+      path: "test/e2e/fixtures.ts",
+      content: options.resources.fixtures.content.slice(),
+      mode: options.resources.fixtures.mode,
+      sourcePath: vueHonoJointE2eResourcePaths.fixtures,
+    },
   ]);
-  const files: CompositionFile[] = [
-    {
-      packageDefinitionId: options.rootPackageDefinitionId,
-      file: {
-        path: "playwright.config.ts",
-        content: outputConfiguration,
-        mode: options.resources.configuration.mode,
-        sources,
-      },
-    },
-    {
-      packageDefinitionId: options.rootPackageDefinitionId,
-      file: {
-        path: "test/e2e/app.spec.ts",
-        content: options.resources.appSpec.content.slice(),
-        mode: options.resources.appSpec.mode,
-        sources,
-      },
-    },
-    {
-      packageDefinitionId: options.rootPackageDefinitionId,
-      file: {
-        path: "test/e2e/fixtures.ts",
-        content: options.resources.fixtures.content.slice(),
-        mode: options.resources.fixtures.mode,
-        sources,
-      },
-    },
-  ];
-  const reconciliation: CompositionReconciliation[] = files.map(
-    ({ packageDefinitionId, file }) => ({
-      packageDefinitionId,
-      reconciliation: {
-        path: file.path,
-        driver: "text",
-        sources,
-      },
-    }),
-  );
-  return {
-    files: Object.freeze(files),
-    reconciliation: Object.freeze(reconciliation),
-  };
 }
 
 /** 纯组合此预设本次selection内的web、API实例与owner附件。 */
@@ -275,12 +217,12 @@ export function composeVueHonoJointE2e(options: {
   readonly selection: GenerationRecordSelection;
   /** 必须是本次已选择的两节点映射，不传入工作区全实例表。 */
   readonly selectedPackages: ReadonlyMap<
-    PackageDefinitionId,
-    CompositionPackage
+    string,
+    DefaultPresetPackageEvaluation
   >;
   /** 默认组合器明确提供的根实例。 */
   readonly rootPackage: CompositionPackage;
-  readonly resources: PreparedVueHonoJointE2eResources;
+  readonly ownerFacts: VueHonoJointE2eOwnerFacts;
 }): VueHonoJointE2eComposition {
   if (
     options.selection.presetIdentity === null ||
@@ -333,15 +275,14 @@ export function composeVueHonoJointE2e(options: {
     );
   }
 
-  const output = outputFiles({
-    sourceIdentity: options.ownerIdentity,
-    rootPackageDefinitionId: options.rootPackage.packageDefinitionId,
-    api,
-    web,
-    resources: options.resources,
-  });
+  const preparedResources = prepareVueHonoJointE2eResources(
+    options.ownerFacts.resources,
+  );
   return Object.freeze({
-    rootDeclaration: rootDeclaration(options.ownerIdentity, api, web),
-    ...output,
+    rootPackageDefinitionId: options.rootPackage.packageDefinitionId,
+    rootDeclaration: Object.freeze({
+      ...rootDeclaration(api, web),
+      files: outputFiles({ api, web, resources: preparedResources }),
+    }),
   });
 }
