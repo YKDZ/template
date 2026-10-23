@@ -290,7 +290,7 @@ const journey: CliJourney = {
               'import { greet } from "@acme/public-utilities";',
               'const greeting: { message: string } = greet("Ada");',
               "void greeting;",
-              "// @ts-expect-error greet accepts a string name.",
+              "// @ts-expect-error greet 的姓名参数必须是字符串。",
               "greet(42);",
               "",
             ].join("\n"),
