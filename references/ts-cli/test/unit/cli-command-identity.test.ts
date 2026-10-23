@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   cliCommandIdentity,
+  projectCliPackageManifest,
   validateCliCommandName,
 } from "../../src/publication/cli-command-identity.ts";
 
@@ -47,6 +48,60 @@ void describe("CLI command identity", () => {
         version: "2.3.4",
       }),
       { commandName: "ship", version: "2.3.4" },
+    );
+  });
+
+  void it("按目标命令名和 Node 大版本转换原生清单", () => {
+    assert.deepStrictEqual(
+      projectCliPackageManifest({
+        manifest: {
+          name: "@ykdz/reference-ts-cli",
+          private: true,
+          bin: { "reference-cli": "./dist/cli.js" },
+          files: ["dist"],
+          engines: { node: "^24.21.0" },
+        },
+        commandName: "public-cli",
+        nodeDeclaration: "24.21.0",
+      }),
+      {
+        name: "@ykdz/reference-ts-cli",
+        private: true,
+        bin: { "public-cli": "./dist/cli.js" },
+        files: ["dist"],
+        engines: { node: ">=24" },
+      },
+    );
+  });
+
+  void it("拒绝无效命令名和含多个入口的原生清单", () => {
+    const manifest = {
+      name: "@ykdz/reference-ts-cli",
+      bin: { "reference-cli": "./dist/cli.js" },
+    };
+    assert.throws(
+      () =>
+        projectCliPackageManifest({
+          manifest,
+          commandName: "public--cli",
+          nodeDeclaration: "24",
+        }),
+      /single hyphens/u,
+    );
+    assert.throws(
+      () =>
+        projectCliPackageManifest({
+          manifest: {
+            ...manifest,
+            bin: {
+              "reference-cli": "./dist/cli.js",
+              other: "./dist/other.js",
+            },
+          },
+          commandName: "public-cli",
+          nodeDeclaration: "24.21.0",
+        }),
+      /exactly one bin/u,
     );
   });
 

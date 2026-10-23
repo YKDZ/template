@@ -19,11 +19,11 @@
     "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false"
   },
   "dependencies": {
-    "@ykdz/template-core": "0.0.0"
+    "@ykdz/template-core": "0.0.0",
+    "never-install-target-application": "1.0.0"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
-    "@ykdz/template-workspace-authoring": "0.0.0",
-    "never-install-target-application": "1.0.0"
+    "@ykdz/template-workspace-authoring": "0.0.0"
   }
 }

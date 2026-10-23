@@ -12,35 +12,56 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
-import { createGenerator } from "@ykdz/template-generator";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
-import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 import { execa } from "execa";
 
 const content = await loadContentSource({
   namespace: "ykdz",
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
-    "@ykdz/reference-ts-cli/template",
-    "@ykdz/reference-ts-lib/template",
-    "@ykdz/reference-rust-bin/template",
-    "@ykdz/reference-tooling-config/template",
-    "@ykdz/preset-ts-cli/template",
+    {
+      specifier: "@ykdz/reference-workspace-root/template",
+      load: () => import("@ykdz/reference-workspace-root/template"),
+    },
+    {
+      specifier: "@ykdz/reference-ts-cli/template",
+      load: () => import("@ykdz/reference-ts-cli/template"),
+    },
+    {
+      specifier: "@ykdz/reference-ts-lib/template",
+      load: () => import("@ykdz/reference-ts-lib/template"),
+    },
+    {
+      specifier: "@ykdz/reference-tooling-config/template",
+      load: () => import("@ykdz/reference-tooling-config/template"),
+    },
+    {
+      specifier: "@ykdz/reference-npm-publication/template",
+      load: () => import("@ykdz/reference-npm-publication/template"),
+    },
+    {
+      specifier: "@ykdz/preset-ts-cli/template",
+      load: () => import("@ykdz/preset-ts-cli/template"),
+    },
+    {
+      specifier: "@ykdz/preset-ts-lib/template",
+      load: () => import("@ykdz/preset-ts-lib/template"),
+    },
   ],
-  prepareReferenceDefinition(definition) {
-    return defineReferencePackage(
-      definition as Parameters<typeof defineReferencePackage>[0],
-    );
-  },
 });
-const preset = content.find(
+const cliPreset = content.find(
   (member) =>
     member.kind === "preset" &&
     member.identity.packageName === "@ykdz/preset-ts-cli",
 );
-assert.ok(preset);
+const libraryPreset = content.find(
+  (member) =>
+    member.kind === "preset" &&
+    member.identity.packageName === "@ykdz/preset-ts-lib",
+);
+assert.ok(cliPreset);
+assert.ok(libraryPreset);
 
 async function readManifest(
   packageRoot: string,
@@ -51,10 +72,7 @@ async function readManifest(
 }
 
 function generator() {
-  return createGenerator({
-    content,
-    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
-  });
+  return createDefaultGenerator({ content });
 }
 
 void describe("TypeScript CLI 公开预设安装行为", () => {
@@ -67,15 +85,19 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
       );
       const targetRoot = path.join(workspace, "demo-cli");
       const packageRoot = path.join(targetRoot, "packages/cli");
-      const packDestination = path.join(workspace, "packs");
+      const libraryRoot = path.join(targetRoot, "packages/lib");
+      const unpublishedPackDestination = path.join(
+        workspace,
+        "unpublished-pack",
+      );
       testContext.after(async () =>
         rm(workspace, { recursive: true, force: true }),
       );
 
       const initialized = await generator().init({
         targetRoot,
-        selection: { roots: [{ preset: preset.identity }] },
-        strategyInput: {
+        selection: { presets: [{ contentIdentity: libraryPreset.identity }] },
+        conventions: {
           repositoryName: "demo-cli",
           defaultPackageScope: "demo",
         },
@@ -85,6 +107,12 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
         "success",
         JSON.stringify(initialized),
       );
+      const added = await generator().add({
+        repositoryRoot: targetRoot,
+        preset: cliPreset.identity,
+        creationInput: { linkTo: { nodeIdentity: "library" } },
+      });
+      assert.strictEqual(added.status, "success", JSON.stringify(added));
 
       await execa("pnpm", ["install"], {
         cwd: targetRoot,
@@ -103,13 +131,25 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
       assert.deepStrictEqual(originalManifest.bin, {
         cli: "./dist/cli.js",
       });
+      assert.strictEqual(
+        (originalManifest.dependencies as Record<string, string>)["@demo/lib"],
+        "workspace:*",
+      );
       assert.deepStrictEqual(originalManifest.files, ["dist"]);
       assert.strictEqual(Object.hasOwn(originalManifest, "version"), false);
 
-      await mkdir(packDestination);
+      assert.strictEqual(
+        await execa(
+          process.execPath,
+          ["--conditions=source", "src/cli.ts", "--version"],
+          { cwd: packageRoot },
+        ).then(({ stdout }) => stdout),
+        "cli unpublished",
+      );
+      await mkdir(unpublishedPackDestination);
       const unpublishedPack = await execa(
         "pnpm",
-        ["pack", "--pack-destination", packDestination],
+        ["pack", "--pack-destination", unpublishedPackDestination],
         { cwd: packageRoot, cancelSignal: testContext.signal, reject: false },
       );
       assert.strictEqual(unpublishedPack.exitCode, 1);
@@ -122,16 +162,8 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
         await readFile(path.join(packageRoot, "package.json"), "utf8"),
         originalManifestBytes,
       );
-      assert.deepStrictEqual(await readdir(packDestination), []);
+      assert.deepStrictEqual(await readdir(unpublishedPackDestination), []);
 
-      assert.strictEqual(
-        await execa(
-          process.execPath,
-          ["--conditions=source", "src/cli.ts", "--version"],
-          { cwd: packageRoot },
-        ).then(({ stdout }) => stdout),
-        "cli unpublished",
-      );
       const sourceManifest = await readManifest(packageRoot);
       await writeFile(
         path.join(packageRoot, "package.json"),
@@ -139,12 +171,35 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
           {
             ...sourceManifest,
             version: "7.8.9",
+            private: false,
             bin: { release: "./dist/cli.js" },
           },
           null,
           2,
         )}\n`,
       );
+      const libraryManifest = await readManifest(libraryRoot);
+      await writeFile(
+        path.join(libraryRoot, "package.json"),
+        `${JSON.stringify(
+          { ...libraryManifest, version: "1.2.3", private: false },
+          null,
+          2,
+        )}\n`,
+      );
+      await writeFile(
+        path.join(packageRoot, "src/linked-library.ts"),
+        [
+          'import { greet } from "@demo/lib";',
+          "",
+          'console.log(greet("Ada").message);',
+          "",
+        ].join("\n"),
+      );
+      await execa("pnpm", ["install", "--no-frozen-lockfile"], {
+        cwd: targetRoot,
+        cancelSignal: testContext.signal,
+      });
       assert.strictEqual(
         await execa(
           process.execPath,
@@ -152,6 +207,14 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
           { cwd: packageRoot },
         ).then(({ stdout }) => stdout),
         "release 7.8.9",
+      );
+      assert.strictEqual(
+        await execa(
+          process.execPath,
+          ["--conditions=source", "src/linked-library.ts"],
+          { cwd: packageRoot, cancelSignal: testContext.signal },
+        ).then(({ stdout }) => stdout),
+        "Hello, Ada",
       );
       assert.strictEqual(
         (
@@ -178,6 +241,13 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
           cwd: packageRoot,
         }).then(({ stdout }) => stdout),
         "release 7.8.9",
+      );
+      assert.strictEqual(
+        await execa(process.execPath, ["dist/linked-library.js"], {
+          cwd: packageRoot,
+          cancelSignal: testContext.signal,
+        }).then(({ stdout }) => stdout),
+        "Hello, Ada",
       );
       assert.strictEqual(
         await execa(
@@ -221,12 +291,41 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
         "找到记录：Ada Lovelace（ada）",
       );
 
-      await execa("pnpm", ["pack", "--pack-destination", packDestination], {
-        cwd: packageRoot,
+      await execa("pnpm", ["run", "publication:pack"], {
+        cwd: targetRoot,
         cancelSignal: testContext.signal,
       });
-      const archives = await readdir(packDestination);
-      assert.strictEqual(archives.length, 1);
+      const packedRoot = path.join(targetRoot, ".changeset/packed");
+      const publishPlan = JSON.parse(
+        await readFile(path.join(packedRoot, "publish-plan.json"), "utf8"),
+      ) as {
+        readonly plan: readonly (readonly {
+          readonly name: string;
+          readonly tarball: { readonly path: string };
+        }[])[];
+      };
+      const packedPackages = publishPlan.plan.flat();
+      const packedCli = packedPackages.find(({ name }) => name === "@demo/cli");
+      const packedLibrary = packedPackages.find(
+        ({ name }) => name === "@demo/lib",
+      );
+      assert.ok(packedCli);
+      assert.ok(packedLibrary);
+      assert.deepStrictEqual(
+        packedPackages.map(({ name }) => name).toSorted(),
+        ["@demo/cli", "@demo/lib"],
+      );
+      const cliTarballPath = path.join(packedRoot, packedCli.tarball.path);
+      const libraryTarballPath = path.join(
+        packedRoot,
+        packedLibrary.tarball.path,
+      );
+      const packedCliManifest = JSON.parse(
+        await execa("tar", ["-xOf", cliTarballPath, "package/package.json"], {
+          cancelSignal: testContext.signal,
+        }).then(({ stdout }) => stdout),
+      ) as { readonly dependencies: Readonly<Record<string, string>> };
+      assert.strictEqual(packedCliManifest.dependencies["@demo/lib"], "1.2.3");
       const installedRoot = path.join(workspace, "installed-consumer");
       await mkdir(installedRoot);
       await writeFile(
@@ -235,9 +334,14 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
           private: true,
           packageManager: (await readManifest(targetRoot)).packageManager,
           dependencies: {
-            "@demo/cli": `file:${path.join(packDestination, archives[0]!)}`,
+            "@demo/cli": `file:${cliTarballPath}`,
+            "@demo/lib": `file:${libraryTarballPath}`,
           },
         })}\n`,
+      );
+      await writeFile(
+        path.join(installedRoot, "pnpm-workspace.yaml"),
+        `overrides:\n  '@demo/lib@1.2.3': ${JSON.stringify(`file:${libraryTarballPath}`)}\n`,
       );
       await execa("pnpm", ["install"], {
         cwd: installedRoot,
@@ -261,6 +365,14 @@ void describe("TypeScript CLI 公开预设安装行为", () => {
           { cwd: packageRoot, cancelSignal: testContext.signal },
         ).then(({ stdout }) => stdout),
         "packed:lookup:passed",
+      );
+      assert.strictEqual(
+        await execa(
+          process.execPath,
+          ["node_modules/@demo/cli/dist/linked-library.js"],
+          { cwd: installedRoot, cancelSignal: testContext.signal },
+        ).then(({ stdout }) => stdout),
+        "Hello, Ada",
       );
     },
   );

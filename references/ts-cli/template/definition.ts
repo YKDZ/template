@@ -1,95 +1,149 @@
-import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
-import { validateCliCommandName } from "@ykdz/template-workspace/package-contribution";
-import type { PackageLinkRequirement } from "@ykdz/template-workspace/project-requirements";
-import {
-  defineReferencePackage,
-  type ReferencePackage,
-} from "@ykdz/template-workspace/reference-package";
+import { projectCliPackageManifest } from "@ykdz/reference-ts-cli/command-identity";
+import type { JsonValue } from "@ykdz/template-core/json";
+import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
-export type TsCliCreationInput = PackageCreationInput & {
-  /** 一次性连接意图不属于可变配置。 */
-  readonly linkToNodeIdentity?: string;
+import referenceManifest from "../package.json" with { type: "json" };
+
+export type TsCliCreationInput = Readonly<Record<string, JsonValue>> & {
+  readonly linkTo?:
+    | Readonly<{ readonly nodeIdentity: string }>
+    | Readonly<{ readonly packageDefinitionId: string }>;
 };
 
-export const referencePackage: ReferencePackage<TsCliCreationInput> =
-  defineReferencePackage<TsCliCreationInput>({
-    packageName: "@ykdz/reference-ts-cli",
-    // 私有原生清单未声明 npm 版本，给制品显式提供未发布坐标。
-    artifactVersion: "0.0.0",
-    resolve: (specifier) => import.meta.resolve(specifier),
-    resourceRoot: new URL("../", import.meta.url),
-    alias: "cli-package-addition",
-    instance: "independent",
-    defaultLeafName: "cli",
-    role: "cli-tool",
-    resources: ["."],
-    template: {
-      dependencies: [
-        {
-          name: "@ykdz/reference-npm-publication",
-          purpose: "template-execution",
-        },
-        { name: "@ykdz/template-core", purpose: "template-execution" },
-        {
-          name: "@ykdz/template-workspace",
-          purpose: "template-execution",
-        },
-      ],
-      exports: ["./command-identity"],
-      scripts: ["build:template", "check:author-planning-roles"],
-      resources: ["template", "tsconfig.template.json"],
-    },
-    environmentNeeds: [],
-    foundation: {
-      toolchains: {},
-      editorCapabilities: ["oxc-format-lint"],
-      dependencyMaintenance: {
-        ecosystems: ["npm", "github-actions", "docker"],
-        interval: "weekly",
+function nodeDeclarationFrom(value: unknown): string {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    !("nodeDeclaration" in value) ||
+    typeof value.nodeDeclaration !== "string"
+  ) {
+    throw new Error("CLI 生成需要默认组合提供有效的 Node 声明");
+  }
+  return value.nodeDeclaration;
+}
+
+function recordFrom(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+export const referencePackage = defineReferencePackage<TsCliCreationInput>({
+  manifest: referenceManifest,
+  artifactVersion: "0.0.0",
+  resourceRoot: new URL("../", import.meta.url),
+  alias: "cli-package-addition",
+  instance: "independent",
+  defaultLeafName: "cli",
+  role: "cli-tool",
+  dependencies: [
+    {
+      key: "base-workspace",
+      ownerLocal: {
+        specifier: "@ykdz/reference-workspace-root/template",
+        resolve: (specifier) => import.meta.resolve(specifier),
       },
     },
-    project(contribution, input) {
-      const creationInput = input.creationInput as
-        | TsCliCreationInput
-        | undefined;
-      const commandName = validateCliCommandName(
-        input.definition.name.slice(input.definition.name.lastIndexOf("/") + 1),
-      );
-      const bin = contribution.manifest.bin as Readonly<Record<string, string>>;
-      let packageLinkRequirement: PackageLinkRequirement | undefined;
-      if (creationInput?.linkToNodeIdentity !== undefined) {
-        if (creationInput.linkToNodeIdentity.length === 0) {
-          throw new Error("CLI 包连接要求非空节点身份");
-        }
-        const provider = input.nodeInstances?.get(
-          creationInput.linkToNodeIdentity,
-        );
-        if (provider === undefined) {
-          throw new Error(
-            `CLI 包连接引用了未知节点身份：${creationInput.linkToNodeIdentity}`,
-          );
-        }
-        packageLinkRequirement = {
-          kind: "package-link",
-          consumer: input.definition,
-          provider,
-        };
-      }
-      return {
-        ...contribution,
-        manifest: {
-          ...contribution.manifest,
-          bin: { [commandName]: Object.values(bin)[0]! },
-          engines: { node: `>=${input.context.toolchain.nodeLtsMajor}` },
-        },
-        ...(packageLinkRequirement === undefined
-          ? {}
-          : {
-              projectRequirements: [
-                ...(contribution.projectRequirements ?? []),
-                packageLinkRequirement,
-              ],
-            }),
-      };
+    {
+      key: "tooling-config",
+      ownerLocal: {
+        specifier: "@ykdz/reference-tooling-config/template",
+        resolve: (specifier) => import.meta.resolve(specifier),
+      },
     },
-  });
+  ],
+  rootAttachmentDependencies: [
+    {
+      key: "npm-publication",
+      ownerLocal: {
+        specifier: "@ykdz/reference-npm-publication/template",
+        resolve: (specifier) => import.meta.resolve(specifier),
+      },
+    },
+  ],
+  resources: [
+    { path: ".gitignore" },
+    { path: ".npmignore" },
+    { path: "src/cli.ts" },
+    { path: "src/main.ts" },
+    { path: "src/publication/cli-command-identity.ts" },
+    { path: "test/e2e/journey.ts" },
+    { path: "test/e2e/journeys/lookup.journey.ts" },
+    { path: "test/e2e/run-journeys.ts" },
+    { path: "test/e2e/source-journeys.test.ts" },
+    { path: "test/integration/command.test.ts" },
+    { path: "test/unit/cli-command-identity.test.ts" },
+    { path: "tsconfig.build.json" },
+    { path: "tsconfig.json" },
+    { path: "tsconfig.node.json" },
+    { path: "turbo.json" },
+  ],
+  templateDependencies: [
+    {
+      name: "@ykdz/reference-tooling-config",
+      purpose: "target",
+    },
+    {
+      name: "@ykdz/reference-tooling-config",
+      purpose: "template-execution",
+    },
+    {
+      name: "@ykdz/reference-workspace-root",
+      purpose: "template-execution",
+    },
+    {
+      name: "@ykdz/reference-npm-publication",
+      purpose: "template-execution",
+    },
+    {
+      name: "@ykdz/template-core",
+      purpose: "template-build",
+    },
+    {
+      name: "@ykdz/template-workspace",
+      purpose: "template-execution",
+    },
+  ],
+  executionDependencies: [
+    "@ykdz/reference-tooling-config",
+    "@ykdz/reference-workspace-root",
+    "@ykdz/reference-npm-publication",
+    "@ykdz/template-workspace",
+  ],
+  templateScripts: ["build:template", "check:author-planning-roles"],
+  templateExports: ["./command-identity"],
+  foundation: {
+    toolchains: {},
+    editorCapabilities: ["oxc-format-lint"],
+    dependencyMaintenance: {
+      ecosystems: ["npm", "github-actions", "docker"],
+      interval: "weekly",
+    },
+  },
+  environmentNeeds: [],
+  transformManifest(options) {
+    return projectCliPackageManifest({
+      manifest: options.manifest,
+      commandName: options.definition.name.slice(
+        options.definition.name.lastIndexOf("/") + 1,
+      ),
+      nodeDeclaration: nodeDeclarationFrom(options.stableCommon),
+    });
+  },
+  transformDocument({ path: documentPath, value }) {
+    if (documentPath !== "turbo.json") return value;
+    const tasks = recordFrom(value.tasks);
+    const build = tasks === undefined ? undefined : recordFrom(tasks.build);
+    if (tasks === undefined || build === undefined) {
+      throw new Error("CLI 原生 turbo.json 必须声明 build 任务");
+    }
+    return {
+      ...value,
+      tasks: {
+        ...tasks,
+        build: { ...build, dependsOn: ["^build"] },
+      },
+    };
+  },
+});
