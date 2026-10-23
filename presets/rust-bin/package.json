@@ -33,6 +33,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
+    "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/reference-ts-lib": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",

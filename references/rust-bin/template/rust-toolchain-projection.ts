@@ -1,11 +1,11 @@
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
+import {
+  composeApplicationRequirements,
+  type RustToolchainRequirement,
+} from "@ykdz/template-workspace/application-requirements";
 import { parse } from "smol-toml";
 
-export type RustToolchainRequirement = {
-  readonly toolchain: string;
-  readonly components: readonly string[];
-  readonly configurationText: string;
-};
+export type { RustToolchainRequirement };
 
 export type PreparedRustToolchainDeclaration = {
   readonly channel: string;
@@ -56,19 +56,15 @@ export function parseRustToolchainDeclaration(
 export function resolveRustToolchainRequirements(
   requirements: readonly RustToolchainRequirement[],
 ): RustToolchainRequirement | undefined {
-  if (requirements.length === 0) return undefined;
-  const fingerprints = requirements.map((requirement) => {
+  for (const requirement of requirements) {
     parseRustToolchainDeclaration(requirement.configurationText);
-    return JSON.stringify({
-      toolchain: requirement.toolchain,
-      components: [...new Set(requirement.components)].toSorted(),
-      configurationText: requirement.configurationText,
-    });
-  });
-  if (new Set(fingerprints).size > 1) {
-    throw new Error("工作区要求所有 Rust 工具链声明相互兼容");
   }
-  return requirements[0];
+  return composeApplicationRequirements(
+    requirements.map((rustToolchain, index) => ({
+      source: `Rust 内容 ${index + 1}`,
+      requirements: { rustToolchain },
+    })),
+  ).rustToolchain;
 }
 
 /** 投影根声明；加包时保留已校验的用户声明原始字节。 */

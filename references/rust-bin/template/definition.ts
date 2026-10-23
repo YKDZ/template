@@ -1,13 +1,20 @@
-import type { RenderOperation } from "@ykdz/template-core/renderer";
-import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
+import type {
+  PackageContribution,
+} from "@ykdz/template-core/package-contribution";
+import type { ResourceFileSnapshot } from "@ykdz/template-core/reference-package";
+import {
+  defineReferencePackage,
+  serializeNativeReferenceDocument,
+  type DefaultReferenceContributionFacts,
+} from "@ykdz/template-workspace/reference-package";
 import {
   rustDevelopmentContainerToolLayer,
   rustToolchainEnvironmentNeed,
 } from "@ykdz/template-workspace/default-environment";
-import {
-  defineReferencePackage,
-  type ReferencePackage,
-} from "@ykdz/template-workspace/reference-package";
+import type {
+  ApplicationRequirements,
+  RustToolchainRequirement,
+} from "@ykdz/template-workspace/application-requirements";
 import { parse } from "smol-toml";
 
 import {
@@ -16,7 +23,18 @@ import {
   projectRustTurboTasks,
   type CargoFileSnapshot,
 } from "./rust-package-projection.ts";
-import { parseRustToolchainDeclaration } from "./rust-toolchain-projection.ts";
+import {
+  parseRustToolchainDeclaration,
+  projectRustToolchainDeclaration,
+} from "./rust-toolchain-projection.ts";
+
+import referenceManifest from "../package.json" with { type: "json" };
+
+type RustCreationInput = {
+  readonly leafName?: string;
+  readonly packageName?: string;
+  readonly packagePath?: string;
+};
 
 type RustReferenceFacts = {
   readonly cargoManifest: CargoFileSnapshot;
@@ -26,59 +44,119 @@ type RustReferenceFacts = {
   >;
 };
 
-export const referencePackage: ReferencePackage<
-  PackageCreationInput,
-  RustReferenceFacts
-> = defineReferencePackage({
-  packageName: "@ykdz/reference-rust-bin",
-  artifactVersion: "0.0.0",
-  resolve: (specifier) => import.meta.resolve(specifier),
+type RustContributionFacts = DefaultReferenceContributionFacts<RustReferenceFacts>;
+
+function snapshot(
+  resources: readonly ResourceFileSnapshot[],
+  resourcePath: string,
+): CargoFileSnapshot {
+  const resource = resources.find(({ path }) => path === resourcePath);
+  if (resource === undefined) {
+    throw new Error(`Rust 原生资源缺失：${resourcePath}`);
+  }
+  const source = new TextDecoder("utf-8", { fatal: true }).decode(
+    resource.content,
+  );
+  return { source, data: parse(source) };
+}
+
+function applicationRequirements(
+  ownerFacts: RustReferenceFacts,
+): ApplicationRequirements {
+  const configuration = ownerFacts.toolchainConfiguration;
+  return {
+    rustToolchain: {
+      toolchain: configuration.channel,
+      components: configuration.components,
+      configurationText: configuration.declaration,
+    },
+  };
+}
+
+function stableRustToolchain(value: unknown):
+  | (RustToolchainRequirement & { readonly existingDeclaration?: string })
+  | undefined {
+  if (!isRecord(value) || !isRecord(value.applicationRequirements)) {
+    return undefined;
+  }
+  const requirement = value.applicationRequirements.rustToolchain;
+  if (
+    !isRecord(requirement) ||
+    typeof requirement.toolchain !== "string" ||
+    !Array.isArray(requirement.components) ||
+    !requirement.components.every((component) => typeof component === "string") ||
+    typeof requirement.configurationText !== "string" ||
+    (requirement.existingDeclaration !== undefined &&
+      typeof requirement.existingDeclaration !== "string")
+  ) {
+    return undefined;
+  }
+  return requirement as unknown as RustToolchainRequirement & {
+    readonly existingDeclaration?: string;
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const nativeReference = defineReferencePackage<RustCreationInput, RustReferenceFacts>({
+  manifest: referenceManifest,
   resourceRoot: new URL("../", import.meta.url),
   alias: "binary",
   instance: "independent",
   defaultLeafName: "app",
   role: "native-package",
-  requiresRootRustToolchain: true,
-  resources: ["."],
-  template: {
-    dependencies: [
-      { name: "@ykdz/template-core", purpose: "template-execution" },
-      {
-        name: "@ykdz/template-workspace",
-        purpose: "template-execution",
+  dependencies: [
+    {
+      key: "base-workspace",
+      ownerLocal: {
+        specifier: "@ykdz/reference-workspace-root/template",
+        resolve: (specifier) => import.meta.resolve(specifier),
       },
-      { name: "smol-toml", purpose: "template-execution" },
-    ],
-    scripts: ["build:template", "check:author-planning-roles"],
-    resources: ["template", "tsconfig.template.json"],
-    executionData: ["Cargo.toml", "Cargo.lock", "template/rust-toolchain.toml"],
-  },
-  prepare(input) {
-    const source = (file: string): CargoFileSnapshot => {
-      const text = input.readText(file);
-      return { source: text, data: parse(text) };
-    };
-    return {
-      cargoManifest: source("Cargo.toml"),
-      cargoLock: source("Cargo.lock"),
-      toolchainConfiguration: parseRustToolchainDeclaration(
-        input.readText("template/rust-toolchain.toml"),
-      ),
-    };
-  },
-  environmentNeeds: ({ definition }) => [
-    rustToolchainEnvironmentNeed({
-      kind: "package-boundary",
-      path: definition.path,
-    }),
+    },
   ],
-  foundation({ context, definition }) {
-    const rustChannel = context.toolchain.rustVersion ?? "stable";
+  resources: [
+    { path: ".gitignore" },
+    { path: ".npmignore" },
+    { path: "Cargo.toml" },
+    { path: "Cargo.lock" },
+    { path: "rustfmt.toml" },
+    { path: "src/main.rs" },
+    { path: "turbo.json" },
+    { path: "template/rust-toolchain.toml", prepareOnly: true },
+  ],
+  templateDependencies: [
+    { name: "@ykdz/template-core", purpose: "template-execution" },
+    { name: "@ykdz/template-workspace", purpose: "template-execution" },
+    { name: "@ykdz/reference-workspace-root", purpose: "template-execution" },
+    { name: "smol-toml", purpose: "template-execution" },
+  ],
+  executionDependencies: [
+    "@ykdz/template-core",
+    "@ykdz/template-workspace",
+    "@ykdz/reference-workspace-root",
+    "smol-toml",
+  ],
+  templateScripts: [
+    "build:template",
+    "check:author-planning-roles",
+    "lint:fix",
+    "typecheck",
+  ],
+  templateExports: ["./reference", "./template"],
+  foundation: ({ definition, ownerFacts, stableCommon }) => {
+    const requirement = stableRustToolchain(stableCommon);
+    if (requirement === undefined) {
+      throw new Error("Rust 参考包缺少稳定工具链共同输入");
+    }
     return {
       toolchains: {
         rust: {
-          toolchain: rustChannel,
-          components: ["rustfmt", "clippy"],
+          toolchain: requirement.toolchain,
+          components: requirement.components,
+          configurationText:
+            ownerFacts.toolchainConfiguration.declaration,
         },
       },
       editorCapabilities: ["rust-tooling"],
@@ -94,80 +172,137 @@ export const referencePackage: ReferencePackage<
         interval: "weekly",
       },
       developmentContainerToolLayers: [
-        rustDevelopmentContainerToolLayer(rustChannel),
+        rustDevelopmentContainerToolLayer(requirement.toolchain),
       ],
     };
   },
-  project(contribution, { definition, preparation }) {
-    const { cargoManifest, cargoLock } = preparation.ownerFacts;
-    const rustToolchain = contribution.foundation.toolchains.rust;
-    if (rustToolchain === undefined) {
-      throw new Error("Rust 参考包缺少所属工具链能力");
-    }
-    const targetName = definition.name.slice(
-      definition.name.lastIndexOf("/") + 1,
-    );
-    const cargoFiles = projectRustCargoFiles({
-      cargoManifest,
-      cargoLock,
-      targetName,
-    });
-    const scripts = projectRustPackageScripts(
-      contribution.manifest.scripts as Record<string, string>,
-    );
-    const replacements = new Map<string, RenderOperation>([
-      [
-        `${definition.path}/Cargo.toml`,
-        {
-          kind: "writeText",
-          to: `${definition.path}/Cargo.toml`,
-          text: cargoFiles.manifestText,
-        },
-      ],
-      [
-        `${definition.path}/Cargo.lock`,
-        {
-          kind: "writeText",
-          to: `${definition.path}/Cargo.lock`,
-          text: cargoFiles.lockText,
-        },
-      ],
-    ]);
+  environmentNeeds: ({ definition }) => [
+    rustToolchainEnvironmentNeed({
+      kind: "package-boundary",
+      path: definition.path,
+    }),
+  ],
+  rootDeclaration(ownerFacts, stableCommon) {
+    const requirement = stableRustToolchain(stableCommon);
+    const files =
+      requirement === undefined
+        ? []
+        : [
+            {
+              path: "rust-toolchain.toml",
+              content: new TextEncoder().encode(
+                projectRustToolchainDeclaration({
+                  requirement,
+                  ...(requirement.existingDeclaration === undefined
+                    ? {}
+                    : { existingDeclaration: requirement.existingDeclaration }),
+                }),
+              ),
+              mode: 0,
+              sourcePath: "template/rust-toolchain.toml",
+            },
+          ];
     return {
-      ...contribution,
-      manifest: { ...contribution.manifest, scripts },
-      foundation: {
-        ...contribution.foundation,
-        toolchains: {
-          ...contribution.foundation.toolchains,
-          rust: {
-            ...rustToolchain,
-            configurationText:
-              preparation.ownerFacts.toolchainConfiguration.declaration,
-          },
+      manifest: { scripts: { "toolchain:prepare": "cargo --version" } },
+      turboTasks: {
+        "//#toolchain:prepare": {
+          cache: false,
+          tags: ["work:preparation"],
         },
       },
-      operations: contribution.operations.map((operation) => {
-        const projected =
-          "to" in operation
-            ? (replacements.get(operation.to) ?? operation)
-            : operation;
-        if (
-          projected.kind !== "writeJson" ||
-          projected.to !== `${definition.path}/turbo.json`
-        ) {
-          return projected;
-        }
-
-        const turbo = projected.value as {
-          readonly tasks: Record<string, unknown>;
-        };
-        return {
-          ...projected,
-          value: { ...turbo, tasks: projectRustTurboTasks(turbo.tasks) },
-        };
-      }),
+      applicationRequirements: applicationRequirements(ownerFacts),
+      ...(files.length === 0 ? {} : { files }),
     };
+  },
+  prepareFacts(resources) {
+    const toolchain = resources.find(
+      ({ path: resourcePath }) =>
+        resourcePath === "template/rust-toolchain.toml",
+    );
+    if (toolchain === undefined) {
+      throw new Error("Rust 工具链原生资源缺失：template/rust-toolchain.toml");
+    }
+    return {
+      cargoManifest: snapshot(resources, "Cargo.toml"),
+      cargoLock: snapshot(resources, "Cargo.lock"),
+      toolchainConfiguration: parseRustToolchainDeclaration(
+        new TextDecoder("utf-8", { fatal: true }).decode(toolchain.content),
+      ),
+    };
+  },
+});
+
+export const referencePackage = Object.freeze({
+  ...nativeReference,
+  evaluate(input: Parameters<typeof nativeReference.evaluate>[0]) {
+    const contribution = nativeReference.evaluate(input);
+    const rustFacts = contribution.facts.ownerFacts;
+    const targetName = input.definition.name.slice(
+      input.definition.name.lastIndexOf("/") + 1,
+    );
+    const cargoFiles = projectRustCargoFiles({
+      cargoManifest: rustFacts.cargoManifest,
+      cargoLock: rustFacts.cargoLock,
+      targetName,
+    });
+    const manifest = {
+      ...contribution.facts.manifest,
+      scripts: projectRustPackageScripts(
+        isRecord(contribution.facts.manifest.scripts)
+          ? (contribution.facts.manifest.scripts as Record<string, string>)
+          : {},
+      ),
+    };
+    const nativeDocuments = contribution.facts.nativeDocuments.map(
+      (document) => {
+        if (document.path === "package.json" && document.scope === "package") {
+          return { ...document, value: manifest };
+        }
+        if (document.path !== "turbo.json" || !isRecord(document.value.tasks)) {
+          return document;
+        }
+        return {
+          ...document,
+          value: {
+            ...document.value,
+            tasks: projectRustTurboTasks(document.value.tasks),
+          },
+        };
+      },
+    );
+    const turboDocument = nativeDocuments.find(
+      (document) => document.path === "turbo.json",
+    );
+    const packageManifestDocument = nativeDocuments.find(
+      (document) => document.path === "package.json",
+    );
+    const files = contribution.files.map((file) => {
+      if (file.path === "package.json" && packageManifestDocument !== undefined) {
+        return {
+          ...file,
+          content: serializeNativeReferenceDocument(packageManifestDocument),
+        };
+      }
+      if (file.path === "Cargo.toml") {
+        return { ...file, content: new TextEncoder().encode(cargoFiles.manifestText) };
+      }
+      if (file.path === "Cargo.lock") {
+        return { ...file, content: new TextEncoder().encode(cargoFiles.lockText) };
+      }
+      if (file.path === "turbo.json" && turboDocument !== undefined) {
+        return { ...file, content: serializeNativeReferenceDocument(turboDocument) };
+      }
+      return file;
+    });
+    return {
+      ...contribution,
+      files,
+      facts: {
+        ...contribution.facts,
+        manifest,
+        nativeDocuments,
+      },
+    } satisfies PackageContribution<RustContributionFacts>;
   },
 });
 

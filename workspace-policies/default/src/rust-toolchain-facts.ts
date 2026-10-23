@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
+import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 
+import type { CurrentProjectProjectionEntry } from "@ykdz/template-core/project-projection";
 import { parse as parseToml } from "smol-toml";
 
 export const rootRustDeclarationFileName = "rust-toolchain.toml";
@@ -71,6 +73,71 @@ export function readRootRustToolchainChannel(repositoryRoot: string): string {
 export type RustToolchainChannelReading =
   | { readonly channel: string; readonly status: "explained" }
   | { readonly reason: string; readonly status: "unreadable" };
+
+export type PreparedRootRustToolchainTarget = {
+  readonly target?: { readonly channel: string; readonly declaration: string };
+  readonly readFact: CurrentProjectProjectionEntry;
+};
+
+/** 正式 add 准备读取一次根声明，并保留实际文件或缺失前提。 */
+export async function prepareRootRustToolchainTarget(options: {
+  readonly repositoryRoot: string;
+  readonly required: boolean;
+}): Promise<PreparedRootRustToolchainTarget> {
+  const filePath = path.join(
+    options.repositoryRoot,
+    rootRustDeclarationFileName,
+  );
+  let stat;
+  try {
+    stat = await lstat(filePath);
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      if (options.required) {
+        throw new RustToolchainDeclarationFailure(
+          "存在",
+          "文件不存在",
+          `请先创建根 ${rootRustDeclarationFileName}，在 [toolchain] 表内声明 channel 再加包。`,
+        );
+      }
+      return {
+        readFact: { path: rootRustDeclarationFileName, kind: "missing" },
+      };
+    }
+    throw error;
+  }
+  if (!stat.isFile()) {
+    throw new RustToolchainDeclarationFailure(
+      "是普通文件",
+      "路径不是普通文件",
+      `请先修正根 ${rootRustDeclarationFileName}，使其成为普通 TOML 文件。`,
+    );
+  }
+  const bytes = new Uint8Array(await readFile(filePath));
+  const declaration = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  const reading = readRustToolchainChannelFromToml(declaration);
+  if (reading.status !== "explained") {
+    throw new RustToolchainDeclarationFailure(
+      "是有效 TOML 声明",
+      reading.reason,
+      `请先修正根 ${rootRustDeclarationFileName}，在 [toolchain] 表内声明非空 channel 再加包。`,
+    );
+  }
+  return {
+    target: { channel: reading.channel, declaration },
+    readFact: {
+      path: rootRustDeclarationFileName,
+      kind: "file",
+      content: bytes,
+      mode: stat.mode & 0o111,
+    },
+  };
+}
 
 /** 从模板投影的 Rust 声明结构化读取根 channel，供工具链镜像校验共用。 */
 export function readRustToolchainChannelFromToml(
