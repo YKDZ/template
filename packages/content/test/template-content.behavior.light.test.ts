@@ -12,7 +12,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 
-import { projectPublicationWorkspace } from "@ykdz/reference-npm-publication/template";
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import {
   templateContent,
@@ -63,9 +62,7 @@ const vueAppPreset = requirePresetMember("@ykdz/preset-vue-app");
 function createContentTestStrategy<
   CreationInput extends PackageCreationInput = TsCliCreationInput,
 >() {
-  return createDefaultWorkspaceStrategy<CreationInput>({
-    project: projectPublicationWorkspace,
-  });
+  return createDefaultWorkspaceStrategy<CreationInput>();
 }
 
 const temporaryDirectories: string[] = [];

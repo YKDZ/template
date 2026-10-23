@@ -1,7 +1,6 @@
 import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { isPublicationEnabled } from "@ykdz/reference-npm-publication/template";
 import {
   readProjectedMirrorSlotScalar,
   type ProjectProjectionEntry,
@@ -337,16 +336,11 @@ export async function validatePlanDependencyCatalog(
   }
 }
 
-export async function assertGeneratedManifestPublicationPolicy(options: {
+export async function assertGeneratedManifestDefaultsPrivate(options: {
   readonly result: SuccessfulScenarioResult;
   readonly projectDir: string;
   readonly scenarioId: string;
 }): Promise<void> {
-  const enabled = new Set(
-    options.result.generationRecord.packages
-      .filter((record) => isPublicationEnabled(record.configuration))
-      .map((record) => record.packageDefinitionId),
-  );
   const rootManifest = JSON.parse(
     await readFile(path.join(options.projectDir, "package.json"), "utf8"),
   ) as Record<string, unknown>;
@@ -360,14 +354,9 @@ export async function assertGeneratedManifestPublicationPolicy(options: {
     const manifest = JSON.parse(
       await readFile(path.join(options.projectDir, manifestPath), "utf8"),
     ) as Record<string, unknown>;
-    const isPublicCandidate = enabled.has(definition.packageDefinitionId);
-    if (
-      isPublicCandidate ? manifest.private === true : manifest.private !== true
-    ) {
+    if (manifest.private !== true) {
       throw new Error(
-        isPublicCandidate
-          ? `${options.scenarioId}：公开候选 ${manifestPath} 必须允许发布`
-          : `${options.scenarioId}：非候选包 ${manifestPath} 必须保持 private:true`,
+        `${options.scenarioId}：生成包 ${manifestPath} 必须默认保持 private:true`,
       );
     }
   }
@@ -509,7 +498,7 @@ export async function validateGeneratedScenarioReceipt(options: {
     options.receipt.projectDir,
     options.receipt.scenario.id,
   );
-  await assertGeneratedManifestPublicationPolicy({
+  await assertGeneratedManifestDefaultsPrivate({
     result: options.receipt.result,
     projectDir: options.receipt.projectDir,
     scenarioId: options.receipt.scenario.id,

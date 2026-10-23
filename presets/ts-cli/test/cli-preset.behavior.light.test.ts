@@ -15,10 +15,14 @@ import { after, describe, it } from "node:test";
 import { projectPublicationWorkspace } from "@ykdz/reference-npm-publication/template";
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import { createContentIndex } from "@ykdz/template-core/content-identity";
+import type { GeneratorPackageState } from "@ykdz/template-core/workspace-strategy";
 import { createGenerator } from "@ykdz/template-generator";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+import {
+  defineReferencePackage,
+  type ReferencePackage,
+} from "@ykdz/template-workspace/reference-package";
 
 const content = await loadContentSource({
   namespace: "ykdz",
@@ -128,8 +132,20 @@ function generator() {
   return createGenerator({
     content,
     strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>({
-      project: projectPublicationWorkspace,
+      project: projectSelectedPublicationWorkspace,
     }),
+  });
+}
+
+function projectSelectedPublicationWorkspace(options: {
+  readonly packages: readonly GeneratorPackageState[];
+}) {
+  return projectPublicationWorkspace({
+    references: options.packages.map(
+      (record) =>
+        contentIndex.resolve(record.contentIdentity, "reference")
+          .definition as ReferencePackage,
+    ),
   });
 }
 
@@ -139,7 +155,7 @@ const strategyInput = {
 };
 
 void describe("TypeScript CLI 公开组合预设", () => {
-  void it("默认 internal，显式发布按实例恢复并复用根发布配置", async () => {
+  void it("声明发布工具依赖后默认私有并在后续组合中复用根配置", async () => {
     const targetRoot = await createTargetRoot("template-ts-cli-preset-");
     const initialized = await generator().init({
       targetRoot,
@@ -161,55 +177,30 @@ void describe("TypeScript CLI 公开组合预设", () => {
       path.join(targetRoot, "package.json"),
       JSON.stringify(customizedRoot),
     );
-    const published = await generator().add({
+    const workflowPath = path.join(targetRoot, ".github/workflows/release.yml");
+    const workflow = await readFile(workflowPath, "utf8");
+    await writeFile(workflowPath, `${workflow}\n# 用户工作流定制\n`);
+    const addedCli = await generator().add({
       repositoryRoot: targetRoot,
       preset: preset.identity,
-      configuration: { publication: true },
       creationInput: {
         leafName: "public-cli",
         packagePath: "packages/public-cli",
       },
     });
-    assert.equal(published.status, "success", JSON.stringify(published));
+    assert.equal(addedCli.status, "success", JSON.stringify(addedCli));
     const root = await manifest(".");
     assert.equal(root.scripts.notes, "echo 维护者说明");
     assert.equal(root.devDependencies["@changesets/cli"], "catalog:");
-    assert.equal((await manifest("packages/public-cli")).private, false);
-    const internal = await generator().add({
-      repositoryRoot: targetRoot,
-      preset: preset.identity,
-      creationInput: {
-        leafName: "internal-cli",
-        packagePath: "packages/internal-cli",
-      },
-    });
-    assert.equal(internal.status, "success", JSON.stringify(internal));
-    assert.equal((await manifest("packages/internal-cli")).private, true);
-    const second = await generator().add({
+    assert.equal((await manifest("packages/public-cli")).private, true);
+    assert.match(await readFile(workflowPath, "utf8"), /# 用户工作流定制/u);
+    const addedLibrary = await generator().add({
       repositoryRoot: targetRoot,
       contentIdentity: library.identity,
-      configuration: { publication: true },
-      creationInput: {
-        leafName: "public-lib",
-        packagePath: "packages/public-lib",
-      },
+      creationInput: { leafName: "public-lib" },
     });
-    assert.equal(second.status, "success", JSON.stringify(second));
-    const records = JSON.parse(
-      await readFile(
-        path.join(targetRoot, ".template/generation.json"),
-        "utf8",
-      ),
-    );
-    assert.deepEqual(
-      records.packages
-        .filter(
-          (record: { contentIdentity: typeof cli.identity }) =>
-            record.contentIdentity.packageName === "@ykdz/reference-ts-cli",
-        )
-        .map((record: { configuration: unknown }) => record.configuration),
-      [{ publication: false }, { publication: true }, { publication: false }],
-    );
+    assert.equal(addedLibrary.status, "success", JSON.stringify(addedLibrary));
+    assert.equal((await manifest("packages/public-lib")).private, true);
     assert.equal(
       (await manifest(".")).devDependencies["@changesets/cli"],
       "catalog:",
@@ -225,7 +216,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
       strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>({
         project(options) {
           return [
-            ...projectPublicationWorkspace(options),
+            ...projectSelectedPublicationWorkspace(options),
             {
               kind: "shared-root-files",
               source: "consumer#publication",
@@ -242,9 +233,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
     const result = await generated.init({
       targetRoot,
       selection: {
-        roots: [
-          { preset: preset.identity, configuration: { publication: true } },
-        ],
+        roots: [{ preset: preset.identity }],
       },
       strategyInput,
     });
@@ -259,7 +248,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
     await assert.rejects(stat(targetRoot), { code: "ENOENT" });
   });
 
-  void it("发布共享根脚本与消费者冲突时拒绝整次加包", async () => {
+  void it("加包时保留消费者对共享发布脚本的定制", async () => {
     const targetRoot = await createTargetRoot("template-publication-conflict-");
     const initialized = await generator().init({
       targetRoot,
@@ -271,21 +260,18 @@ void describe("TypeScript CLI 公开组合预设", () => {
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     manifest.scripts["publication:pack"] = "node custom-publication.ts";
     await writeFile(manifestPath, JSON.stringify(manifest));
-    const before = await snapshotTree(targetRoot);
     const result = await generator().add({
       repositoryRoot: targetRoot,
       preset: preset.identity,
-      configuration: { publication: true },
       creationInput: { leafName: "public-cli" },
     });
-    assert.equal(result.status, "conflict", JSON.stringify(result));
-    if (result.status !== "conflict") throw new Error("应拒绝冲突");
-    assert.ok(
-      result.conflicts.some(
-        (conflict) => conflict.location === "/scripts/publication:pack",
-      ),
+    assert.equal(result.status, "success", JSON.stringify(result));
+    assert.equal(
+      JSON.parse(await readFile(manifestPath, "utf8")).scripts[
+        "publication:pack"
+      ],
+      "node custom-publication.ts",
     );
-    assert.equal(await snapshotTree(targetRoot), before);
   });
 
   void it("直接选择 CLI 原生参考包时仍按私有包处理", async () => {
@@ -479,189 +465,4 @@ void describe("TypeScript CLI 公开组合预设", () => {
     assert.strictEqual(result.status, "conflict", JSON.stringify(result));
     assert.strictEqual(await snapshotTree(targetRoot), before);
   });
-});
-
-void it("已有内部实例正式开启发布保持身份和定制，第二实例复用并可幂等重试", async () => {
-  const targetRoot = await createTargetRoot("template-configure-publication-");
-  const initialized = await generator().init({
-    targetRoot,
-    selection: { roots: [{ preset: preset.identity }] },
-    strategyInput,
-  });
-  assert.equal(initialized.status, "success", JSON.stringify(initialized));
-  if (initialized.status !== "success") return;
-  const original = initialized.generationRecord.packages.find(
-    (record) => record.contentIdentity.packageName === "@ykdz/reference-ts-cli",
-  )!;
-  const originalDefinition = initialized.blueprint.packages.find(
-    (item) => item.packageDefinitionId === original.packageDefinitionId,
-  )!;
-  const manifestPath = path.join(targetRoot, "packages/cli/package.json");
-  const customized = JSON.parse(await readFile(manifestPath, "utf8"));
-  customized.scripts.notes = "echo 维护者的命令";
-  customized.description = "维护者的包说明";
-  await writeFile(manifestPath, JSON.stringify(customized));
-  const before = await snapshotTree(targetRoot);
-  const preview = await generator().configure({
-    repositoryRoot: targetRoot,
-    packageDefinitionId: original.packageDefinitionId,
-    configuration: { publication: true },
-    dryRun: true,
-  });
-  assert.equal(preview.status, "success", JSON.stringify(preview));
-  assert.equal(await snapshotTree(targetRoot), before);
-  const configured = await generator().configure({
-    repositoryRoot: targetRoot,
-    packageDefinitionId: original.packageDefinitionId,
-    configuration: { publication: true },
-  });
-  assert.equal(configured.status, "success", JSON.stringify(configured));
-  if (configured.status !== "success") return;
-  const current = configured.generationRecord.packages.find(
-    (record) => record.packageDefinitionId === original.packageDefinitionId,
-  )!;
-  assert.deepEqual(
-    {
-      ...current,
-      configuration: original.configuration,
-      bindings: original.bindings,
-    },
-    original,
-  );
-  assert.deepEqual(
-    configured.blueprint.packages.find(
-      (item) => item.packageDefinitionId === original.packageDefinitionId,
-    ),
-    originalDefinition,
-  );
-  const actual = JSON.parse(await readFile(manifestPath, "utf8"));
-  assert.equal(actual.private, false);
-  assert.equal(actual.description, "维护者的包说明");
-  assert.deepEqual(actual.scripts, customized.scripts);
-  const added = await generator().add({
-    repositoryRoot: targetRoot,
-    contentIdentity: library.identity,
-    creationInput: { leafName: "later" },
-  });
-  assert.equal(added.status, "success", JSON.stringify(added));
-  if (added.status !== "success") return;
-  const later = added.generationRecord.packages.find(
-    (record) => record.creationInput?.leafName === "later",
-  )!;
-  const laterDefinition = added.blueprint.packages.find(
-    (item) => item.packageDefinitionId === later.packageDefinitionId,
-  )!;
-  const laterManifestPath = path.join(
-    targetRoot,
-    laterDefinition.path,
-    "package.json",
-  );
-  const internalLibrary = JSON.parse(await readFile(laterManifestPath, "utf8"));
-  const second = await generator().configure({
-    repositoryRoot: targetRoot,
-    packageDefinitionId: later.packageDefinitionId,
-    configuration: { publication: true },
-  });
-  assert.equal(second.status, "success", JSON.stringify(second));
-  if (second.status !== "success") return;
-  const publishedLibrary = JSON.parse(
-    await readFile(laterManifestPath, "utf8"),
-  );
-  assert.deepEqual(publishedLibrary.scripts, internalLibrary.scripts);
-  const snapshot = await snapshotTree(targetRoot);
-  const repeated = await generator().configure({
-    repositoryRoot: targetRoot,
-    packageDefinitionId: later.packageDefinitionId,
-    configuration: { publication: true },
-  });
-  assert.equal(repeated.status, "success", JSON.stringify(repeated));
-  if (repeated.status !== "success") return;
-  assert.deepEqual(repeated.actions, []);
-  assert.equal(await snapshotTree(targetRoot), snapshot);
-});
-
-void it("已有实例开启发布的消费者冲突和未知实例均保留全部字节权限", async () => {
-  const targetRoot = await createTargetRoot("template-configure-conflict-");
-  const initialized = await generator().init({
-    targetRoot,
-    selection: { roots: [{ preset: preset.identity }] },
-    strategyInput,
-  });
-  assert.equal(initialized.status, "success", JSON.stringify(initialized));
-  if (initialized.status !== "success") return;
-  const target = initialized.generationRecord.packages.find(
-    (record) => record.contentIdentity.packageName === "@ykdz/reference-ts-cli",
-  )!;
-  const manifestPath = path.join(targetRoot, "package.json");
-  const root = JSON.parse(await readFile(manifestPath, "utf8"));
-  root.scripts["publication:pack"] = "node consumer-artifact.ts";
-  await writeFile(manifestPath, JSON.stringify(root));
-  const before = await snapshotTree(targetRoot);
-  for (const dryRun of [true, false]) {
-    const conflicting = await generator().configure({
-      repositoryRoot: targetRoot,
-      packageDefinitionId: target.packageDefinitionId,
-      configuration: { publication: true },
-      dryRun,
-    });
-    assert.equal(conflicting.status, "conflict", JSON.stringify(conflicting));
-    assert.equal(await snapshotTree(targetRoot), before);
-  }
-  const unknown = await generator().configure({
-    repositoryRoot: targetRoot,
-    packageDefinitionId: `package-${"0".repeat(64)}`,
-    configuration: { publication: true },
-  });
-  assert.equal(unknown.status, "input-invalid", JSON.stringify(unknown));
-  assert.equal(await snapshotTree(targetRoot), before);
-});
-
-void it("配置已有实例的声明来源冲突列明双方并在写入前拒绝", async () => {
-  const targetRoot = await createTargetRoot(
-    "template-configure-source-conflict-",
-  );
-  const create = () =>
-    createGenerator({
-      content,
-      strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>({
-        project(options) {
-          return [
-            ...projectPublicationWorkspace(options),
-            {
-              kind: "shared-root-files",
-              source: "consumer#publication",
-              manifest: {
-                scripts: {
-                  "publication:pack": "node consumer-artifact.ts",
-                },
-              },
-            },
-          ];
-        },
-      }),
-    });
-  const initialized = await create().init({
-    targetRoot,
-    selection: { roots: [{ preset: preset.identity }] },
-    strategyInput,
-  });
-  assert.equal(initialized.status, "success", JSON.stringify(initialized));
-  if (initialized.status !== "success") return;
-  const target = initialized.generationRecord.packages.find(
-    (record) => record.contentIdentity.packageName === "@ykdz/reference-ts-cli",
-  )!;
-  const before = await snapshotTree(targetRoot);
-  const result = await create().configure({
-    repositoryRoot: targetRoot,
-    packageDefinitionId: target.packageDefinitionId,
-    configuration: { publication: true },
-  });
-  assert.equal(result.status, "operation-failure", JSON.stringify(result));
-  if (result.status !== "operation-failure") return;
-  assert.match(
-    result.error.message,
-    /@ykdz\/reference-npm-publication#\.\/template/u,
-  );
-  assert.match(result.error.message, /consumer#publication/u);
-  assert.equal(await snapshotTree(targetRoot), before);
 });

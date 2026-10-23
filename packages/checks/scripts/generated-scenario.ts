@@ -11,7 +11,7 @@ export {
 } from "../src/generated-content.ts";
 
 export {
-  assertGeneratedManifestPublicationPolicy,
+  assertGeneratedManifestDefaultsPrivate,
   validateGeneratedDevelopmentContainerProjection,
   validateGeneratedScenarioReceipt,
   validatePlanDependencyCatalog,

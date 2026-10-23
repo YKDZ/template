@@ -33,7 +33,6 @@ export type GeneratedScenario = {
 export type GeneratedScenarioRuntime = {
   readonly content: typeof import("@ykdz/template-content").templateContent;
   readonly createGenerator: typeof import("@ykdz/template-generator").createGenerator;
-  readonly projectPublicationWorkspace?: typeof import("@ykdz/reference-npm-publication/template").projectPublicationWorkspace;
   readonly createDefaultWorkspaceStrategy: typeof import("@ykdz/template-workspace/default-workspace-strategy").createDefaultWorkspaceStrategy;
   readonly resolveTemplateSource: typeof import("@ykdz/template-core/renderer").resolveTemplateSource;
   readonly canConsumeNodePackageNameImportForRole: typeof import("@ykdz/template-workspace/project-linking").canConsumeNodePackageNameImportForRole;
@@ -225,11 +224,7 @@ export async function materializeGeneratedScenario(options: {
   const generator = options.runtime.createGenerator({
     content: options.runtime.content,
     strategy:
-      options.runtime.createDefaultWorkspaceStrategy<ChecksCreationInput>(
-        options.runtime.projectPublicationWorkspace === undefined
-          ? {}
-          : { project: options.runtime.projectPublicationWorkspace },
-      ),
+      options.runtime.createDefaultWorkspaceStrategy<ChecksCreationInput>(),
   });
   const initialization = requireSuccess(
     await generator.init({

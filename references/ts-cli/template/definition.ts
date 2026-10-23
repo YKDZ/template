@@ -1,7 +1,3 @@
-import {
-  normalizePublicationConfiguration,
-  projectPublicationTarget,
-} from "@ykdz/reference-npm-publication/template";
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
 import { validateCliCommandName } from "@ykdz/template-workspace/package-contribution";
 import type { PackageLinkRequirement } from "@ykdz/template-workspace/project-requirements";
@@ -27,7 +23,6 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
     defaultLeafName: "cli",
     role: "cli-tool",
     resources: ["."],
-    normalizeConfiguration: normalizePublicationConfiguration,
     template: {
       dependencies: [
         {
@@ -80,24 +75,21 @@ export const referencePackage: ReferencePackage<TsCliCreationInput> =
           provider,
         };
       }
-      return projectPublicationTarget({
-        configuration: input.configuration,
-        contribution: {
-          ...contribution,
-          manifest: {
-            ...contribution.manifest,
-            bin: { [commandName]: Object.values(bin)[0]! },
-            engines: { node: `>=${input.context.toolchain.nodeLtsMajor}` },
-          },
-          ...(packageLinkRequirement === undefined
-            ? {}
-            : {
-                projectRequirements: [
-                  ...(contribution.projectRequirements ?? []),
-                  packageLinkRequirement,
-                ],
-              }),
+      return {
+        ...contribution,
+        manifest: {
+          ...contribution.manifest,
+          bin: { [commandName]: Object.values(bin)[0]! },
+          engines: { node: `>=${input.context.toolchain.nodeLtsMajor}` },
         },
-      });
+        ...(packageLinkRequirement === undefined
+          ? {}
+          : {
+              projectRequirements: [
+                ...(contribution.projectRequirements ?? []),
+                packageLinkRequirement,
+              ],
+            }),
+      };
     },
   });

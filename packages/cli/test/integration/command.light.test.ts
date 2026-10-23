@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import {
-  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -147,7 +146,7 @@ void describe("template CLI command control", () => {
     assert.equal(output.stderr(), "");
   });
 
-  void it("显式发布 CLI 完整序列化 schema4 现行配置", async () => {
+  void it("初始化记录生成实例身份和绑定并默认保持包私有", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-cli-generation-record-"),
     );
@@ -162,7 +161,6 @@ void describe("template CLI command control", () => {
         "demo",
         "--preset",
         cliPreset.definition.metadata.alias,
-        "--publication",
         "--scope",
         "acme",
       ]);
@@ -191,7 +189,6 @@ void describe("template CLI command control", () => {
               readonly packageDefinitionId: string;
               readonly createdBy: string;
               readonly creationInput: unknown;
-              readonly configuration: unknown;
               readonly bindings: Readonly<Record<string, string>>;
             }[];
             readonly nodeInstances: Readonly<Record<string, string>>;
@@ -244,7 +241,17 @@ void describe("template CLI command control", () => {
       assert.ok(candidateRecord);
       assert.equal(candidateRecord.createdBy, "initialization");
       assert.equal(candidateRecord.creationInput, null);
-      assert.deepEqual(candidateRecord.configuration, { publication: true });
+      const packageManifest = JSON.parse(
+        await readFile(
+          path.join(workspace, "demo/packages/cli/package.json"),
+          "utf8",
+        ),
+      );
+      assert.equal(packageManifest.private, true);
+      const rootManifest = JSON.parse(
+        await readFile(path.join(workspace, "demo/package.json"), "utf8"),
+      );
+      assert.equal(rootManifest.devDependencies["@changesets/cli"], "catalog:");
       assert.ok(Object.keys(candidateRecord.bindings).length > 0);
       assert.ok(
         Object.values(candidateRecord.bindings).every((packageId) =>
@@ -1385,138 +1392,4 @@ void describe("template CLI command control", () => {
     assert.equal(output.stdout(), "");
     assert.deepEqual(await workspaceByteSnapshot(target), before);
   });
-});
-
-void it("开启库发布保留用户的原生打包规则", async () => {
-  const workspace = await mkdtemp(
-    path.join(tmpdir(), "template-cli-ignore-conflict-"),
-  );
-  try {
-    const initialized = testRuntime(["init", "demo", "--preset", "ts-lib"]);
-    assert.equal(
-      await runCli({ ...initialized.runtime, cwd: workspace }),
-      0,
-      initialized.stderr(),
-    );
-    const repositoryRoot = path.join(workspace, "demo");
-    const ignorePath = path.join(repositoryRoot, "packages/lib/.npmignore");
-    await writeFile(ignorePath, "dist/*\n!dist/index.js\n");
-    await chmod(ignorePath, 0o600);
-    const manifestPath = path.join(repositoryRoot, "packages/lib/package.json");
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.scripts.prepack = "pnpm run build";
-    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-    const before = await workspaceByteSnapshot(repositoryRoot);
-    for (const dryRun of [true, false]) {
-      const output = testRuntime([
-        "configure",
-        "package",
-        "--path",
-        "packages/lib",
-        "--publication",
-        ...(dryRun ? ["--dry-run"] : []),
-        "--output-format",
-        "text",
-      ]);
-      assert.equal(
-        await runCli({ ...output.runtime, cwd: repositoryRoot }),
-        0,
-        output.stderr(),
-      );
-      if (dryRun) {
-        assert.deepEqual(await workspaceByteSnapshot(repositoryRoot), before);
-      } else {
-        assert.equal(
-          await readFile(ignorePath, "utf8"),
-          "dist/*\n!dist/index.js\n",
-        );
-        assert.equal((await stat(ignorePath)).mode & 0o777, 0o600);
-        const configured = JSON.parse(await readFile(manifestPath, "utf8"));
-        assert.equal(configured.scripts.prepack, manifest.scripts.prepack);
-        assert.equal(configured.private, false);
-      }
-    }
-  } finally {
-    await rm(workspace, { recursive: true, force: true });
-  }
-});
-
-void it("正式配置命令保持已登记实例身份，未知原生包拒绝接管并可安全重试", async () => {
-  const workspace = await mkdtemp(
-    path.join(tmpdir(), "template-cli-configure-"),
-  );
-  try {
-    const initialized = testRuntime(["init", "demo", "--preset", "ts-cli"]);
-    assert.equal(
-      await runCli({ ...initialized.runtime, cwd: workspace }),
-      0,
-      initialized.stderr(),
-    );
-    const repositoryRoot = path.join(workspace, "demo");
-    const recordPath = path.join(repositoryRoot, ".template/generation.json");
-    const before = JSON.parse(await readFile(recordPath, "utf8"));
-    const original = before.packages.find(
-      (record: { contentIdentity: { packageName: string } }) =>
-        record.contentIdentity.packageName === "@ykdz/reference-ts-cli",
-    );
-    await mkdir(path.join(repositoryRoot, "packages/native"));
-    await writeFile(
-      path.join(repositoryRoot, "packages/native/package.json"),
-      JSON.stringify({ name: "@demo/native", private: true }),
-    );
-    const snapshot = await workspaceByteSnapshot(repositoryRoot);
-    const unknown = testRuntime([
-      "configure",
-      "package",
-      "--path",
-      "packages/native",
-      "--publication",
-    ]);
-    assert.equal(await runCli({ ...unknown.runtime, cwd: repositoryRoot }), 1);
-    assert.equal(JSON.parse(unknown.stderr()).variant, "unknownInstance");
-    assert.deepEqual(await workspaceByteSnapshot(repositoryRoot), snapshot);
-    const configured = testRuntime([
-      "configure",
-      "package",
-      "--path",
-      "packages/cli",
-      "--publication",
-    ]);
-    assert.equal(
-      await runCli({ ...configured.runtime, cwd: repositoryRoot }),
-      0,
-      configured.stderr(),
-    );
-    const result = JSON.parse(configured.stdout());
-    assert.equal(result.variant, "configured");
-    assert.equal(result.data.packageDefinitionId, original.packageDefinitionId);
-    const after = JSON.parse(await readFile(recordPath, "utf8"));
-    const actual = after.packages.find(
-      (record: { packageDefinitionId: string }) =>
-        record.packageDefinitionId === original.packageDefinitionId,
-    );
-    assert.deepEqual(
-      {
-        ...actual,
-        configuration: original.configuration,
-        bindings: original.bindings,
-      },
-      original,
-    );
-    const repeated = testRuntime([
-      "configure",
-      "package",
-      "--path",
-      "packages/cli",
-      "--publication",
-    ]);
-    assert.equal(
-      await runCli({ ...repeated.runtime, cwd: repositoryRoot }),
-      0,
-      repeated.stderr(),
-    );
-    assert.equal(JSON.parse(repeated.stdout()).variant, "unchanged");
-  } finally {
-    await rm(workspace, { recursive: true, force: true });
-  }
 });

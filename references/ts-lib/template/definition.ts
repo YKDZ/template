@@ -1,7 +1,3 @@
-import {
-  normalizePublicationConfiguration,
-  projectPublicationTarget,
-} from "@ykdz/reference-npm-publication/template";
 import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 export const referencePackage = defineReferencePackage({
@@ -13,7 +9,6 @@ export const referencePackage = defineReferencePackage({
   defaultLeafName: "lib",
   role: "shared-library",
   resources: ["."],
-  normalizeConfiguration: normalizePublicationConfiguration,
   template: {
     dependencies: [
       {
@@ -28,12 +23,6 @@ export const referencePackage = defineReferencePackage({
     ],
     scripts: ["build:template", "check:author-planning-roles"],
     resources: ["template", "tsconfig.template.json"],
-  },
-  project(contribution, input) {
-    return projectPublicationTarget({
-      contribution,
-      configuration: input.configuration,
-    });
   },
   environmentNeeds: [],
   foundation: {

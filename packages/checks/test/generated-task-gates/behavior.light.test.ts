@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { projectPublicationWorkspace } from "@ykdz/reference-npm-publication/template";
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import { templateContent, templatePresets } from "@ykdz/template-content";
 import { createGenerator } from "@ykdz/template-generator";
@@ -16,9 +15,7 @@ async function initialize(
 ): Promise<void> {
   const result = await createGenerator({
     content: templateContent,
-    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>({
-      project: projectPublicationWorkspace,
-    }),
+    strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
   }).init({
     targetRoot,
     selection: { roots: [{ preset: preset.identity }] },

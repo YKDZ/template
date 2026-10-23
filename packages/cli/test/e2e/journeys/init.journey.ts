@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { templatePresets } from "@ykdz/template-content";
+import {
+  templatePresets,
+  templateReferencePackages,
+} from "@ykdz/template-content";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 import type { CliJourney } from "../journey.ts";
@@ -257,6 +260,28 @@ const journey: CliJourney = {
         await readFile(path.join(project, ".template/blueprint.json"), "utf8"),
       );
       assert.deepEqual(data.blueprint, blueprint);
+      const publicationReferenceName = "@ykdz/reference-npm-publication";
+      const requiresPublication = Object.values(member.definition.nodes).some(
+        ({ reference }) => {
+          const selected = templateReferencePackages.find(
+            (candidate) => candidate.definition === reference,
+          );
+          return selected?.definition.dependencyUses.some(
+            ({ name, purposes }) =>
+              name === publicationReferenceName &&
+              purposes.includes("template-execution"),
+          );
+        },
+      );
+      const rootManifest = JSON.parse(
+        await readFile(path.join(project, "package.json"), "utf8"),
+      ) as {
+        readonly devDependencies?: Readonly<Record<string, string>>;
+      };
+      assert.equal(
+        rootManifest.devDependencies?.["@changesets/cli"],
+        requiresPublication ? "catalog:" : undefined,
+      );
       for (const packageEntry of data.resolved.packages as readonly {
         readonly name: string;
         readonly path: string;
@@ -266,8 +291,9 @@ const journey: CliJourney = {
             path.join(project, packageEntry.path, "package.json"),
             "utf8",
           ),
-        ) as { readonly name: string };
+        ) as { readonly name: string; readonly private?: boolean };
         assert.equal(manifest.name, packageEntry.name);
+        assert.equal(manifest.private, true);
       }
     }
   },
