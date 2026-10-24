@@ -20,7 +20,13 @@ type PackageManifest = {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   bundleDependencies?: string[];
-  publishConfig?: { access?: string; directory?: string };
+  exports?: Record<string, unknown>;
+  publishConfig?: {
+    access?: string;
+    directory?: string;
+    linkDirectory?: boolean;
+    exports?: Record<string, unknown>;
+  };
 };
 
 type WorkspaceDependency = {
@@ -90,6 +96,7 @@ async function workspaceRoot(): Promise<string> {
   return path.resolve(stdout.trim());
 }
 
+/** 产品归档不包含只有源码条件的维护入口。 */
 function packageManifestForArchives(
   archives: readonly PackedArtifact[],
   resolved: Readonly<Record<string, WorkspaceDependency>>,
@@ -118,9 +125,16 @@ function packageManifestForArchives(
   delete scripts.prepack;
   const publishConfig = { ...packageManifest.publishConfig };
   delete publishConfig.directory;
+  delete publishConfig.linkDirectory;
+  delete publishConfig.exports;
+  const exports = packageManifest.publishConfig?.exports;
+  if (exports === undefined) {
+    throw new Error("CLI 分发清单缺少产品导出配置");
+  }
 
   return {
     ...packageManifest,
+    exports,
     files: [
       "dist",
       ...bundleDependencies.map((name) => `node_modules/${name}`),

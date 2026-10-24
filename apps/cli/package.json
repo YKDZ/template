@@ -43,6 +43,12 @@
     }
   },
   "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/main.d.ts",
+        "default": "./dist/main.js"
+      }
+    },
     "access": "public",
     "directory": ".package",
     "linkDirectory": false
