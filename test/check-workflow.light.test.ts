@@ -561,7 +561,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
         name: "BuildKit",
         path: ".fixture-native-cache/buildkit",
         keyInput:
-          "hashFiles('content/default/composition/assets/environment/**/*.Dockerfile', 'content/default/composition/assets/environment/devcontainer/workspace-template.json', 'content/default/presets/vike-app/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts')",
+          "hashFiles('content/default/references/workspace-root/resources/environment/**/*.Dockerfile', 'content/default/references/workspace-root/resources/environment/devcontainer/workspace-template.json', 'content/default/references/rust-bin/resources/devcontainer/rust.Dockerfile', 'content/default/presets/vike-app/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts')",
       },
       {
         name: "pnpm downloads",

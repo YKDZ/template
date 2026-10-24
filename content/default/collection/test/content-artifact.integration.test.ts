@@ -26,7 +26,6 @@ import {
   prepareContentCollection,
   writeContentCollectionEvidence,
   writeNativeArchiveOverrides,
-  type PackedArtifact,
   type PreparedContentCollection,
 } from "@ykdz/template-content-artifacts";
 import { contentIdentityKey } from "@ykdz/template-core/content-identity";
@@ -84,12 +83,18 @@ async function contentArtifactEvidenceRoot(): Promise<string> {
 async function buildNativeAuthoredContent(
   fixture: Awaited<ReturnType<typeof createAuthoredContentFixture>>,
   namespace: string,
-  sdkArchives: readonly PackedArtifact[],
+  prepared: PreparedContentCollection,
 ) {
-  await writeNativeArchiveOverrides(fixture.root, sdkArchives, [
-    `${namespace}/authors/*`,
-    `${namespace}/collection`,
-  ]);
+  const rootOwner = prepared.owners.find(
+    (owner) =>
+      owner.member.identity.packageName === "@ykdz/reference-workspace-root",
+  );
+  assert.ok(rootOwner, "原生作者fixture需要默认root owner归档");
+  await writeNativeArchiveOverrides(
+    fixture.root,
+    [...prepared.sdkPackages, rootOwner.packed],
+    [`${namespace}/authors/*`, `${namespace}/collection`],
+  );
   await execa("pnpm", ["--dir", fixture.root, "install"], {
     cwd: workspaceRoot,
   });
@@ -1654,8 +1659,12 @@ void describe("原生内容制品安装链", () => {
       firstPartyPrepared.resolvedVersions.get("typescript-7");
     const nodeTypesVersion =
       firstPartyPrepared.resolvedVersions.get("@types/node");
+    const workspaceSdkVersion = firstPartyPrepared.resolvedVersions.get(
+      "@ykdz/template-workspace",
+    );
     assert.ok(typescriptVersion);
     assert.ok(nodeTypesVersion);
+    assert.ok(workspaceSdkVersion);
 
     const namespace = "native-authored";
     const fixture = await createAuthoredContentFixture({
@@ -1670,7 +1679,10 @@ void describe("原生内容制品安装链", () => {
         typescript: typescriptVersion,
         nodeTypes: nodeTypesVersion,
       },
-      featureNativeDevDependencies: { typescript: "6.0.3" },
+      featureNativeDevDependencies: {
+        "@ykdz/template-workspace": workspaceSdkVersion,
+        typescript: "6.0.3",
+      },
       featureTemplatePrelude: [
         'import ts from "typescript";',
         "export const fixtureTypescriptVersion = ts.version;",
@@ -1724,7 +1736,7 @@ void describe("原生内容制品安装链", () => {
     const content = await buildNativeAuthoredContent(
       fixture,
       namespace,
-      firstPartyPrepared.sdkPackages,
+      firstPartyPrepared,
     );
     const feature = content.find(
       (member) => member.identity.packageName === "@fixture/feature",
@@ -2496,7 +2508,7 @@ void describe("原生内容制品安装链", () => {
         members: await buildNativeAuthoredContent(
           fixture,
           source.namespace,
-          firstPartyPrepared.sdkPackages,
+          firstPartyPrepared,
         ),
       });
     }

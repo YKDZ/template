@@ -36,6 +36,10 @@ void it("源码容器冻结检查当前工作树，成功后移除快照、失�
       path.join(root, "rust-toolchain.toml"),
       '[toolchain]\nchannel = "1.99.0"\n',
     );
+    await writeFile(
+      path.join(root, "pnpm-workspace.yaml"),
+      'catalog:\n  "@playwright/test": 1.64.0\n',
+    );
     await writeFile(path.join(root, "pnpm-lock.yaml"), "保持原样的锁文件\n");
     await writeFile(
       path.join(root, ".devcontainer/devcontainer.json"),

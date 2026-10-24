@@ -4,7 +4,6 @@
   "private": true,
   "files": [
     "dist",
-    "assets",
     "scripts"
   ],
   "type": "module",
@@ -13,11 +12,6 @@
       "source": "./src/dependency-catalog.ts",
       "types": "./dist/dependency-catalog.d.ts",
       "default": "./dist/dependency-catalog.js"
-    },
-    "./project-github": {
-      "source": "./src/project-github.ts",
-      "types": "./dist/project-github.d.ts",
-      "default": "./dist/project-github.js"
     },
     "./application-requirements": {
       "source": "./src/application-requirements.ts",
@@ -28,11 +22,6 @@
       "source": "./src/vue-policy.ts",
       "types": "./dist/vue-policy.d.ts",
       "default": "./dist/vue-policy.js"
-    },
-    "./default-environment": {
-      "source": "./src/default-environment.ts",
-      "types": "./dist/default-environment.d.ts",
-      "default": "./dist/default-environment.js"
     },
     "./release-toolchain-snapshot": {
       "source": "./src/release-toolchain-snapshot.ts",
@@ -86,7 +75,6 @@
     "@ykdz/default-content-authoring": "workspace:*",
     "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/template-core": "workspace:*",
-    "@ykdz/template-environment": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
     "ignore": "catalog:",
     "jsonc-parser": "catalog:",
@@ -96,6 +84,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@ykdz/template-environment": "workspace:*",
     "@ykdz/tooling-config": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

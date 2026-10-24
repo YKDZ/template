@@ -254,7 +254,7 @@ await test("映射 TypeScript 导入到显式绑定并保留源文件执行权�
   assert.equal(output.mode, 0o111);
 });
 
-await test("剔除作者资源、脚本和任务，同时保留产品测试配置", async (context) => {
+await test("剔除作者资源、脚本和任务，同时在求值中形成原生包文件", async (context) => {
   const setup = await fixture(
     context,
     {
@@ -320,8 +320,26 @@ await test("剔除作者资源、脚本和任务，同时保留产品测试配�
   });
   assert.deepEqual(
     contribution.files.map(({ path: filePath }) => filePath).toSorted(),
-    ["src/application.txt"],
+    ["package.json", "src/application.txt", "tsconfig.json", "turbo.json"],
   );
+  assert.equal(
+    contribution.reconciliation?.some(
+      ({ path: filePath }) => filePath === "tsconfig.template.json",
+    ),
+    false,
+  );
+  assert.deepEqual(JSON.parse(fileText(contribution, "turbo.json")), {
+    extends: ["//"],
+    tasks: { test: { tags: ["quality:light"], dependsOn: [] } },
+  });
+  assert.deepEqual(JSON.parse(fileText(contribution, "tsconfig.json")), {
+    include: ["src/**/*.ts"],
+  });
+  const packageManifest = JSON.parse(
+    fileText(contribution, "package.json"),
+  ) as Record<string, unknown>;
+  assert.equal(packageManifest.name, "@consumer/application");
+  assert.deepEqual(packageManifest.scripts, { test: "node --test" });
 });
 
 await test("保留依赖协议，并只重映射精确包任务身份", async (context) => {

@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { CiDiagnosticArtifactDeclaration } from "@ykdz/default-content-authoring/contracts";
-import { composeCiDiagnosticArtifacts } from "@ykdz/template-workspace/default-environment";
 import {
   prepareProjectGithubTemplates,
   projectCheckWorkflow,
-} from "@ykdz/template-workspace/project-github";
+} from "@ykdz/reference-workspace-root/project-github";
+
+import { composeCiDiagnosticArtifacts } from "../src/ci-diagnostic-artifact.ts";
 
 const checkWorkflowTemplate = prepareProjectGithubTemplates().checkWorkflow;
 
@@ -19,6 +20,24 @@ const vitestBrowser = (path: string): CiDiagnosticArtifactDeclaration => ({
   kind: "vitest-browser",
   owner: { kind: "package-boundary", path },
 });
+
+function projectWorkflow(options: {
+  readonly packagePaths: readonly string[];
+  readonly diagnosticArtifacts?: readonly unknown[];
+  readonly job?: { readonly name?: string; readonly timeoutMinutes?: number };
+}): string {
+  const diagnostics = composeCiDiagnosticArtifacts({
+    packagePaths: options.packagePaths,
+    declarations: options.diagnosticArtifacts ?? [],
+  });
+  return projectCheckWorkflow(
+    {
+      diagnostics,
+      ...(options.job === undefined ? {} : { job: options.job }),
+    },
+    checkWorkflowTemplate,
+  );
+}
 
 void describe("CI 诊断产物合同", () => {
   void it("只返回排序且去重的封闭声明", () => {
@@ -69,16 +88,10 @@ void describe("CI 诊断产物合同", () => {
 
   void it("工作流只投影实际包边界中的诊断所有者", () => {
     const packagePaths = ["apps/web"];
-    const workflow = projectCheckWorkflow(
-      {
-        packagePaths,
-        diagnosticArtifacts: [
-          playwright("apps/web"),
-          vitestBrowser("apps/web"),
-        ],
-      },
-      checkWorkflowTemplate,
-    );
+    const workflow = projectWorkflow({
+      packagePaths,
+      diagnosticArtifacts: [playwright("apps/web"), vitestBrowser("apps/web")],
+    });
     assert.match(workflow, /PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS/u);
     assert.match(workflow, /VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS/u);
     assert.match(workflow, /apps\/web/u);
@@ -91,13 +104,10 @@ void describe("CI 诊断产物合同", () => {
     ]) {
       assert.throws(
         () =>
-          projectCheckWorkflow(
-            {
-              packagePaths: ["apps/web"],
-              diagnosticArtifacts: [declaration],
-            },
-            checkWorkflowTemplate,
-          ),
+          projectWorkflow({
+            packagePaths: ["apps/web"],
+            diagnosticArtifacts: [declaration],
+          }),
         (error) =>
           error instanceof Error &&
           error.message.includes("CI 诊断制品所有者不是已声明的包边界"),
@@ -108,24 +118,18 @@ void describe("CI 诊断产物合同", () => {
   void it("工作流作业配置由通用根声明提供", () => {
     const packagePaths = ["apps/web"];
     assert.match(
-      projectCheckWorkflow(
-        {
-          packagePaths,
-          job: { name: "Full Check", timeoutMinutes: 45 },
-        },
-        checkWorkflowTemplate,
-      ),
+      projectWorkflow({
+        packagePaths,
+        job: { name: "Full Check", timeoutMinutes: 45 },
+      }),
       /name: Full Check\n    runs-on: ubuntu-latest\n    timeout-minutes: 45/u,
     );
     assert.match(
-      projectCheckWorkflow({ packagePaths }, checkWorkflowTemplate),
+      projectWorkflow({ packagePaths }),
       /name: Root Check\n    runs-on: ubuntu-latest\n    timeout-minutes: 30/u,
     );
     assert.match(
-      projectCheckWorkflow(
-        { packagePaths, job: { name: "Full Check" } },
-        checkWorkflowTemplate,
-      ),
+      projectWorkflow({ packagePaths, job: { name: "Full Check" } }),
       /name: Full Check\n    runs-on: ubuntu-latest\n    timeout-minutes: 30/u,
     );
   });
@@ -137,22 +141,16 @@ void describe("CI 诊断产物合同", () => {
     };
 
     assert.throws(() =>
-      projectCheckWorkflow(
-        {
-          packagePaths: ["apps/web"],
-          diagnosticArtifacts: [declarationWithPath],
-        },
-        checkWorkflowTemplate,
-      ),
+      projectWorkflow({
+        packagePaths: ["apps/web"],
+        diagnosticArtifacts: [declarationWithPath],
+      }),
     );
     assert.throws(() =>
-      projectCheckWorkflow(
-        {
-          packagePaths: ["node_modules/private"],
-          diagnosticArtifacts: [playwright("node_modules/private")],
-        },
-        checkWorkflowTemplate,
-      ),
+      projectWorkflow({
+        packagePaths: ["node_modules/private"],
+        diagnosticArtifacts: [playwright("node_modules/private")],
+      }),
     );
   });
 });

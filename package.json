@@ -36,6 +36,7 @@
     "@devcontainers/cli": "catalog:",
     "@types/node": "catalog:",
     "@ykdz/default-content-authoring": "workspace:*",
+    "@ykdz/reference-rust-bin": "workspace:*",
     "@ykdz/reference-ts-cli": "workspace:*",
     "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/template-checks": "workspace:*",

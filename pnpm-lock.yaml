@@ -342,6 +342,9 @@ importers:
       '@ykdz/default-content-authoring':
         specifier: workspace:*
         version: link:content/default/authoring
+      '@ykdz/reference-rust-bin':
+        specifier: workspace:*
+        version: link:content/default/references/rust-bin
       '@ykdz/reference-ts-cli':
         specifier: workspace:*
         version: link:content/default/references/ts-cli
@@ -548,9 +551,6 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../../packages/core
-      '@ykdz/template-environment':
-        specifier: workspace:*
-        version: link:../../../packages/environment
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../../../packages/generator
@@ -573,6 +573,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../../../packages/environment
       '@ykdz/tooling-config':
         specifier: workspace:*
         version: link:../../../packages/tooling-config
@@ -1006,9 +1009,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../../../packages/core
-      '@ykdz/template-workspace':
+      '@ykdz/template-environment':
         specifier: workspace:*
-        version: link:../../composition
+        version: link:../../../../packages/environment
       '@ykdz/tooling-config':
         specifier: workspace:*
         version: link:../../../../packages/tooling-config
@@ -1484,6 +1487,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../../../packages/core
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../../../../packages/environment
       '@ykdz/tooling-config':
         specifier: workspace:*
         version: link:../../../../packages/tooling-config
@@ -1502,6 +1508,12 @@ importers:
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
+      valibot:
+        specifier: 'catalog:'
+        version: 1.5.0(typescript@7.0.2)
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.1
 
   packages/checks:
     dependencies:
