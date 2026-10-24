@@ -80,9 +80,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .fixture-native-cache/buildkit
-          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('workspace-policies/default/assets/environment/**/*.Dockerfile', 'workspace-policies/default/assets/environment/devcontainer/workspace-template.json', 'workspace-policies/default/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('content/default/references/workspace-root/resources/environment/**/*.Dockerfile', 'content/default/references/workspace-root/resources/environment/devcontainer/workspace-template.json', 'content/default/references/rust-bin/resources/devcontainer/rust.Dockerfile', 'content/default/presets/vike-app/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            fixture-buildkit-${{ runner.os }}-${{ hashFiles('workspace-policies/default/assets/environment/**/*.Dockerfile', 'workspace-policies/default/assets/environment/devcontainer/workspace-template.json', 'workspace-policies/default/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts') }}-
+            fixture-buildkit-${{ runner.os }}-${{ hashFiles('content/default/references/workspace-root/resources/environment/**/*.Dockerfile', 'content/default/references/workspace-root/resources/environment/devcontainer/workspace-template.json', 'content/default/references/rust-bin/resources/devcontainer/rust.Dockerfile', 'content/default/presets/vike-app/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts') }}-
             fixture-buildkit-${{ runner.os }}-
 
       - name: Restore pnpm downloads cache
@@ -100,9 +100,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .fixture-native-cache/cargo
-          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('references/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('content/default/references/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('references/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-
+            fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('content/default/references/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-
             fixture-cargo-downloads-${{ runner.os }}-
 
       - name: Restore Fixture Verification Evidence
@@ -254,7 +254,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: .fixture-native-cache/buildkit
-          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('workspace-policies/default/assets/environment/**/*.Dockerfile', 'workspace-policies/default/assets/environment/devcontainer/workspace-template.json', 'workspace-policies/default/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('content/default/references/workspace-root/resources/environment/**/*.Dockerfile', 'content/default/references/workspace-root/resources/environment/devcontainer/workspace-template.json', 'content/default/references/rust-bin/resources/devcontainer/rust.Dockerfile', 'content/default/presets/vike-app/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Save pnpm downloads cache
         if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'
@@ -268,7 +268,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: .fixture-native-cache/cargo
-          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('references/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('content/default/references/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Save Fixture Verification Evidence
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'

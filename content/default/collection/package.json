@@ -11,11 +11,6 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./collection": {
-      "source": "./src/collection.ts",
-      "types": "./dist/collection.d.ts",
-      "default": "./dist/collection.js"
     }
   },
   "scripts": {

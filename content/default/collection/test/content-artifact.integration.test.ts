@@ -35,7 +35,7 @@ import { execa } from "execa";
 import { createAuthoredContentFixture } from "../test-support/authored-content-fixture.ts";
 import { unprivilegedProcessOptions } from "../test-support/unprivileged-process.ts";
 
-const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
+const workspaceRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 const temporaryRoots: string[] = [];
 const preparedCollections: PreparedContentCollection[] = [];
 const authoredFixtures: Awaited<

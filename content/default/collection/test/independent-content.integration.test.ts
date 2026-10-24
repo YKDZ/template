@@ -23,7 +23,7 @@ import { execa } from "execa";
 
 import { unprivilegedProcessOptions } from "../test-support/unprivileged-process.ts";
 
-const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
+const workspaceRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
 void it("任意内容集合仅携带显式执行闭包并交付未被初始化选择的拥有者资源", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "independent-content-"));

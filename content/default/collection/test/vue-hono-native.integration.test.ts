@@ -23,7 +23,7 @@ import { execa } from "execa";
 
 import { unprivilegedProcessOptions } from "../test-support/unprivileged-process.ts";
 
-const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
+const workspaceRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 const content = await loadContentSource({
   namespace: "ykdz",
   resolve: (specifier) => import.meta.resolve(specifier),

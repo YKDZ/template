@@ -1,9 +1,8 @@
 packages:
-  - references/*
-  - packages/*
   - content/default/*
-  - presets/*
-  - workspace-policies/*
+  - content/default/references/*
+  - content/default/presets/*
+  - packages/*
 nodeLinker: isolated
 preferSymlinkedExecutables: true
 shellEmulator: true

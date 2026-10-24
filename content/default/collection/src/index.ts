@@ -1,7 +1,8 @@
-import { loadTemplateContent } from "./collection.ts";
+import { loadContentSource } from "@ykdz/template-generator/content-source";
+export { deriveContentMembers as deriveTemplateMembers } from "@ykdz/template-core/content-identity";
 
 /** 所有可选择内容只在这里登记一次，并从原生公开入口装载。 */
-export const templateContent = await loadTemplateContent({
+export const templateContent = await loadContentSource({
   namespace: "ykdz",
   resolve: (specifier) => import.meta.resolve(specifier),
   members: [
@@ -80,7 +81,7 @@ export const templateContent = await loadTemplateContent({
   ],
 });
 
-export type { ContentKind } from "./collection.ts";
+export type { ContentKind } from "@ykdz/template-core/content-identity";
 export type TemplateContentMember = (typeof templateContent)[number];
 export type TemplatePreset = Extract<
   TemplateContentMember,
@@ -90,8 +91,6 @@ export type TemplateReferencePackage = Extract<
   TemplateContentMember,
   { readonly kind: "reference" }
 >;
-
-export { deriveTemplateMembers } from "./template-members.ts";
 
 export const templatePresets: readonly TemplatePreset[] =
   templateContent.filter(

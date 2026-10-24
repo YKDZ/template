@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 const publicSourceResolutions = [
   ["@ykdz/template", "/packages/cli/src/main.ts"],
-  ["@ykdz/template-content", "/packages/content/src/index.ts"],
+  ["@ykdz/template-content", "/content/default/collection/src/index.ts"],
   ["@ykdz/template-core/project-blueprint", "/src/project-blueprint.ts"],
   ["@ykdz/template-core/generation-record", "/src/generation-record.ts"],
 ] as const;
