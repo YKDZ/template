@@ -74,15 +74,19 @@ export async function readTemplateToolchainDeclarations(
   };
   const rustDeclaration = parseToml(rustContents);
   const workspaceDeclaration = parseYaml(workspaceContents) as unknown;
-  const workspaceCatalog =
+  const workspaceCatalogValue =
     typeof workspaceDeclaration === "object" &&
     workspaceDeclaration !== null &&
     !Array.isArray(workspaceDeclaration) &&
     "catalog" in workspaceDeclaration &&
-    typeof workspaceDeclaration.catalog === "object" &&
-    workspaceDeclaration.catalog !== null &&
-    !Array.isArray(workspaceDeclaration.catalog)
+    typeof workspaceDeclaration.catalog !== "undefined"
       ? workspaceDeclaration.catalog
+      : undefined;
+  const workspaceCatalog =
+    typeof workspaceCatalogValue === "object" &&
+    workspaceCatalogValue !== null &&
+    !Array.isArray(workspaceCatalogValue)
+      ? (workspaceCatalogValue as Record<string, unknown>)
       : undefined;
   const playwrightTestVersion =
     workspaceCatalog?.["@playwright/test"] ?? workspaceCatalog?.playwright;

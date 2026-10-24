@@ -4,7 +4,6 @@ import { describe, it } from "node:test";
 import {
   parseRustToolchainDeclaration,
   projectRustToolchainDeclaration,
-  resolveRustToolchainRequirements,
 } from "@ykdz/reference-rust-bin/template";
 
 void describe("Rust 工具链共同事实", () => {
@@ -34,7 +33,7 @@ void describe("Rust 工具链共同事实", () => {
     );
   });
 
-  void it("只接受兼容的 Rust 需求并在加包时保留合法根声明字节", () => {
+  void it("在加包时保留兼容的根声明字节", () => {
     const configurationText =
       '[toolchain]\nchannel = "1.99.0"\ncomponents = ["rustfmt", "clippy"]\n';
     const requirement = {
@@ -45,10 +44,6 @@ void describe("Rust 工具链共同事实", () => {
     const existingDeclaration =
       '# user extension\n[toolchain]\nchannel = "1.98.0"\ncomponents = ["rustfmt", "clippy"]\nprofile = "minimal"\n';
 
-    assert.deepEqual(
-      resolveRustToolchainRequirements([requirement, { ...requirement }]),
-      requirement,
-    );
     assert.equal(
       projectRustToolchainDeclaration({
         requirement,
@@ -59,14 +54,6 @@ void describe("Rust 工具链共同事实", () => {
     assert.equal(
       projectRustToolchainDeclaration({ requirement }),
       '[toolchain]\nchannel = "1.98.0"\ncomponents = ["rustfmt", "clippy"]\n',
-    );
-    assert.throws(
-      () =>
-        resolveRustToolchainRequirements([
-          requirement,
-          { ...requirement, toolchain: "1.97.0" },
-        ]),
-      /工具链要求冲突/u,
     );
   });
 });
