@@ -32,6 +32,7 @@ import type {
   DefaultReferenceDocumentTransformOptions,
   DefaultReferenceEvaluationContext,
   DefaultReferenceManifestTransformOptions,
+  DefaultReferencePackageInput,
   DefaultReferencePreparedFacts,
   DefaultRootDeclarationData,
   DefaultWorkspaceConventions,
@@ -54,6 +55,7 @@ export type {
   DefaultReferenceDocumentTransformOptions,
   DefaultReferenceEvaluationContext,
   DefaultReferenceManifestTransformOptions,
+  DefaultReferencePackageInput,
   DefaultReferencePreparedFacts,
   DefaultRootDeclarationData,
   DefaultWorkspaceConventions,
@@ -560,7 +562,7 @@ export type DefaultReferencePackageDefinition<
       CreationInput,
       DefaultReferencePreparedFacts<OwnerFacts>,
       unknown,
-      unknown,
+      DefaultReferencePackageInput,
       DefaultReferenceContributionFacts<OwnerFacts>
     >,
     DefaultReferencePreparedFacts<OwnerFacts>
@@ -811,7 +813,7 @@ export function defineReferencePackage<
           CreationInput,
           DefaultReferencePreparedFacts<OwnerFacts>,
           unknown,
-          unknown,
+          DefaultReferencePackageInput,
           DefaultReferenceContributionFacts<OwnerFacts>
         >["evaluate"]
       >[0],
@@ -884,8 +886,17 @@ export function defineReferencePackage<
       const documentBySourcePath = new Map(
         nativeDocuments.map((document) => [document.sourcePath, document]),
       );
+      const deferredDocumentPaths = new Set(
+        input.packageInput?.deferredNativeDocumentPaths ?? [],
+      );
+      const deferredNativeDocuments = nativeDocuments.filter(
+        (document) =>
+          document.scope === "package" &&
+          deferredDocumentPaths.has(document.path),
+      );
       const packageFiles: PackageContributionFile[] = [];
       const compositionFiles: DefaultCompositionFile[] = [];
+      const emittedNativePaths = new Set<string>();
       for (const resource of input.prepared.resources) {
         const mapping = mappingsBySourcePath.get(resource.path);
         if (mapping === undefined) {
@@ -901,6 +912,13 @@ export function defineReferencePackage<
               mode: document.mode,
               sourcePath: resource.path,
             });
+          } else if (!deferredDocumentPaths.has(document.path)) {
+            packageFiles.push({
+              path: document.path,
+              content: serializeNativeReferenceDocument(document),
+              mode: document.mode,
+            });
+            emittedNativePaths.add(document.path);
           }
           continue;
         }
@@ -937,12 +955,40 @@ export function defineReferencePackage<
           mode: resource.mode,
         });
       }
+      const syntheticManifest = nativeDocuments.find(
+        (document) =>
+          document.path === "package.json" &&
+          document.sourcePath === "package.json" &&
+          document.scope === "package",
+      );
+      if (
+        syntheticManifest !== undefined &&
+        !deferredDocumentPaths.has(syntheticManifest.path) &&
+        !emittedNativePaths.has(syntheticManifest.path)
+      ) {
+        packageFiles.push({
+          path: syntheticManifest.path,
+          content: serializeNativeReferenceDocument(syntheticManifest),
+          mode: syntheticManifest.mode,
+        });
+        emittedNativePaths.add(syntheticManifest.path);
+      }
+      const contributedNativePaths = new Set([
+        ...emittedNativePaths,
+        ...deferredNativeDocuments.map(
+          ({ path: documentPath }) => documentPath,
+        ),
+      ]);
       const reconciliationByPath = new Map<
         string,
         ProjectProjectionReconciliation
       >(
         nativeDocuments
-          .filter((document) => document.scope === "package")
+          .filter(
+            (document) =>
+              document.scope === "package" &&
+              contributedNativePaths.has(document.path),
+          )
           .map((document): [string, ProjectProjectionReconciliation] => [
             document.path,
             { path: document.path, driver: "structured" },
@@ -997,6 +1043,8 @@ export function defineReferencePackage<
           exports: exposureExports,
           imports: exposureImports,
         },
+        deferredNativeDocuments,
+        packageInput: input.packageInput,
         nativeDocuments,
         compositionFiles,
         dependencyUses,
@@ -1029,7 +1077,7 @@ export function defineReferencePackage<
       CreationInput,
       DefaultReferencePreparedFacts<OwnerFacts>,
       unknown,
-      unknown,
+      DefaultReferencePackageInput,
       DefaultReferenceContributionFacts<OwnerFacts>
     >,
     "prepare"

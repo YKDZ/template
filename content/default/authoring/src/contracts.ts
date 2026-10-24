@@ -203,6 +203,13 @@ export type DefaultReferencePreparedFacts<OwnerFacts = undefined> = {
   readonly ownerFacts: OwnerFacts;
 };
 
+/** 组合明确延后形成的文档及该实例自身的当前清单事实。 */
+export type DefaultReferencePackageInput = {
+  readonly deferredNativeDocumentPaths: readonly string[];
+  readonly targetManifest: Readonly<Record<string, unknown>> | undefined;
+  readonly existing: boolean;
+};
+
 export type ReferenceTemplateDependencyPurpose =
   | "target"
   | "template-execution"
@@ -227,6 +234,10 @@ export type DefaultReferenceContributionFacts<OwnerFacts = unknown> = {
     readonly exports: Readonly<Record<string, unknown>>;
     readonly imports: Readonly<Record<string, unknown>>;
   };
+  /** 仅保留需要跨包结果的原生文档供唯一组合阶段形成。 */
+  readonly deferredNativeDocuments: readonly DefaultNativeDocument[];
+  /** 只包含本实例的快照，不包含图中其他包的事实。 */
+  readonly packageInput: DefaultReferencePackageInput | undefined;
   readonly nativeDocuments: readonly DefaultNativeDocument[];
   readonly compositionFiles: readonly DefaultCompositionFile[];
   readonly dependencyUses: readonly ReferenceDependencyUse[];

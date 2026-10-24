@@ -7,6 +7,7 @@ import type {
   DefaultCompositionFile,
   DefaultNativeDocument,
   DefaultReferenceContributionFacts,
+  DefaultReferencePackageInput,
   DefaultRootDeclarationData,
   DefaultWorkspaceConventions,
   DependencyMaintenancePolicy,
@@ -154,14 +155,9 @@ export type DefaultStableCommon = {
   readonly rootDeclarations: readonly DefaultRootDeclaration[];
   readonly rootAttachmentIdentities: readonly ContentIdentity[];
   readonly presetRootContributions: readonly PreparedDefaultPresetRootContribution[];
-  readonly existingPackageDefinitionIds: ReadonlySet<PackageDefinitionId>;
-  readonly targetManifests: ReadonlyMap<
-    PackageDefinitionId,
-    Readonly<Record<string, unknown>>
-  >;
 };
 
-export type DefaultPackageInput = undefined;
+export type DefaultPackageInput = DefaultReferencePackageInput;
 
 export type DefaultCompositionOwnerFacts = {
   readonly rootPackageDefinitionId: PackageDefinitionId;
@@ -774,8 +770,6 @@ function requestsInjectedProvider(
 function linkedManifestOverrides(options: {
   readonly packages: readonly DefaultEvaluation[];
   readonly intents: readonly PackageLinkIntent[];
-  readonly existingPackageDefinitionIds: DefaultStableCommon["existingPackageDefinitionIds"];
-  readonly targetManifests: DefaultStableCommon["targetManifests"];
 }): ReadonlyMap<PackageDefinitionId, Readonly<Record<string, unknown>>> {
   const byId = new Map(
     options.packages.map((item) => [item.package.packageDefinitionId, item]),
@@ -786,7 +780,7 @@ function linkedManifestOverrides(options: {
     const existing = overrides.get(item.package.packageDefinitionId);
     if (existing !== undefined) return existing;
     const next = structuredClone(
-      options.targetManifests.get(item.package.packageDefinitionId) ??
+      item.contribution.facts.packageInput?.targetManifest ??
         item.contribution.facts.manifest,
     ) as Record<string, unknown>;
     overrides.set(item.package.packageDefinitionId, next);
@@ -806,9 +800,10 @@ function linkedManifestOverrides(options: {
       id: PackageDefinitionId,
       source: Readonly<Record<string, unknown>>,
     ): Readonly<Record<string, unknown>> => {
-      const current = options.targetManifests.get(id);
+      const packageInput = item.contribution.facts.packageInput;
+      const current = packageInput?.targetManifest;
       if (current !== undefined) return current;
-      if (options.existingPackageDefinitionIds.has(id)) {
+      if (packageInput?.existing === true) {
         throw new Error(
           `包连接缺少当前manifest事实：${item.package.definition.path}`,
         );
@@ -897,6 +892,7 @@ function linkedManifestOverrides(options: {
       : {};
     dependencies[providerName] = "workspace:*";
     consumerManifest.dependencies = dependencies;
+    const providerManifest = getOverride(provider);
     if (injected) {
       const metadata = isRecord(consumerManifest.dependenciesMeta)
         ? { ...consumerManifest.dependenciesMeta }
@@ -904,7 +900,6 @@ function linkedManifestOverrides(options: {
       metadata[providerName] = { injected: true };
       consumerManifest.dependenciesMeta = metadata;
 
-      const providerManifest = getOverride(provider);
       const devDependencies = isRecord(providerManifest.devDependencies)
         ? { ...providerManifest.devDependencies }
         : {};
@@ -935,7 +930,6 @@ function linkedManifestOverrides(options: {
 
 function assertUniqueWorkspaceBinaryNames(options: {
   readonly packages: readonly DefaultEvaluation[];
-  readonly targetManifests: DefaultStableCommon["targetManifests"];
   readonly manifestOverrides: ReadonlyMap<
     PackageDefinitionId,
     Readonly<Record<string, unknown>>
@@ -945,7 +939,7 @@ function assertUniqueWorkspaceBinaryNames(options: {
   for (const { package: item, contribution } of options.packages) {
     const manifest =
       options.manifestOverrides.get(item.packageDefinitionId) ??
-      options.targetManifests.get(item.packageDefinitionId) ??
+      contribution.facts.packageInput?.targetManifest ??
       contribution.facts.manifest;
     if (!isRecord(manifest.bin)) continue;
     for (const commandName of Object.keys(manifest.bin)) {
@@ -1207,7 +1201,7 @@ function nativeDocumentsForPackage(options: {
   readonly identity: ContentIdentity;
   readonly packageDefinitionId: PackageDefinitionId;
 }[] {
-  return options.contribution.nativeDocuments.map((document) => ({
+  return options.contribution.deferredNativeDocuments.map((document) => ({
     document,
     identity: options.identity,
     packageDefinitionId: options.packageDefinitionId,
@@ -1317,6 +1311,47 @@ export function createDefaultComposition(options: {
             }),
         defaultRustToolchain: releaseToolchainSnapshot.rustVersion,
       });
+      const packageLinkIntents = packageLinks({
+        packages: resolveOptions.packages,
+        content: options.content,
+        selections: resolveOptions.selections,
+        existingPackageDefinitionIds:
+          resolveOptions.operationFacts.existingPackageDefinitionIds,
+        existingPackageLinkIntents:
+          resolveOptions.operationFacts.existingPackageLinkIntents,
+      });
+      const linkedPackageIds = new Set(
+        packageLinkIntents.flatMap(({ consumerId, providerId }) => [
+          consumerId,
+          providerId,
+        ]),
+      );
+      const packageInputs = new Map<PackageDefinitionId, DefaultPackageInput>(
+        resolveOptions.packages.map((item) => {
+          const deferredNativeDocumentPaths = new Set<string>();
+          if (contentIdentityKey(item.contentIdentity) === rootKey) {
+            deferredNativeDocumentPaths.add("package.json");
+            deferredNativeDocumentPaths.add("turbo.json");
+            deferredNativeDocumentPaths.add("tsconfig.config.json");
+          }
+          if (linkedPackageIds.has(item.packageDefinitionId)) {
+            deferredNativeDocumentPaths.add("package.json");
+          }
+          return [
+            item.packageDefinitionId,
+            {
+              deferredNativeDocumentPaths: [...deferredNativeDocumentPaths],
+              targetManifest: resolveOptions.operationFacts.targetManifests.get(
+                item.packageDefinitionId,
+              ),
+              existing:
+                resolveOptions.operationFacts.existingPackageDefinitionIds.has(
+                  item.packageDefinitionId,
+                ),
+            },
+          ];
+        }),
+      );
       return {
         stableCommon: Object.freeze({
           nodeDeclaration: resolveOptions.operationFacts.nodeDeclaration,
@@ -1327,20 +1362,9 @@ export function createDefaultComposition(options: {
           rootAttachmentIdentities,
           presetRootContributions:
             resolveOptions.operationFacts.presetRootContributions,
-          existingPackageDefinitionIds:
-            resolveOptions.operationFacts.existingPackageDefinitionIds,
-          targetManifests: resolveOptions.operationFacts.targetManifests,
         }),
-        packageInputs: new Map(),
-        packageLinkIntents: packageLinks({
-          packages: resolveOptions.packages,
-          content: options.content,
-          selections: resolveOptions.selections,
-          existingPackageDefinitionIds:
-            resolveOptions.operationFacts.existingPackageDefinitionIds,
-          existingPackageLinkIntents:
-            resolveOptions.operationFacts.existingPackageLinkIntents,
-        }),
+        packageInputs,
+        packageLinkIntents,
       };
     },
     combine(combineOptions) {
@@ -1369,13 +1393,16 @@ export function createDefaultComposition(options: {
       const manifestOverrides = linkedManifestOverrides({
         packages: combineOptions.packages,
         intents: combineOptions.blueprint.packageLinkIntents,
-        existingPackageDefinitionIds:
-          combineOptions.stableCommon.existingPackageDefinitionIds,
-        targetManifests: combineOptions.stableCommon.targetManifests,
       });
+      const finalManifests = new Map(
+        combineOptions.packages.map(({ package: item, contribution }) => [
+          item.packageDefinitionId,
+          manifestOverrides.get(item.packageDefinitionId) ??
+            contribution.facts.manifest,
+        ]),
+      );
       assertUniqueWorkspaceBinaryNames({
         packages: combineOptions.packages,
-        targetManifests: combineOptions.stableCommon.targetManifests,
         manifestOverrides,
       });
       const requiredTemplateDependencies = new Set(
@@ -1423,6 +1450,15 @@ export function createDefaultComposition(options: {
       ]);
       const rootIdentity = rootPackage.package.contentIdentity;
       const rootSource = sourceLabel(rootIdentity);
+      const nativeDocumentFacts: DefaultCompositionOwnerFacts["nativeDocuments"][number][] =
+        combineOptions.packages.flatMap(({ package: item, contribution }) =>
+          contribution.facts.nativeDocuments.map((document) => ({
+            identity: item.contentIdentity,
+            packageDefinitionId: item.packageDefinitionId,
+            path: document.path,
+            sourcePath: document.sourcePath,
+          })),
+        );
       const documents = combineOptions.packages.flatMap(
         ({ package: item, contribution }) =>
           nativeDocumentsForPackage({
@@ -1447,7 +1483,8 @@ export function createDefaultComposition(options: {
         throw new Error("基础根原生贡献必须包含package.json与turbo.json");
       }
       const manifest = structuredClone(
-        rootManifestFact.document.value,
+        finalManifests.get(rootPackage.package.packageDefinitionId) ??
+          rootManifestFact.document.value,
       ) as Record<string, unknown>;
       for (const field of ["scripts", "imports", "devDependencies"] as const) {
         const base = isRecord(manifest[field])
@@ -1572,17 +1609,9 @@ export function createDefaultComposition(options: {
           value,
         };
       }
-
-      const generatedManifests = combineOptions.packages.map(
-        ({ package: item, contribution }) =>
-          manifestOverrides.get(item.packageDefinitionId) ??
-          contribution.facts.manifest,
-      );
-      generatedManifests[
-        generatedManifests.indexOf(rootPackage.contribution.facts.manifest)
-      ] = manifest;
+      finalManifests.set(rootPackage.package.packageDefinitionId, manifest);
       const dependencyCatalog = selectTemplateDependencyCatalogEntries(
-        collectGeneratedManifestCatalogReferences(generatedManifests),
+        collectGeneratedManifestCatalogReferences([...finalManifests.values()]),
         catalog as Record<string, string>,
       );
       const packagePaths = combineOptions.blueprint.packages
@@ -1894,15 +1923,7 @@ export function createDefaultComposition(options: {
       });
 
       const processedDocuments: CompositionFile[] = [];
-      const nativeDocumentFacts: DefaultCompositionOwnerFacts["nativeDocuments"][number][] =
-        [];
       for (const item of documents) {
-        nativeDocumentFacts.push({
-          identity: item.identity,
-          packageDefinitionId: item.packageDefinitionId,
-          path: item.document.path,
-          sourcePath: item.document.sourcePath,
-        });
         if (item.document.scope === "composition") continue;
         const isRootDocument =
           contentIdentityKey(item.identity) === rootKey &&
