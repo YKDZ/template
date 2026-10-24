@@ -351,9 +351,9 @@ importers:
       '@ykdz/reference-workspace-root':
         specifier: workspace:*
         version: link:content/default/references/workspace-root
-      '@ykdz/template-checks':
+      '@ykdz/default-content-verification':
         specifier: workspace:*
-        version: link:packages/checks
+        version: link:content/default/verification
       '@ykdz/template-content':
         specifier: workspace:*
         version: link:content/default/collection
@@ -1515,7 +1515,7 @@ importers:
         specifier: 'catalog:'
         version: 2.9.1
 
-  packages/checks:
+  content/default/verification:
     dependencies:
       '@ykdz/default-content-authoring':
         specifier: workspace:*

@@ -13,7 +13,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const packageRoot = process.cwd();
 const ownerDirectory = await mkdtemp(
-  path.join(tmpdir(), "template-checks-integration-owner-"),
+  path.join(tmpdir(), "default-content-verification-integration-owner-"),
 );
 const signalFile = path.join(ownerDirectory, "signal.txt");
 const workerPidDirectory = path.join(ownerDirectory, "workers");

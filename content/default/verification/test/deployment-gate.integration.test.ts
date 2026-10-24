@@ -354,7 +354,7 @@ void describe("deployment quality gate", () => {
         }),
         (error: unknown) =>
           error instanceof Error &&
-          /Docker is required for Generated Repository Fixture quality.*docker executable unavailable/u.test(
+          /Docker is required for Development Container checks: docker executable unavailable/u.test(
             error.message,
           ),
       );

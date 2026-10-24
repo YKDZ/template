@@ -1,6 +1,6 @@
 {
   "extends": ["//"],
-  "tags": ["template-checks"],
+  "tags": ["default-content-verification"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

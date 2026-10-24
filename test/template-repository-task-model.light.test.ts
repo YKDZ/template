@@ -119,7 +119,7 @@ void describe("Template Repository native task model", () => {
     );
     for (const [name, tag] of [
       ["@ykdz/template", "template-cli"],
-      ["@ykdz/template-checks", "template-checks"],
+      ["@ykdz/default-content-verification", "default-content-verification"],
       ["@ykdz/template-core", "template-core"],
       ["@ykdz/template-workspace", "template-workspace"],
     ] as const)
@@ -145,7 +145,7 @@ void describe("Template Repository native task model", () => {
     );
     const buildIds = [
       "@ykdz/template#build",
-      "@ykdz/template-checks#build",
+      "@ykdz/default-content-verification#build",
       "@ykdz/template-core#build",
       "@ykdz/template-workspace#build",
     ];
@@ -194,7 +194,7 @@ void describe("Template Repository native task model", () => {
         ],
       ],
       [
-        "@ykdz/template-checks#build",
+        "@ykdz/default-content-verification#build",
         [
           "@ykdz/reference-ts-cli#build",
           "@ykdz/template-content#build",
@@ -292,7 +292,9 @@ void describe("Template Repository native task model", () => {
       ["quality:conditional"],
     );
     assert.deepStrictEqual(
-      nativeTasks.get("@ykdz/template-checks#check:evidence-health")?.tags,
+      nativeTasks.get(
+        "@ykdz/default-content-verification#check:evidence-health",
+      )?.tags,
       ["quality:conditional"],
     );
 
@@ -313,10 +315,12 @@ void describe("Template Repository native task model", () => {
     assert.ok(taskIds.includes("@ykdz/template-core#format:check"));
     assert.ok(taskIds.includes("@ykdz/template-core#typecheck"));
     assert.ok(taskIds.includes("@ykdz/template-workspace#test"));
-    assert.ok(taskIds.includes("@ykdz/template-checks#test"));
+    assert.ok(taskIds.includes("@ykdz/default-content-verification#test"));
     assert.ok(
       !actionGraph.tasks
-        .find(({ taskId }) => taskId === "@ykdz/template-checks#lint")
+        .find(
+          ({ taskId }) => taskId === "@ykdz/default-content-verification#lint",
+        )
         ?.dependencies.includes("@ykdz/template-core#build"),
     );
     assert.strictEqual(
@@ -326,7 +330,9 @@ void describe("Template Repository native task model", () => {
   });
 
   void it("keeps registry and Template Source checks under the checks owner", async () => {
-    const checks = await readJson<Manifest>("packages/checks/package.json");
+    const checks = await readJson<Manifest>(
+      "content/default/verification/package.json",
+    );
 
     const templateCheckScript = checks.scripts["check:templates"];
     assert.ok(templateCheckScript !== undefined);
@@ -352,7 +358,7 @@ void describe("Template Repository native task model", () => {
     assert.strictEqual(executableTemplateChecks.length, 1);
     assert.strictEqual(
       executableTemplateChecks[0]?.taskId,
-      "@ykdz/template-checks#check:templates",
+      "@ykdz/default-content-verification#check:templates",
     );
     assert.ok(!taskIds.includes("//#test"));
     assert.ok(!taskIds.includes("@ykdz/template#build"));
@@ -376,7 +382,9 @@ void describe("Template Repository native task model", () => {
     };
     assert.deepStrictEqual(
       registryGraph.tasks.map((task) => task.taskId).sort(),
-      requiredTasks.map((name) => `@ykdz/template-checks#${name}`).sort(),
+      requiredTasks
+        .map((name) => `@ykdz/default-content-verification#${name}`)
+        .sort(),
     );
     for (const task of registryGraph.tasks)
       assert.deepStrictEqual(task.dependencies, []);
@@ -390,7 +398,7 @@ void describe("Template Repository native task model", () => {
     };
     assert.deepStrictEqual(
       matrixGraph.tasks.map((task) => task.taskId),
-      ["@ykdz/template-checks#diagnose:matrix"],
+      ["@ykdz/default-content-verification#diagnose:matrix"],
     );
   });
 
@@ -408,7 +416,7 @@ void describe("Template Repository native task model", () => {
     assert.ok(!taskIds.includes("//#build"));
     for (const packageName of [
       "@ykdz/template",
-      "@ykdz/template-checks",
+      "@ykdz/default-content-verification",
       "@ykdz/template-core",
       "@ykdz/template-workspace",
     ]) {

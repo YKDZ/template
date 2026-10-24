@@ -321,7 +321,7 @@ void describe("Erasable TypeScript enforcement", () => {
     );
     const repositoryPackages = [
       ".",
-      "packages/checks",
+      "content/default/verification",
       "packages/cli",
       "packages/core",
       "packages/workspace-authoring",
@@ -428,7 +428,7 @@ void describe("Erasable TypeScript enforcement", () => {
         !new Set([
           "@ykdz/template-repository",
           "@ykdz/template",
-          "@ykdz/template-checks",
+          "@ykdz/default-content-verification",
           "@ykdz/template-core",
           "@ykdz/template-workspace-authoring",
         ]).has(manifest.name ?? "")

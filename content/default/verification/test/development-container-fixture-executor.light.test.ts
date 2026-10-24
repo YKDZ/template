@@ -1860,7 +1860,7 @@ void describe("Development Container Fixture Executor", () => {
       );
       assert.ok(
         reports.some((report) =>
-          /\[Fixture Evidence\] init .* \(init--.*\) failed: .*Reproduce the scenario set with pnpm --filter @ykdz\/template-checks check:generated; generated artifact:/u.test(
+          /\[Fixture Evidence\] init .* \(init--.*\) failed: .*Reproduce the scenario set with pnpm --filter @ykdz\/default-content-verification check:generated; generated artifact:/u.test(
             report,
           ),
         ),
