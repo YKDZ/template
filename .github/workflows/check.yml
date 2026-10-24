@@ -41,6 +41,7 @@ jobs:
     outputs:
       pack_artifact_id: ${{ steps.pack.outputs.pack-dir-artifact-id }}
     env:
+      TEMPLATE_FIXTURE_WORKSPACE_DIR: ${{ github.workspace }}/.fixture-workspace
       TEMPLATE_FIXTURE_EVIDENCE_DIR: ${{ github.workspace }}/.fixture-evidence
       TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
       TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1"
