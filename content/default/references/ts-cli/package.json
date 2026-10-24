@@ -19,6 +19,9 @@
       "source": "./src/publication/cli-command-identity.ts",
       "types": "./dist/publication/cli-command-identity.d.ts",
       "default": "./dist/publication/cli-command-identity.js"
+    },
+    "./repository-configuration": {
+      "source": "./scripts/repository-configuration.ts"
     }
   },
   "scripts": {

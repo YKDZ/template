@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -18,9 +19,15 @@ type Replacement = {
   readonly value: string;
 };
 type Target = {
-  readonly file: string;
+  readonly label: string;
   readonly before: string | undefined;
   readonly after: string;
+  write(contents: string): Promise<void>;
+};
+type PreparedOwnerTarget = {
+  readonly label: string;
+  readonly before: string;
+  write(contents: string): Promise<void>;
 };
 
 function replaceStrings(
@@ -54,6 +61,36 @@ function replaceStrings(
     contents =
       contents.slice(0, edit.start) + edit.value + contents.slice(edit.end);
   return contents;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isPreparedOwnerTarget(value: unknown): value is PreparedOwnerTarget {
+  return (
+    isRecord(value) &&
+    typeof value.label === "string" &&
+    typeof value.before === "string" &&
+    typeof value.write === "function"
+  );
+}
+
+async function prepareOwnerTarget(
+  resolve: ReturnType<typeof createRequire>,
+  specifier: string,
+): Promise<PreparedOwnerTarget> {
+  const entry = resolve.resolve(specifier);
+  const ownerModule: unknown = await import(pathToFileURL(entry).href);
+  if (!isRecord(ownerModule))
+    throw new Error(`${specifier}: 无法读取维护公开入口`);
+  const prepare = ownerModule.prepareRepositoryConfigurationTarget;
+  if (typeof prepare !== "function")
+    throw new Error(`${specifier}: 缺少维护目标准备能力`);
+  const target: unknown = await prepare();
+  if (!isPreparedOwnerTarget(target))
+    throw new Error(`${specifier}: 维护目标不符合宿主合同`);
+  return target;
 }
 
 function projectCli(file: string, contents: string, value: string): string {
@@ -100,23 +137,25 @@ export async function planRepositoryConfiguration(
   const derived = deriveTemplateToolchain(declarations);
   if (derived.diagnostics.length > 0)
     throw new Error(derived.diagnostics.join("\n"));
-  const partialFiles = [
-    "packages/cli/package.json",
-    "content/default/references/ts-cli/package.json",
-    "content/default/references/rust-bin/template/rust-toolchain.toml",
-  ];
-  const contents = await Promise.all(
-    partialFiles.map((file) =>
-      readFile(path.join(repositoryRoot, file), "utf8"),
+  const resolve = createRequire(path.join(repositoryRoot, "package.json"));
+  const ownerTargets = await Promise.all([
+    prepareOwnerTarget(resolve, "@ykdz/template/repository-configuration"),
+    prepareOwnerTarget(
+      resolve,
+      "@ykdz/reference-ts-cli/repository-configuration",
     ),
-  );
+    prepareOwnerTarget(
+      resolve,
+      "@ykdz/reference-rust-bin/repository-configuration",
+    ),
+  ]);
   const partialOutputs = [
-    ...partialFiles
+    ...ownerTargets
       .slice(0, 2)
-      .map((file, index) =>
-        projectCli(file, contents[index]!, derived.cliNodeEngine),
+      .map((target) =>
+        projectCli(target.label, target.before, derived.cliNodeEngine),
       ),
-    projectTomlStringValues(contents[2]!, [
+    projectTomlStringValues(ownerTargets[2]!.before, [
       {
         path: ["toolchain", "channel"],
         value: declarations.rustToolchainChannel.trim(),
@@ -124,10 +163,11 @@ export async function planRepositoryConfiguration(
     ]),
   ];
   const environment = await repositoryDevelopmentEnvironment(declarations);
-  const targets: Target[] = partialFiles.map((file, index) => ({
-    file,
-    before: contents[index]!,
+  const targets: Target[] = ownerTargets.map((target, index) => ({
+    label: target.label,
+    before: target.before,
     after: partialOutputs[index]!,
+    write: target.write,
   }));
   for (const [file, after] of Object.entries(environment.files)) {
     const before = await readFile(
@@ -138,7 +178,16 @@ export async function planRepositoryConfiguration(
         return undefined;
       throw error;
     });
-    targets.push({ file, before, after });
+    targets.push({
+      label: file,
+      before,
+      after,
+      write: async (contents) => {
+        const destination = path.join(repositoryRoot, file);
+        await mkdir(path.dirname(destination), { recursive: true });
+        await replaceFile(destination, contents);
+      },
+    });
   }
   return targets;
 }
@@ -149,26 +198,26 @@ export async function checkRepositoryConfiguration(
   return (await planRepositoryConfiguration(repositoryRoot))
     .filter(({ before, after }) => before !== after)
     .map(
-      ({ file, before }) =>
-        `${file} ${before === undefined ? "缺失受管投影" : "配置投影漂移"}；请运行 pnpm run sync`,
+      ({ label, before }) =>
+        `${label} ${before === undefined ? "缺失受管投影" : "配置投影漂移"}；请运行 pnpm run sync`,
     );
 }
 
 /** 写入替身仅用于系统边界故障验收。 */
 export async function syncRepositoryConfiguration(
   repositoryRoot: string,
-  replace: (file: string, contents: string) => Promise<void> = replaceFile,
+  replace: (
+    label: string,
+    write: () => Promise<void>,
+  ) => Promise<void> = (_label, write) => write(),
 ): Promise<string[]> {
   const targets = await planRepositoryConfiguration(repositoryRoot);
   const updated: string[] = [];
   try {
     for (const target of targets) {
       if (target.before === target.after) continue;
-      await mkdir(path.dirname(path.join(repositoryRoot, target.file)), {
-        recursive: true,
-      });
-      await replace(path.join(repositoryRoot, target.file), target.after);
-      updated.push(target.file);
+      await replace(target.label, () => target.write(target.after));
+      updated.push(target.label);
     }
   } catch (error) {
     throw new Error(

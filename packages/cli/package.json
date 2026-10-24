@@ -37,6 +37,9 @@
       "source": "./src/main.ts",
       "types": "./dist/main.d.ts",
       "default": "./dist/main.js"
+    },
+    "./repository-configuration": {
+      "source": "./scripts/repository-configuration.ts"
     }
   },
   "publishConfig": {
