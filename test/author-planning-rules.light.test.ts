@@ -154,8 +154,8 @@ void describe("author planning role check", () => {
           fixture.entryFile,
           `import { readFileSync } from "node:fs";
 import type { ReferencePackageDefinition } from "@ykdz/template-core/reference-package";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
-import type { DefaultPresetRootContributionOwner } from "@ykdz/template-workspace/default-composition";
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
+import type { DefaultPresetRootContributionOwner } from "@ykdz/default-content-authoring/preset-root-contribution";
 import { readOwnerValue } from "./planning-helper.ts";
 
 export const reference: ReferencePackageDefinition = {
@@ -338,8 +338,8 @@ export const reference: sdk.ReferencePackageDefinition = {
         `import { readFileSync } from "node:fs";
 import type { Composition } from "@ykdz/template-core/composition";
 import type { ReferencePackageDefinition } from "@ykdz/template-core/reference-package";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
-import type { DefaultPresetRootContributionOwner } from "@ykdz/template-workspace/default-composition";
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
+import type { DefaultPresetRootContributionOwner } from "@ykdz/default-content-authoring/preset-root-contribution";
 
 export const reference: ReferencePackageDefinition = {
   parseCreationInput() {
@@ -466,7 +466,7 @@ export const rootContribution = {
         ),
         writeFile(
           fixture.entryFile,
-          `import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+          `import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
 
 export const reference = defineReferencePackage({
   prepareFacts() { return undefined; },
@@ -478,7 +478,7 @@ export const reference = defineReferencePackage({
         writeFile(
           spareFile,
           `import { readFileSync } from "node:fs";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
 
 export const reference = defineReferencePackage({
   prepareFacts() { return undefined; },
@@ -587,7 +587,7 @@ export function loadComputedModule(): void {
       await writeFile(
         fixture.entryFile,
         `import ownerManifest from "./package.json" with { type: "json" };
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
 
 export const reference = defineReferencePackage({
   prepareFacts() { return undefined; },

@@ -1,7 +1,12 @@
 import { isDeepStrictEqual } from "node:util";
 
-import type { DependencyMaintenancePolicy } from "./project-requirements.ts";
-import type { SharedRootContribution } from "./shared-root-files.ts";
+import type {
+  ApplicationRequirements,
+  DependencyMaintenancePolicy,
+  RustToolchainRequirement,
+  RustToolchainTarget,
+  SharedRootContribution,
+} from "@ykdz/default-content-authoring/contracts";
 
 type DependencyMaintenanceContribution = {
   readonly foundation: {
@@ -13,25 +18,6 @@ type RootDependencyMaintenanceContribution = Pick<
   SharedRootContribution,
   "dependencyMaintenance"
 >;
-
-export type { DependencyMaintenancePolicy };
-
-export type RustToolchainRequirement = {
-  readonly toolchain: string;
-  readonly components: readonly string[];
-  readonly configurationText: string;
-};
-
-export type RustToolchainTarget = {
-  readonly channel: string;
-  readonly declaration: string;
-};
-
-export type ApplicationRequirements = {
-  readonly rustToolchain?: RustToolchainRequirement & {
-    readonly existingDeclaration?: string;
-  };
-};
 
 /** 在包求值前合并所选 owner 的相同工具要求，并报告相互冲突的来源。 */
 export function composeApplicationRequirements(

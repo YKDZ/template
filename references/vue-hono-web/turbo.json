@@ -60,7 +60,7 @@
       "dependsOn": [
         "@ykdz/reference-hono-api#build",
         "@ykdz/template-core#build",
-        "@ykdz/template-workspace#build"
+        "@ykdz/default-content-authoring#build"
       ],
       "outputs": ["template-dist/**"],
       "tags": ["work:preparation"]

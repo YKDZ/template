@@ -64,7 +64,7 @@
       "dependsOn": [
         "@ykdz/reference-vike-db#build",
         "@ykdz/template-core#build",
-        "@ykdz/template-workspace#build"
+        "@ykdz/default-content-authoring#build"
       ],
       "outputs": [],
       "tags": ["quality:light"]
@@ -73,7 +73,7 @@
       "dependsOn": [
         "@ykdz/reference-vike-db#build",
         "@ykdz/template-core#build",
-        "@ykdz/template-workspace#build"
+        "@ykdz/default-content-authoring#build"
       ],
       "outputs": ["template-dist/**"],
       "tags": ["quality:light"]
@@ -82,7 +82,7 @@
       "dependsOn": [
         "@ykdz/reference-vike-db#build",
         "@ykdz/template-core#build",
-        "@ykdz/template-workspace#build"
+        "@ykdz/default-content-authoring#build"
       ],
       "outputs": [],
       "tags": ["quality:light"]

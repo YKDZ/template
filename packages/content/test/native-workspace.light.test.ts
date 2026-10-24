@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { it } from "node:test";
 
+import type { DefaultRootDeclarationData } from "@ykdz/default-content-authoring/reference-package";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
-import type { DefaultRootDeclarationData } from "@ykdz/template-workspace/reference-package";
 
 const content = await loadContentSource({
   namespace: "ykdz",

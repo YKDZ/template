@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
 import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 import toolingManifest from "@ykdz/tooling-config/reference" with { type: "json" };
 
 import referenceManifest from "../package.json" with { type: "json" };
@@ -63,14 +63,14 @@ export const referencePackage = defineReferencePackage({
     { name: "@ykdz/template-core", purpose: "template-execution" },
     { name: "@ykdz/tooling-config", purpose: "template-execution" },
     {
-      name: "@ykdz/template-workspace",
+      name: "@ykdz/default-content-authoring",
       purpose: "template-execution",
     },
   ],
   executionDependencies: [
     "@ykdz/template-core",
     "@ykdz/tooling-config",
-    "@ykdz/template-workspace",
+    "@ykdz/default-content-authoring",
   ],
   templateScripts: ["build:template", "check:author-planning-roles"],
   templateExports: ["./reference", "./template"],

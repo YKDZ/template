@@ -45,7 +45,7 @@
     "build:template": {
       "dependsOn": [
         "@ykdz/template-core#build",
-        "@ykdz/template-workspace#build"
+        "@ykdz/default-content-authoring#build"
       ],
       "outputs": ["template-dist/**"],
       "tags": ["quality:light"]
@@ -53,7 +53,7 @@
     "typecheck:template": {
       "dependsOn": [
         "@ykdz/template-core#build",
-        "@ykdz/template-workspace#build"
+        "@ykdz/default-content-authoring#build"
       ],
       "outputs": [],
       "tags": ["quality:light"]

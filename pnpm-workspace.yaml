@@ -1,6 +1,7 @@
 packages:
   - references/*
   - packages/*
+  - content/default/*
   - presets/*
   - workspace-policies/*
 nodeLinker: isolated

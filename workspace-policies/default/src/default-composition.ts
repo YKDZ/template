@@ -3,6 +3,27 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
 import type {
+  ApplicationRequirements,
+  CheckEnvironmentNeed,
+  CiDiagnosticArtifactDeclaration,
+  DefaultCompositionFile,
+  DefaultNativeDocument,
+  DefaultReferenceContributionFacts,
+  DefaultRootDeclarationData,
+  DefaultWorkspaceConventions,
+  DependencyMaintenancePolicy,
+  DeploymentEnvironmentNeed,
+  EnvironmentNeedsMetadata,
+  RustToolchainTarget,
+} from "@ykdz/default-content-authoring/contracts";
+import { normalizeEnvironmentNeeds } from "@ykdz/default-content-authoring/environment-needs";
+import { isDefaultPackageRole } from "@ykdz/default-content-authoring/package-role";
+import type { DefaultPresetRootContributionOwner } from "@ykdz/default-content-authoring/preset-root-contribution";
+import {
+  serializeNativeJson,
+  serializeNativeReferenceDocument,
+} from "@ykdz/default-content-authoring/reference-package";
+import type {
   Composition,
   CompositionPackage,
   CompositionPackageEvaluation,
@@ -34,16 +55,9 @@ import {
   composeApplicationRequirements,
   projectDependencyMaintenancePolicy,
   resolveApplicationRequirements,
-  type ApplicationRequirements,
-  type DependencyMaintenancePolicy,
-  type RustToolchainTarget,
 } from "./application-requirements.ts";
-import {
-  composeCiDiagnosticArtifacts,
-  type CiDiagnosticArtifactDeclaration,
-} from "./ci-diagnostic-artifact.ts";
+import { composeCiDiagnosticArtifacts } from "./ci-diagnostic-artifact.ts";
 import { assertDefaultProjectBlueprint } from "./default-package-identity.ts";
-import { isDefaultPackageRole } from "./default-package-role.ts";
 import {
   collectGeneratedManifestCatalogReferences,
   selectTemplateDependencyCatalogEntries,
@@ -57,14 +71,6 @@ import {
   shellCheckDevelopmentContainerToolLayer,
 } from "./development-environment.ts";
 import type { EditorCustomizationCapability } from "./editor-customization.ts";
-import type {
-  CheckEnvironmentNeed,
-  DeploymentEnvironmentNeed,
-} from "./environment-needs.ts";
-import {
-  normalizeEnvironmentNeeds,
-  type EnvironmentNeedsMetadata,
-} from "./environment-needs.ts";
 import {
   normalizeProjectCheckWorkflowJob,
   projectCheckWorkflow,
@@ -74,17 +80,6 @@ import {
 } from "./project-github.ts";
 import type { ProjectCheckWorkflowJob } from "./project-github.ts";
 import { PackageLinkValidationError } from "./project-requirements.ts";
-import type {
-  DefaultCompositionFile,
-  DefaultNativeDocument,
-  DefaultReferenceContributionFacts,
-  DefaultRootDeclarationData,
-  DefaultWorkspaceConventions,
-} from "./reference-package.ts";
-import {
-  serializeNativeJson,
-  serializeNativeReferenceDocument,
-} from "./reference-package.ts";
 import { releaseToolchainSnapshot } from "./release-toolchain-snapshot.ts";
 import {
   composeCheckWorkflow,
@@ -108,51 +103,6 @@ export type DefaultRootAttachmentDependencyFact = {
     | { readonly kind: "resolved"; readonly ownerIdentity: ContentIdentity }
     | { readonly kind: "error"; readonly message: string };
 };
-
-export type DefaultPresetRootContributionResource = Readonly<{
-  readonly path: string;
-  readonly content: Uint8Array;
-  readonly mode: number;
-}>;
-
-export type DefaultPresetRootContributionPrepared<OwnerFacts = unknown> =
-  Readonly<{
-    readonly ownerFacts: OwnerFacts;
-    readonly readFacts?: readonly CurrentProjectProjectionEntry[];
-  }>;
-
-export type DefaultPresetPackageEvaluation = CompositionPackageEvaluation<
-  DefaultReferenceContributionFacts<unknown>
->;
-
-export type DefaultPresetRootContributionOwner<OwnerFacts = unknown> =
-  Readonly<{
-    prepare(options: {
-      readonly ownerIdentity: ContentIdentity;
-      readonly repositoryRoot?: string;
-      readonly selection?: GenerationRecordSelection;
-      /** 仅包含该完整预设身份的持久节点，按 nodeIdentity 索引。 */
-      readonly selectedPackages?: ReadonlyMap<string, CompositionPackage>;
-    }):
-      | DefaultPresetRootContributionPrepared<OwnerFacts>
-      | Promise<DefaultPresetRootContributionPrepared<OwnerFacts>>;
-    compose(
-      options: Readonly<{
-        readonly ownerIdentity: ContentIdentity;
-        readonly selection: GenerationRecordSelection;
-        /** 仅包含该持久选择的节点，按 nodeIdentity 索引。 */
-        readonly selectedPackages: ReadonlyMap<
-          string,
-          DefaultPresetPackageEvaluation
-        >;
-        readonly rootPackage: CompositionPackage;
-        readonly ownerFacts: OwnerFacts;
-      }>,
-    ): Readonly<{
-      readonly rootPackageDefinitionId: PackageDefinitionId;
-      readonly rootDeclaration: DefaultRootDeclarationData;
-    }>;
-  }>;
 
 export type PreparedDefaultPresetRootContribution = Readonly<{
   readonly ownerIdentity: ContentIdentity;

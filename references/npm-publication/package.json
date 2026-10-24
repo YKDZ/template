@@ -24,8 +24,8 @@
   "devDependencies": {
     "@changesets/cli": "catalog:",
     "@types/node": "catalog:",
+    "@ykdz/default-content-authoring": "workspace:*",
     "@ykdz/template-core": "workspace:*",
-    "@ykdz/template-workspace": "workspace:*",
     "@ykdz/tooling-config": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

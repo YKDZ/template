@@ -1,4 +1,4 @@
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
 
 import referenceManifest from "../package.json" with { type: "json" };
 
@@ -47,14 +47,14 @@ export const referencePackage = defineReferencePackage({
       purpose: "template-execution",
     },
     { name: "@ykdz/template-core", purpose: "template-build" },
-    { name: "@ykdz/template-workspace", purpose: "template-execution" },
+    { name: "@ykdz/default-content-authoring", purpose: "template-execution" },
     { name: "typescript-7", purpose: "target" },
     { name: "typescript-7", purpose: "template-build" },
   ],
   executionDependencies: [
     "@ykdz/reference-tooling-config",
     "@ykdz/reference-workspace-root",
-    "@ykdz/template-workspace",
+    "@ykdz/default-content-authoring",
   ],
   templateScripts: ["build:template", "check:author-planning-roles"],
   foundation: {

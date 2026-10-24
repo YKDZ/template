@@ -5,7 +5,7 @@
     "build:template": {
       "dependsOn": [
         "@ykdz/template-core#build",
-        "@ykdz/template-workspace#build",
+        "@ykdz/default-content-authoring#build",
         "@ykdz/reference-npm-publication#build:template",
         "@ykdz/reference-workspace-root#build:template",
         "@ykdz/reference-tooling-config#build:template",

@@ -1,11 +1,11 @@
-import type { JsonValue } from "@ykdz/template-core/json";
-import type { ResourceFileSnapshot } from "@ykdz/template-core/reference-package";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
 import type {
   DefaultCompositionFile,
   DefaultRootDeclarationData,
   ReferencePackageManifest,
-} from "@ykdz/template-workspace/reference-package";
+} from "@ykdz/default-content-authoring/reference-package";
+import type { JsonValue } from "@ykdz/template-core/json";
+import type { ResourceFileSnapshot } from "@ykdz/template-core/reference-package";
 
 import referenceManifest from "../package.json" with { type: "json" };
 
@@ -73,9 +73,9 @@ export const referencePackage = defineReferencePackage<
   templateDependencies: [
     { name: "@ykdz/tooling-config", purpose: "template-build" },
     { name: "@ykdz/template-core", purpose: "template-build" },
-    { name: "@ykdz/template-workspace", purpose: "template-execution" },
+    { name: "@ykdz/default-content-authoring", purpose: "template-execution" },
   ],
-  executionDependencies: ["@ykdz/template-workspace"],
+  executionDependencies: ["@ykdz/default-content-authoring"],
   templateScripts: [
     "build:template",
     "publication:pack",

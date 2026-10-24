@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
 import { definePreset } from "@ykdz/template-core/preset-definition";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 import {
   deriveFixtureMatrix,

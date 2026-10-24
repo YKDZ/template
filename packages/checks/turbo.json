@@ -143,6 +143,7 @@
       "dependsOn": [
         "@ykdz/template-content#build",
         "@ykdz/template-core#build",
+        "@ykdz/default-content-authoring#build",
         "@ykdz/template-generator#build",
         "@ykdz/template-workspace#build"
       ],
@@ -156,6 +157,7 @@
       "dependsOn": [
         "@ykdz/template-content#build",
         "@ykdz/template-core#build",
+        "@ykdz/default-content-authoring#build",
         "@ykdz/template-generator#build",
         "@ykdz/template-workspace#build"
       ],

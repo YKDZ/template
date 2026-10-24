@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@ykdz/default-content-authoring": "workspace:*",
     "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",

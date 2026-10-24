@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 
+import type { DependencyMaintenancePolicy } from "@ykdz/default-content-authoring/contracts";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
 
 import { composeCiDiagnosticArtifacts } from "./ci-diagnostic-artifact.ts";
-import type { DependencyMaintenancePolicy } from "./project-requirements.ts";
 
 export type ProjectCheckWorkflowDiagnosticOptions = {
   readonly packagePaths: readonly string[];

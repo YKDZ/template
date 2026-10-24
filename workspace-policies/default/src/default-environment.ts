@@ -2,7 +2,6 @@ export {
   assertCiDiagnosticArtifactDeclaration,
   composeCiDiagnosticArtifacts,
 } from "./ci-diagnostic-artifact.ts";
-export type { CiDiagnosticArtifactDeclaration } from "./ci-diagnostic-artifact.ts";
 export { browserTestDevelopmentContainerToolLayer } from "./development-container.ts";
 export {
   githubCliDevelopmentContainerToolLayer,
@@ -23,22 +22,3 @@ export type {
   EditorCustomizationCapability,
   EditorCustomizationDeclarations,
 } from "./editor-customization.ts";
-export {
-  dockerEngineEnvironmentNeed,
-  normalizeEnvironmentNeeds,
-  parseEnvironmentNeedsMetadata,
-  playwrightBrowserAssetsEnvironmentNeed,
-  rustToolchainEnvironmentNeed,
-  shellCheckEnvironmentNeed,
-} from "./environment-needs.ts";
-export type {
-  CheckEnvironmentNeed,
-  ComponentOwner,
-  DeploymentEnvironmentNeed,
-  EnvironmentNeedsMetadata,
-  PackageBoundaryOwner,
-  PlaywrightBrowserAssetsEnvironmentNeed,
-  RustToolchainEnvironmentNeed,
-  ShellCheckEnvironmentNeed,
-  WorkspaceOrchestrationOwner,
-} from "./environment-needs.ts";

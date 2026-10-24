@@ -2,6 +2,21 @@ import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type {
+  CheckEnvironmentNeed,
+  DeploymentEnvironmentNeed,
+  DependencyMaintenancePolicy,
+  DefaultCompositionFile,
+  DefaultRootDeclarationData,
+} from "@ykdz/default-content-authoring/contracts";
+import {
+  dockerEngineEnvironmentNeed,
+  shellCheckEnvironmentNeed,
+} from "@ykdz/default-content-authoring/environment-needs";
+import type {
+  DefaultPresetPackageEvaluation,
+  DefaultPresetRootContributionOwner,
+} from "@ykdz/default-content-authoring/preset-root-contribution";
 import { databaseDependencyKey as migrationsDatabaseDependencyKey } from "@ykdz/reference-vike-migrations/template";
 import { databaseDependencyKey as webDatabaseDependencyKey } from "@ykdz/reference-vike-web/template";
 import type { CompositionPackage } from "@ykdz/template-core/composition";
@@ -19,21 +34,6 @@ import {
   createTemplateSourceHandle,
 } from "@ykdz/template-core/template-source";
 import type { NativeContentArtifactResource } from "@ykdz/template-workspace-authoring/content-artifact";
-import type {
-  DefaultPresetPackageEvaluation,
-  DefaultPresetRootContributionOwner,
-} from "@ykdz/template-workspace/default-composition";
-import {
-  dockerEngineEnvironmentNeed,
-  shellCheckEnvironmentNeed,
-  type CheckEnvironmentNeed,
-  type DeploymentEnvironmentNeed,
-} from "@ykdz/template-workspace/default-environment";
-import type { DependencyMaintenancePolicy } from "@ykdz/template-workspace/project-requirements";
-import type {
-  DefaultCompositionFile,
-  DefaultRootDeclarationData,
-} from "@ykdz/template-workspace/reference-package";
 import { YAMLMap, parseDocument } from "yaml";
 
 const deploymentDirectory = fileURLToPath(
