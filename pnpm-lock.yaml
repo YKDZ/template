@@ -360,6 +360,9 @@ importers:
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:packages/generator
+      '@ykdz/template-verification-runtime':
+        specifier: workspace:*
+        version: link:packages/verification-runtime
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:workspace-policies/default
@@ -414,6 +417,9 @@ importers:
       '@ykdz/template-generator':
         specifier: workspace:*
         version: link:../generator
+      '@ykdz/template-verification-runtime':
+        specifier: workspace:*
+        version: link:../verification-runtime
       '@ykdz/template-workspace':
         specifier: workspace:*
         version: link:../../workspace-policies/default
@@ -773,6 +779,31 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  packages/verification-runtime:
+    dependencies:
+      execa:
+        specifier: 'catalog:'
+        version: 10.1.1
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0

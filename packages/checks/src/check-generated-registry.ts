@@ -5,6 +5,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { contentIdentityKey } from "@ykdz/template-core/content-identity";
+import {
+  containerCleanupTimeoutMilliseconds,
+  containerCommandTimeoutMilliseconds,
+  deriveDevelopmentContainerBuildIdentity,
+  type ContainerCommandRunner,
+  type DevelopmentContainerDependencyCaches,
+} from "@ykdz/template-verification-runtime/development-container-session";
 import { execa } from "execa";
 
 import {
@@ -30,22 +37,17 @@ import {
 } from "./fixture-evidence/gates/root-quality/index.ts";
 import {
   checkFixtureEvidenceHealth,
-  createDevelopmentContainerFixtureSession,
   createFixtureEvidenceScheduler,
   defaultDevelopmentContainerSessionConcurrency,
-  deriveDevelopmentContainerBuildIdentity,
-  fixtureCommandTimeoutMilliseconds,
-  fixtureCleanupTimeoutMilliseconds,
   FileFixtureEvidenceActivityLedger,
   FileFixtureEvidenceStorage,
   formatFixtureEvidenceHealthReport,
   initializeFixtureGitRepository,
+  createFixtureDevelopmentContainerSession,
   runFixtureEvidenceGate,
   stageFixtureGitRepository,
   writeGeneratedRepositoryTree,
   type FixtureEvidenceActivityLedger,
-  type FixtureCommandOptions,
-  type DevelopmentContainerFixtureDependencyCaches,
   type FixtureEvidenceInvocationEvent,
   type FixtureEvidenceLifecycleEvent,
   type FixtureEvidenceGate,
@@ -99,9 +101,7 @@ export type GeneratedScenarioRunOptions = {
   readonly scheduling?: FixtureEvidenceSchedulingOptions;
   readonly schedulerFactory?: FixtureEvidenceSchedulerFactory;
   readonly buildKitCacheDirectory?: string;
-  readonly dependencyCaches?:
-    | DevelopmentContainerFixtureDependencyCaches
-    | undefined;
+  readonly dependencyCaches?: DevelopmentContainerDependencyCaches | undefined;
   readonly containerEnvironment?: NodeJS.ProcessEnv;
   readonly evidence?: {
     readonly storage?: FixtureEvidenceStorage;
@@ -129,11 +129,7 @@ type InternalGeneratedScenarioRunOptions = GeneratedScenarioRunOptions & {
   ) => void | Promise<void>;
 };
 
-export type GeneratedCommandRunner = (
-  command: string,
-  args: readonly string[],
-  options: FixtureCommandOptions,
-) => Promise<unknown>;
+export type GeneratedCommandRunner = ContainerCommandRunner;
 
 const fixtureEnvironment = {
   buildKitCacheDirectory: "TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR",
@@ -204,7 +200,7 @@ export function fixtureContainerEnvironmentFromEnvironment(
 
 export function fixtureDependencyCachesFromEnvironment(
   environment: NodeJS.ProcessEnv,
-): DevelopmentContainerFixtureDependencyCaches | undefined {
+): DevelopmentContainerDependencyCaches | undefined {
   const configured = (
     name:
       | typeof fixtureEnvironment.pnpmCacheDirectory
@@ -409,8 +405,8 @@ async function persistFixtureFailureReport(options: {
       platform: process.platform,
       architecture: process.arch,
     },
-    fixtureCommandTimeoutMilliseconds,
-    fixtureCleanupTimeoutMilliseconds,
+    containerCommandTimeoutMilliseconds,
+    containerCleanupTimeoutMilliseconds,
     environment: Object.fromEntries(
       fixtureFailureEnvironmentNames.flatMap((name) =>
         options.environment[name] === undefined
@@ -570,7 +566,7 @@ async function runScenario(
     const commandExecution = rawRun(command, args, {
       ...runOptions,
       ...(cancelSignal === undefined ? {} : { cancelSignal }),
-      timeout: runOptions.timeout ?? fixtureCommandTimeoutMilliseconds,
+      timeout: runOptions.timeout ?? containerCommandTimeoutMilliseconds,
       killDescendants: runOptions.killDescendants ?? true,
     }) as Promise<unknown> & {
       readonly stdout?: {
@@ -745,7 +741,7 @@ async function runScenario(
           : deploymentQualityExecutionResources(deployment)),
       ]),
     ];
-  const containerSession = createDevelopmentContainerFixtureSession({
+  const containerSession = createFixtureDevelopmentContainerSession({
     projectDir,
     probes: finalResult.ownerFacts.container.probes,
     ...(options.cancelSignal === undefined
@@ -788,6 +784,30 @@ async function runScenario(
             }
           },
         }),
+    onCommand: async (command, args) => {
+      const runsWorkspaceQuality =
+        (command === "node" &&
+          args[0] === "--conditions=source" &&
+          args[1] === "scripts/task-gates.ts" &&
+          ["check", "check:heavy", "check:full", "fix"].includes(
+            args[2] ?? "",
+          )) ||
+        (command === "pnpm" &&
+          ((args[0] === "run" &&
+            ["check", "check:heavy", "check:full", "fix"].includes(
+              args[1] ?? "",
+            )) ||
+            (args[0] === "exec" && args[1] === "turbo")));
+      if (runsWorkspaceQuality) {
+        await options.recordActivity?.({
+          type: "cache",
+          cache: "turbo",
+          outcome: "configured",
+          scenario: diagnostics,
+          at: clock().toISOString(),
+        });
+      }
+    },
     recordActivity: async (event) => {
       await options.recordActivity?.(
         event.type === "cache"

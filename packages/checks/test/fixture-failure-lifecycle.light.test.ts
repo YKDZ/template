@@ -14,6 +14,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { it } from "node:test";
 
+import {
+  createDevelopmentContainerSession,
+  type ContainerCommandRunner,
+} from "@ykdz/template-verification-runtime/development-container-session";
 import { execa } from "execa";
 
 import {
@@ -22,12 +26,10 @@ import {
   type GeneratedCommandRunner,
 } from "../src/check-generated-registry.ts";
 import {
-  createDevelopmentContainerFixtureSession,
   createFixtureEvidenceScheduler,
   runFixtureEvidenceGate,
   type FixtureEvidenceLifecycleEvent,
   type FixtureEvidenceSchedulerFactory,
-  type FixtureCommandRunner,
   type FixtureEvidenceStorage,
 } from "../src/fixture-evidence/kernel/index.ts";
 
@@ -64,7 +66,7 @@ void it("部分启动失败后先恢复属主，再移除所属容器", async ()
     cause: startupCause,
   });
   const events: string[] = [];
-  const session = createDevelopmentContainerFixtureSession({
+  const session = createDevelopmentContainerSession({
     projectDir,
     probes: [],
     run: async (command, args) => {
@@ -121,7 +123,7 @@ void it("清理时首次恢复属主失败后，execute 重试成功再移除容
   const events: string[] = [];
   let restoreAttempts = 0;
   let removeAttempts = 0;
-  const session = createDevelopmentContainerFixtureSession({
+  const session = createDevelopmentContainerSession({
     projectDir,
     probes: [],
     run: async (command, args) => {
@@ -186,7 +188,7 @@ void it("连续恢复属主失败时保留容器并允许显式 close 再试", a
   let removeAttempts = 0;
   let allowRestore = false;
   let notifiedCleanupFailure: unknown;
-  const session = createDevelopmentContainerFixtureSession({
+  const session = createDevelopmentContainerSession({
     projectDir,
     probes: [],
     onCleanupFailure: (error) => {
@@ -262,7 +264,7 @@ void it("retries owned container cleanup when close is called again", async () =
     readonly command: string;
     readonly args: readonly string[];
   }> = [];
-  const run: FixtureCommandRunner = async (command, args, options) => {
+  const run: ContainerCommandRunner = async (command, args, options) => {
     calls.push({ command, args });
     if (command === "devcontainer") {
       const tempDirectory = options.env?.TMPDIR;
@@ -281,7 +283,7 @@ void it("retries owned container cleanup when close is called again", async () =
     }
     return {};
   };
-  const session = createDevelopmentContainerFixtureSession({
+  const session = createDevelopmentContainerSession({
     projectDir,
     probes: [],
     run,
@@ -321,7 +323,7 @@ void it("cancels a running container command and still removes its container", a
     readonly command: string;
     readonly args: readonly string[];
   }> = [];
-  const run: FixtureCommandRunner = async (command, args, options) => {
+  const run: ContainerCommandRunner = async (command, args, options) => {
     calls.push({ command, args });
     if (
       command === "devcontainer" &&
@@ -343,7 +345,7 @@ void it("cancels a running container command and still removes its container", a
     }
     return {};
   };
-  const session = createDevelopmentContainerFixtureSession({
+  const session = createDevelopmentContainerSession({
     projectDir,
     probes: [],
     cancelSignal: controller.signal,
@@ -387,7 +389,7 @@ void it("times out a hung container command and waits for owned resource cleanup
   const projectDir = path.join(root, "project");
   await mkdir(projectDir, { recursive: true });
   let removeAttempted = false;
-  const run: FixtureCommandRunner = async (command, args, options) => {
+  const run: ContainerCommandRunner = async (command, args, options) => {
     if (
       command === "devcontainer" &&
       args[0] === "exec" &&
@@ -416,7 +418,7 @@ void it("times out a hung container command and waits for owned resource cleanup
     if (command === "docker" && args[0] === "rm") removeAttempted = true;
     return {};
   };
-  const session = createDevelopmentContainerFixtureSession({
+  const session = createDevelopmentContainerSession({
     projectDir,
     probes: [],
     commandTimeoutMilliseconds: 25,
@@ -521,7 +523,7 @@ void it(
     const cancellation = new AbortController();
     let cleanupFailure: unknown;
     let secondRunnerCalls = 0;
-    const first = createDevelopmentContainerFixtureSession({
+    const first = createDevelopmentContainerSession({
       projectDir: firstProject,
       probes: [],
       cancelSignal: cancellation.signal,
@@ -547,7 +549,7 @@ void it(
         return {};
       },
     });
-    const second = createDevelopmentContainerFixtureSession({
+    const second = createDevelopmentContainerSession({
       projectDir: secondProject,
       probes: [],
       cancelSignal: cancellation.signal,

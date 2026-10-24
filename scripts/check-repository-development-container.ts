@@ -1,13 +1,15 @@
 import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { hostname } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
-  createDevelopmentContainerFixtureSession,
-  type FixtureCommandRunner,
-} from "@ykdz/template-checks/development-container-session";
+  containerCommandTimeoutMilliseconds,
+  createDevelopmentContainerSession,
+  developmentContainerPnpmStorePath,
+  type ContainerCommandRunner,
+} from "@ykdz/template-verification-runtime/development-container-session";
 import { execa } from "execa";
 
 import { repositoryDevelopmentEnvironment } from "./repository-environment.ts";
@@ -50,7 +52,7 @@ function commandOutput(result: unknown): string {
 
 async function dockerWorkspaceSource(
   projectDir: string,
-  run: FixtureCommandRunner,
+  run: ContainerCommandRunner,
   cancelSignal: AbortSignal,
 ): Promise<string> {
   if (!existsSync("/.dockerenv")) return projectDir;
@@ -87,18 +89,19 @@ async function dockerWorkspaceSource(
 export async function checkRepositoryDevelopmentContainer(
   options: {
     readonly repositoryRoot?: string;
-    readonly run?: FixtureCommandRunner;
+    readonly run?: ContainerCommandRunner;
     readonly cancelSignal?: AbortSignal;
   } = {},
 ): Promise<void> {
   const repositoryRoot = path.resolve(options.repositoryRoot ?? process.cwd());
   const cancelSignal =
-    options.cancelSignal ?? AbortSignal.timeout(60 * 60 * 1_000);
-  const run: FixtureCommandRunner =
+    options.cancelSignal ??
+    AbortSignal.timeout(containerCommandTimeoutMilliseconds);
+  const run: ContainerCommandRunner =
     options.run ??
     ((command, args, commandOptions) =>
       execa(command, [...args], {
-        timeout: 60 * 60 * 1_000,
+        timeout: containerCommandTimeoutMilliseconds,
         ...commandOptions,
       }));
   const temporaryRoot = path.join(
@@ -107,9 +110,13 @@ export async function checkRepositoryDevelopmentContainer(
     "repository-development-container",
   );
   await mkdir(temporaryRoot, { recursive: true });
-  const projectDir = await mkdtemp(path.join(temporaryRoot, "source-"));
+  const temporaryProjectDir = await mkdtemp(
+    path.join(temporaryRoot, "source-"),
+  );
+  let projectDir = temporaryProjectDir;
   let preserveWorkspace = false;
   try {
+    projectDir = await realpath(temporaryProjectDir);
     const files = commandOutput(
       await run(
         "git",
@@ -183,10 +190,24 @@ export async function checkRepositoryDevelopmentContainer(
       throw new Error(
         `Docker bind mount 的源码路径不能包含逗号：${hostSource}`,
       );
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: environment.probes,
-      dependencyPreparation: "existing-lockfile",
+      dependencyPreparation: {
+        trustWorkspace: true,
+        commands: [
+          {
+            command: "pnpm",
+            args: [
+              "install",
+              "--frozen-lockfile",
+              "--store-dir",
+              developmentContainerPnpmStorePath,
+            ],
+            retryRegistry: "npm",
+          },
+        ],
+      },
       ownedVolumePrefix: `template-repository-check-${path.basename(projectDir)}`,
       workspaceMount: {
         source: hostSource,
@@ -194,6 +215,16 @@ export async function checkRepositoryDevelopmentContainer(
       },
       cancelSignal,
       environment: process.env,
+      onCleanupFailure: (error) => {
+        console.error("开发容器清理失败：", error);
+      },
+      recordActivity: (event) => {
+        if (
+          event.type === "retry" ||
+          (event.type === "phase" && event.outcome === "failed")
+        )
+          console.error("开发容器检查活动：", event);
+      },
       run,
     });
     await session.execute(async (execute) => {
