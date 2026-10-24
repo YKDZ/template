@@ -819,7 +819,7 @@ void it(
       assert.equal(report.scenarioSet, "init");
       assert.equal(
         report.reproductionCommand,
-        "pnpm --filter @ykdz/template-checks check:generated",
+        "pnpm --filter @ykdz/default-content-verification check:generated",
       );
       assert.equal(report.generatedWorkspace, workspace);
       assert.match(report.failure.message, /\[REDACTED\]/u);

@@ -117,7 +117,7 @@ jobs:
         id: fixture-prerequisites
         run: |
           docker version --format '{{.Server.Version}}'
-          pnpm --filter @ykdz/template-checks exec devcontainer --version
+          pnpm --filter @ykdz/default-content-verification exec devcontainer --version
 
       - name: Prepare shell checks
         run: sudo apt-get update && sudo apt-get install -y shellcheck
@@ -139,7 +139,7 @@ jobs:
       - name: Check Fixture Evidence Health
         id: fixture-evidence-health
         if: always() && steps.package-check.outcome == 'success'
-        run: pnpm --filter @ykdz/template-checks run check:evidence-health
+        run: pnpm --filter @ykdz/default-content-verification run check:evidence-health
 
       - name: 构建 CLI 分发目录
         if: inputs.pack_cli

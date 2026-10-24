@@ -26,8 +26,8 @@ const packages = {
     mayImport: ["core"] as const,
   },
   checks: {
-    directory: "packages/checks",
-    name: "@ykdz/template-checks",
+    directory: "content/default/verification",
+    name: "@ykdz/default-content-verification",
     mayImport: ["core"] as const,
   },
 } as const;
@@ -146,7 +146,9 @@ void describe("Template Repository dependency DAG", () => {
       assert.ok(!tags[tag]?.dependencies.allow.includes("template-cli"));
     }
     assert.ok(
-      !tags["template-checks"]?.dependencies.allow.includes("template-cli"),
+      !tags["default-content-verification"]?.dependencies.allow.includes(
+        "template-cli",
+      ),
     );
     for (const [tag, rule] of Object.entries(tags)) {
       assert.ok(rule.dependencies.allow.includes(tag));

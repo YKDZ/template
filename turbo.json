@@ -9,12 +9,12 @@
             "library",
             "template-core",
             "template-generator",
-            "template-checks",
             "template-environment",
             "template-workspace",
             "template-workspace-authoring",
             "template-preset",
-            "template-content"
+            "template-content",
+            "default-content-verification"
           ]
         }
       },
@@ -26,12 +26,12 @@
             "native",
             "template-core",
             "template-generator",
-            "template-checks",
             "template-environment",
             "template-workspace",
             "template-workspace-authoring",
             "template-preset",
-            "template-content"
+            "template-content",
+            "default-content-verification"
           ]
         }
       },
@@ -43,12 +43,12 @@
             "app",
             "native",
             "library",
-            "template-checks",
             "template-environment",
             "template-workspace",
             "template-workspace-authoring",
             "template-preset",
-            "template-content"
+            "template-content",
+            "default-content-verification"
           ]
         }
       },
@@ -61,11 +61,11 @@
             "library",
             "template-core",
             "template-generator",
-            "template-checks",
             "template-workspace",
             "template-workspace-authoring",
             "template-preset",
-            "template-content"
+            "template-content",
+            "default-content-verification"
           ]
         }
       },
@@ -78,11 +78,11 @@
             "library",
             "template-core",
             "template-generator",
-            "template-checks",
             "template-environment",
             "template-workspace-authoring",
             "template-preset",
-            "template-content"
+            "template-content",
+            "default-content-verification"
           ]
         }
       },
@@ -93,7 +93,6 @@
             "app",
             "native",
             "library",
-            "template-checks",
             "template-workspace",
             "template-root",
             "template-core",
@@ -101,7 +100,8 @@
             "template-environment",
             "template-cli",
             "template-preset",
-            "template-content"
+            "template-content",
+            "default-content-verification"
           ]
         }
       },
@@ -115,10 +115,10 @@
             "library",
             "template-core",
             "template-generator",
-            "template-checks",
             "template-environment",
             "template-workspace",
-            "template-workspace-authoring"
+            "template-workspace-authoring",
+            "default-content-verification"
           ]
         }
       },
@@ -132,10 +132,10 @@
             "library",
             "template-core",
             "template-generator",
-            "template-checks",
             "template-environment",
             "template-workspace",
-            "template-workspace-authoring"
+            "template-workspace-authoring",
+            "default-content-verification"
           ]
         }
       },
@@ -150,17 +150,16 @@
             "template-generator",
             "template-preset",
             "template-content",
-            "template-checks",
             "template-environment",
             "template-workspace",
-            "template-workspace-authoring"
+            "template-workspace-authoring",
+            "default-content-verification"
           ]
         }
       },
-      "template-checks": {
+      "default-content-verification": {
         "dependencies": {
           "allow": [
-            "template-checks",
             "app",
             "native",
             "library",
@@ -170,7 +169,8 @@
             "template-workspace",
             "template-workspace-authoring",
             "template-preset",
-            "template-content"
+            "template-content",
+            "default-content-verification"
           ]
         }
       },
@@ -185,7 +185,7 @@
             "template-generator",
             "template-preset",
             "template-content",
-            "template-checks",
+            "default-content-verification",
             "template-environment",
             "template-workspace",
             "template-cli",
@@ -201,12 +201,12 @@
             "library",
             "template-core",
             "template-generator",
-            "template-checks",
             "template-environment",
             "template-workspace",
             "template-workspace-authoring",
             "template-preset",
-            "template-content"
+            "template-content",
+            "default-content-verification"
           ]
         }
       }

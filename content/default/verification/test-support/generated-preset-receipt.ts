@@ -1,4 +1,4 @@
-import type { assertWorkflowContract } from "@ykdz/template-checks/workflow-contract";
+import type { assertWorkflowContract } from "@ykdz/default-content-verification/workflow-contract";
 import { templateContent } from "@ykdz/template-content";
 import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
 
