@@ -289,6 +289,15 @@ export const referencePackage = Object.freeze({
     const packageManifestDocument = nativeDocuments.find(
       (document) => document.path === "package.json",
     );
+    const deferredNativeDocuments =
+      contribution.facts.deferredNativeDocuments.map(
+        (document) =>
+          nativeDocuments.find(
+            ({ path: candidatePath, sourcePath }) =>
+              candidatePath === document.path &&
+              sourcePath === document.sourcePath,
+          ) ?? document,
+      );
     const files = contribution.files.map((file) => {
       if (
         file.path === "package.json" &&
@@ -325,6 +334,7 @@ export const referencePackage = Object.freeze({
       facts: {
         ...contribution.facts,
         manifest,
+        deferredNativeDocuments,
         nativeDocuments,
       },
     } satisfies PackageContribution<RustContributionFacts>;

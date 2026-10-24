@@ -68,6 +68,8 @@ function evaluation(
         sourcePackageName: packageInstance.contentIdentity.packageName,
         manifest: {},
         exposure: { exports: {}, imports: {} },
+        deferredNativeDocuments: [],
+        packageInput: undefined,
         nativeDocuments: [],
         compositionFiles: [],
         dependencyUses: [],
