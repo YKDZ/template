@@ -101,7 +101,7 @@ export async function planRepositoryConfiguration(
   if (derived.diagnostics.length > 0)
     throw new Error(derived.diagnostics.join("\n"));
   const partialFiles = [
-    "packages/cli/package.json",
+    "apps/cli/package.json",
     "references/ts-cli/package.json",
     "references/rust-bin/template/rust-toolchain.toml",
   ];
