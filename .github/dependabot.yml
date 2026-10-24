@@ -4,7 +4,7 @@ updates:
   - package-ecosystem: devcontainers
     directories:
       - /
-      - /workspace-policies/default/assets/environment
+      - /content/default/composition/assets/environment
     schedule:
       interval: weekly
   - package-ecosystem: npm
@@ -28,15 +28,15 @@ updates:
   - package-ecosystem: github-actions
     directories:
       - /
-      - /workspace-policies/default/assets/github
-      - /workspace-policies/default/resources/cli-publication
+      - /content/default/composition/assets/github
+      - /content/default/references/npm-publication
     schedule:
       interval: weekly
   - package-ecosystem: docker
     directories:
       - /.devcontainer
-      - /workspace-policies/default/assets/environment
-      - /workspace-policies/default/resources/deployment
+      - /content/default/composition/assets/environment
+      - /content/default/presets/vike-app
     schedule:
       interval: weekly
     ignore:
@@ -44,7 +44,7 @@ updates:
         update-types:
           - version-update:semver-major
   - package-ecosystem: cargo
-    directory: /references/rust-bin
+    directory: /content/default/references/rust-bin
     schedule:
       interval: weekly
   - package-ecosystem: rust-toolchain

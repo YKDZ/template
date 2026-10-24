@@ -14,8 +14,10 @@ import {
 async function repositoryFixture(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "repository-config-"));
   await mkdir(path.join(root, "packages/cli"), { recursive: true });
-  await mkdir(path.join(root, "references/ts-cli"), { recursive: true });
-  await mkdir(path.join(root, "references/rust-bin/template"), {
+  await mkdir(path.join(root, "content/default/references/ts-cli"), {
+    recursive: true,
+  });
+  await mkdir(path.join(root, "content/default/references/rust-bin/template"), {
     recursive: true,
   });
   await mkdir(path.join(root, ".devcontainer"), { recursive: true });
@@ -32,7 +34,7 @@ async function repositoryFixture(): Promise<string> {
     '{"engines":{"node":"^24.0.0"},"custom":true}\n',
   );
   await writeFile(
-    path.join(root, "references/ts-cli/package.json"),
+    path.join(root, "content/default/references/ts-cli/package.json"),
     '{"engines":{"node":"^24.0.0"},"custom":"参考 CLI 局部配置"}\n',
   );
   await writeFile(
@@ -40,7 +42,10 @@ async function repositoryFixture(): Promise<string> {
     "FROM node:24.0.0-bookworm\n",
   );
   await writeFile(
-    path.join(root, "references/rust-bin/template/rust-toolchain.toml"),
+    path.join(
+      root,
+      "content/default/references/rust-bin/template/rust-toolchain.toml",
+    ),
     '[toolchain]\nchannel = "1.99.0" # 保留模板注释\ncomponents = ["rustfmt", "clippy"]\n',
   );
   return root;
@@ -68,7 +73,10 @@ void it("统一同步重建自用配置，并从根版本声明投影工具链�
       '{"engines":{"node":"^26.1.2"},"custom":true}\n',
     );
     assert.strictEqual(
-      await readFile(path.join(root, "references/ts-cli/package.json"), "utf8"),
+      await readFile(
+        path.join(root, "content/default/references/ts-cli/package.json"),
+        "utf8",
+      ),
       '{"engines":{"node":"^26.1.2"},"custom":"参考 CLI 局部配置"}\n',
     );
     assert.deepStrictEqual(await syncRepositoryConfiguration(root), []);
@@ -89,8 +97,9 @@ void it("只读检查发现所有受管输出的漂移，同步恢复后再次�
       ".vscode/extensions.json",
     ];
     const cliFile = "packages/cli/package.json";
-    const referenceCliFile = "references/ts-cli/package.json";
-    const rustFile = "references/rust-bin/template/rust-toolchain.toml";
+    const referenceCliFile = "content/default/references/ts-cli/package.json";
+    const rustFile =
+      "content/default/references/rust-bin/template/rust-toolchain.toml";
     const files = [...managedFiles, cliFile, referenceCliFile, rustFile];
     const readOutputs = () =>
       Promise.all(
@@ -158,7 +167,7 @@ void it("写入失败报告已更新文件，直接 Node 入口可离线补齐�
         if (file.endsWith("rust-toolchain.toml")) throw new Error("磁盘故障");
         await writeFile(file, contents);
       }),
-      /已更新文件：packages\/cli\/package.json、references\/ts-cli\/package.json；/u,
+      /已更新文件：packages\/cli\/package.json、content\/default\/references\/ts-cli\/package.json；/u,
     );
     const result = await execa(
       process.execPath,
@@ -181,7 +190,10 @@ void it("写入失败报告已更新文件，直接 Node 入口可离线补齐�
     );
     assert.strictEqual(
       await readFile(
-        path.join(root, "references/rust-bin/template/rust-toolchain.toml"),
+        path.join(
+          root,
+          "content/default/references/rust-bin/template/rust-toolchain.toml",
+        ),
         "utf8",
       ),
       '[toolchain]\nchannel = "1.100.2" # 保留模板注释\ncomponents = ["rustfmt", "clippy"]\n',
@@ -197,10 +209,15 @@ for (const failure of ["node", "pnpm", "rust", "invalid-toml"]) {
     try {
       await mkdir(path.join(root, "packages/cli"), { recursive: true });
       await mkdir(path.join(root, ".devcontainer"), { recursive: true });
-      await mkdir(path.join(root, "references/ts-cli"), { recursive: true });
-      await mkdir(path.join(root, "references/rust-bin/template"), {
+      await mkdir(path.join(root, "content/default/references/ts-cli"), {
         recursive: true,
       });
+      await mkdir(
+        path.join(root, "content/default/references/rust-bin/template"),
+        {
+          recursive: true,
+        },
+      );
       await writeFile(
         path.join(root, "package.json"),
         JSON.stringify({
@@ -219,9 +236,15 @@ for (const failure of ["node", "pnpm", "rust", "invalid-toml"]) {
       const cli = '{"engines":{"node":"^24.0.0"},"custom":true}\n';
       const docker = "FROM node:24.0.0-bookworm\nENV CUSTOM=yes\n";
       await writeFile(path.join(root, "packages/cli/package.json"), cli);
-      await writeFile(path.join(root, "references/ts-cli/package.json"), cli);
       await writeFile(
-        path.join(root, "references/rust-bin/template/rust-toolchain.toml"),
+        path.join(root, "content/default/references/ts-cli/package.json"),
+        cli,
+      );
+      await writeFile(
+        path.join(
+          root,
+          "content/default/references/rust-bin/template/rust-toolchain.toml",
+        ),
         '[toolchain]\nchannel = "1.99.0"\n',
       );
       await writeFile(path.join(root, ".devcontainer/Dockerfile"), docker);

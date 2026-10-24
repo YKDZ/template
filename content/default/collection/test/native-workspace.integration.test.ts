@@ -21,7 +21,7 @@ import {
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { execa } from "execa";
 
-const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
+const workspaceRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 const content = await loadContentSource({
   namespace: "ykdz",
   resolve: (specifier) => import.meta.resolve(specifier),

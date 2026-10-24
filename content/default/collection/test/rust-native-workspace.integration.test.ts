@@ -24,7 +24,7 @@ import { execa } from "execa";
 
 import { unprivilegedProcessOptions } from "../test-support/unprivileged-process.ts";
 
-const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
+const workspaceRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
 async function withUnreadableAuthorDirectories<Result>(
   directories: readonly { readonly path: string; readonly mode: number }[],
