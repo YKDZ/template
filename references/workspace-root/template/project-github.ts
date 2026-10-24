@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 
-import type { DependencyMaintenancePolicy } from "@ykdz/default-content-authoring/contracts";
+import type {
+  CiDiagnosticArtifactDeclaration,
+  DependencyMaintenancePolicy,
+} from "@ykdz/default-content-authoring/contracts";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
 
-import { composeCiDiagnosticArtifacts } from "./ci-diagnostic-artifact.ts";
-
 export type ProjectCheckWorkflowDiagnosticOptions = {
-  readonly packagePaths: readonly string[];
-  readonly diagnosticArtifacts?: readonly unknown[] | undefined;
+  readonly diagnostics: readonly CiDiagnosticArtifactDeclaration[];
   readonly job?: ProjectCheckWorkflowJobOptions;
 };
 
@@ -37,17 +37,17 @@ export function normalizeProjectCheckWorkflowJob(
   };
 }
 
-/** GitHub 与下一步文档的原生模板由工作区 owner 在准备阶段读取。 */
+/** GitHub 与后续步骤模板由根参考包在准备阶段从自有资源读取。 */
 export function prepareProjectGithubTemplates(): PreparedProjectGithubTemplates {
   const read = (file: string): string => {
     try {
       return readFileSync(
-        new URL(`../assets/${file}`, import.meta.url),
+        new URL(`../resources/${file}`, import.meta.url),
         "utf8",
       );
     } catch (cause) {
       throw new Error(
-        `工作区资源 @ykdz/template-workspace#./project-github prepare 阶段无法读取 ${file}`,
+        `根资源 @ykdz/reference-workspace-root#./project-github prepare 阶段无法读取 ${file}`,
         { cause },
       );
     }
@@ -64,10 +64,7 @@ export function projectCheckWorkflow(
   options: ProjectCheckWorkflowDiagnosticOptions,
   template: string,
 ): string {
-  const diagnostics = composeCiDiagnosticArtifacts({
-    packagePaths: options.packagePaths,
-    declarations: options.diagnosticArtifacts ?? [],
-  });
+  const diagnostics = options.diagnostics;
   const workflow = parseDocument(template);
   const job = normalizeProjectCheckWorkflowJob(options.job);
   workflow.setIn(["jobs", "check", "name"], job.name);
@@ -99,7 +96,7 @@ export function projectCheckWorkflow(
       diagnostics
         .filter((declaration) => declaration.kind === kind)
         .map((declaration) => declaration.owner.path)
-        .toSorted()
+        .toSorted((left, right) => (left < right ? -1 : left > right ? 1 : 0))
         .join("\n");
     staging.setIn(
       ["env", "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS"],

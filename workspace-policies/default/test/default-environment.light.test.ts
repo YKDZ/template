@@ -6,10 +6,10 @@ import { describe, it } from "node:test";
 
 import {
   loadEditorCustomizationDeclarations,
-  projectBuiltInEditorCustomization,
-} from "@ykdz/template-workspace/default-environment";
+  projectWorkspaceEditorCustomization,
+} from "@ykdz/reference-workspace-root/environment";
 
-void describe("默认编辑器设置组合", () => {
+void describe("根环境编辑器设置组合", () => {
   void it("拒绝冲突资源中的设置并报告位置及双方来源", async () => {
     const directory = await mkdtemp(
       path.join(tmpdir(), "default-editor-conflict-"),
@@ -44,7 +44,7 @@ void describe("默认编辑器设置组合", () => {
 
       assert.throws(
         () =>
-          projectBuiltInEditorCustomization(
+          projectWorkspaceEditorCustomization(
             ["formatter-a", "formatter-b"],
             declarations,
           ),

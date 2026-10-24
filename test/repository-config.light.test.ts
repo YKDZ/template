@@ -28,6 +28,10 @@ async function repositoryFixture(): Promise<string> {
     '[toolchain]\nchannel = "1.100.2"\n',
   );
   await writeFile(
+    path.join(root, "pnpm-workspace.yaml"),
+    'catalog:\n  "@playwright/test": 1.64.0\n',
+  );
+  await writeFile(
     path.join(root, "packages/cli/package.json"),
     '{"engines":{"node":"^24.0.0"},"custom":true}\n',
   );
@@ -58,6 +62,10 @@ void it("统一同步重建自用配置，并从根版本声明投影工具链�
     );
     assert.strictEqual(container.build.args.NODE_VERSION, "26.1.2");
     assert.strictEqual(container.build.args.RUST_TOOLCHAIN, "1.100.2");
+    assert.strictEqual(
+      container.build.args.PLAYWRIGHT_CLI_PACKAGE,
+      "@playwright/test@1.64.0",
+    );
     const settings = JSON.parse(
       await readFile(path.join(root, ".vscode/settings.json"), "utf8"),
     );
