@@ -13,7 +13,7 @@ import {
 
 async function repositoryFixture(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "repository-config-"));
-  await mkdir(path.join(root, "packages/cli"), { recursive: true });
+  await mkdir(path.join(root, "apps/cli"), { recursive: true });
   await mkdir(path.join(root, "content/default/references/ts-cli"), {
     recursive: true,
   });
@@ -34,7 +34,7 @@ async function repositoryFixture(): Promise<string> {
     'catalog:\n  "@playwright/test": 1.64.0\n',
   );
   await writeFile(
-    path.join(root, "packages/cli/package.json"),
+    path.join(root, "apps/cli/package.json"),
     '{"engines":{"node":"^24.0.0"},"custom":true}\n',
   );
   await writeFile(
@@ -77,7 +77,7 @@ void it("统一同步重建自用配置，并从根版本声明投影工具链�
     assert.strictEqual(settings["rust-analyzer.check.command"], "clippy");
     assert.deepStrictEqual(container.customizations.vscode.settings, settings);
     assert.strictEqual(
-      await readFile(path.join(root, "packages/cli/package.json"), "utf8"),
+      await readFile(path.join(root, "apps/cli/package.json"), "utf8"),
       '{"engines":{"node":"^26.1.2"},"custom":true}\n',
     );
     assert.strictEqual(
@@ -104,7 +104,7 @@ void it("只读检查发现所有受管输出的漂移，同步恢复后再次�
       ".vscode/settings.json",
       ".vscode/extensions.json",
     ];
-    const cliFile = "packages/cli/package.json";
+    const cliFile = "apps/cli/package.json";
     const referenceCliFile = "content/default/references/ts-cli/package.json";
     const rustFile =
       "content/default/references/rust-bin/template/rust-toolchain.toml";
@@ -175,7 +175,7 @@ void it("写入失败报告已更新文件，直接 Node 入口可离线补齐�
         if (file.endsWith("rust-toolchain.toml")) throw new Error("磁盘故障");
         await writeFile(file, contents);
       }),
-      /已更新文件：packages\/cli\/package.json、content\/default\/references\/ts-cli\/package.json；/u,
+      /已更新文件：apps\/cli\/package.json、content\/default\/references\/ts-cli\/package.json；/u,
     );
     const result = await execa(
       process.execPath,
@@ -193,7 +193,7 @@ void it("写入失败报告已更新文件，直接 Node 入口可离线补齐�
     assert.strictEqual(result.exitCode, 0, result.stderr);
     assert.deepStrictEqual(await checkRepositoryConfiguration(root), []);
     assert.strictEqual(
-      await readFile(path.join(root, "packages/cli/package.json"), "utf8"),
+      await readFile(path.join(root, "apps/cli/package.json"), "utf8"),
       '{"engines":{"node":"^26.1.2"},"custom":true}\n',
     );
     assert.strictEqual(
@@ -215,7 +215,7 @@ for (const failure of ["node", "pnpm", "rust", "invalid-toml"]) {
   void it(`预检失败 ${failure} 时已经需要更新的其他目标也零写入`, async () => {
     const root = await mkdtemp(path.join(tmpdir(), "sync-preflight-"));
     try {
-      await mkdir(path.join(root, "packages/cli"), { recursive: true });
+      await mkdir(path.join(root, "apps/cli"), { recursive: true });
       await mkdir(path.join(root, ".devcontainer"), { recursive: true });
       await mkdir(path.join(root, "content/default/references/ts-cli"), {
         recursive: true,
@@ -243,7 +243,7 @@ for (const failure of ["node", "pnpm", "rust", "invalid-toml"]) {
       );
       const cli = '{"engines":{"node":"^24.0.0"},"custom":true}\n';
       const docker = "FROM node:24.0.0-bookworm\nENV CUSTOM=yes\n";
-      await writeFile(path.join(root, "packages/cli/package.json"), cli);
+      await writeFile(path.join(root, "apps/cli/package.json"), cli);
       await writeFile(
         path.join(root, "content/default/references/ts-cli/package.json"),
         cli,
@@ -271,7 +271,7 @@ for (const failure of ["node", "pnpm", "rust", "invalid-toml"]) {
       );
       assert.strictEqual(result.exitCode, 1);
       assert.strictEqual(
-        await readFile(path.join(root, "packages/cli/package.json"), "utf8"),
+        await readFile(path.join(root, "apps/cli/package.json"), "utf8"),
         cli,
       );
       assert.strictEqual(

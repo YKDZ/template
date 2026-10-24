@@ -37,7 +37,7 @@ async function generateNodeOnlyProject(prefix: string): Promise<string> {
     "node",
     [
       "--conditions=source",
-      path.join(repoRoot, "packages/cli/src/cli.ts"),
+      path.join(repoRoot, "apps/cli/src/cli.ts"),
       "init",
       projectDir,
       "--preset",

@@ -322,7 +322,7 @@ void describe("Erasable TypeScript enforcement", () => {
     const repositoryPackages = [
       ".",
       "packages/checks",
-      "packages/cli",
+      "apps/cli",
       "packages/core",
       "packages/workspace-authoring",
     ];
