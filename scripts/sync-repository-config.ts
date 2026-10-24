@@ -22,12 +22,12 @@ type Target = {
   readonly label: string;
   readonly before: string | undefined;
   readonly after: string;
-  write(contents: string): Promise<void>;
+  readonly write: (contents: string) => Promise<void>;
 };
 type PreparedOwnerTarget = {
   readonly label: string;
   readonly before: string;
-  write(contents: string): Promise<void>;
+  readonly write: (contents: string) => Promise<void>;
 };
 
 function replaceStrings(
@@ -84,10 +84,13 @@ async function prepareOwnerTarget(
   const ownerModule: unknown = await import(pathToFileURL(entry).href);
   if (!isRecord(ownerModule))
     throw new Error(`${specifier}: 无法读取维护公开入口`);
-  const prepare = ownerModule.prepareRepositoryConfigurationTarget;
+  const prepare: unknown = Reflect.get(
+    ownerModule,
+    "prepareRepositoryConfigurationTarget",
+  );
   if (typeof prepare !== "function")
     throw new Error(`${specifier}: 缺少维护目标准备能力`);
-  const target: unknown = await prepare();
+  const target: unknown = await Reflect.apply(prepare, undefined, []);
   if (!isPreparedOwnerTarget(target))
     throw new Error(`${specifier}: 维护目标不符合宿主合同`);
   return target;
@@ -206,10 +209,10 @@ export async function checkRepositoryConfiguration(
 /** 写入替身仅用于系统边界故障验收。 */
 export async function syncRepositoryConfiguration(
   repositoryRoot: string,
-  replace: (
-    label: string,
-    write: () => Promise<void>,
-  ) => Promise<void> = (_label, write) => write(),
+  replace: (label: string, write: () => Promise<void>) => Promise<void> = (
+    _label,
+    write,
+  ) => write(),
 ): Promise<string[]> {
   const targets = await planRepositoryConfiguration(repositoryRoot);
   const updated: string[] = [];

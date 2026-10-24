@@ -1,6 +1,6 @@
 {
   "extends": ["//"],
-  "tags": ["template-cli"],
+  "tags": ["app", "template-cli"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

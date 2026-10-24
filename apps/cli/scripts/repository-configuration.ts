@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 export type RepositoryConfigurationTarget = {
   readonly label: string;
   readonly before: string;
-  write(contents: string): Promise<void>;
+  readonly write: (contents: string) => Promise<void>;
 };
 
 async function replaceFile(file: string, contents: string): Promise<void> {
