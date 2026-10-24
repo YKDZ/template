@@ -99,11 +99,23 @@ await it("直接参考生成原生根并连续添加ts-lib与显式provider连�
     });
     assert.equal(initialized.status, "success", JSON.stringify(initialized));
     if (initialized.status !== "success") return;
+    assert.deepEqual(initialized.generationRecord.composition.identity, {
+      namespace: "ykdz",
+      packageName: "@ykdz/template-workspace",
+      exportPath: "./default-composition",
+    });
 
     const rootManifestPath = path.join(targetRoot, "package.json");
     const rootManifest = await readManifest(rootManifestPath);
     assert.equal(rootManifest.private, true);
     assert.equal(rootManifest.name, "native-demo");
+    assert.equal(rootManifest.version, undefined);
+    assert.equal(rootManifest.engines.node, "24.21.0");
+    assert.equal(rootManifest.packageManager, "pnpm@12.9.1");
+    assert.match(
+      await readFile(path.join(targetRoot, "AGENTS.md"), "utf8"),
+      /本地代理上下文/u,
+    );
     assert.equal(
       rootManifest.scripts.check,
       "node --conditions=source scripts/task-gates.ts check",
@@ -216,6 +228,10 @@ await it("直接同时选择ts-lib与发布owner时复用同来源根声明", as
       "utf8",
     );
     assert.match(changeset, /"access": "public"/u);
+    assert.match(
+      await readFile(path.join(targetRoot, ".gitignore"), "utf8"),
+      /^\.changeset\/packed\/$/mu,
+    );
     await stat(path.join(targetRoot, ".github/workflows/release.yml"));
   });
 });

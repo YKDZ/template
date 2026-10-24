@@ -476,21 +476,6 @@ function outputManifest(options: {
       manifest.engines = { ...manifest.engines, node: nodeDeclaration };
     }
   }
-  if (options.definition.path === ".") {
-    delete manifest.version;
-    if (isRecord(options.stableCommon)) {
-      if (typeof options.stableCommon.nodeDeclaration === "string") {
-        manifest.engines = {
-          ...(isRecord(manifest.engines) ? manifest.engines : {}),
-          node: options.stableCommon.nodeDeclaration,
-        };
-      }
-      if (typeof options.stableCommon.packageManagerPin === "string") {
-        manifest.packageManager = options.stableCommon.packageManagerPin;
-      }
-    }
-    manifest.name = options.conventions.repositoryName;
-  }
   return Object.freeze(manifest);
 }
 
@@ -537,13 +522,21 @@ function packagePath(options: {
   return selected;
 }
 
-function packageName(options: {
+function packageName<CreationInput extends JsonValue>(options: {
   readonly conventions: DefaultWorkspaceConventions;
-  readonly creationInput: JsonValue | undefined;
+  readonly creationInput: CreationInput | undefined;
   readonly defaultLeafName: string;
-  readonly defaultPath: string;
+  readonly targetName?: (input: {
+    readonly conventions: DefaultWorkspaceConventions;
+    readonly creationInput: CreationInput | undefined;
+  }) => string;
 }): string {
-  if (options.defaultPath === ".") return options.conventions.repositoryName;
+  if (options.targetName !== undefined) {
+    return options.targetName({
+      conventions: options.conventions,
+      creationInput: options.creationInput,
+    });
+  }
   const inputName = isRecord(options.creationInput)
     ? options.creationInput.packageName
     : undefined;
@@ -601,6 +594,11 @@ export function defineReferencePackage<
   readonly instance: "shared" | "independent";
   readonly defaultLeafName: string;
   readonly defaultPath?: string;
+  /** 可选的包内名称规则；目标路径不会自动改变包名。 */
+  readonly targetName?: (input: {
+    readonly conventions: DefaultWorkspaceConventions;
+    readonly creationInput: CreationInput | undefined;
+  }) => string;
   readonly role: DefaultPackageRole;
   readonly workspaceConfiguration?: {
     readonly kind: "typescript-workspace-configuration";
@@ -793,7 +791,9 @@ export function defineReferencePackage<
           conventions: input.conventions,
           creationInput: input.creationInput,
           defaultLeafName: options.defaultLeafName,
-          defaultPath,
+          ...(options.targetName === undefined
+            ? {}
+            : { targetName: options.targetName }),
         }),
         path: packagePath({
           creationInput: input.creationInput,

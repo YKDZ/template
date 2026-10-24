@@ -1,6 +1,0 @@
-{
-  "extends": "@ykdz/tooling-config/node.json",
-  "compilerOptions": {
-    "types": ["node"]
-  }
-}
