@@ -36,6 +36,7 @@
   "devDependencies": {
     "@playwright/test": "catalog:",
     "@types/node": "catalog:",
+    "@ykdz/default-content-authoring": "workspace:*",
     "@ykdz/reference-npm-publication": "workspace:*",
     "@ykdz/reference-tooling-config": "workspace:*",
     "@ykdz/reference-ts-cli": "workspace:*",

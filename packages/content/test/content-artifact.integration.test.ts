@@ -19,6 +19,7 @@ import path from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import type { DefaultReferencePackageDefinition } from "@ykdz/default-content-authoring/reference-package";
 import { templateContent } from "@ykdz/template-content";
 import {
   installContentCollection,
@@ -30,7 +31,6 @@ import {
 } from "@ykdz/template-content/artifact-builder";
 import { contentIdentityKey } from "@ykdz/template-core/content-identity";
 import { resolveReferenceDependencyIdentity } from "@ykdz/template-generator";
-import type { DefaultReferencePackageDefinition } from "@ykdz/template-workspace/reference-package";
 import { execa } from "execa";
 
 import { createAuthoredContentFixture } from "../test-support/authored-content-fixture.ts";

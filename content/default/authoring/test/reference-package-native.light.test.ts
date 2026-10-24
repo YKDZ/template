@@ -5,10 +5,9 @@ import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
 import type { PackageBinding } from "@ykdz/template-core/reference-package";
 import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
-
-import { defineReferencePackage } from "../src/reference-package.ts";
 
 await test("原生作者factory只准备快照并把完整原生文档留给组合", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "native-reference-"));

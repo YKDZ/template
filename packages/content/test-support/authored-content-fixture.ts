@@ -3,16 +3,18 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import type { ReferenceTemplateDependency } from "@ykdz/default-content-authoring/reference-package";
 import {
   loadContentSource,
   type LoadedSourceMember,
 } from "@ykdz/template-generator/content-source";
-import type { ReferenceTemplateDependency } from "@ykdz/template-workspace/reference-package";
 
 const sdkPackageEntries = {
   "@ykdz/template-core": "@ykdz/template-core/content-identity",
   "@ykdz/template-generator": "@ykdz/template-generator/content-source",
-  "@ykdz/template-workspace": "@ykdz/template-workspace/reference-package",
+  "@ykdz/template-workspace": "@ykdz/template-workspace/default-generation",
+  "@ykdz/default-content-authoring":
+    "@ykdz/default-content-authoring/reference-package",
 } as const;
 
 function localSdkPackageRoots(): ReadonlyMap<string, string> {
@@ -68,7 +70,7 @@ function packageManifest(
   version = "1.0.0",
 ): Record<string, unknown> {
   const authoringVersion =
-    sdkVersions.get("@ykdz/template-workspace") ?? "workspace:*";
+    sdkVersions.get("@ykdz/default-content-authoring") ?? "workspace:*";
   return {
     name: packageName,
     version,
@@ -90,7 +92,7 @@ function packageManifest(
     dependencies,
     devDependencies: {
       ...devDependencies,
-      "@ykdz/template-workspace": authoringVersion,
+      "@ykdz/default-content-authoring": authoringVersion,
     },
   };
 }
@@ -133,7 +135,7 @@ function referenceDefinition(options: {
   const templateDependencies = [
     ...(options.templateDependencies ?? [
       {
-        name: "@ykdz/template-workspace",
+        name: "@ykdz/default-content-authoring",
         purpose: "template-execution" as const,
       },
     ]),
@@ -148,7 +150,7 @@ function referenceDefinition(options: {
   return [
     ...(options.templatePrelude ?? []),
     "",
-    'import { defineReferencePackage, type DefaultReferencePackageDefinition } from "@ykdz/template-workspace/reference-package";',
+    'import { defineReferencePackage, type DefaultReferencePackageDefinition } from "@ykdz/default-content-authoring/reference-package";',
     'import manifest from "../package.json" with { type: "json" };',
     "",
     "export const referencePackage: DefaultReferencePackageDefinition = defineReferencePackage({",

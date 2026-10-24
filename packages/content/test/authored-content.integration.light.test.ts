@@ -301,7 +301,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       },
       featureTemplateDependencies: [
         {
-          name: "@ykdz/template-workspace",
+          name: "@ykdz/default-content-authoring",
           purpose: "template-execution",
         },
         { name: "@fixture/tooling-config", purpose: "target" },
@@ -375,7 +375,7 @@ void describe("外部specifier集合经默认策略走公开生成器", () => {
       assert.equal(
         Object.hasOwn(
           manifest.devDependencies ?? {},
-          "@ykdz/template-workspace",
+          "@ykdz/default-content-authoring",
         ),
         false,
       );

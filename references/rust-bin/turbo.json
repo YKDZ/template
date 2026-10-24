@@ -11,6 +11,7 @@
     "build:template": {
       "dependsOn": [
         "@ykdz/template-core#build",
+        "@ykdz/default-content-authoring#build",
         "@ykdz/template-workspace#build"
       ],
       "inputs": [],

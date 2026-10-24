@@ -1,8 +1,6 @@
+import type { RustToolchainRequirement } from "@ykdz/default-content-authoring/contracts";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
-import {
-  composeApplicationRequirements,
-  type RustToolchainRequirement,
-} from "@ykdz/template-workspace/application-requirements";
+import { composeApplicationRequirements } from "@ykdz/template-workspace/application-requirements";
 import { parse } from "smol-toml";
 
 export type { RustToolchainRequirement };

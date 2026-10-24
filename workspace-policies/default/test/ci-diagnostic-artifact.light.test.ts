@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-  composeCiDiagnosticArtifacts,
-  type CiDiagnosticArtifactDeclaration,
-} from "@ykdz/template-workspace/default-environment";
+import type { CiDiagnosticArtifactDeclaration } from "@ykdz/default-content-authoring/contracts";
+import { composeCiDiagnosticArtifacts } from "@ykdz/template-workspace/default-environment";
 import {
   prepareProjectGithubTemplates,
   projectCheckWorkflow,

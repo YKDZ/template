@@ -1,0 +1,59 @@
+{
+  "name": "@ykdz/default-content-authoring",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    "./contracts": {
+      "source": "./src/contracts.ts",
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./environment-needs": {
+      "source": "./src/environment-needs.ts",
+      "types": "./dist/environment-needs.d.ts",
+      "default": "./dist/environment-needs.js"
+    },
+    "./package-role": {
+      "source": "./src/package-role.ts",
+      "types": "./dist/package-role.d.ts",
+      "default": "./dist/package-role.js"
+    },
+    "./preset-root-contribution": {
+      "source": "./src/preset-root-contribution.ts",
+      "types": "./dist/preset-root-contribution.d.ts",
+      "default": "./dist/preset-root-contribution.js"
+    },
+    "./reference-package": {
+      "source": "./src/reference-package.ts",
+      "types": "./dist/reference-package.d.ts",
+      "default": "./dist/reference-package.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false",
+    "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec 'test/**/*.light.test.ts'"
+  },
+  "dependencies": {
+    "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-workspace-authoring": "workspace:*",
+    "jsonc-parser": "catalog:",
+    "yaml": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@ykdz/tooling-config": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  }
+}

@@ -1,3 +1,11 @@
+import type {
+  DefaultCompositionFile,
+  DefaultRootDeclarationData,
+} from "@ykdz/default-content-authoring/contracts";
+import type {
+  DefaultPresetPackageEvaluation,
+  DefaultPresetRootContributionResource,
+} from "@ykdz/default-content-authoring/preset-root-contribution";
 import { honoApiDependencyKey } from "@ykdz/reference-vue-hono-web/template";
 import type { CompositionPackage } from "@ykdz/template-core/composition";
 import {
@@ -6,14 +14,6 @@ import {
   type ContentIdentity,
 } from "@ykdz/template-core/content-identity";
 import type { GenerationRecordSelection } from "@ykdz/template-core/generation-record";
-import type {
-  DefaultPresetPackageEvaluation,
-  DefaultPresetRootContributionResource,
-} from "@ykdz/template-workspace/default-composition";
-import type {
-  DefaultCompositionFile,
-  DefaultRootDeclarationData,
-} from "@ykdz/template-workspace/reference-package";
 
 export const vueHonoJointE2eResourcePaths = Object.freeze({
   configuration: "resources/joint-e2e/playwright.config.ts",

@@ -1,6 +1,6 @@
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
 import { projectCliPackageManifest } from "@ykdz/reference-ts-cli/command-identity";
 import type { JsonValue } from "@ykdz/template-core/json";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 import referenceManifest from "../package.json" with { type: "json" };
 
@@ -102,7 +102,7 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
       purpose: "template-build",
     },
     {
-      name: "@ykdz/template-workspace",
+      name: "@ykdz/default-content-authoring",
       purpose: "template-execution",
     },
   ],
@@ -110,7 +110,7 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
     "@ykdz/reference-tooling-config",
     "@ykdz/reference-workspace-root",
     "@ykdz/reference-npm-publication",
-    "@ykdz/template-workspace",
+    "@ykdz/default-content-authoring",
   ],
   templateScripts: ["build:template", "check:author-planning-roles"],
   templateExports: ["./command-identity"],

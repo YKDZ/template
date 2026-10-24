@@ -60,6 +60,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@ykdz/default-content-authoring": "workspace:*",
     "@ykdz/tooling-config": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",

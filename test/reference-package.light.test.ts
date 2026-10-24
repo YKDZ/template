@@ -5,11 +5,11 @@ import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import type { PackageBinding } from "@ykdz/template-core/reference-package";
 import {
   defineReferencePackage,
   type ReferencePackageManifest,
-} from "@ykdz/template-workspace/reference-package";
+} from "@ykdz/default-content-authoring/reference-package";
+import type { PackageBinding } from "@ykdz/template-core/reference-package";
 
 type Fixture = {
   readonly source: string;

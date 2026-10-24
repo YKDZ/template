@@ -8,7 +8,7 @@
       "outputs": []
     },
     "build:template": {
-      "dependsOn": ["@ykdz/template-workspace#build"],
+      "dependsOn": ["@ykdz/default-content-authoring#build"],
       "inputs": [],
       "outputs": ["template-dist/**"],
       "tags": ["work:preparation"]

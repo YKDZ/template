@@ -1,6 +1,10 @@
 import { isBuiltin } from "node:module";
 
 import {
+  defaultPackageRoles,
+  isDefaultPackageRole,
+} from "@ykdz/default-content-authoring/package-role";
+import {
   assertProjectBlueprintDraft,
   ProjectBlueprintValidationError,
   validateProjectBlueprint,
@@ -10,11 +14,6 @@ import {
   type ProjectBlueprint,
   type ProjectBlueprintDraft,
 } from "@ykdz/template-core/project-blueprint";
-
-import {
-  defaultPackageRoles,
-  isDefaultPackageRole,
-} from "./default-package-role.ts";
 
 const defaultPackagePath = /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/u;
 const reservedWorkspaceCollections = new Set([
