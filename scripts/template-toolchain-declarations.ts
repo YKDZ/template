@@ -2,11 +2,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { parse as parseToml } from "smol-toml";
+import { parse as parseYaml } from "yaml";
 
 export type TemplateToolchainDeclarations = {
   readonly rootNodeEngine: string;
   readonly packageManagerDeclaration: string;
   readonly rustToolchainChannel: string;
+  readonly playwrightTestVersion: string;
 };
 
 export function deriveTemplateToolchain(
@@ -33,6 +35,11 @@ export function deriveTemplateToolchain(
     diagnostics.push(
       `根 rust-toolchain.toml 必须声明精确的已测 Rust 版本（形如 1.97.1，不接受 stable、beta、nightly 或范围），当前为 ${declarations.rustToolchainChannel}`,
     );
+  if (declarations.playwrightTestVersion.trim().length === 0) {
+    diagnostics.push(
+      "根 pnpm-workspace.yaml 必须在 catalog 中声明 @playwright/test 版本",
+    );
+  }
   return { diagnostics, cliNodeEngine: `^${node}`, pnpmVersion };
 }
 
@@ -47,20 +54,36 @@ export function readNodeEngine(manifest: {
   return typeof node === "string" ? node : "(缺失 engines.node)";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export async function readTemplateToolchainDeclarations(
   repositoryRoot: string,
 ): Promise<TemplateToolchainDeclarations> {
-  const [manifestContents, rustContents] = await Promise.all([
-    readFile(path.join(repositoryRoot, "package.json"), "utf8"),
-    readFile(path.join(repositoryRoot, "rust-toolchain.toml"), "utf8").catch(
-      () => "",
-    ),
-  ]);
+  const [manifestContents, rustContents, workspaceContents] = await Promise.all(
+    [
+      readFile(path.join(repositoryRoot, "package.json"), "utf8"),
+      readFile(path.join(repositoryRoot, "rust-toolchain.toml"), "utf8").catch(
+        () => "",
+      ),
+      readFile(path.join(repositoryRoot, "pnpm-workspace.yaml"), "utf8").catch(
+        () => "",
+      ),
+    ],
+  );
   const manifest = JSON.parse(manifestContents) as {
     readonly engines?: unknown;
     readonly packageManager?: unknown;
   };
   const rustDeclaration = parseToml(rustContents);
+  const workspaceDeclaration = parseYaml(workspaceContents);
+  const workspaceCatalog =
+    isRecord(workspaceDeclaration) && isRecord(workspaceDeclaration.catalog)
+      ? workspaceDeclaration.catalog
+      : undefined;
+  const playwrightTestVersion =
+    workspaceCatalog?.["@playwright/test"] ?? workspaceCatalog?.playwright;
   const toolchain = rustDeclaration.toolchain;
   const channel =
     typeof toolchain === "object" &&
@@ -78,5 +101,7 @@ export async function readTemplateToolchainDeclarations(
       typeof channel === "string"
         ? channel
         : "(缺失 rust-toolchain.toml 的 channel)",
+    playwrightTestVersion:
+      typeof playwrightTestVersion === "string" ? playwrightTestVersion : "",
   };
 }

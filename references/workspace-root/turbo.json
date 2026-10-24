@@ -55,6 +55,7 @@
     "build:template": {
       "dependsOn": [
         "@ykdz/template-core#build",
+        "@ykdz/template-environment#build",
         "@ykdz/default-content-authoring#build",
         "@ykdz/template-workspace-authoring#build"
       ],

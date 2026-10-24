@@ -1,6 +1,5 @@
 import type { RustToolchainRequirement } from "@ykdz/default-content-authoring/contracts";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
-import { composeApplicationRequirements } from "@ykdz/template-workspace/application-requirements";
 import { parse } from "smol-toml";
 
 export type { RustToolchainRequirement };
@@ -48,21 +47,6 @@ export function parseRustToolchainDeclaration(
     components: components ?? [],
     declaration,
   };
-}
-
-/** 合并 Rust 内容声明的工具链要求；版本、组件和配置文本都须兼容。 */
-export function resolveRustToolchainRequirements(
-  requirements: readonly RustToolchainRequirement[],
-): RustToolchainRequirement | undefined {
-  for (const requirement of requirements) {
-    parseRustToolchainDeclaration(requirement.configurationText);
-  }
-  return composeApplicationRequirements(
-    requirements.map((rustToolchain, index) => ({
-      source: `Rust 内容 ${index + 1}`,
-      requirements: { rustToolchain },
-    })),
-  ).rustToolchain;
 }
 
 /** 投影根声明；加包时保留已校验的用户声明原始字节。 */

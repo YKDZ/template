@@ -8,6 +8,11 @@
       "source": "./template/definition.ts",
       "types": "./template-dist/definition.d.ts",
       "default": "./template-dist/definition.js"
+    },
+    "./environment": {
+      "source": "./template/environment.ts",
+      "types": "./template-dist/environment.d.ts",
+      "default": "./template-dist/environment.js"
     }
   },
   "scripts": {
@@ -26,7 +31,7 @@
     "@ykdz/default-content-authoring": "workspace:*",
     "@ykdz/reference-workspace-root": "workspace:*",
     "@ykdz/template-core": "workspace:*",
-    "@ykdz/template-workspace": "workspace:*",
+    "@ykdz/template-environment": "workspace:*",
     "@ykdz/tooling-config": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

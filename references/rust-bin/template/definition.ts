@@ -10,10 +10,10 @@ import {
 } from "@ykdz/default-content-authoring/reference-package";
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type { ResourceFileSnapshot } from "@ykdz/template-core/reference-package";
-import { rustDevelopmentContainerToolLayer } from "@ykdz/template-workspace/default-environment";
 import { parse } from "smol-toml";
 
 import referenceManifest from "../package.json" with { type: "json" };
+import { rustDevelopmentContainerToolLayer } from "./environment.ts";
 import {
   projectRustCargoFiles,
   projectRustPackageScripts,
@@ -36,6 +36,10 @@ export type RustReferenceFacts = {
   readonly cargoLock: CargoFileSnapshot;
   readonly toolchainConfiguration: ReturnType<
     typeof parseRustToolchainDeclaration
+  >;
+  /** Rust owner 自身准备的 Dockerfile 文本快照。 */
+  readonly developmentContainerToolLayerFragments: Readonly<
+    Record<string, string>
   >;
 };
 
@@ -129,6 +133,10 @@ const nativeReference = defineReferencePackage<
     { path: "src/main.rs" },
     { path: "turbo.json" },
     { path: "template/rust-toolchain.toml", prepareOnly: true },
+    {
+      path: "resources/devcontainer/rust.Dockerfile",
+      prepareOnly: true,
+    },
   ],
   templateDependencies: [
     { name: "@ykdz/template-core", purpose: "template-execution" },
@@ -136,7 +144,7 @@ const nativeReference = defineReferencePackage<
       name: "@ykdz/default-content-authoring",
       purpose: "template-execution",
     },
-    { name: "@ykdz/template-workspace", purpose: "template-execution" },
+    { name: "@ykdz/template-environment", purpose: "template-build" },
     { name: "@ykdz/reference-workspace-root", purpose: "template-execution" },
     { name: "@ykdz/tooling-config", purpose: "template-build" },
     { name: "oxfmt", purpose: "template-build" },
@@ -148,7 +156,6 @@ const nativeReference = defineReferencePackage<
   executionDependencies: [
     "@ykdz/template-core",
     "@ykdz/default-content-authoring",
-    "@ykdz/template-workspace",
     "@ykdz/reference-workspace-root",
     "smol-toml",
   ],
@@ -158,7 +165,7 @@ const nativeReference = defineReferencePackage<
     "lint:fix",
     "typecheck",
   ],
-  templateExports: ["./reference", "./template"],
+  templateExports: ["./reference", "./template", "./environment"],
   foundation: ({ definition, ownerFacts, stableCommon }) => {
     const requirement = stableRustToolchain(stableCommon);
     if (requirement === undefined) {
@@ -187,6 +194,8 @@ const nativeReference = defineReferencePackage<
       developmentContainerToolLayers: [
         rustDevelopmentContainerToolLayer(requirement.toolchain),
       ],
+      developmentContainerToolLayerFragments:
+        ownerFacts.developmentContainerToolLayerFragments,
     };
   },
   environmentNeeds: ({ definition }) => [
@@ -235,12 +244,26 @@ const nativeReference = defineReferencePackage<
     if (toolchain === undefined) {
       throw new Error("Rust 工具链原生资源缺失：template/rust-toolchain.toml");
     }
+    const developmentContainerDockerfile = resources.find(
+      ({ path: resourcePath }) =>
+        resourcePath === "resources/devcontainer/rust.Dockerfile",
+    );
+    if (developmentContainerDockerfile === undefined) {
+      throw new Error(
+        "Rust 开发容器原生资源缺失：resources/devcontainer/rust.Dockerfile",
+      );
+    }
     return {
       cargoManifest: snapshot(resources, "Cargo.toml"),
       cargoLock: snapshot(resources, "Cargo.lock"),
       toolchainConfiguration: parseRustToolchainDeclaration(
         new TextDecoder("utf-8", { fatal: true }).decode(toolchain.content),
       ),
+      developmentContainerToolLayerFragments: {
+        "rust.Dockerfile": new TextDecoder("utf-8", { fatal: true }).decode(
+          developmentContainerDockerfile.content,
+        ),
+      },
     };
   },
 });
@@ -344,7 +367,6 @@ export const referencePackage = Object.freeze({
 export {
   parseRustToolchainDeclaration,
   projectRustToolchainDeclaration,
-  resolveRustToolchainRequirements,
 } from "./rust-toolchain-projection.ts";
 export type { CargoFileSnapshot } from "./rust-package-projection.ts";
 export type {

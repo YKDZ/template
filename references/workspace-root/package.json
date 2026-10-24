@@ -10,15 +10,25 @@
       "source": "./template/definition.ts",
       "types": "./template-dist/definition.d.ts",
       "default": "./template-dist/definition.js"
+    },
+    "./environment": {
+      "source": "./template/environment.ts",
+      "types": "./template-dist/environment.d.ts",
+      "default": "./template-dist/environment.js"
+    },
+    "./project-github": {
+      "source": "./template/project-github.ts",
+      "types": "./template-dist/project-github.d.ts",
+      "default": "./template-dist/project-github.js"
     }
   },
   "scripts": {
     "check:author-planning-roles": "pnpm --workspace-root run author-planning-roles:workspace -- --owner-directory \"$PWD\"",
     "typecheck:owner": "tsc -p tsconfig.node.json --noEmit --pretty false",
-    "format:check": "oxfmt --list-different --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .changeset/config.json .devcontainer scripts template",
-    "format:write": "oxfmt --write --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .changeset/config.json .devcontainer scripts template",
-    "lint": "oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts scripts",
-    "lint:fix": "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts scripts --fix",
+    "format:check": "oxfmt --list-different --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .changeset/config.json .devcontainer resources scripts template",
+    "format:write": "oxfmt --write --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .changeset/config.json .devcontainer resources scripts template",
+    "lint": "oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts scripts template",
+    "lint:fix": "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts scripts template --fix",
     "typecheck": "tsc --build --noEmit --pretty false",
     "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
     "check": "node --conditions=source scripts/task-gates.ts check",
@@ -32,12 +42,15 @@
     "@ykdz/default-content-authoring": "workspace:*",
     "@ykdz/reference-tooling-config": "workspace:../tooling-config",
     "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-environment": "workspace:*",
     "@ykdz/tooling-config": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "turbo": "catalog:",
-    "typescript-7": "catalog:"
+    "typescript-7": "catalog:",
+    "valibot": "catalog:",
+    "yaml": "catalog:"
   },
   "engines": {
     "node": "24"

@@ -1,17 +1,20 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
+import {
+  prepareRustDevelopmentContainerToolLayerFragments,
+  rustDevelopmentContainerToolLayer,
+} from "@ykdz/reference-rust-bin/environment";
+import {
+  browserTestDevelopmentContainerToolLayer,
+  prepareWorkspaceDevelopmentContainerResources,
+  prepareWorkspaceEditorCustomizationDeclarations,
+  projectWorkspaceDevelopmentContainer,
+  projectWorkspaceEditorCustomization,
+  shellCheckDevelopmentContainerToolLayer,
+} from "@ykdz/reference-workspace-root/environment";
 import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
 import type { DevelopmentContainerToolLayerProbe } from "@ykdz/template-environment/development-container-tool-layer";
-import {
-  prepareBuiltInDevelopmentContainerResources,
-  prepareBuiltInEditorCustomizationDeclarations,
-  projectBuiltInDevelopmentContainer,
-  projectBuiltInEditorCustomization,
-  rustDevelopmentContainerToolLayer,
-  shellCheckDevelopmentContainerToolLayer,
-  browserTestDevelopmentContainerToolLayer,
-} from "@ykdz/template-workspace/default-environment";
 import { format } from "oxfmt";
 
 import formatterConfig from "../oxfmt.config.ts";
@@ -42,7 +45,9 @@ export async function repositoryDevelopmentEnvironment(
   readonly probes: readonly DevelopmentContainerToolLayerProbe[];
 }> {
   const layers = [
-    browserTestDevelopmentContainerToolLayer(),
+    browserTestDevelopmentContainerToolLayer(
+      declarations.playwrightTestVersion,
+    ),
     rustDevelopmentContainerToolLayer(declarations.rustToolchainChannel.trim()),
     shellCheckDevelopmentContainerToolLayer(),
     {
@@ -73,22 +78,24 @@ export async function repositoryDevelopmentEnvironment(
       ],
     },
   ];
-  const environmentResources = prepareBuiltInDevelopmentContainerResources();
+  const environmentResources = prepareWorkspaceDevelopmentContainerResources();
+  const rustFragments = prepareRustDevelopmentContainerToolLayerFragments();
   const repositoryDockerfile = prepareRepositoryEnvironmentDockerfile();
-  const container = projectBuiltInDevelopmentContainer({
+  const container = projectWorkspaceDevelopmentContainer({
     nodeVersion: declarations.rootNodeEngine.trim(),
     layers,
     resources: {
       ...environmentResources,
       dockerfileFragments: {
         ...environmentResources.dockerfileFragments,
+        ...rustFragments,
         "repository.Dockerfile": repositoryDockerfile,
       },
     },
   });
-  const editor = projectBuiltInEditorCustomization(
+  const editor = projectWorkspaceEditorCustomization(
     ["oxc-format-lint", "vue", "rust-tooling"],
-    prepareBuiltInEditorCustomizationDeclarations(),
+    prepareWorkspaceEditorCustomizationDeclarations(),
   );
   const extensions = [...editor.extensions, "fill-labs.dependi"];
   const settings = {
