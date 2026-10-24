@@ -166,6 +166,7 @@ const nativeReference = defineReferencePackage<
     "typecheck",
   ],
   templateExports: ["./reference", "./template", "./environment"],
+  targetExports: {},
   foundation: ({ definition, ownerFacts, stableCommon }) => {
     const requirement = stableRustToolchain(stableCommon);
     if (requirement === undefined) {

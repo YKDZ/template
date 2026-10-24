@@ -37,11 +37,21 @@
       "source": "./src/main.ts",
       "types": "./dist/main.d.ts",
       "default": "./dist/main.js"
+    },
+    "./repository-configuration": {
+      "source": "./scripts/repository-configuration.ts"
     }
   },
   "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/main.d.ts",
+        "default": "./dist/main.js"
+      }
+    },
     "access": "public",
-    "directory": ".package"
+    "directory": ".package",
+    "linkDirectory": false
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",

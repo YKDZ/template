@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { it } from "node:test";
@@ -11,19 +20,97 @@ import {
   syncRepositoryConfiguration,
 } from "../scripts/sync-repository-config.ts";
 
+const requireFromTest = createRequire(import.meta.url);
+
+async function installOwnerFixture(
+  root: string,
+  packageName: string,
+  packagePath: string,
+  manifest: string,
+): Promise<void> {
+  const ownerDirectory = path.join(root, packagePath);
+  await mkdir(path.join(ownerDirectory, "scripts"), { recursive: true });
+  await copyFile(
+    requireFromTest.resolve(`${packageName}/repository-configuration`),
+    path.join(ownerDirectory, "scripts/repository-configuration.ts"),
+  );
+  await writeFile(path.join(ownerDirectory, "package.json"), manifest);
+
+  const packageLink = path.join(
+    root,
+    "node_modules",
+    ...packageName.split("/"),
+  );
+  await mkdir(path.dirname(packageLink), { recursive: true });
+  await symlink(
+    path.relative(path.dirname(packageLink), ownerDirectory),
+    packageLink,
+    "dir",
+  );
+}
+
+function ownerManifest(
+  packageName: string,
+  fields: Readonly<Record<string, unknown>> = {},
+): string {
+  return `${JSON.stringify(
+    {
+      name: packageName,
+      type: "module",
+      exports: {
+        "./repository-configuration": {
+          source: "./scripts/repository-configuration.ts",
+        },
+      },
+      ...fields,
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+const syncTargetPaths = [
+  "apps/cli/package.json",
+  "content/default/references/ts-cli/package.json",
+  "content/default/references/rust-bin/template/rust-toolchain.toml",
+  ".devcontainer/Dockerfile",
+  ".devcontainer/devcontainer.json",
+  ".vscode/settings.json",
+  ".vscode/extensions.json",
+];
+
+async function readSyncTargetSnapshot(
+  root: string,
+): Promise<(string | undefined)[]> {
+  return Promise.all(
+    syncTargetPaths.map((file) =>
+      readFile(path.join(root, file), "utf8").catch((error: unknown) => {
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          error.code === "ENOENT"
+        )
+          return undefined;
+        throw error;
+      }),
+    ),
+  );
+}
+
 async function repositoryFixture(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "repository-config-"));
-  await mkdir(path.join(root, "apps/cli"), { recursive: true });
-  await mkdir(path.join(root, "content/default/references/ts-cli"), {
-    recursive: true,
-  });
-  await mkdir(path.join(root, "content/default/references/rust-bin/template"), {
-    recursive: true,
-  });
   await mkdir(path.join(root, ".devcontainer"), { recursive: true });
   await writeFile(
     path.join(root, "package.json"),
-    '{"engines":{"node":"26.1.2"},"packageManager":"pnpm@13.2.1"}\n',
+    `${JSON.stringify({
+      engines: { node: "26.1.2" },
+      packageManager: "pnpm@13.2.1",
+      devDependencies: {
+        "@ykdz/template": "workspace:*",
+        "@ykdz/reference-ts-cli": "workspace:*",
+        "@ykdz/reference-rust-bin": "workspace:*",
+      },
+    })}\n`,
   );
   await writeFile(
     path.join(root, "rust-toolchain.toml"),
@@ -33,14 +120,33 @@ async function repositoryFixture(): Promise<string> {
     path.join(root, "pnpm-workspace.yaml"),
     'catalog:\n  "@playwright/test": 1.64.0\n',
   );
-  await writeFile(
-    path.join(root, "apps/cli/package.json"),
-    '{"engines":{"node":"^24.0.0"},"custom":true}\n',
+  await installOwnerFixture(
+    root,
+    "@ykdz/template",
+    "apps/cli",
+    ownerManifest("@ykdz/template", {
+      engines: { node: "^24.0.0" },
+      custom: true,
+    }),
   );
-  await writeFile(
-    path.join(root, "content/default/references/ts-cli/package.json"),
-    '{"engines":{"node":"^24.0.0"},"custom":"参考 CLI 局部配置"}\n',
+  await installOwnerFixture(
+    root,
+    "@ykdz/reference-ts-cli",
+    "content/default/references/ts-cli",
+    ownerManifest("@ykdz/reference-ts-cli", {
+      engines: { node: "^24.0.0" },
+      custom: "参考 CLI 局部配置",
+    }),
   );
+  await installOwnerFixture(
+    root,
+    "@ykdz/reference-rust-bin",
+    "content/default/references/rust-bin",
+    ownerManifest("@ykdz/reference-rust-bin"),
+  );
+  await mkdir(path.join(root, "content/default/references/rust-bin/template"), {
+    recursive: true,
+  });
   await writeFile(
     path.join(root, ".devcontainer/Dockerfile"),
     "FROM node:24.0.0-bookworm\n",
@@ -78,14 +184,20 @@ void it("统一同步重建自用配置，并从根版本声明投影工具链�
     assert.deepStrictEqual(container.customizations.vscode.settings, settings);
     assert.strictEqual(
       await readFile(path.join(root, "apps/cli/package.json"), "utf8"),
-      '{"engines":{"node":"^26.1.2"},"custom":true}\n',
+      ownerManifest("@ykdz/template", {
+        engines: { node: "^26.1.2" },
+        custom: true,
+      }),
     );
     assert.strictEqual(
       await readFile(
         path.join(root, "content/default/references/ts-cli/package.json"),
         "utf8",
       ),
-      '{"engines":{"node":"^26.1.2"},"custom":"参考 CLI 局部配置"}\n',
+      ownerManifest("@ykdz/reference-ts-cli", {
+        engines: { node: "^26.1.2" },
+        custom: "参考 CLI 局部配置",
+      }),
     );
     assert.deepStrictEqual(await syncRepositoryConfiguration(root), []);
   } finally {
@@ -108,6 +220,12 @@ void it("只读检查发现所有受管输出的漂移，同步恢复后再次�
     const referenceCliFile = "content/default/references/ts-cli/package.json";
     const rustFile =
       "content/default/references/rust-bin/template/rust-toolchain.toml";
+    const labels = [
+      ...managedFiles,
+      "应用 CLI 包清单",
+      "参考 CLI 包清单",
+      "Rust 工具链模板",
+    ];
     const files = [...managedFiles, cliFile, referenceCliFile, rustFile];
     const readOutputs = () =>
       Promise.all(
@@ -128,11 +246,16 @@ void it("只读检查发现所有受管输出的漂移，同步恢复后再次�
       await writeFile(path.join(root, file), '{"custom":"直接修改输出"}\n');
     await writeFile(
       path.join(root, cliFile),
-      '{"engines":{"node":"^24.0.0","npm":">=10"},"custom":"保留包配置"}\n',
+      ownerManifest("@ykdz/template", {
+        engines: { node: "^24.0.0", npm: ">=10" },
+        custom: "保留包配置",
+      }),
     );
     await writeFile(
       path.join(root, referenceCliFile),
-      '{"engines":{"node":"^24.0.0"}}\n',
+      ownerManifest("@ykdz/reference-ts-cli", {
+        engines: { node: "^24.0.0" },
+      }),
     );
     await writeFile(
       path.join(root, rustFile),
@@ -141,7 +264,7 @@ void it("只读检查发现所有受管输出的漂移，同步恢复后再次�
     const beforeCheck = await readOutputs();
     const diagnostics = await checkRepositoryConfiguration(root);
     assert.strictEqual(diagnostics.length, 7);
-    for (const file of files)
+    for (const file of labels)
       assert.ok(
         diagnostics.some(
           (message) =>
@@ -151,7 +274,7 @@ void it("只读检查发现所有受管输出的漂移，同步恢复后再次�
     assert.deepStrictEqual(await readOutputs(), beforeCheck);
     assert.deepStrictEqual(
       (await syncRepositoryConfiguration(root)).sort(),
-      files.sort(),
+      labels.sort(),
     );
     assert.deepStrictEqual(await checkRepositoryConfiguration(root), []);
     const settings = JSON.parse(
@@ -160,7 +283,10 @@ void it("只读检查发现所有受管输出的漂移，同步恢复后再次�
     assert.strictEqual(settings.custom, undefined);
     assert.strictEqual(
       await readFile(path.join(root, cliFile), "utf8"),
-      '{"engines":{"node":"^26.1.2","npm":">=10"},"custom":"保留包配置"}\n',
+      ownerManifest("@ykdz/template", {
+        engines: { node: "^26.1.2", npm: ">=10" },
+        custom: "保留包配置",
+      }),
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -171,11 +297,11 @@ void it("写入失败报告已更新文件，直接 Node 入口可离线补齐�
   const root = await repositoryFixture();
   try {
     await assert.rejects(
-      syncRepositoryConfiguration(root, async (file, contents) => {
-        if (file.endsWith("rust-toolchain.toml")) throw new Error("磁盘故障");
-        await writeFile(file, contents);
+      syncRepositoryConfiguration(root, async (label, write) => {
+        if (label === "Rust 工具链模板") throw new Error("磁盘故障");
+        await write();
       }),
-      /已更新文件：apps\/cli\/package.json、content\/default\/references\/ts-cli\/package.json；/u,
+      /已更新文件：应用 CLI 包清单、参考 CLI 包清单；/u,
     );
     const result = await execa(
       process.execPath,
@@ -194,7 +320,10 @@ void it("写入失败报告已更新文件，直接 Node 入口可离线补齐�
     assert.deepStrictEqual(await checkRepositoryConfiguration(root), []);
     assert.strictEqual(
       await readFile(path.join(root, "apps/cli/package.json"), "utf8"),
-      '{"engines":{"node":"^26.1.2"},"custom":true}\n',
+      ownerManifest("@ykdz/template", {
+        engines: { node: "^26.1.2" },
+        custom: true,
+      }),
     );
     assert.strictEqual(
       await readFile(
@@ -213,25 +342,17 @@ void it("写入失败报告已更新文件，直接 Node 入口可离线补齐�
 
 for (const failure of ["node", "pnpm", "rust", "invalid-toml"]) {
   void it(`预检失败 ${failure} 时已经需要更新的其他目标也零写入`, async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "sync-preflight-"));
+    const root = await repositoryFixture();
     try {
-      await mkdir(path.join(root, "apps/cli"), { recursive: true });
-      await mkdir(path.join(root, ".devcontainer"), { recursive: true });
-      await mkdir(path.join(root, "content/default/references/ts-cli"), {
-        recursive: true,
-      });
-      await mkdir(
-        path.join(root, "content/default/references/rust-bin/template"),
-        {
-          recursive: true,
-        },
+      const rootManifest = JSON.parse(
+        await readFile(path.join(root, "package.json"), "utf8"),
       );
+      rootManifest.engines.node = failure === "node" ? ">=26" : "26.1.2";
+      rootManifest.packageManager =
+        failure === "pnpm" ? "pnpm@^13" : "pnpm@13.2.1";
       await writeFile(
         path.join(root, "package.json"),
-        JSON.stringify({
-          engines: { node: failure === "node" ? ">=26" : "26.1.2" },
-          packageManager: failure === "pnpm" ? "pnpm@^13" : "pnpm@13.2.1",
-        }),
+        `${JSON.stringify(rootManifest)}\n`,
       );
       await writeFile(
         path.join(root, "rust-toolchain.toml"),
@@ -241,12 +362,19 @@ for (const failure of ["node", "pnpm", "rust", "invalid-toml"]) {
             ? '[toolchain]\nchannel = "1.100.2"\nchannel = "stable"\n'
             : '[toolchain]\nchannel = "1.100.2"\n',
       );
-      const cli = '{"engines":{"node":"^24.0.0"},"custom":true}\n';
       const docker = "FROM node:24.0.0-bookworm\nENV CUSTOM=yes\n";
-      await writeFile(path.join(root, "apps/cli/package.json"), cli);
+      await writeFile(
+        path.join(root, "apps/cli/package.json"),
+        ownerManifest("@ykdz/template", {
+          engines: { node: "^24.0.0" },
+          custom: true,
+        }),
+      );
       await writeFile(
         path.join(root, "content/default/references/ts-cli/package.json"),
-        cli,
+        ownerManifest("@ykdz/reference-ts-cli", {
+          engines: { node: "^24.0.0" },
+        }),
       );
       await writeFile(
         path.join(
@@ -256,6 +384,7 @@ for (const failure of ["node", "pnpm", "rust", "invalid-toml"]) {
         '[toolchain]\nchannel = "1.99.0"\n',
       );
       await writeFile(path.join(root, ".devcontainer/Dockerfile"), docker);
+      const before = await readSyncTargetSnapshot(root);
       const result = await execa(
         process.execPath,
         [
@@ -270,16 +399,31 @@ for (const failure of ["node", "pnpm", "rust", "invalid-toml"]) {
         { reject: false },
       );
       assert.strictEqual(result.exitCode, 1);
-      assert.strictEqual(
-        await readFile(path.join(root, "apps/cli/package.json"), "utf8"),
-        cli,
-      );
-      assert.strictEqual(
-        await readFile(path.join(root, ".devcontainer/Dockerfile"), "utf8"),
-        docker,
-      );
+      assert.deepStrictEqual(await readSyncTargetSnapshot(root), before);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 }
+
+void it("局部拥有者清单形状错误时其他漂移目标保持原样", async () => {
+  const root = await repositoryFixture();
+  try {
+    await writeFile(
+      path.join(root, "apps/cli/package.json"),
+      ownerManifest("@ykdz/template", { engines: ["^24.0.0"] }),
+    );
+    await writeFile(
+      path.join(root, ".devcontainer/Dockerfile"),
+      "FROM node:24.0.0-bookworm\nENV CUSTOM=yes\n",
+    );
+    const before = await readSyncTargetSnapshot(root);
+    await assert.rejects(
+      syncRepositoryConfiguration(root),
+      /应用 CLI 包清单: 无法识别 engines/u,
+    );
+    assert.deepStrictEqual(await readSyncTargetSnapshot(root), before);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -114,6 +114,7 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
   ],
   templateScripts: ["build:template", "check:author-planning-roles"],
   templateExports: ["./command-identity"],
+  targetExports: {},
   foundation: {
     toolchains: {},
     editorCapabilities: ["oxc-format-lint"],

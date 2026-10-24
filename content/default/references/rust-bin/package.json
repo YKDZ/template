@@ -13,6 +13,9 @@
       "source": "./template/environment.ts",
       "types": "./template-dist/environment.d.ts",
       "default": "./template-dist/environment.js"
+    },
+    "./repository-configuration": {
+      "source": "./scripts/repository-configuration.ts"
     }
   },
   "scripts": {
