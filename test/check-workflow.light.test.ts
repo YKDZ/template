@@ -463,7 +463,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
     const cleanupIndex = steps.findIndex(
       (step) =>
         step.run?.includes(
-          "docker ps -aq --filter label=com.ykdz.template.fixture.project",
+          "docker ps -aq --filter label=com.ykdz.template.verification.project",
         ) && step.run.includes('docker rm -f "${fixture_containers[@]}"'),
     );
     const restoreIndex = steps.findIndex(

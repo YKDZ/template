@@ -3,11 +3,6 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./development-container-session": {
-      "source": "./src/development-container-session.ts",
-      "types": "./dist/development-container-session.d.ts",
-      "default": "./dist/development-container-session.js"
-    },
     "./check-generated-registry": null,
     "./workflow-contract": {
       "source": "./src/workflow-contract.ts",
@@ -39,6 +34,7 @@
     "@ykdz/template-content": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
+    "@ykdz/template-verification-runtime": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*",
     "execa": "catalog:",

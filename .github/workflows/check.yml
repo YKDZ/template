@@ -169,7 +169,7 @@ jobs:
       - name: 清理测试容器
         if: always() && steps.fixture-prerequisites.outcome == 'success'
         run: |
-          fixture_container_ids="$(docker ps -aq --filter label=com.ykdz.template.fixture.project)"
+          fixture_container_ids="$(docker ps -aq --filter label=com.ykdz.template.verification.project)"
           if [[ -n "$fixture_container_ids" ]]; then
             readarray -t fixture_containers <<< "$fixture_container_ids"
             docker rm -f "${fixture_containers[@]}"

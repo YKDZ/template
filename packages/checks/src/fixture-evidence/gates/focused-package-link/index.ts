@@ -7,12 +7,12 @@ import type {
   PackageDefinition,
   PersistedPackageDefinition,
 } from "@ykdz/template-core/project-blueprint";
+import type { ContainerCommandRunner } from "@ykdz/template-verification-runtime/development-container-session";
 
 import type { GeneratedScenarioReceipt } from "../../../generated-content.ts";
 import {
   deriveFixtureGateContractIdentity,
   normalizedFixtureDependencyInstallationPlan,
-  type FixtureCommandRunner,
 } from "../../kernel/index.ts";
 
 type FocusedProviderManifest = {
@@ -257,7 +257,7 @@ export async function executeFocusedPackageLink(options: {
   readonly fixtureWorkspace: string;
   readonly consumerPackagePath: string;
   readonly providerPackagePath: string;
-  readonly run: FixtureCommandRunner;
+  readonly run: ContainerCommandRunner;
 }): Promise<void> {
   const run = options.run;
   const consumerRoot = path.join(
