@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 
 import * as v from "valibot";
 
-/** 能力身份由默认工作区策略提供。 */
+/** 能力声明由根环境维护，能力选择由内容拥有者贡献。 */
 export type EditorCustomizationCapability = string;
 
 export type EditorCustomization = {

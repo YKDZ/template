@@ -42,6 +42,30 @@ export const referencePackage = defineReferencePackage({
     { path: "tsconfig.config.json" },
     { path: "tsconfig.scripts.json" },
     { path: "template/files/turbo.json", targetPath: "turbo.json" },
+    { path: "resources/environment/base.Dockerfile", prepareOnly: true },
+    {
+      path: "resources/environment/devcontainer/browser-test.Dockerfile",
+      prepareOnly: true,
+    },
+    {
+      path: "resources/environment/devcontainer/github-cli.Dockerfile",
+      prepareOnly: true,
+    },
+    {
+      path: "resources/environment/devcontainer/shellcheck.Dockerfile",
+      prepareOnly: true,
+    },
+    {
+      path: "resources/environment/devcontainer/workspace-template.json",
+      prepareOnly: true,
+    },
+    {
+      path: "resources/environment/editor-customization/capabilities.json",
+      prepareOnly: true,
+    },
+    { path: "resources/github/check.yml", prepareOnly: true },
+    { path: "resources/github/dependabot.yml", prepareOnly: true },
+    { path: "resources/next-steps.md", prepareOnly: true },
   ],
   compositionResources: [
     { path: "resources/gitignore", targetPath: ".gitignore" },
@@ -50,20 +74,38 @@ export const referencePackage = defineReferencePackage({
     { name: "@ykdz/tooling-config", purpose: "template-build" },
     {
       name: "@ykdz/template-core",
-      purpose: "template-build",
+      purpose: "template-execution",
+    },
+    {
+      name: "@ykdz/template-environment",
+      purpose: "template-execution",
     },
     {
       name: "@ykdz/default-content-authoring",
       purpose: "template-execution",
     },
+    { name: "valibot", purpose: "template-execution" },
+    { name: "yaml", purpose: "template-execution" },
   ],
-  executionDependencies: ["@ykdz/default-content-authoring"],
+  executionDependencies: [
+    "@ykdz/default-content-authoring",
+    "@ykdz/template-core",
+    "@ykdz/template-environment",
+    "valibot",
+    "yaml",
+  ],
   templateScripts: [
     "build:template",
     "check:author-planning-roles",
     "typecheck:owner",
   ],
-  templateExports: ["./reference", "./template", "./task-gates"],
+  templateExports: [
+    "./reference",
+    "./template",
+    "./task-gates",
+    "./environment",
+    "./project-github",
+  ],
   transformManifest: ({ manifest, conventions, stableCommon }) => {
     const rootManifest: Record<string, unknown> = {
       ...manifest,

@@ -8,12 +8,23 @@ import {
   type DevelopmentContainerToolLayerPlan,
 } from "@ykdz/template-environment/development-container-tool-layer";
 
-import { environmentSources } from "./default-environment-sources.ts";
 import {
   editorCustomizationForCapabilities,
   loadEditorCustomizationDeclarations,
   type EditorCustomization,
   type EditorCustomizationCapability,
+  type EditorCustomizationDeclarations,
+} from "./editor-customization.ts";
+import { workspaceEnvironmentSources as environmentSources } from "./environment-sources.ts";
+
+export type {
+  EditorCustomization,
+  EditorCustomizationCapability,
+  EditorCustomizationDeclarations,
+} from "./editor-customization.ts";
+export {
+  editorCustomizationForCapabilities,
+  loadEditorCustomizationDeclarations,
 } from "./editor-customization.ts";
 
 export function githubCliDevelopmentContainerToolLayer(): DevelopmentContainerToolLayer {
@@ -34,6 +45,7 @@ export function githubCliDevelopmentContainerToolLayer(): DevelopmentContainerTo
   };
 }
 
+/** 浏览器资源版本由最终合成依赖事实提供。 */
 export function browserTestDevelopmentContainerToolLayer(
   playwrightTestVersion: string,
 ): DevelopmentContainerToolLayer {
@@ -66,35 +78,34 @@ export function browserTestDevelopmentContainerToolLayer(
   };
 }
 
-export type PreparedBuiltInDevelopmentContainerResources = {
+export type PreparedWorkspaceDevelopmentContainerResources = {
   readonly configuration: Readonly<Record<string, unknown>> & {
     readonly features: Readonly<Record<string, Record<string, unknown>>>;
   };
   readonly dockerfileFragments: Readonly<Record<string, string>>;
 };
 
-const builtInDockerfileResources = [
+const workspaceDockerfileResources = [
   "base.Dockerfile",
   "github-cli.Dockerfile",
-  "rust.Dockerfile",
   "browser-test.Dockerfile",
   "shellcheck.Dockerfile",
 ] as const;
 
-/** 环境 owner 在工作区策略准备阶段读取其有限配置与 Dockerfile 资源。 */
-export function prepareBuiltInDevelopmentContainerResources(): PreparedBuiltInDevelopmentContainerResources {
+/** 根参考包在准备阶段读取自有配置和 Dockerfile 片段。 */
+export function prepareWorkspaceDevelopmentContainerResources(): PreparedWorkspaceDevelopmentContainerResources {
   const read = (source: typeof environmentSources.base, file: string) => {
     try {
       return readFileSync(resolveTemplateSource(source, file), "utf8");
     } catch (cause) {
       throw new Error(
-        `默认环境资源 @ykdz/template-workspace#./default-environment prepare 阶段无法读取 ${file}`,
+        `根环境资源 @ykdz/reference-workspace-root#./environment prepare 阶段无法读取 ${file}`,
         { cause },
       );
     }
   };
   const dockerfileFragments = Object.fromEntries(
-    builtInDockerfileResources.map((file) => [
+    workspaceDockerfileResources.map((file) => [
       file,
       read(
         file === "base.Dockerfile"
@@ -104,7 +115,7 @@ export function prepareBuiltInDevelopmentContainerResources(): PreparedBuiltInDe
       ),
     ]),
   );
-  let configuration: PreparedBuiltInDevelopmentContainerResources["configuration"];
+  let configuration: PreparedWorkspaceDevelopmentContainerResources["configuration"];
   try {
     configuration = JSON.parse(
       readFileSync(
@@ -114,10 +125,10 @@ export function prepareBuiltInDevelopmentContainerResources(): PreparedBuiltInDe
         ),
         "utf8",
       ),
-    ) as PreparedBuiltInDevelopmentContainerResources["configuration"];
+    ) as PreparedWorkspaceDevelopmentContainerResources["configuration"];
   } catch (cause) {
     throw new Error(
-      "默认环境资源 @ykdz/template-workspace#./default-environment prepare 阶段无法读取 workspace-template.json",
+      "根环境资源 @ykdz/reference-workspace-root#./environment prepare 阶段无法读取 workspace-template.json",
       { cause },
     );
   }
@@ -177,12 +188,12 @@ function baseDevelopmentContainerToolLayer(
   };
 }
 
-function completeBuiltInDevelopmentContainer(options: {
+function completeWorkspaceDevelopmentContainer(options: {
   readonly nodeVersion: string;
   readonly layers?: readonly DevelopmentContainerToolLayer[];
-  readonly resources: PreparedBuiltInDevelopmentContainerResources;
+  readonly resources: PreparedWorkspaceDevelopmentContainerResources;
 }): DevelopmentContainerToolLayerPlan & {
-  readonly configuration: PreparedBuiltInDevelopmentContainerResources["configuration"];
+  readonly configuration: PreparedWorkspaceDevelopmentContainerResources["configuration"];
   readonly features: Readonly<Record<string, Record<string, unknown>>>;
   readonly dockerfile: string;
 } {
@@ -230,48 +241,13 @@ function completeBuiltInDevelopmentContainer(options: {
   };
 }
 
-/** 只消费所属环境准备事实并投影所选开发容器能力。 */
-export function projectBuiltInDevelopmentContainer(options: {
+/** 只消费根环境快照和所选能力，投影开发容器配置。 */
+export function projectWorkspaceDevelopmentContainer(options: {
   readonly nodeVersion: string;
   readonly layers?: readonly DevelopmentContainerToolLayer[];
-  readonly resources: PreparedBuiltInDevelopmentContainerResources;
-}): ReturnType<typeof completeBuiltInDevelopmentContainer> {
-  return completeBuiltInDevelopmentContainer(options);
-}
-
-/** 非生成策略消费者的便利入口；生成策略应先准备再调用纯 project。 */
-export function rustDevelopmentContainerToolLayer(
-  rustVersion: string,
-): DevelopmentContainerToolLayer {
-  return {
-    identity: "rust",
-    dockerfile: {
-      source: environmentSources.devcontainer,
-      from: "rust.Dockerfile",
-    },
-    requires: ["node-pnpm"],
-    buildArguments: [{ name: "RUST_TOOLCHAIN", value: rustVersion }],
-    mounts: [
-      {
-        identity: "cargo-registry",
-        type: "volume",
-        source: "${devcontainerId}-cargo-registry",
-        target: "/usr/local/cargo/registry",
-      },
-      {
-        identity: "cargo-git",
-        type: "volume",
-        source: "${devcontainerId}-cargo-git",
-        target: "/usr/local/cargo/git",
-      },
-    ],
-    probes: [
-      { identity: "cargo", command: "cargo", args: ["--version"] },
-      { identity: "rustc", command: "rustc", args: ["--version"] },
-      { identity: "rustfmt", command: "cargo", args: ["fmt", "--version"] },
-      { identity: "clippy", command: "cargo", args: ["clippy", "--version"] },
-    ],
-  };
+  readonly resources: PreparedWorkspaceDevelopmentContainerResources;
+}): ReturnType<typeof completeWorkspaceDevelopmentContainer> {
+  return completeWorkspaceDevelopmentContainer(options);
 }
 
 export function shellCheckDevelopmentContainerToolLayer(): DevelopmentContainerToolLayer {
@@ -288,29 +264,29 @@ export function shellCheckDevelopmentContainerToolLayer(): DevelopmentContainerT
   };
 }
 
-/** 环境 owner 在策略准备阶段读取并验证编辑器能力声明。 */
-export function prepareBuiltInEditorCustomizationDeclarations() {
+/** 根参考包在准备阶段读取并验证自有编辑器能力声明。 */
+export function prepareWorkspaceEditorCustomizationDeclarations(): EditorCustomizationDeclarations {
   try {
     return loadEditorCustomizationDeclarations(
       resolveTemplateSource(
         environmentSources.editorCustomization,
         "capabilities.json",
       ),
-      "@ykdz/template-workspace#./assets/environment/editor-customization/capabilities.json",
+      "@ykdz/reference-workspace-root#./resources/environment/editor-customization/capabilities.json",
     );
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     throw new Error(
-      `默认环境资源 @ykdz/template-workspace#./default-environment prepare 阶段失败：${detail}`,
+      `根环境资源 @ykdz/reference-workspace-root#./environment prepare 阶段失败：${detail}`,
       { cause },
     );
   }
 }
 
 /** 只组合已准备的编辑器声明与实际能力。 */
-export function projectBuiltInEditorCustomization(
+export function projectWorkspaceEditorCustomization(
   capabilities: readonly EditorCustomizationCapability[],
-  declarations: ReturnType<typeof loadEditorCustomizationDeclarations>,
+  declarations: EditorCustomizationDeclarations,
 ): EditorCustomization {
   const unknownCapability = capabilities.find(
     (capability) => !declarations.capabilityOrder.includes(capability),

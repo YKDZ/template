@@ -21,6 +21,26 @@ import {
   serializeNativeJson,
   serializeNativeReferenceDocument,
 } from "@ykdz/default-content-authoring/reference-package";
+import {
+  browserTestDevelopmentContainerToolLayer,
+  prepareWorkspaceDevelopmentContainerResources,
+  prepareWorkspaceEditorCustomizationDeclarations,
+  projectWorkspaceDevelopmentContainer,
+  projectWorkspaceEditorCustomization,
+  shellCheckDevelopmentContainerToolLayer,
+  type EditorCustomizationCapability,
+  type EditorCustomizationDeclarations,
+  type PreparedWorkspaceDevelopmentContainerResources,
+} from "@ykdz/reference-workspace-root/environment";
+import {
+  normalizeProjectCheckWorkflowJob,
+  prepareProjectGithubTemplates,
+  projectCheckWorkflow,
+  projectDependabotConfig,
+  projectNextStepsDocument,
+  type PreparedProjectGithubTemplates,
+  type ProjectCheckWorkflowJob,
+} from "@ykdz/reference-workspace-root/project-github";
 import { workspaceRootNextSteps } from "@ykdz/reference-workspace-root/template";
 import type {
   Composition,
@@ -61,23 +81,6 @@ import {
   collectGeneratedManifestCatalogReferences,
   selectTemplateDependencyCatalogEntries,
 } from "./dependency-catalog.ts";
-import {
-  browserTestDevelopmentContainerToolLayer,
-  prepareBuiltInDevelopmentContainerResources,
-  prepareBuiltInEditorCustomizationDeclarations,
-  projectBuiltInDevelopmentContainer,
-  projectBuiltInEditorCustomization,
-  shellCheckDevelopmentContainerToolLayer,
-} from "./development-environment.ts";
-import type { EditorCustomizationCapability } from "./editor-customization.ts";
-import {
-  normalizeProjectCheckWorkflowJob,
-  projectCheckWorkflow,
-  prepareProjectGithubTemplates,
-  projectDependabotConfig,
-  projectNextStepsDocument,
-} from "./project-github.ts";
-import type { ProjectCheckWorkflowJob } from "./project-github.ts";
 import { PackageLinkValidationError } from "./project-requirements.ts";
 import { releaseToolchainSnapshot } from "./release-toolchain-snapshot.ts";
 import {
@@ -115,13 +118,9 @@ export type PreparedDefaultPresetRootContribution = Readonly<{
 }>;
 
 export type DefaultCompositionResources = {
-  readonly github: ReturnType<typeof prepareProjectGithubTemplates>;
-  readonly developmentContainer: ReturnType<
-    typeof prepareBuiltInDevelopmentContainerResources
-  >;
-  readonly editor: ReturnType<
-    typeof prepareBuiltInEditorCustomizationDeclarations
-  >;
+  readonly github: PreparedProjectGithubTemplates;
+  readonly developmentContainer: PreparedWorkspaceDevelopmentContainerResources;
+  readonly editor: EditorCustomizationDeclarations;
   readonly nextSteps: readonly { readonly display: string }[];
 };
 
@@ -181,13 +180,13 @@ export type DefaultCompositionOwnerFacts = {
   readonly container: {
     readonly dockerfileText: string;
     readonly buildArguments: ReturnType<
-      typeof projectBuiltInDevelopmentContainer
+      typeof projectWorkspaceDevelopmentContainer
     >["buildArguments"];
     readonly mounts: ReturnType<
-      typeof projectBuiltInDevelopmentContainer
+      typeof projectWorkspaceDevelopmentContainer
     >["mounts"];
     readonly probes: ReturnType<
-      typeof projectBuiltInDevelopmentContainer
+      typeof projectWorkspaceDevelopmentContainer
     >["probes"];
   };
 };
@@ -332,8 +331,8 @@ function parseConventions(value: unknown): DefaultWorkspaceConventions {
 export function prepareDefaultCompositionResources(): DefaultCompositionResources {
   return Object.freeze({
     github: prepareProjectGithubTemplates(),
-    developmentContainer: prepareBuiltInDevelopmentContainerResources(),
-    editor: prepareBuiltInEditorCustomizationDeclarations(),
+    developmentContainer: prepareWorkspaceDevelopmentContainerResources(),
+    editor: prepareWorkspaceEditorCustomizationDeclarations(),
     nextSteps: workspaceRootNextSteps,
   });
 }
@@ -991,6 +990,43 @@ function mergeEntries<T>(options: {
   return result;
 }
 
+function developmentContainerFragmentTexts(options: {
+  readonly packages: readonly DefaultEvaluation[];
+  readonly rootFragments: Readonly<Record<string, string>>;
+}): Readonly<Record<string, string>> {
+  const fragments = { ...options.rootFragments };
+  const owners = new Map(
+    Object.keys(fragments).map((path) => [path, "根参考包"]),
+  );
+  for (const { package: item, contribution } of options.packages) {
+    const declared =
+      contribution.facts.foundation.developmentContainerToolLayerFragments;
+    if (declared === undefined) continue;
+    if (!isRecord(declared)) {
+      throw new Error(
+        `开发容器片段快照无效：${sourceLabel(item.contentIdentity)}`,
+      );
+    }
+    const owner = sourceLabel(item.contentIdentity);
+    for (const [path, text] of Object.entries(declared)) {
+      if (typeof text !== "string") {
+        throw new Error(`开发容器片段必须是文本：${owner}/${path}`);
+      }
+      const previousOwner = owners.get(path);
+      if (previousOwner !== undefined && fragments[path] !== text) {
+        throw new Error(
+          `开发容器 Dockerfile 片段冲突：${path}；来源 ${previousOwner} 与 ${owner}`,
+        );
+      }
+      if (previousOwner === undefined) {
+        owners.set(path, owner);
+        fragments[path] = text;
+      }
+    }
+  }
+  return fragments;
+}
+
 function packageGlobs(blueprint: ProjectBlueprint): readonly string[] {
   const globs = new Set(["apps/*", "packages/*"]);
   for (const definition of blueprint.packages) {
@@ -1607,7 +1643,7 @@ export function createDefaultComposition(options: {
         ),
       });
       const ownerPackagePaths = packagePaths;
-      const editor = projectBuiltInEditorCustomization(
+      const editor = projectWorkspaceEditorCustomization(
         allFacts.flatMap((facts) => {
           const capabilities = facts.foundation.editorCapabilities;
           return Array.isArray(capabilities)
@@ -1664,10 +1700,19 @@ export function createDefaultComposition(options: {
           shellCheckDevelopmentContainerToolLayer(),
         );
       }
-      const developmentContainer = projectBuiltInDevelopmentContainer({
+      const developmentContainerResources = {
+        ...combineOptions.stableCommon.resources.developmentContainer,
+        dockerfileFragments: developmentContainerFragmentTexts({
+          packages: combineOptions.packages,
+          rootFragments:
+            combineOptions.stableCommon.resources.developmentContainer
+              .dockerfileFragments,
+        }),
+      };
+      const developmentContainer = projectWorkspaceDevelopmentContainer({
         nodeVersion: combineOptions.stableCommon.nodeDeclaration,
         layers: developmentContainerLayers,
-        resources: combineOptions.stableCommon.resources.developmentContainer,
+        resources: developmentContainerResources,
       });
       const dependencyMaintenance = ownerDependencies(
         allFacts,
@@ -1689,8 +1734,7 @@ export function createDefaultComposition(options: {
       const checkWorkflow = composeCheckWorkflow(
         projectCheckWorkflow(
           {
-            packagePaths: ownerPackagePaths,
-            diagnosticArtifacts: ciDiagnosticArtifacts,
+            diagnostics: ciDiagnosticArtifacts,
             ...(ciJob === undefined ? {} : { job: ciJob }),
           },
           combineOptions.stableCommon.resources.github.checkWorkflow,
