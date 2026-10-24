@@ -40,7 +40,7 @@
     },
     "build:template": {
       "tags": ["work:preparation"],
-      "dependsOn": ["@ykdz/template-workspace#build"],
+      "dependsOn": ["@ykdz/default-content-authoring#build"],
       "outputs": ["template-dist/**"]
     },
     "check:author-planning-roles": {

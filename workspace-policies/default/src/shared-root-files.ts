@@ -1,17 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 
+import type { SharedRootContribution } from "@ykdz/default-content-authoring/contracts";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
-
-import type { CiDiagnosticArtifactDeclaration } from "./ci-diagnostic-artifact.ts";
-import type {
-  CheckEnvironmentNeed,
-  DeploymentEnvironmentNeed,
-} from "./environment-needs.ts";
-import type { DependencyMaintenancePolicy } from "./project-requirements.ts";
-
-type SharedRootCiStep =
-  | (Readonly<Record<string, unknown>> & { readonly id: string })
-  | YAMLMap<unknown>;
 
 function isYamlMapStep(value: unknown): value is YAMLMap<unknown> {
   if (typeof value !== "object" || value === null) return false;
@@ -26,41 +16,6 @@ function isYamlMapStep(value: unknown): value is YAMLMap<unknown> {
     typeof candidate.clone === "function"
   );
 }
-
-/** 外层拥有者声明共享文件中的领域条目；不向参考包授予根写入权限。 */
-export type SharedRootContribution = {
-  readonly kind: "shared-root-files";
-  readonly source: string;
-  readonly manifest?: {
-    readonly scripts?: Readonly<Record<string, string>>;
-    readonly imports?: Readonly<Record<string, string>>;
-    readonly devDependencies?: Readonly<Record<string, string>>;
-  };
-  /** 同名任务作为完整声明比较，不递归合并任务内部的规则。 */
-  readonly turboTasks?: Readonly<Record<string, unknown>>;
-  readonly typescript?: {
-    readonly compilerOptions?: Readonly<Record<string, unknown>>;
-    readonly include?: readonly string[];
-  };
-  /** 每个步骤必须有独占的 id；before 引用已存在的步骤。 */
-  readonly ciSteps?: readonly {
-    readonly before?: string;
-    readonly steps: readonly SharedRootCiStep[];
-  }[];
-  /** 声明根检查作业的名称和超时；同一字段只允许等价来源。 */
-  readonly ciJob?: {
-    readonly name?: string;
-    readonly timeoutMinutes?: number;
-  };
-  /** 外层拥有者声明共享环境及依赖维护需求。 */
-  readonly environmentNeeds?: {
-    readonly check?: readonly CheckEnvironmentNeed[];
-    readonly deployment?: readonly DeploymentEnvironmentNeed[];
-  };
-  readonly dependencyMaintenance?: DependencyMaintenancePolicy;
-  /** 由所属内容声明的 CI 失败诊断制品。 */
-  readonly ciDiagnosticArtifacts?: readonly CiDiagnosticArtifactDeclaration[];
-};
 
 function pointer(value: string): string {
   return value.replaceAll("~", "~0").replaceAll("/", "~1");

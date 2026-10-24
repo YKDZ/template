@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import type { DefaultPresetPackageEvaluation } from "@ykdz/default-content-authoring/preset-root-contribution";
 import { honoApiDependencyKey } from "@ykdz/reference-vue-hono-web/template";
 import type { CompositionPackage } from "@ykdz/template-core/composition";
 import type { ContentIdentity } from "@ykdz/template-core/content-identity";
 import type { PackageDefinitionId } from "@ykdz/template-core/project-blueprint";
-import type { DefaultPresetPackageEvaluation } from "@ykdz/template-workspace/default-composition";
 
 import { preset } from "../template/definition.ts";
 

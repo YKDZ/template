@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 
+import type { SharedRootContribution } from "@ykdz/default-content-authoring/contracts";
 import {
   composeCheckWorkflow,
   composeSharedRootFiles,
-  type SharedRootContribution,
 } from "@ykdz/template-workspace/shared-root-files";
 import { parse as parseYaml } from "yaml";
 

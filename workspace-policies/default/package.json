@@ -59,16 +59,6 @@
       "types": "./dist/project-requirements.d.ts",
       "default": "./dist/project-requirements.js"
     },
-    "./default-package-role": {
-      "source": "./src/default-package-role.ts",
-      "types": "./dist/default-package-role.d.ts",
-      "default": "./dist/default-package-role.js"
-    },
-    "./reference-package": {
-      "source": "./src/reference-package.ts",
-      "types": "./dist/reference-package.d.ts",
-      "default": "./dist/reference-package.js"
-    },
     "./default-composition": {
       "source": "./src/default-composition.ts",
       "types": "./dist/default-composition.d.ts",
@@ -93,10 +83,10 @@
     "sync:release-toolchain-snapshot": "node scripts/sync-snapshot.ts src/release-toolchain-snapshot.ts"
   },
   "dependencies": {
+    "@ykdz/default-content-authoring": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
-    "@ykdz/template-workspace-authoring": "workspace:*",
     "ignore": "catalog:",
     "jsonc-parser": "catalog:",
     "smol-toml": "catalog:",

@@ -1,18 +1,16 @@
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
-import type { ResourceFileSnapshot } from "@ykdz/template-core/reference-package";
 import type {
   ApplicationRequirements,
   RustToolchainRequirement,
-} from "@ykdz/template-workspace/application-requirements";
-import {
-  rustDevelopmentContainerToolLayer,
-  rustToolchainEnvironmentNeed,
-} from "@ykdz/template-workspace/default-environment";
+} from "@ykdz/default-content-authoring/contracts";
+import { rustToolchainEnvironmentNeed } from "@ykdz/default-content-authoring/environment-needs";
 import {
   defineReferencePackage,
   serializeNativeReferenceDocument,
   type DefaultReferenceContributionFacts,
-} from "@ykdz/template-workspace/reference-package";
+} from "@ykdz/default-content-authoring/reference-package";
+import type { PackageContribution } from "@ykdz/template-core/package-contribution";
+import type { ResourceFileSnapshot } from "@ykdz/template-core/reference-package";
+import { rustDevelopmentContainerToolLayer } from "@ykdz/template-workspace/default-environment";
 import { parse } from "smol-toml";
 
 import referenceManifest from "../package.json" with { type: "json" };
@@ -134,6 +132,10 @@ const nativeReference = defineReferencePackage<
   ],
   templateDependencies: [
     { name: "@ykdz/template-core", purpose: "template-execution" },
+    {
+      name: "@ykdz/default-content-authoring",
+      purpose: "template-execution",
+    },
     { name: "@ykdz/template-workspace", purpose: "template-execution" },
     { name: "@ykdz/reference-workspace-root", purpose: "template-execution" },
     { name: "@ykdz/tooling-config", purpose: "template-build" },
@@ -145,6 +147,7 @@ const nativeReference = defineReferencePackage<
   ],
   executionDependencies: [
     "@ykdz/template-core",
+    "@ykdz/default-content-authoring",
     "@ykdz/template-workspace",
     "@ykdz/reference-workspace-root",
     "smol-toml",

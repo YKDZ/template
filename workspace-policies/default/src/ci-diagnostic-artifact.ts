@@ -1,10 +1,4 @@
-import type { ComponentOwner } from "./environment-needs.ts";
-
-/** 包贡献可在 CI 中保留的封闭式、按所有者限定的原生诊断制品。 */
-export type CiDiagnosticArtifactDeclaration = {
-  readonly kind: "playwright" | "vitest-browser";
-  readonly owner: ComponentOwner;
-};
+import type { CiDiagnosticArtifactDeclaration } from "@ykdz/default-content-authoring/contracts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

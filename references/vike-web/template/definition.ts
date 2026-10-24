@@ -1,9 +1,9 @@
-import type { ReferenceDependency } from "@ykdz/template-core/reference-package";
-import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-workspace/default-environment";
+import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/default-content-authoring/environment-needs";
 import {
   defineReferencePackage,
   type ReferenceTemplateDependency,
-} from "@ykdz/template-workspace/reference-package";
+} from "@ykdz/default-content-authoring/reference-package";
+import type { ReferenceDependency } from "@ykdz/template-core/reference-package";
 
 import referenceManifest from "../package.json" with { type: "json" };
 
@@ -43,7 +43,7 @@ const templateDependencies = [
     purpose: "template-execution",
   },
   { name: "@ykdz/template-core", purpose: "template-execution" },
-  { name: "@ykdz/template-workspace", purpose: "template-execution" },
+  { name: "@ykdz/default-content-authoring", purpose: "template-execution" },
   { name: "typescript-7", purpose: "template-build" },
 ] as const satisfies readonly ReferenceTemplateDependency[];
 
@@ -144,7 +144,7 @@ export const referencePackage = defineReferencePackage({
   templateDependencies,
   executionDependencies: [
     "@ykdz/template-core",
-    "@ykdz/template-workspace",
+    "@ykdz/default-content-authoring",
     "@ykdz/reference-workspace-root",
     "@ykdz/reference-tooling-config",
   ],

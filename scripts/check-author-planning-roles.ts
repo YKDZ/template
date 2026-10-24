@@ -43,7 +43,7 @@ type PlanningRoleContract = {
 
 const publicPlanningContracts: readonly PlanningRoleContract[] = [
   {
-    module: "@ykdz/template-workspace/reference-package",
+    module: "@ykdz/default-content-authoring/reference-package",
     names: new Set(["defineReferencePackage"]),
     role: "reference" as const,
     members: ["transformManifest", "transformDocument"],
@@ -55,7 +55,7 @@ const publicPlanningContracts: readonly PlanningRoleContract[] = [
     members: ["parseCreationInput", "createDefinition", "evaluate"],
   },
   {
-    module: "@ykdz/template-workspace/default-composition",
+    module: "@ykdz/default-content-authoring/preset-root-contribution",
     names: new Set(["DefaultPresetRootContributionOwner"]),
     role: "preset" as const,
     members: ["compose"],

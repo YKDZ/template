@@ -1,4 +1,4 @@
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
 
 import referenceManifest from "../package.json" with { type: "json" };
 
@@ -57,7 +57,7 @@ export const referencePackage = defineReferencePackage({
     },
     { name: "@ykdz/template-core", purpose: "template-build" },
     {
-      name: "@ykdz/template-workspace",
+      name: "@ykdz/default-content-authoring",
       purpose: "template-execution",
     },
     {
@@ -70,7 +70,7 @@ export const referencePackage = defineReferencePackage({
     },
   ],
   executionDependencies: [
-    "@ykdz/template-workspace",
+    "@ykdz/default-content-authoring",
     "@ykdz/reference-workspace-root",
     "@ykdz/reference-tooling-config",
     "@ykdz/reference-npm-publication",

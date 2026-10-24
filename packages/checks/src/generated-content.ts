@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import type { DefaultWorkspaceConventions } from "@ykdz/default-content-authoring/reference-package";
 import {
   contentIdentityKey,
   type ContentIdentity,
@@ -8,7 +9,6 @@ import {
 } from "@ykdz/template-core/content-identity";
 import type { JsonValue } from "@ykdz/template-core/json";
 import type { PresetSelectionDefinition } from "@ykdz/template-core/reference-package";
-import type { DefaultWorkspaceConventions } from "@ykdz/template-workspace/reference-package";
 
 export type ChecksPreset = LoadedContentMember<
   PresetSelectionDefinition<JsonValue> & {

@@ -13,6 +13,7 @@ import path from "node:path";
 import { it, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
 import {
   templateContent,
   templatePresets,
@@ -20,7 +21,6 @@ import {
 } from "@ykdz/template-content";
 import type { LoadedContentMember } from "@ykdz/template-core/content-identity";
 import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 type TestReference = ReturnType<typeof defineReferencePackage>;
 

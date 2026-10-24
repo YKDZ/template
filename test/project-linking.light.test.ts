@@ -13,11 +13,11 @@ import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
 import { templateContent } from "@ykdz/template-content";
 import type { LoadedContentMember } from "@ykdz/template-core/content-identity";
 import type { PackageDefinitionId } from "@ykdz/template-core/project-blueprint";
 import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 type PackageLinkIssue =
   | { readonly kind: "unknown-consumer"; readonly path: string }

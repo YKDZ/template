@@ -13,10 +13,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
 import type { LoadedContentMember } from "@ykdz/template-core/content-identity";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
-import { defineReferencePackage } from "@ykdz/template-workspace/reference-package";
 
 const content = await loadContentSource({
   namespace: "ykdz",

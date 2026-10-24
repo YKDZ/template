@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import type { DefaultPresetRootContributionOwner } from "@ykdz/default-content-authoring/preset-root-contribution";
 import { referencePackage as api } from "@ykdz/reference-hono-api/template";
 import {
   honoApiDependencyKey,
@@ -15,7 +16,6 @@ import {
   resolveTemplateSource,
 } from "@ykdz/template-core/template-source";
 import { defineNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";
-import type { DefaultPresetRootContributionOwner } from "@ykdz/template-workspace/default-composition";
 
 import presetPackage from "../package.json" with { type: "json" };
 import {

@@ -1,52 +1,26 @@
-export type PackageBoundaryOwner = {
-  readonly kind: "package-boundary";
-  readonly path: string;
-};
+import type {
+  CheckEnvironmentNeed,
+  ComponentOwner,
+  DockerEngineEnvironmentNeed,
+  DeploymentEnvironmentNeed,
+  EnvironmentNeedsMetadata,
+  PlaywrightBrowserAssetsEnvironmentNeed,
+  RustToolchainEnvironmentNeed,
+  ShellCheckEnvironmentNeed,
+} from "./contracts.ts";
 
-export type WorkspaceOrchestrationOwner = {
-  readonly kind: "workspace-orchestration";
-  readonly path: ".";
-};
-
-export type ComponentOwner = PackageBoundaryOwner | WorkspaceOrchestrationOwner;
-
-export type PlaywrightBrowserAssetsEnvironmentNeed = {
-  readonly kind: "playwright-browser-assets";
-  readonly browser: "chromium";
-  readonly owner: ComponentOwner;
-};
-
-export type ShellCheckEnvironmentNeed = {
-  readonly kind: "shellcheck-command";
-  readonly owner: ComponentOwner;
-};
-
-/** Rust 任务必须在本地与 CI 计划中使用已维护的工具链。 */
-export type RustToolchainEnvironmentNeed = {
-  readonly kind: "rust-toolchain";
-  readonly owner: ComponentOwner;
-  readonly toolchain: "stable";
-};
-
-/**
- * Docker 仅在独立部署验收中使用，不属于应用于所有生成检查场景的常规检查环境需求。
- */
-export type DockerEngineEnvironmentNeed = {
-  readonly kind: "docker-engine";
-};
-
-export type CheckEnvironmentNeed =
-  | PlaywrightBrowserAssetsEnvironmentNeed
-  | ShellCheckEnvironmentNeed
-  | RustToolchainEnvironmentNeed;
-
-export type DeploymentEnvironmentNeed = DockerEngineEnvironmentNeed;
-
-export type EnvironmentNeedsMetadata = {
-  readonly schemaVersion: 1;
-  readonly check: readonly CheckEnvironmentNeed[];
-  readonly deployment: readonly DeploymentEnvironmentNeed[];
-};
+export type {
+  CheckEnvironmentNeed,
+  ComponentOwner,
+  DeploymentEnvironmentNeed,
+  DockerEngineEnvironmentNeed,
+  EnvironmentNeedsMetadata,
+  PackageBoundaryOwner,
+  PlaywrightBrowserAssetsEnvironmentNeed,
+  RustToolchainEnvironmentNeed,
+  ShellCheckEnvironmentNeed,
+  WorkspaceOrchestrationOwner,
+} from "./contracts.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

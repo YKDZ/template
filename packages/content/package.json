@@ -54,6 +54,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@ykdz/default-content-authoring": "workspace:*",
     "@ykdz/template-content-artifacts": "workspace:*",
     "@ykdz/tooling-config": "workspace:*",
     "execa": "catalog:",

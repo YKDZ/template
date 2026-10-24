@@ -30,6 +30,7 @@
     "check:capabilities": "node --conditions=source src/check-fixture-evidence-architecture.ts && node --conditions=source src/check-generated-registry.ts capabilities"
   },
   "dependencies": {
+    "@ykdz/default-content-authoring": "workspace:*",
     "@ykdz/reference-ts-cli": "workspace:*",
     "@ykdz/template-content": "workspace:*",
     "@ykdz/template-core": "workspace:*",

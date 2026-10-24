@@ -1,6 +1,7 @@
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 
+import type { DefaultPresetRootContributionOwner } from "@ykdz/default-content-authoring/preset-root-contribution";
 import type { CompositionPackage } from "@ykdz/template-core/composition";
 import {
   contentIdentityKey,
@@ -24,7 +25,6 @@ import {
   prepareDefaultInitOperationFacts,
   prepareDefaultRootAttachmentDependencies,
   prepareDefaultRootDeclarations,
-  type DefaultPresetRootContributionOwner,
   type PreparedDefaultPresetRootContribution,
   type DefaultContentMember,
   type DefaultOperationFacts,
