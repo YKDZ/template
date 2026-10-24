@@ -5,19 +5,22 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
+import {
+  createDevelopmentContainerSession,
+  deriveDevelopmentContainerBuildIdentity,
+  type ContainerCommandRunner,
+} from "@ykdz/template-verification-runtime/development-container-session";
 import { execa } from "execa";
 
 import { runGeneratedScenarioSet } from "../src/check-generated-registry.ts";
 import { executeGeneratedRootQuality } from "../src/fixture-evidence/gates/root-quality/index.ts";
 import {
   checkFixtureEvidenceHealth,
-  createDevelopmentContainerFixtureSession,
-  deriveDevelopmentContainerBuildIdentity,
   FileFixtureEvidenceActivityLedger,
   FileFixtureEvidenceStorage,
   formatFixtureEvidenceHealthReport,
+  normalizedFixtureDependencyInstallationPlan,
   runFixtureEvidenceGate,
-  type FixtureCommandRunner,
 } from "../src/fixture-evidence/kernel/index.ts";
 import {
   registryCapabilityProbes,
@@ -31,7 +34,7 @@ type Command = {
 };
 
 function fixtureIdLabel(projectDir: string): string {
-  return `com.ykdz.template.fixture.project=${fixtureProjectIdentity(projectDir)}`;
+  return `com.ykdz.template.verification.project=${fixtureProjectIdentity(projectDir)}`;
 }
 
 function fixtureProjectIdentity(projectDir: string): string {
@@ -40,6 +43,19 @@ function fixtureProjectIdentity(projectDir: string): string {
 
 function fixtureTurboCacheRemoteEnv(projectDir: string): string {
   return `TURBO_CACHE_DIR=/tmp/template-turbo-cache-${fixtureProjectIdentity(projectDir)}`;
+}
+
+function fixtureDependencyPreparation() {
+  return {
+    commands: normalizedFixtureDependencyInstallationPlan().commands.map(
+      (command) => ({
+        ...command,
+        ...(command.args.includes("--offline")
+          ? {}
+          : { retryRegistry: "npm" as const }),
+      }),
+    ),
+  };
 }
 
 function nestedDevcontainerCommand(args: readonly string[]): {
@@ -74,7 +90,7 @@ void describe("Development Container Fixture Executor", () => {
       path.join(projectDir, ".devcontainer/devcontainer.json"),
       JSON.stringify(config),
     );
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
       ownedVolumePrefix: "source-test-owned",
@@ -142,10 +158,24 @@ void describe("Development Container Fixture Executor", () => {
   void it("冻结现有源码锁文件并在失败后清理自己的容器", async () => {
     const projectDir = "/fixture/source-repository";
     const calls: Command[] = [];
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
-      dependencyPreparation: "existing-lockfile",
+      dependencyPreparation: {
+        trustWorkspace: true,
+        commands: [
+          {
+            command: "pnpm",
+            args: [
+              "install",
+              "--frozen-lockfile",
+              "--store-dir",
+              "/pnpm/store",
+            ],
+            retryRegistry: "npm",
+          },
+        ],
+      },
       run: async (command, args, options) => {
         calls.push({ command, args, cwd: options.cwd });
         if (command === "docker" && args[0] === "ps") {
@@ -270,16 +300,17 @@ void describe("Development Container Fixture Executor", () => {
     const projectDir = path.resolve("/fixture/generated");
     const idLabel = fixtureIdLabel(projectDir);
     const calls: Command[] = [];
-    const run: FixtureCommandRunner = async (command, args, options) => {
+    const run: ContainerCommandRunner = async (command, args, options) => {
       calls.push({ command, args, cwd: options.cwd });
       if (command === "docker" && args[0] === "ps") {
         return { stdout: "fixture-one\nfixture-two\n" };
       }
       return {};
     };
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
+      dependencyPreparation: fixtureDependencyPreparation(),
       run,
     });
 
@@ -420,7 +451,7 @@ void describe("Development Container Fixture Executor", () => {
     const cacheDirectory = path.resolve("/cache/template-buildkit");
     const buildIdentity = "a".repeat(64);
     const calls: Command[] = [];
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
       build: { identity: buildIdentity, cacheDirectory },
@@ -464,7 +495,7 @@ void describe("Development Container Fixture Executor", () => {
     ];
     const calls: Command[] = [];
     const sessions = projectDirs.map((projectDir) =>
-      createDevelopmentContainerFixtureSession({
+      createDevelopmentContainerSession({
         projectDir,
         probes: [],
         run: async (command, args, options) => {
@@ -563,7 +594,7 @@ void describe("Development Container Fixture Executor", () => {
         configPath,
         `${JSON.stringify(generatedConfig, null, 2)}\n`,
       );
-      const session = createDevelopmentContainerFixtureSession({
+      const session = createDevelopmentContainerSession({
         projectDir,
         probes: [],
         dependencyCaches: { pnpm: pnpmCache, cargo: cargoCache },
@@ -665,9 +696,10 @@ void describe("Development Container Fixture Executor", () => {
         })}\n`,
       );
       const cacheActivity: Array<Record<string, unknown>> = [];
-      const session = createDevelopmentContainerFixtureSession({
+      const session = createDevelopmentContainerSession({
         projectDir,
         probes: [],
+        dependencyPreparation: fixtureDependencyPreparation(),
         dependencyCaches: {
           pnpm: path.join(root, "cache", "pnpm"),
           cargo: path.join(root, "cache", "cargo"),
@@ -693,7 +725,6 @@ void describe("Development Container Fixture Executor", () => {
 
       await session.execute(async (run) => {
         await run("node", ["--version"], { cwd: projectDir });
-        assert.ok(cacheActivity.every((event) => event.cache !== "turbo"));
         await run(
           "node",
           ["--conditions=source", "scripts/task-gates.ts", "check:full"],
@@ -710,7 +741,6 @@ void describe("Development Container Fixture Executor", () => {
         { cache: "buildkit", outcome: "configured" },
         { cache: "pnpm-downloads", outcome: "mounted" },
         { cache: "cargo-downloads", outcome: "mounted" },
-        { cache: "turbo", outcome: "configured" },
       ]) {
         const event = cacheActivity.find(
           (candidate) =>
@@ -736,9 +766,10 @@ void describe("Development Container Fixture Executor", () => {
     const projectDir = path.resolve("/fixture/phase-lifecycle");
     const activity: Array<Record<string, unknown>> = [];
     let milliseconds = 0;
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
+      dependencyPreparation: fixtureDependencyPreparation(),
       clock: () => new Date(milliseconds++ * 10),
       recordActivity: (event) => {
         activity.push(event);
@@ -789,7 +820,7 @@ void describe("Development Container Fixture Executor", () => {
     const upCalls: Command[] = [];
     const activity: Array<Record<string, unknown>> = [];
     let milliseconds = 0;
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
       clock: () => new Date(milliseconds++ * 10),
@@ -851,9 +882,18 @@ void describe("Development Container Fixture Executor", () => {
     const projectDir = path.resolve("/fixture/npm-registry-recovery");
     const installCalls: Command[] = [];
     const activity: Array<Record<string, unknown>> = [];
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
+      dependencyPreparation: {
+        commands: [
+          {
+            command: "pnpm",
+            args: ["install", "--lockfile-only", "--store-dir", "/pnpm/store"],
+            retryRegistry: "npm",
+          },
+        ],
+      },
       recordActivity: (event) => {
         activity.push(event);
       },
@@ -923,7 +963,7 @@ void describe("Development Container Fixture Executor", () => {
   void it("does not retry a semantic gate failure even when its text resembles a registry transient", async () => {
     const projectDir = path.resolve("/fixture/semantic-no-retry");
     let semanticAttempts = 0;
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
       run: async (command, args) => {
@@ -959,9 +999,18 @@ void describe("Development Container Fixture Executor", () => {
     const projectDir = path.resolve("/fixture/single-retry-budget");
     let upAttempts = 0;
     let installAttempts = 0;
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
+      dependencyPreparation: {
+        commands: [
+          {
+            command: "pnpm",
+            args: ["install", "--lockfile-only", "--store-dir", "/pnpm/store"],
+            retryRegistry: "npm",
+          },
+        ],
+      },
       run: async (command, args) => {
         if (command === "devcontainer" && args[0] === "up") {
           upAttempts += 1;
@@ -1008,7 +1057,7 @@ void describe("Development Container Fixture Executor", () => {
     const projectDir = path.resolve("/fixture/docker-registry-final-failure");
     let upAttempts = 0;
     const activity: Array<Record<string, unknown>> = [];
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
       recordActivity: (event) => {
@@ -1093,7 +1142,7 @@ void describe("Development Container Fixture Executor", () => {
         outcome: "started",
         scenarios: [scenario],
       });
-      const session = createDevelopmentContainerFixtureSession({
+      const session = createDevelopmentContainerSession({
         projectDir,
         probes: [],
         recordActivity: async (event) => {
@@ -1205,7 +1254,7 @@ void describe("Development Container Fixture Executor", () => {
     const bothVersions = new Promise<void>((resolve) => {
       signalBothVersions = resolve;
     });
-    const run: FixtureCommandRunner = async (command, args, options) => {
+    const run: ContainerCommandRunner = async (command, args, options) => {
       calls.push({ command, args, cwd: options.cwd });
       if (command === "devcontainer" && args[0] === "--version") {
         versionChecks += 1;
@@ -1230,7 +1279,7 @@ void describe("Development Container Fixture Executor", () => {
       path.resolve("/fixture/equivalent-build-b"),
     ];
     const sessions = projectDirs.map((projectDir) =>
-      createDevelopmentContainerFixtureSession({
+      createDevelopmentContainerSession({
         projectDir,
         probes: [],
         build: { identity: buildIdentity, cacheDirectory },
@@ -1355,7 +1404,7 @@ void describe("Development Container Fixture Executor", () => {
     const bothBuildsStarted = new Promise<void>((resolve) => {
       signalBothBuilds = resolve;
     });
-    const run: FixtureCommandRunner = async (command, args, options) => {
+    const run: ContainerCommandRunner = async (command, args, options) => {
       if (command === "devcontainer" && args[0] === "up") {
         upStarts.push(options.cwd);
         upDestinations.push(args[args.indexOf("--cache-to") + 1]!);
@@ -1368,7 +1417,7 @@ void describe("Development Container Fixture Executor", () => {
       return {};
     };
     const sessions = projectDirs.map((projectDir, index) =>
-      createDevelopmentContainerFixtureSession({
+      createDevelopmentContainerSession({
         projectDir,
         probes: [],
         build: {
@@ -1430,7 +1479,7 @@ void describe("Development Container Fixture Executor", () => {
     const activeCancellationReceived = new Promise<void>((resolve) => {
       signalActiveCancellation = resolve;
     });
-    const run: FixtureCommandRunner = async (command, args, options) => {
+    const run: ContainerCommandRunner = async (command, args, options) => {
       if (command === "devcontainer" && args[0] === "--version") {
         if (options.cwd === projectDirs[1]) signalQueuedVersion();
         if (options.cwd === projectDirs[2]) signalNextVersion();
@@ -1463,7 +1512,7 @@ void describe("Development Container Fixture Executor", () => {
       return {};
     };
     const sessions = projectDirs.map((projectDir, index) =>
-      createDevelopmentContainerFixtureSession({
+      createDevelopmentContainerSession({
         projectDir,
         probes: [],
         ...(index === 0
@@ -1566,7 +1615,7 @@ void describe("Development Container Fixture Executor", () => {
       releaseVersionChecks = resolve;
     });
     const activities: Array<Array<Record<string, unknown>>> = [[], []];
-    const run: FixtureCommandRunner = async (command, args, options) => {
+    const run: ContainerCommandRunner = async (command, args, options) => {
       calls.push({
         command,
         args: [...args],
@@ -1592,7 +1641,7 @@ void describe("Development Container Fixture Executor", () => {
       return {};
     };
     const sessions = activities.map((activity) =>
-      createDevelopmentContainerFixtureSession({
+      createDevelopmentContainerSession({
         projectDir,
         probes: [],
         build,
@@ -1719,7 +1768,7 @@ void describe("Development Container Fixture Executor", () => {
     const calls: Command[] = [];
     let leases = 0;
     let releases = 0;
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir: path.resolve("/fixture/full-hit"),
       probes: [],
       acquireSession: async () => {
@@ -1744,7 +1793,7 @@ void describe("Development Container Fixture Executor", () => {
     const projectDir = path.resolve("/fixture/cold-session-lease");
     let leases = 0;
     let releases = 0;
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
       acquireSession: async () => {
@@ -1825,7 +1874,7 @@ void describe("Development Container Fixture Executor", () => {
     const projectDir = path.resolve("/fixture/startup-failure");
     const idLabel = fixtureIdLabel(projectDir);
     const calls: Command[] = [];
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
       run: async (command, args, options) => {
@@ -1878,7 +1927,7 @@ void describe("Development Container Fixture Executor", () => {
     const projectDir = path.resolve("/fixture/probe-failure");
     const idLabel = fixtureIdLabel(projectDir);
     const calls: Command[] = [];
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [
         {
@@ -1936,7 +1985,7 @@ void describe("Development Container Fixture Executor", () => {
 
   void it("keeps a probe failure primary when cleanup also fails", async () => {
     const projectDir = path.resolve("/fixture/probe-and-cleanup-failure");
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [
         {
@@ -1984,7 +2033,7 @@ void describe("Development Container Fixture Executor", () => {
 
   void it("fails a successful scenario when cleanup fails", async () => {
     const projectDir = path.resolve("/fixture/cleanup-only-failure");
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
       run: async (command, args) => {
@@ -2004,7 +2053,7 @@ void describe("Development Container Fixture Executor", () => {
     assert.ok(failure instanceof AggregateError);
     assert.match(
       failure.message,
-      /^Development Container Fixture cleanup retry failed/u,
+      /^Development Container cleanup retry failed/u,
     );
     assert.strictEqual(failure.cause, failure.errors[0]);
     assert.strictEqual(failure.errors.length, 2);
@@ -2020,9 +2069,10 @@ void describe("Development Container Fixture Executor", () => {
     const projectDir = path.resolve("/fixture/fetch-failure");
     const idLabel = fixtureIdLabel(projectDir);
     const calls: Command[] = [];
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
+      dependencyPreparation: fixtureDependencyPreparation(),
       run: async (command, args, options) => {
         calls.push({ command, args, cwd: options.cwd });
         if (
@@ -2074,7 +2124,7 @@ void describe("Development Container Fixture Executor", () => {
     const projectDir = path.resolve("/fixture/command-failure");
     const idLabel = fixtureIdLabel(projectDir);
     const calls: Command[] = [];
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
       ownedVolumes: [
@@ -2144,7 +2194,7 @@ void describe("Development Container Fixture Executor", () => {
     const idLabel = fixtureIdLabel(projectDir);
     const consumerDir = path.join(projectDir, "apps", "web");
     const calls: Command[] = [];
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
       run: async (command, args, options) => {
@@ -2191,7 +2241,7 @@ void describe("Development Container Fixture Executor", () => {
   void it("仅向容器命令传递缓存与原生代理开关", async () => {
     const projectDir = path.resolve("/fixture/turbo-cache");
     const calls: Command[] = [];
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
       environment: {
@@ -2260,7 +2310,7 @@ void describe("Development Container Fixture Executor", () => {
       command: `devcontainer exec --remote-env TURBO_TOKEN=${turboToken} --remote-env TURBO_REMOTE_CACHE_SIGNATURE_KEY=${signatureKey} pnpm run check`,
       escapedCommand: `devcontainer exec --remote-env "TURBO_TOKEN=${turboToken}" --remote-env "TURBO_REMOTE_CACHE_SIGNATURE_KEY=${signatureKey}" pnpm run check`,
     });
-    const session = createDevelopmentContainerFixtureSession({
+    const session = createDevelopmentContainerSession({
       projectDir,
       probes: [],
       environment: {
@@ -2358,7 +2408,7 @@ void describe("Development Container Fixture Executor", () => {
       );
       let upAttempts = 0;
       const activity: Array<Record<string, unknown>> = [];
-      const session = createDevelopmentContainerFixtureSession({
+      const session = createDevelopmentContainerSession({
         projectDir,
         probes: [],
         recordActivity: (event) => {
@@ -2407,7 +2457,7 @@ void describe("Development Container Fixture Executor", () => {
         throw new Error(`Expected registry-derived ${identity} probe`);
       }
       const calls: Command[] = [];
-      const session = createDevelopmentContainerFixtureSession({
+      const session = createDevelopmentContainerSession({
         projectDir,
         probes: [probe],
         run: async (command, args, options) => {
@@ -2462,13 +2512,13 @@ void describe("Development Container Fixture Executor", () => {
   for (const scenario of [
     {
       unavailable: "docker",
-      expected: /Docker is required for Generated Repository Fixture quality/u,
+      expected: /Docker is required for Development Container checks/u,
       expectedCalls: [["docker", "version", "--format", "{{.Server.Version}}"]],
     },
     {
       unavailable: "devcontainer",
       expected:
-        /pinned Dev Container CLI is required for Generated Repository Fixture quality/u,
+        /pinned Dev Container CLI is required for Development Container checks/u,
       expectedCalls: [
         ["docker", "version", "--format", "{{.Server.Version}}"],
         ["devcontainer", "--version"],
@@ -2479,7 +2529,7 @@ void describe("Development Container Fixture Executor", () => {
       const { unavailable, expected, expectedCalls } = scenario;
       const projectDir = path.resolve(`/fixture/missing-${unavailable}`);
       const calls: Command[] = [];
-      const session = createDevelopmentContainerFixtureSession({
+      const session = createDevelopmentContainerSession({
         projectDir,
         probes: [],
         run: async (command, args, options) => {

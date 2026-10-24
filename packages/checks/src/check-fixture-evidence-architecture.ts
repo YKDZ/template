@@ -9,6 +9,9 @@ const defaultChecksPackageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const kernelPublicRuntimeImports = new Set([
+  "@ykdz/template-verification-runtime/development-container-session",
+]);
 
 export type FixtureEvidenceArchitectureFinding = {
   readonly rule:
@@ -744,7 +747,10 @@ export async function findFixtureEvidenceArchitectureFindings(
           continue;
         }
         if (!specifier.startsWith(".")) {
-          if (isRepositoryInternalSpecifier(specifier)) {
+          if (
+            isRepositoryInternalSpecifier(specifier) &&
+            !kernelPublicRuntimeImports.has(specifier)
+          ) {
             findings.push({
               rule: "kernel-runtime-import-outside-kernel",
               file: relativeFile,

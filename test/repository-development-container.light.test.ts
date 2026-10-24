@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { it } from "node:test";
 
-import type { FixtureCommandRunner } from "@ykdz/template-checks/development-container-session";
+import type { ContainerCommandRunner } from "@ykdz/template-verification-runtime/development-container-session";
 import { execa } from "execa";
 
 import { checkRepositoryDevelopmentContainer } from "../scripts/check-repository-development-container.ts";
@@ -62,7 +62,7 @@ void it("源码容器冻结检查当前工作树，成功后移除快照、失�
     }
     await writeFile(path.join(root, "AGENTS.md"), "不得复制\n");
 
-    const run: FixtureCommandRunner = async (command, args, options) => {
+    const run: ContainerCommandRunner = async (command, args, options) => {
       if (command === "git") return await execa(command, [...args], options);
       if (command === "docker" && args[0] === "inspect") {
         return {

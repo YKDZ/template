@@ -1,11 +1,12 @@
 import { fileURLToPath } from "node:url";
 
+import type { ContainerCommandRunner } from "@ykdz/template-verification-runtime/development-container-session";
+
 import type { SuccessfulScenarioResult } from "../../../generated-content.ts";
 import {
   deriveFixtureGateContractIdentity,
   normalizedFixtureDependencyInstallationPlan,
   writeGeneratedRepositoryTree,
-  type FixtureCommandRunner,
   type FixtureEvidenceExecutionResource,
 } from "../../kernel/index.ts";
 
@@ -95,7 +96,7 @@ export async function executeGeneratedRootQuality(options: {
   readonly gitSafeDirectory?: string;
   readonly rootGate?: "check" | "check:full";
   readonly includeFix?: boolean;
-  readonly run: FixtureCommandRunner;
+  readonly run: ContainerCommandRunner;
 }): Promise<void> {
   await options.run(
     "node",

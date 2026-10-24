@@ -16,6 +16,7 @@ import path from "node:path";
 import { afterEach, mock } from "node:test";
 import { isDeepStrictEqual } from "node:util";
 
+import type { ContainerCommandRunner } from "@ykdz/template-verification-runtime/development-container-session";
 import { execa } from "execa";
 
 import { findFixtureEvidenceArchitectureFindings } from "../src/check-fixture-evidence-architecture.ts";
@@ -46,7 +47,6 @@ import {
   formatFixtureEvidenceHealthReport,
   initializeFixtureGitRepository,
   runFixtureEvidenceGate,
-  type FixtureCommandRunner,
   type FixtureEvidenceActivityLedger,
   type FixtureEvidenceExecutionResource,
   type FixtureEvidenceGate,
@@ -158,8 +158,8 @@ async function textBelow(root: string): Promise<string> {
 }
 
 function fixtureExecutorTestRunner(
-  run: FixtureCommandRunner,
-): FixtureCommandRunner {
+  run: ContainerCommandRunner,
+): ContainerCommandRunner {
   return async (command, args, options) => {
     if (command === "docker") return {};
     if (command !== "devcontainer") {
@@ -559,7 +559,7 @@ export {
 
 export type {
   FixtureActivityRecorder,
-  FixtureCommandRunner,
+  ContainerCommandRunner,
   FixtureEvidenceActivityLedger,
   FixtureEvidenceExecutionResource,
   FixtureEvidenceGate,

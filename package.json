@@ -42,6 +42,7 @@
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-environment": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
+    "@ykdz/template-verification-runtime": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*",
     "@ykdz/tooling-config": "workspace:*",
