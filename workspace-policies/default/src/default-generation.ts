@@ -2,6 +2,7 @@ import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { DefaultPresetRootContributionOwner } from "@ykdz/default-content-authoring/preset-root-contribution";
+import { workspaceRootIdentity } from "@ykdz/reference-workspace-root/template";
 import type { CompositionPackage } from "@ykdz/template-core/composition";
 import {
   contentIdentityKey,
@@ -68,22 +69,6 @@ function preparedSelectionsContainOwner(
       containsOwner(dependency),
     );
   return selections.some((selection) => selection.roots.some(containsOwner));
-}
-
-function defaultRootIdentity(content: readonly DefaultContentMember[]) {
-  const roots = content.filter((member) => {
-    if (member.kind !== "reference" || !isRecord(member.definition)) {
-      return false;
-    }
-    return (
-      member.definition.defaultPath === "." &&
-      member.definition.role === "native-package"
-    );
-  });
-  if (roots.length !== 1) {
-    throw new Error("默认内容必须登记唯一的native-package根owner");
-  }
-  return roots[0]!.identity;
 }
 
 async function initOperationFacts(
@@ -639,7 +624,7 @@ export function createDefaultGenerator<
   const generator = createGenerator({
     content: options.content,
     composition: createDefaultComposition({
-      rootIdentity: defaultRootIdentity(options.content),
+      rootIdentity: workspaceRootIdentity,
       content: options.content,
       ...(options.catalog === undefined ? {} : { catalog: options.catalog }),
       ...(options.installPolicy === undefined

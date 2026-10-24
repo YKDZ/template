@@ -1807,6 +1807,9 @@ importers:
       '@ykdz/default-content-authoring':
         specifier: workspace:*
         version: link:../../content/default/authoring
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../../references/workspace-root
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core

@@ -228,9 +228,40 @@ await it(
         await readFile(path.join(targetRoot, "package.json"), "utf8"),
       ) as {
         readonly private: boolean;
+        readonly name: string;
+        readonly version?: string;
+        readonly engines: { readonly node: string };
+        readonly packageManager: string;
         readonly devDependencies: Readonly<Record<string, string>>;
         readonly scripts: Readonly<Record<string, string>>;
       };
+      assert.equal(rootManifest.name, "packed-native-demo");
+      assert.equal(rootManifest.version, undefined);
+      assert.equal(rootManifest.engines.node, "24.21.0");
+      assert.equal(rootManifest.packageManager, "pnpm@12.9.1");
+      assert.match(
+        await readFile(path.join(targetRoot, "AGENTS.md"), "utf8"),
+        /本地代理上下文/u,
+      );
+      assert.match(
+        await readFile(path.join(targetRoot, ".gitignore"), "utf8"),
+        /^\.changeset\/packed\/$/mu,
+      );
+      const installedGenerationRecord = JSON.parse(
+        await readFile(
+          path.join(targetRoot, ".template/generation.json"),
+          "utf8",
+        ),
+      ) as {
+        readonly composition: {
+          readonly identity: Readonly<Record<string, string>>;
+        };
+      };
+      assert.deepEqual(installedGenerationRecord.composition.identity, {
+        namespace: "ykdz",
+        packageName: "@ykdz/template-workspace",
+        exportPath: "./default-composition",
+      });
       const generatedToolingManifest = JSON.parse(
         await readFile(
           path.join(targetRoot, "packages/tooling-config/package.json"),

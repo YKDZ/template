@@ -9,6 +9,66 @@ import { defineReferencePackage } from "@ykdz/default-content-authoring/referenc
 import type { PackageBinding } from "@ykdz/template-core/reference-package";
 import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
 
+await test("根目录位置本身不注入参考包业务规则", () => {
+  const owner = defineReferencePackage({
+    manifest: {
+      name: "@fixture/workspace",
+      version: "1.2.3",
+      type: "module",
+      exports: {
+        "./reference": "./package.json",
+        "./template": "./template/definition.js",
+      },
+      engines: { node: ">=20" },
+      packageManager: "npm@10.0.0",
+    },
+    resourceRoot: new URL("../", import.meta.url),
+    alias: "workspace",
+    instance: "shared",
+    defaultLeafName: "workspace",
+    defaultPath: ".",
+    role: "native-package",
+    resources: [],
+  });
+  const conventions = {
+    repositoryName: "sample",
+    defaultPackageScope: "sample",
+  };
+  const definition = owner.createDefinition({
+    conventions,
+    creationInput: undefined,
+  });
+  const contribution = owner.evaluate({
+    packageDefinitionId:
+      "package-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    definition: {
+      packageDefinitionId:
+        "package-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      ...definition,
+    },
+    createdBy: "initialization",
+    creationInput: undefined,
+    prepared: owner.prepare({ excludedPackagePaths: [] }),
+    bindings: new Map(),
+    conventions,
+    stableCommon: {
+      nodeDeclaration: "24.21.0",
+      packageManagerPin: "pnpm@12.9.1",
+    },
+    packageInput: undefined,
+  });
+  const manifest = contribution.facts.nativeDocuments.find(
+    ({ path: documentPath }) => documentPath === "package.json",
+  )?.value as Record<string, unknown>;
+
+  assert.equal(definition.path, ".");
+  assert.equal(definition.name, "@sample/workspace");
+  assert.equal(manifest.name, "@sample/workspace");
+  assert.equal(manifest.version, "1.2.3");
+  assert.equal(manifest.packageManager, "npm@10.0.0");
+  assert.deepEqual(manifest.engines, { node: "24.21.0" });
+});
+
 await test("原生作者factory只准备快照并把完整原生文档留给组合", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "native-reference-"));
   try {

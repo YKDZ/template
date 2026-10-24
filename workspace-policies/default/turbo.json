@@ -7,7 +7,8 @@
         "@ykdz/template-core#build",
         "@ykdz/template-environment#build",
         "@ykdz/template-generator#build",
-        "@ykdz/default-content-authoring#build"
+        "@ykdz/default-content-authoring#build",
+        "@ykdz/reference-workspace-root#build:template"
       ],
       "tags": ["quality:light"],
       "cache": true,

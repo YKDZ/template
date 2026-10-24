@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
 import type {
@@ -23,6 +21,7 @@ import {
   serializeNativeJson,
   serializeNativeReferenceDocument,
 } from "@ykdz/default-content-authoring/reference-package";
+import { workspaceRootNextSteps } from "@ykdz/reference-workspace-root/template";
 import type {
   Composition,
   CompositionPackage,
@@ -91,6 +90,12 @@ import {
   workspaceInstallPolicySnapshot,
 } from "./workspace-policy-snapshot.ts";
 
+const defaultCompositionIdentity: ContentIdentity = Object.freeze({
+  namespace: "ykdz",
+  packageName: "@ykdz/template-workspace",
+  exportPath: "./default-composition",
+});
+
 export type DefaultRootDeclaration = DefaultRootDeclarationData & {
   readonly sourceIdentity: ContentIdentity;
   readonly requiredTemplateDependency?: string;
@@ -109,14 +114,7 @@ export type PreparedDefaultPresetRootContribution = Readonly<{
   readonly ownerFacts: unknown;
 }>;
 
-export type DefaultCompositionFileResource = {
-  readonly path: string;
-  readonly content: Uint8Array;
-  readonly mode: number;
-};
-
 export type DefaultCompositionResources = {
-  readonly rootFiles: readonly DefaultCompositionFileResource[];
   readonly github: ReturnType<typeof prepareProjectGithubTemplates>;
   readonly developmentContainer: ReturnType<
     typeof prepareBuiltInDevelopmentContainerResources
@@ -330,35 +328,13 @@ function parseConventions(value: unknown): DefaultWorkspaceConventions {
   });
 }
 
-function readAsset(resourcePath: string): Uint8Array {
-  return readFileSync(
-    fileURLToPath(new URL(`../assets/${resourcePath}`, import.meta.url)),
-  );
-}
-
 /** 外层默认准备拥有者读取的默认环境资源；Composition只接收这份快照。 */
 export function prepareDefaultCompositionResources(): DefaultCompositionResources {
   return Object.freeze({
-    rootFiles: Object.freeze([
-      {
-        path: ".gitignore",
-        content: readAsset("gitignore"),
-        mode: 0,
-      },
-      {
-        path: "AGENTS.md",
-        content: readAsset("agent-instructions.md"),
-        mode: 0,
-      },
-    ]),
     github: prepareProjectGithubTemplates(),
     developmentContainer: prepareBuiltInDevelopmentContainerResources(),
     editor: prepareBuiltInEditorCustomizationDeclarations(),
-    nextSteps: Object.freeze([
-      { display: "pnpm install" },
-      { display: "pnpm run fix" },
-      { display: "pnpm run check" },
-    ]),
+    nextSteps: workspaceRootNextSteps,
   });
 }
 
@@ -1253,10 +1229,7 @@ export function createDefaultComposition(options: {
   const installPolicy = options.installPolicy ?? workspaceInstallPolicySnapshot;
 
   const composition: DefaultComposer = {
-    identity: Object.freeze({
-      ...options.rootIdentity,
-      exportPath: "./default-composition",
-    }),
+    identity: defaultCompositionIdentity,
     parseConventions(value) {
       return parseConventions(value);
     },
@@ -1622,13 +1595,6 @@ export function createDefaultComposition(options: {
       const baseDeclarations = declarations
         .map((declaration) => declaration.gitignoreFragments ?? [])
         .flat();
-      const nativeGitignore =
-        rootPackage.contribution.facts.nativeDocuments.find(
-          ({ path: documentPath }) => documentPath === ".gitignore",
-        );
-      if (nativeGitignore !== undefined) {
-        throw new Error("基础根.gitignore必须由外层环境拥有者提供");
-      }
       const files = compositionFilesForRoot({
         rootId: rootPackage.package.packageDefinitionId,
         declarations,
@@ -1640,13 +1606,6 @@ export function createDefaultComposition(options: {
             })),
         ),
       });
-      const rootResources: DefaultCompositionFile[] =
-        combineOptions.stableCommon.resources.rootFiles.map((resource) => ({
-          path: resource.path,
-          content: resource.content,
-          mode: resource.mode,
-          sourcePath: resource.path,
-        }));
       const ownerPackagePaths = packagePaths;
       const editor = projectBuiltInEditorCustomization(
         allFacts.flatMap((facts) => {
@@ -1746,7 +1705,7 @@ export function createDefaultComposition(options: {
         dependencyMaintenance,
         combineOptions.stableCommon.resources.github.dependabot,
       );
-      const baseRootFiles = [...rootResources];
+      const baseRootFiles: DefaultCompositionFile[] = [];
       const developmentContainerConfiguration = structuredClone(
         developmentContainer.configuration,
       ) as Record<string, unknown>;
@@ -1966,23 +1925,22 @@ export function createDefaultComposition(options: {
         ({ packageDefinitionId }) =>
           packageDefinitionId !== rootPackage.package.packageDefinitionId,
       );
-      const gitignore = baseRootFiles.find(({ path }) => path === ".gitignore");
-      if (gitignore !== undefined && baseDeclarations.length > 0) {
+      const gitignoreIndex = rootFileComposition.findIndex(
+        ({ file }) => file.path === ".gitignore",
+      );
+      if (gitignoreIndex !== -1 && baseDeclarations.length > 0) {
         const fragment = baseDeclarations.join("\n");
-        const previous = new TextDecoder().decode(gitignore.content);
-        const updated = `${previous.trimEnd()}\n${fragment}\n`;
-        const target = rootFileComposition.findIndex(
-          (item) => item.file.path === ".gitignore",
+        const previous = new TextDecoder().decode(
+          rootFileComposition[gitignoreIndex]!.file.content,
         );
-        if (target !== -1) {
-          rootFileComposition[target] = {
-            ...rootFileComposition[target]!,
-            file: {
-              ...rootFileComposition[target]!.file,
-              content: new TextEncoder().encode(updated),
-            },
-          };
-        }
+        const updated = `${previous.trimEnd()}\n${fragment}\n`;
+        rootFileComposition[gitignoreIndex] = {
+          ...rootFileComposition[gitignoreIndex]!,
+          file: {
+            ...rootFileComposition[gitignoreIndex]!.file,
+            content: new TextEncoder().encode(updated),
+          },
+        };
       }
 
       const dockerfileText = developmentContainer.dockerfile;
