@@ -10,6 +10,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { it } from "node:test";
@@ -85,12 +86,16 @@ async function installContentArtifactBuilder(
   const packageURL = pathToFileURL(
     path.join(builderInstallRoot, "package.json"),
   ).href;
-  const installedEntry = import.meta.resolve(
+  const installedEntry = createRequire(packageURL).resolve(
     "@ykdz/template-content-artifacts",
-    packageURL,
+  );
+  const installedModulesRoot = path.resolve(builderInstallRoot, "node_modules");
+  assert.ok(
+    installedEntry.startsWith(`${installedModulesRoot}${path.sep}`),
+    `安装构建器入口应位于消费者 node_modules，实际为 ${installedEntry}`,
   );
   return (await import(
-    installedEntry
+    pathToFileURL(installedEntry).href
   )) as typeof import("@ykdz/template-content-artifacts");
 }
 
