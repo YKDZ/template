@@ -15,11 +15,6 @@
       "types": "./template-dist/definition.d.ts",
       "default": "./template-dist/definition.js"
     },
-    "./command-identity": {
-      "source": "./src/publication/cli-command-identity.ts",
-      "types": "./dist/publication/cli-command-identity.d.ts",
-      "default": "./dist/publication/cli-command-identity.js"
-    },
     "./repository-configuration": {
       "source": "./scripts/repository-configuration.ts"
     }
@@ -35,7 +30,8 @@
     "postbuild": "node -e \"if (process.platform !== 'win32') require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
     "test": "node --conditions=source --test --test-reporter=spec 'test/unit/**/*.test.ts' 'test/integration/**/*.test.ts'",
     "test:e2e": "node --conditions=source --test --test-timeout=180000 --test-reporter=spec 'test/e2e/source-journeys.test.ts'",
-    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false"
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false",
+    "test:template": "node --conditions=source --test --test-reporter=spec 'test/template/**/*.test.ts'"
   },
   "dependencies": {
     "@valibot/to-json-schema": "catalog:",

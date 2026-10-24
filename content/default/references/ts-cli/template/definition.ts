@@ -1,8 +1,8 @@
 import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
-import { projectCliPackageManifest } from "@ykdz/reference-ts-cli/command-identity";
 import type { JsonValue } from "@ykdz/template-core/json";
 
 import referenceManifest from "../package.json" with { type: "json" };
+import { projectCliPackageManifest } from "./package-manifest.ts";
 
 export type TsCliCreationInput = Readonly<Record<string, JsonValue>> & {
   readonly linkTo?:
@@ -67,7 +67,7 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
     { path: "resources/npmignore", targetPath: ".npmignore" },
     { path: "src/cli.ts" },
     { path: "src/main.ts" },
-    { path: "src/publication/cli-command-identity.ts" },
+    { path: "src/cli-command-identity.ts" },
     { path: "test/e2e/journey.ts" },
     { path: "test/e2e/journeys/lookup.journey.ts" },
     { path: "test/e2e/run-journeys.ts" },
@@ -112,8 +112,11 @@ export const referencePackage = defineReferencePackage<TsCliCreationInput>({
     "@ykdz/reference-npm-publication",
     "@ykdz/default-content-authoring",
   ],
-  templateScripts: ["build:template", "check:author-planning-roles"],
-  templateExports: ["./command-identity"],
+  templateScripts: [
+    "build:template",
+    "check:author-planning-roles",
+    "test:template",
+  ],
   targetExports: {},
   foundation: {
     toolchains: {},

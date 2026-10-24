@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { describe, it } from "node:test";
 
+import { cliCommandIdentity } from "../../src/cli-command-identity.ts";
 import { runCli, type CliRuntime } from "../../src/main.ts";
-import { cliCommandIdentity } from "../../src/publication/cli-command-identity.ts";
 
 const identity = cliCommandIdentity(
   createRequire(import.meta.url)("../../package.json"),

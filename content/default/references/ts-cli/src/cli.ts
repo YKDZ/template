@@ -3,8 +3,8 @@ import { createRequire } from "node:module";
 
 import { nodeCliOutput } from "@ykdz/cli-contract/node";
 
+import { cliCommandIdentity } from "./cli-command-identity.ts";
 import { runCli } from "./main.ts";
-import { cliCommandIdentity } from "./publication/cli-command-identity.ts";
 
 const require = createRequire(import.meta.url);
 process.exitCode = await runCli({

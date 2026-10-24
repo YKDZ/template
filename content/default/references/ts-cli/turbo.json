@@ -8,8 +8,7 @@
         "@ykdz/default-content-authoring#build",
         "@ykdz/reference-npm-publication#build:template",
         "@ykdz/reference-workspace-root#build:template",
-        "@ykdz/reference-tooling-config#build:template",
-        "@ykdz/reference-ts-cli#build"
+        "@ykdz/reference-tooling-config#build:template"
       ],
       "inputs": [],
       "outputs": ["template-dist/**"],
@@ -71,6 +70,12 @@
     },
     "check:author-planning-roles": {
       "cache": false,
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "test:template": {
+      "dependsOn": [],
+      "inputs": [],
       "outputs": [],
       "tags": ["quality:light"]
     }

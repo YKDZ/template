@@ -188,10 +188,6 @@ void describe("TypeScript CLI 公开预设", () => {
         "oxlint-tsgolint": "catalog:",
         "typescript-7": "catalog:",
       });
-      assert.strictEqual(
-        Object.hasOwn(manifest.exports ?? {}, "./command-identity"),
-        false,
-      );
     }
     assert.deepStrictEqual(presetManifest, referenceManifest);
     const generatedTurbo = JSON.parse(
