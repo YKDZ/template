@@ -81,6 +81,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@ykdz/reference-tooling-config": "workspace:*",
+    "@ykdz/template-content-artifacts": "workspace:*",
     "@ykdz/tooling-config": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",

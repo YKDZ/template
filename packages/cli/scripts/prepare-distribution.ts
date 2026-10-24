@@ -9,7 +9,7 @@ import {
   writeNativeArchiveOverrides,
   type PackedArtifact,
   type PreparedContentCollection,
-} from "@ykdz/template-content/artifact-builder";
+} from "@ykdz/template-content-artifacts";
 import { execa } from "execa";
 
 type PackageManifest = {
@@ -138,6 +138,8 @@ try {
   prepared = await prepareContentCollection({
     content: templateContent,
     roots: templateContent,
+    packageName: "@ykdz/template-content",
+    additionalSdkRoots: ["@ykdz/template-workspace"],
     workspaceRoot: await workspaceRoot(),
     root: path.join(temporaryRoot, "content"),
   });

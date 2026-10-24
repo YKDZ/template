@@ -4,6 +4,7 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   symlink,
@@ -14,19 +15,84 @@ import path from "node:path";
 import { it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import {
-  installContentCollection,
-  prepareContentCollection,
-} from "@ykdz/template-content/artifact-builder";
 import { execa } from "execa";
 
 import { unprivilegedProcessOptions } from "../test-support/unprivileged-process.ts";
 
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
+const nodeTypesRoot = path.dirname(
+  fileURLToPath(import.meta.resolve("@types/node/package.json")),
+);
+const tscExecutable = fileURLToPath(
+  new URL("../node_modules/.bin/tsc", import.meta.url),
+);
 const fixtureRoot = fileURLToPath(
   new URL("../test-support/content-contract/", import.meta.url),
 );
 const collectionName = "@fixture/content-contract";
+
+async function packWorkspacePackage(
+  packageRoot: string,
+  destination: string,
+): Promise<string> {
+  await mkdir(destination, { recursive: true });
+  await execa("pnpm", ["pack", "--pack-destination", destination], {
+    cwd: packageRoot,
+  });
+  const archives = (await readdir(destination)).filter((name) =>
+    name.endsWith(".tgz"),
+  );
+  assert.equal(archives.length, 1, `归档目录应只包含一个包：${destination}`);
+  return path.join(destination, archives[0] ?? "");
+}
+
+async function installContentArtifactBuilder(
+  root: string,
+): Promise<typeof import("@ykdz/template-content-artifacts")> {
+  const builderRoot = fileURLToPath(new URL("../", import.meta.url));
+  const builderInstallRoot = path.join(root, "builder-install");
+  const builderArchive = await packWorkspacePackage(
+    builderRoot,
+    path.join(root, "builder-archive"),
+  );
+  const coreArchive = await packWorkspacePackage(
+    path.join(workspaceRoot, "packages/core"),
+    path.join(root, "core-archive"),
+  );
+  const authoringArchive = await packWorkspacePackage(
+    path.join(workspaceRoot, "packages/workspace-authoring"),
+    path.join(root, "authoring-archive"),
+  );
+  await mkdir(builderInstallRoot, { recursive: true });
+  await writeFile(
+    path.join(builderInstallRoot, "package.json"),
+    `${JSON.stringify({ name: "installed-content-artifact-builder", private: true, type: "module", dependencies: { "@ykdz/template-content-artifacts": `file:${builderArchive}` } }, null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(builderInstallRoot, "pnpm-workspace.yaml"),
+    [
+      "packages:",
+      '  - "."',
+      "overrides:",
+      `  ${JSON.stringify("@ykdz/template-core")}: ${JSON.stringify(`file:${coreArchive}`)}`,
+      `  ${JSON.stringify("@ykdz/template-workspace-authoring")}: ${JSON.stringify(`file:${authoringArchive}`)}`,
+      "",
+    ].join("\n"),
+  );
+  await execa("pnpm", ["install", "--prefer-offline"], {
+    cwd: builderInstallRoot,
+  });
+  const packageURL = pathToFileURL(
+    path.join(builderInstallRoot, "package.json"),
+  ).href;
+  const installedEntry = import.meta.resolve(
+    "@ykdz/template-content-artifacts",
+    packageURL,
+  );
+  return (await import(
+    installedEntry
+  )) as typeof import("@ykdz/template-content-artifacts");
+}
 
 async function linkPackage(
   nodeModulesRoot: string,
@@ -66,16 +132,8 @@ async function prepareOwnerPackage(
   }
   const nodeModulesRoot = path.join(ownerRoot, "node_modules");
   await mkdir(path.join(nodeModulesRoot, ".bin"), { recursive: true });
-  await symlink(
-    path.join(workspaceRoot, "node_modules/.bin/tsc"),
-    path.join(nodeModulesRoot, ".bin/tsc"),
-    "file",
-  );
-  await linkPackage(
-    nodeModulesRoot,
-    "@types/node",
-    path.join(workspaceRoot, "node_modules/@types/node"),
-  );
+  await symlink(tscExecutable, path.join(nodeModulesRoot, ".bin/tsc"), "file");
+  await linkPackage(nodeModulesRoot, "@types/node", nodeTypesRoot);
   await linkPackage(
     nodeModulesRoot,
     "@ykdz/template-core",
@@ -158,7 +216,7 @@ async function prepareSourceCollection(
     ]) {
       const packageRoot =
         packageName === "@types/node"
-          ? path.join(workspaceRoot, "node_modules/@types/node")
+          ? nodeTypesRoot
           : path.join(
               workspaceRoot,
               "packages",
@@ -220,11 +278,7 @@ async function prepareSourceCollection(
   for (const [packageName, packageRoot] of providerRoots) {
     await linkPackage(nodeModulesRoot, packageName, packageRoot);
   }
-  await linkPackage(
-    nodeModulesRoot,
-    "@types/node",
-    path.join(workspaceRoot, "node_modules/@types/node"),
-  );
+  await linkPackage(nodeModulesRoot, "@types/node", nodeTypesRoot);
   await linkPackage(
     nodeModulesRoot,
     "@ykdz/template-core",
@@ -292,11 +346,7 @@ async function prepareConsumer(
   for (const [packageName, packageRoot] of options.sdkRoots) {
     await linkPackage(nodeModulesRoot, packageName, packageRoot);
   }
-  await linkPackage(
-    nodeModulesRoot,
-    "@types/node",
-    path.join(options.workspaceRoot, "node_modules/@types/node"),
-  );
+  await linkPackage(nodeModulesRoot, "@types/node", nodeTypesRoot);
 }
 
 async function typecheckConsumer(consumerRoot: string): Promise<void> {
@@ -392,6 +442,7 @@ void it("同一份严格TypeScript消费代码通过源码和正式安装制品"
       path.join(root, "pnpm-workspace.yaml"),
       'packages:\n  - "authors/*"\n',
     );
+    await writeFile(path.join(root, ".npmrc"), "verifyDepsBeforeRun=false\n");
     await Promise.all([
       prepareOwnerPackage("reference", referenceRoot, workspaceRoot),
       prepareOwnerPackage("reference", referenceV2Root, workspaceRoot, "v2"),
@@ -507,7 +558,8 @@ void it("同一份严格TypeScript消费代码通过源码和正式安装制品"
       betaReference.definition.authorExtension.marker,
       "reference-extension-v2",
     );
-    const prepared = await prepareContentCollection({
+    const installedBuilder = await installContentArtifactBuilder(root);
+    const prepared = await installedBuilder.prepareContentCollection({
       content: sourceCollection.templateContent,
       roots: [preset, betaReference],
       workspaceRoot,
@@ -623,7 +675,10 @@ void it("同一份严格TypeScript消费代码通过源码和正式安装制品"
     assert.equal(new Set(prepared.providers.map(({ name }) => name)).size, 2);
     assert.equal(prepared.collection.name, collectionName);
     assert.match(prepared.collection.sha256, /^[0-9a-f]{64}$/u);
-    await installContentCollection(prepared, installedConsumerRoot);
+    await installedBuilder.installContentCollection(
+      prepared,
+      installedConsumerRoot,
+    );
 
     const requiredSdkArchives = [
       "@ykdz/template-core",

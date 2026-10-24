@@ -564,6 +564,9 @@ importers:
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
         version: link:../../references/tooling-config
+      '@ykdz/template-content-artifacts':
+        specifier: workspace:*
+        version: link:../content-artifacts
       '@ykdz/tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
@@ -659,12 +662,49 @@ importers:
       '@ykdz/default-content-authoring':
         specifier: workspace:*
         version: link:../../content/default/authoring
+      '@ykdz/template-content-artifacts':
+        specifier: workspace:*
+        version: link:../content-artifacts
       '@ykdz/tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
       execa:
         specifier: 'catalog:'
         version: 10.1.1
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  packages/content-artifacts:
+    dependencies:
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../core
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../workspace-authoring
+      execa:
+        specifier: 'catalog:'
+        version: 10.1.1
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../generator
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
