@@ -1014,6 +1014,7 @@ async function createCollectionInstallRoot(options: {
   readonly root: string;
   readonly packageName: string;
   readonly collectionVersion: string;
+  readonly additionalSdkRoots: readonly string[];
   readonly providers: readonly {
     readonly packageName: string;
     readonly packageVersion: string;
@@ -1035,6 +1036,14 @@ async function createCollectionInstallRoot(options: {
     const version = options.sdkVersions.get(name);
     if (packageRoot === undefined || version === undefined) {
       throw new Error(`集合运行依赖未由pnpm工作区解析：${name}`);
+    }
+    dependencies[name] = version;
+  }
+  for (const name of options.additionalSdkRoots) {
+    const packageRoot = options.sdkPackageRoots.get(name);
+    const version = options.sdkVersions.get(name);
+    if (packageRoot === undefined || version === undefined) {
+      throw new Error(`集合额外SDK根未由pnpm工作区解析：${name}`);
     }
     dependencies[name] = version;
   }
@@ -1266,6 +1275,7 @@ export async function prepareContentCollection(
     root,
     packageName: collectionName,
     collectionVersion,
+    additionalSdkRoots: options.additionalSdkRoots ?? [],
     providers,
     sdkPackageRoots,
     sdkVersions,
