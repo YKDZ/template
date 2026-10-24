@@ -104,6 +104,7 @@ async function createOwnerFixture(
       path.join(workspaceRoot, "reference-package.d.ts"),
       [
         "export declare function defineReferencePackage(options: {",
+        "  targetName(): unknown;",
         "  prepareFacts(): unknown;",
         "  transformManifest(): unknown;",
         "  transformDocument(): unknown;",
@@ -234,6 +235,48 @@ export function readOwnerValue(): string {
             file: fixture.entryFile,
           },
         ],
+      );
+    } finally {
+      await rm(fixture.fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  void it("拒绝 targetName 规划回调中的文件与进程状态读取", async () => {
+    const fixture = await createOwnerFixture(
+      "author-planning-target-name-",
+      "@fixture/target-name-owner",
+    );
+    try {
+      await writeFile(
+        fixture.entryFile,
+        `import { readFileSync } from "node:fs";
+import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
+
+export const reference = defineReferencePackage({
+  targetName() {
+    readFileSync(new URL("./owner.txt", import.meta.url), "utf8");
+    return process.env.TARGET_NAME;
+  },
+});
+`,
+      );
+
+      const violations = findOwnerViolations(
+        fixture,
+        "@fixture/target-name-owner#./template",
+      );
+
+      assert.deepEqual(
+        [...new Set(violations.map(({ effect }) => effect))].sort(),
+        ["filesystem", "process-global"],
+      );
+      assert.ok(
+        violations.every(
+          (violation) =>
+            violation.role ===
+              "@fixture/target-name-owner#./template:reference.targetName" &&
+            violation.file === fixture.entryFile,
+        ),
       );
     } finally {
       await rm(fixture.fixtureRoot, { recursive: true, force: true });
