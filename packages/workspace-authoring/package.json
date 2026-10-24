@@ -34,6 +34,7 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
+    "test": "node --conditions=source --experimental-strip-types --test --test-reporter=spec 'test/**/*.light.test.ts'",
     "sync:resource-ignore-snapshot": "node scripts/sync-resource-ignore-snapshot.ts",
     "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false && tsc -p tsconfig.scripts.json --noEmit --pretty false"
   },
