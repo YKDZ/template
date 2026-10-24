@@ -27,7 +27,7 @@ import {
   writeNativeArchiveOverrides,
   type PackedArtifact,
   type PreparedContentCollection,
-} from "@ykdz/template-content/artifact-builder";
+} from "@ykdz/template-content-artifacts";
 import { contentIdentityKey } from "@ykdz/template-core/content-identity";
 import { resolveReferenceDependencyIdentity } from "@ykdz/template-generator";
 import type { DefaultReferencePackageDefinition } from "@ykdz/template-workspace/reference-package";
@@ -354,7 +354,8 @@ void describe("原生内容制品安装链", () => {
     const prepared = await prepareContentCollection({
       content: templateContent,
       roots: [preset],
-
+      packageName: "@ykdz/template-content",
+      additionalSdkRoots: ["@ykdz/template-workspace"],
       workspaceRoot,
       root: buildRoot,
     });
@@ -725,7 +726,8 @@ void describe("原生内容制品安装链", () => {
       const prepared = await prepareContentCollection({
         content: templateContent,
         roots: [preset],
-
+        packageName: "@ykdz/template-content",
+        additionalSdkRoots: ["@ykdz/template-workspace"],
         workspaceRoot,
         root: await temporaryRoot(`preset-${preset.alias}-`),
         sdkArchives,
@@ -923,6 +925,7 @@ void describe("原生内容制品安装链", () => {
 
           workspaceRoot,
           packageName: `@fixture/replay-${preset.alias}`,
+          additionalSdkRoots: ["@ykdz/template-workspace"],
           collectionVersion: prepared.collection.version,
           root: await temporaryRoot(`preset-${preset.alias}-replay-build-`),
           sdkArchives,
@@ -1339,6 +1342,8 @@ void describe("原生内容制品安装链", () => {
     const prepared = await prepareContentCollection({
       content: templateContent,
       roots: references,
+      packageName: "@ykdz/template-content",
+      additionalSdkRoots: ["@ykdz/template-workspace"],
       workspaceRoot,
       root: await temporaryRoot("reference-content-"),
       sdkArchives: firstPartyPrepared.sdkPackages,
@@ -1794,6 +1799,7 @@ void describe("原生内容制品安装链", () => {
 
       workspaceRoot,
       packageName: "@fixture/authored-content",
+      additionalSdkRoots: ["@ykdz/template-workspace"],
       collectionVersion: collectionManifest.version,
       root: buildRoot,
       sdkArchives: firstPartyPrepared.sdkPackages,
@@ -2530,6 +2536,7 @@ void describe("原生内容制品安装链", () => {
 
       workspaceRoot,
       packageName: "@fixture/multi-source-content",
+      additionalSdkRoots: ["@ykdz/template-workspace"],
       collectionVersion: "1.0.0",
       root: await temporaryRoot("multi-source-content-"),
       sdkArchives: firstPartyPrepared.sdkPackages,

@@ -12,11 +12,6 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./artifact-builder": {
-      "types": "./scripts/build-content-artifacts.ts",
-      "artifact-builder": "./scripts/build-content-artifacts.ts",
-      "source": "./scripts/build-content-artifacts.ts"
-    },
     "./collection": {
       "source": "./src/collection.ts",
       "types": "./dist/collection.d.ts",
@@ -30,9 +25,8 @@
     "lint": "oxlint --quiet --format=unix --ignore-pattern dist .",
     "lint:fix": "oxlint --format=unix --ignore-pattern dist . --fix",
     "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 'test/**/*.light.test.ts'",
-    "test:integration": "node --conditions=artifact-builder --experimental-strip-types --test --test-concurrency=1 --test-timeout=300000 'test/**/*.integration.test.ts'",
-    "test:integration:content-contract": "node --conditions=artifact-builder --conditions=source --experimental-strip-types --test --test-concurrency=1 --test-timeout=300000 'test/content-contract.integration.test.ts'",
-    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false && tsc -p tsconfig.scripts.json --noEmit --pretty false"
+    "test:integration": "node --conditions=source --experimental-strip-types --test --test-concurrency=1 --test-timeout=300000 'test/**/*.integration.test.ts'",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false"
   },
   "dependencies": {
     "@ykdz/preset-rust-bin": "workspace:*",
@@ -60,6 +54,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@ykdz/template-content-artifacts": "workspace:*",
     "@ykdz/tooling-config": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",

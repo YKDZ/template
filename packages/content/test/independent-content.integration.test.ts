@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   installContentCollection,
   prepareContentCollection,
-} from "@ykdz/template-content/artifact-builder";
+} from "@ykdz/template-content-artifacts";
 import { createTemplateSourceHandle } from "@ykdz/template-core/template-source";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { defineNativeContentArtifact } from "@ykdz/template-workspace-authoring/content-artifact";

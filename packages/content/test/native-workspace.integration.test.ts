@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import {
   installContentCollection,
   prepareContentCollection,
-} from "@ykdz/template-content/artifact-builder";
+} from "@ykdz/template-content-artifacts";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { execa } from "execa";
 
@@ -125,6 +125,8 @@ await it(
       prepared = await prepareContentCollection({
         content,
         roots: [libraryPreset, cliPreset],
+        packageName: "@ykdz/template-content",
+        additionalSdkRoots: ["@ykdz/template-workspace"],
         workspaceRoot,
         root: preparedRoot,
       });
@@ -557,6 +559,8 @@ await it(
       prepared = await prepareContentCollection({
         content,
         roots: [vikePreset, libraryPreset],
+        packageName: "@ykdz/template-content",
+        additionalSdkRoots: ["@ykdz/template-workspace"],
         workspaceRoot,
         root: preparedRoot,
       });
