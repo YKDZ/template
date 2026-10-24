@@ -7,14 +7,14 @@ import { describe, it } from "node:test";
 import {
   assertDependabotContract,
   assertWorkflowContract,
-} from "@ykdz/template-checks/workflow-contract";
+} from "@ykdz/default-content-verification/workflow-contract";
 import { templatePresets } from "@ykdz/template-content";
 import { parse } from "yaml";
 
 import {
   initializePreset,
   type GeneratedPresetReceipt,
-} from "./support/generated-preset-receipt.ts";
+} from "../test-support/generated-preset-receipt.ts";
 
 async function renderedPresetSource(
   ownsDeploymentCheck: boolean,

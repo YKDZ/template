@@ -77,12 +77,14 @@ type GeneratedScenarioSet =
   | "capabilities";
 
 const scenarioSetReproductionCommands: Record<GeneratedScenarioSet, string> = {
-  init: "pnpm --filter @ykdz/template-checks check:generated",
+  init: "pnpm --filter @ykdz/default-content-verification check:generated",
   "package-addition-matrix":
-    "pnpm --filter @ykdz/template-checks diagnose:matrix",
-  focused: "pnpm --filter @ykdz/template-checks check:focused",
-  deployment: "pnpm --filter @ykdz/template-checks check:deployment",
-  capabilities: "pnpm --filter @ykdz/template-checks check:capabilities",
+    "pnpm --filter @ykdz/default-content-verification diagnose:matrix",
+  focused: "pnpm --filter @ykdz/default-content-verification check:focused",
+  deployment:
+    "pnpm --filter @ykdz/default-content-verification check:deployment",
+  capabilities:
+    "pnpm --filter @ykdz/default-content-verification check:capabilities",
 };
 
 const fixtureFailureReportName = "fixture-failure.json";

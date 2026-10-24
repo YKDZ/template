@@ -220,7 +220,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
       readonly catalog: Record<string, string>;
     };
     const checksManifest = JSON.parse(
-      await readFile("packages/checks/package.json", "utf8"),
+      await readFile("content/default/verification/package.json", "utf8"),
     ) as {
       readonly devDependencies: Record<string, string>;
     };
@@ -238,7 +238,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
       name: "Validate Fixture Gate Prerequisites",
       run: [
         "docker version --format '{{.Server.Version}}'",
-        "pnpm --filter @ykdz/template-checks exec devcontainer --version",
+        "pnpm --filter @ykdz/default-content-verification exec devcontainer --version",
         "",
       ].join("\n"),
     });
@@ -375,7 +375,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
       {
         name: "Check Fixture Evidence Health",
         if: "always() && steps.package-check.outcome == 'success'",
-        run: "pnpm --filter @ykdz/template-checks run check:evidence-health",
+        run: "pnpm --filter @ykdz/default-content-verification run check:evidence-health",
       },
     );
 

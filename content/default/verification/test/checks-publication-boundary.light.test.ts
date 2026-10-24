@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
-import path from "node:path";
 import { describe, it } from "node:test";
 
 import { execa } from "execa";
 
-void describe("@ykdz/template-checks publication boundary", () => {
+void describe("@ykdz/default-content-verification publication boundary", () => {
   void it("keeps the generated registry Task Entrypoint private under source resolution", async () => {
     const privateImport = await execa(
       "node",
@@ -12,10 +11,10 @@ void describe("@ykdz/template-checks publication boundary", () => {
         "--conditions=source",
         "--input-type=module",
         "-e",
-        'await import("@ykdz/template-checks/check-generated-registry")',
+        'await import("@ykdz/default-content-verification/check-generated-registry")',
       ],
       {
-        cwd: path.join(process.cwd(), "packages/checks"),
+        cwd: process.cwd(),
         reject: false,
         all: true,
       },

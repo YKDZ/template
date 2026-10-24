@@ -1,5 +1,5 @@
 {
-  "name": "@ykdz/template-checks",
+  "name": "@ykdz/default-content-verification",
   "private": true,
   "type": "module",
   "exports": {
