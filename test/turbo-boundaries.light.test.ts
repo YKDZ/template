@@ -21,7 +21,7 @@ const packages = {
     mayImport: [] as const,
   },
   cli: {
-    directory: "packages/cli",
+    directory: "apps/cli",
     name: "@ykdz/template",
     mayImport: ["core"] as const,
   },

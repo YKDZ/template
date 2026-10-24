@@ -27,7 +27,7 @@ async function createRunnerFixture(): Promise<{
   const root = await mkdtemp(
     path.join(tmpdir(), "template-journey-lifecycle-"),
   );
-  const cliRoot = path.join(root, "packages", "cli");
+  const cliRoot = path.join(root, "apps", "cli");
   const e2eRoot = path.join(cliRoot, "test", "e2e");
   const journeyRoot = path.join(e2eRoot, "journeys");
   await mkdir(journeyRoot, { recursive: true });

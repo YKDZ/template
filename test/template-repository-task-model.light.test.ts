@@ -250,7 +250,7 @@ void describe("Template Repository native task model", () => {
     );
     assert.match(scripts.test ?? "", /--test-concurrency=2/u);
 
-    const cliManifest = await readJson<Manifest>("packages/cli/package.json");
+    const cliManifest = await readJson<Manifest>("apps/cli/package.json");
     assert.match(cliManifest.scripts.test ?? "", /--test-concurrency=2/u);
 
     for (const task of [
@@ -425,7 +425,7 @@ void describe("Template Repository native task model", () => {
   });
 
   void it("lets the public CLI prepack select itself while Turbo builds dependencies", async () => {
-    const cli = await readJson<Manifest>("packages/cli/package.json");
+    const cli = await readJson<Manifest>("apps/cli/package.json");
 
     assert.strictEqual(cli.scripts.prepack, "pnpm run build:distribution");
     assert.match(
@@ -458,7 +458,7 @@ void describe("Template Repository native task model", () => {
   void it("源码旅程不造候选，正式 tgz 负责 compiled CLI 消费", async () => {
     const directory = nativeTaskByName(await queryNativeTaskDirectory());
     const root = await readJson<Manifest>("package.json");
-    const cli = await readJson<Manifest>("packages/cli/package.json");
+    const cli = await readJson<Manifest>("apps/cli/package.json");
     const source = await runTurboDryRun(
       "test",
       "test:e2e:source",
