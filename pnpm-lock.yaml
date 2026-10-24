@@ -342,6 +342,9 @@ importers:
       '@ykdz/default-content-authoring':
         specifier: workspace:*
         version: link:content/default/authoring
+      '@ykdz/default-content-verification':
+        specifier: workspace:*
+        version: link:content/default/verification
       '@ykdz/reference-rust-bin':
         specifier: workspace:*
         version: link:content/default/references/rust-bin
@@ -351,9 +354,6 @@ importers:
       '@ykdz/reference-workspace-root':
         specifier: workspace:*
         version: link:content/default/references/workspace-root
-      '@ykdz/default-content-verification':
-        specifier: workspace:*
-        version: link:content/default/verification
       '@ykdz/template-content':
         specifier: workspace:*
         version: link:content/default/collection
@@ -1602,28 +1602,28 @@ importers:
     dependencies:
       '@ykdz/default-content-authoring':
         specifier: workspace:*
-        version: link:../../content/default/authoring
+        version: link:../authoring
       '@ykdz/reference-ts-cli':
         specifier: workspace:*
-        version: link:../../content/default/references/ts-cli
+        version: link:../references/ts-cli
       '@ykdz/template-content':
         specifier: workspace:*
-        version: link:../../content/default/collection
+        version: link:../collection
       '@ykdz/template-core':
         specifier: workspace:*
-        version: link:../core
+        version: link:../../../packages/core
       '@ykdz/template-generator':
         specifier: workspace:*
-        version: link:../generator
+        version: link:../../../packages/generator
       '@ykdz/template-verification-runtime':
         specifier: workspace:*
-        version: link:../verification-runtime
+        version: link:../../../packages/verification-runtime
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../content/default/composition
+        version: link:../composition
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
-        version: link:../workspace-authoring
+        version: link:../../../packages/workspace-authoring
       execa:
         specifier: 'catalog:'
         version: 10.1.1
@@ -1639,10 +1639,10 @@ importers:
         version: 24.19.2
       '@ykdz/reference-workspace-root':
         specifier: workspace:*
-        version: link:../../content/default/references/workspace-root
+        version: link:../references/workspace-root
       '@ykdz/tooling-config':
         specifier: workspace:*
-        version: link:../tooling-config
+        version: link:../../../packages/tooling-config
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
