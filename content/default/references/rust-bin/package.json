@@ -1,0 +1,45 @@
+{
+  "name": "@ykdz/reference-rust-bin",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./reference": "./package.json",
+    "./template": {
+      "source": "./template/definition.ts",
+      "types": "./template-dist/definition.d.ts",
+      "default": "./template-dist/definition.js"
+    },
+    "./environment": {
+      "source": "./template/environment.ts",
+      "types": "./template-dist/environment.d.ts",
+      "default": "./template-dist/environment.js"
+    }
+  },
+  "scripts": {
+    "check:author-planning-roles": "pnpm --workspace-root run author-planning-roles:workspace -- --owner-directory \"$PWD\"",
+    "build": "cargo build --workspace",
+    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
+    "format:check": "cargo fmt --all -- --check && oxfmt --list-different .",
+    "format:write": "cargo fmt --all && oxfmt --write .",
+    "lint": "cargo clippy --workspace --all-targets -- -D warnings && oxlint --quiet --format=unix --ignore-pattern node_modules --ignore-pattern target .",
+    "lint:fix": "oxlint --format=unix --ignore-pattern node_modules --ignore-pattern target . --fix",
+    "test": "cargo test --workspace && node --conditions=source --experimental-strip-types --test --test-reporter=spec 'test/**/*.light.test.ts'",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@ykdz/default-content-authoring": "workspace:*",
+    "@ykdz/reference-workspace-root": "workspace:*",
+    "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-environment": "workspace:*",
+    "@ykdz/tooling-config": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "smol-toml": "catalog:",
+    "typescript-7": "catalog:"
+  },
+  "engines": {
+    "node": "24"
+  }
+}

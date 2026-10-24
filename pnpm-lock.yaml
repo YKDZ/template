@@ -342,18 +342,21 @@ importers:
       '@ykdz/default-content-authoring':
         specifier: workspace:*
         version: link:content/default/authoring
+      '@ykdz/reference-rust-bin':
+        specifier: workspace:*
+        version: link:content/default/references/rust-bin
       '@ykdz/reference-ts-cli':
         specifier: workspace:*
-        version: link:references/ts-cli
+        version: link:content/default/references/ts-cli
       '@ykdz/reference-workspace-root':
         specifier: workspace:*
-        version: link:references/workspace-root
+        version: link:content/default/references/workspace-root
       '@ykdz/template-checks':
         specifier: workspace:*
         version: link:packages/checks
       '@ykdz/template-content':
         specifier: workspace:*
-        version: link:packages/content
+        version: link:content/default/collection
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:packages/core
@@ -368,7 +371,7 @@ importers:
         version: link:packages/verification-runtime
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:workspace-policies/default
+        version: link:content/default/composition
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:packages/workspace-authoring
@@ -416,13 +419,13 @@ importers:
         version: 0.3.0
       '@ykdz/template-content':
         specifier: workspace:*
-        version: link:../../packages/content
+        version: link:../../content/default/collection
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../packages/core
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../workspace-policies/default
+        version: link:../../content/default/composition
       hosted-git-info:
         specifier: 'catalog:'
         version: 10.1.1
@@ -465,7 +468,7 @@ importers:
         version: 24.19.2
       '@ykdz/reference-tooling-config':
         specifier: workspace:*
-        version: link:../../references/tooling-config
+        version: link:../../content/default/references/tooling-config
       '@ykdz/template-content-artifacts':
         specifier: workspace:*
         version: link:../../packages/content-artifacts
@@ -523,6 +526,1078 @@ importers:
         specifier: 'catalog:'
         version: typescript@7.0.2
 
+  content/default/collection:
+    dependencies:
+      '@ykdz/preset-rust-bin':
+        specifier: workspace:*
+        version: link:../presets/rust-bin
+      '@ykdz/preset-ts-cli':
+        specifier: workspace:*
+        version: link:../presets/ts-cli
+      '@ykdz/preset-ts-lib':
+        specifier: workspace:*
+        version: link:../presets/ts-lib
+      '@ykdz/preset-vike-app':
+        specifier: workspace:*
+        version: link:../presets/vike-app
+      '@ykdz/preset-vue-app':
+        specifier: workspace:*
+        version: link:../presets/vue-app
+      '@ykdz/preset-vue-hono-app':
+        specifier: workspace:*
+        version: link:../presets/vue-hono-app
+      '@ykdz/reference-hono-api':
+        specifier: workspace:*
+        version: link:../references/hono-api
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../references/npm-publication
+      '@ykdz/reference-rust-bin':
+        specifier: workspace:*
+        version: link:../references/rust-bin
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../references/tooling-config
+      '@ykdz/reference-ts-cli':
+        specifier: workspace:*
+        version: link:../references/ts-cli
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../references/ts-lib
+      '@ykdz/reference-vike-db':
+        specifier: workspace:*
+        version: link:../references/vike-db
+      '@ykdz/reference-vike-migrations':
+        specifier: workspace:*
+        version: link:../references/vike-migrations
+      '@ykdz/reference-vike-web':
+        specifier: workspace:*
+        version: link:../references/vike-web
+      '@ykdz/reference-vue-app':
+        specifier: workspace:*
+        version: link:../references/vue-app
+      '@ykdz/reference-vue-hono-web':
+        specifier: workspace:*
+        version: link:../references/vue-hono-web
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../references/workspace-root
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../packages/core
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../../../packages/generator
+      '@ykdz/template-workspace':
+        specifier: workspace:*
+        version: link:../composition
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../../packages/workspace-authoring
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../authoring
+      '@ykdz/template-content-artifacts':
+        specifier: workspace:*
+        version: link:../../../packages/content-artifacts
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../packages/tooling-config
+      execa:
+        specifier: 'catalog:'
+        version: 10.1.1
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/composition:
+    dependencies:
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../authoring
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../references/workspace-root
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../packages/core
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../../../packages/generator
+      ignore:
+        specifier: 'catalog:'
+        version: 7.0.12
+      jsonc-parser:
+        specifier: 'catalog:'
+        version: 3.3.1
+      smol-toml:
+        specifier: 'catalog:'
+        version: 1.9.1
+      valibot:
+        specifier: 'catalog:'
+        version: 1.5.0(typescript@7.0.2)
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.1
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../../../packages/environment
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/presets/rust-bin:
+    dependencies:
+      '@ykdz/reference-rust-bin':
+        specifier: workspace:*
+        version: link:../../references/rust-bin
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../../references/tooling-config
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../../references/workspace-root
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../../../../packages/generator
+      '@ykdz/template-workspace':
+        specifier: workspace:*
+        version: link:../../composition
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../../../packages/workspace-authoring
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      execa:
+        specifier: 'catalog:'
+        version: 10.1.1
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/presets/ts-cli:
+    dependencies:
+      '@ykdz/reference-ts-cli':
+        specifier: workspace:*
+        version: link:../../references/ts-cli
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/preset-ts-lib':
+        specifier: workspace:*
+        version: link:../ts-lib
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
+      '@ykdz/reference-rust-bin':
+        specifier: workspace:*
+        version: link:../../references/rust-bin
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../../references/tooling-config
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../../references/workspace-root
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../../../../packages/generator
+      '@ykdz/template-workspace':
+        specifier: workspace:*
+        version: link:../../composition
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../../../packages/workspace-authoring
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      execa:
+        specifier: 'catalog:'
+        version: 10.1.1
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/presets/ts-lib:
+    dependencies:
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../../references/tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../../references/workspace-root
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../../../../packages/generator
+      '@ykdz/template-workspace':
+        specifier: workspace:*
+        version: link:../../composition
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../../../packages/workspace-authoring
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      execa:
+        specifier: 'catalog:'
+        version: 10.1.1
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/presets/vike-app:
+    dependencies:
+      '@ykdz/reference-vike-db':
+        specifier: workspace:*
+        version: link:../../references/vike-db
+      '@ykdz/reference-vike-migrations':
+        specifier: workspace:*
+        version: link:../../references/vike-migrations
+      '@ykdz/reference-vike-web':
+        specifier: workspace:*
+        version: link:../../references/vike-web
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      '@ykdz/template-workspace':
+        specifier: workspace:*
+        version: link:../../composition
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../../../packages/workspace-authoring
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.1
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../../references/tooling-config
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../../references/workspace-root
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../../../../packages/generator
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      execa:
+        specifier: 'catalog:'
+        version: 10.1.1
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/presets/vue-app:
+    dependencies:
+      '@ykdz/reference-vue-app':
+        specifier: workspace:*
+        version: link:../../references/vue-app
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../../references/tooling-config
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../../../../packages/generator
+      '@ykdz/template-workspace':
+        specifier: workspace:*
+        version: link:../../composition
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../../../packages/workspace-authoring
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/presets/vue-hono-app:
+    dependencies:
+      '@ykdz/reference-hono-api':
+        specifier: workspace:*
+        version: link:../../references/hono-api
+      '@ykdz/reference-vue-hono-web':
+        specifier: workspace:*
+        version: link:../../references/vue-hono-web
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      '@ykdz/template-workspace-authoring':
+        specifier: workspace:*
+        version: link:../../../../packages/workspace-authoring
+    devDependencies:
+      '@playwright/test':
+        specifier: 'catalog:'
+        version: 1.64.0
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../../references/npm-publication
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../../references/tooling-config
+      '@ykdz/reference-ts-cli':
+        specifier: workspace:*
+        version: link:../../references/ts-cli
+      '@ykdz/reference-ts-lib':
+        specifier: workspace:*
+        version: link:../../references/ts-lib
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../../references/workspace-root
+      '@ykdz/template-generator':
+        specifier: workspace:*
+        version: link:../../../../packages/generator
+      '@ykdz/template-workspace':
+        specifier: workspace:*
+        version: link:../../composition
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript:
+        specifier: 'catalog:'
+        version: '@typescript/typescript6@6.0.2'
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/references/hono-api:
+    dependencies:
+      '@hono/node-server':
+        specifier: 'catalog:'
+        version: 2.1.5(hono@4.13.13)
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      hono:
+        specifier: 'catalog:'
+        version: 4.13.13
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/references/npm-publication:
+    devDependencies:
+      '@changesets/cli':
+        specifier: 'catalog:'
+        version: 3.0.3
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/references/rust-bin:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../../../../packages/environment
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      smol-toml:
+        specifier: 'catalog:'
+        version: 1.9.1
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/references/tooling-config:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/references/ts-cli:
+    dependencies:
+      '@valibot/to-json-schema':
+        specifier: 'catalog:'
+        version: 1.8.0(valibot@1.5.0(typescript@7.0.2))
+      '@ykdz/cli-contract':
+        specifier: 'catalog:'
+        version: 0.3.0
+      valibot:
+        specifier: 'catalog:'
+        version: 1.5.0(typescript@7.0.2)
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../npm-publication
+      '@ykdz/reference-tooling-config':
+        specifier: link:../tooling-config
+        version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/references/ts-lib:
+    dependencies:
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      valibot:
+        specifier: 'catalog:'
+        version: 1.5.0(typescript@7.0.2)
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/reference-npm-publication':
+        specifier: workspace:*
+        version: link:../npm-publication
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/references/vike-db:
+    dependencies:
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 1.0.0-rc.5-ab785fc(valibot@1.5.0(typescript@7.0.2))
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/references/vike-migrations:
+    dependencies:
+      '@ykdz/reference-vike-db':
+        specifier: workspace:*
+        version: link:../vike-db
+      drizzle-kit:
+        specifier: 'catalog:'
+        version: 1.0.0-rc.5-ab785fc
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 1.0.0-rc.5-ab785fc(valibot@1.5.0(typescript@7.0.2))
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  content/default/references/vike-web:
+    dependencies:
+      '@vikejs/hono':
+        specifier: 'catalog:'
+        version: 0.2.1(hono@4.13.13)(srvx@1.0.5)(vike@0.4.267(hono@4.13.13)(srvx@1.0.5)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)))
+      '@ykdz/reference-vike-db':
+        specifier: workspace:*
+        version: link:../vike-db
+      hono:
+        specifier: 'catalog:'
+        version: 4.13.13
+      srvx:
+        specifier: 'catalog:'
+        version: 1.0.5
+      telefunc:
+        specifier: 'catalog:'
+        version: 0.2.24(@babel/core@7.29.7)(@babel/parser@7.29.9)(@babel/types@7.29.8)(srvx@1.0.5)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+      vike:
+        specifier: 'catalog:'
+        version: 0.4.267(hono@4.13.13)(srvx@1.0.5)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+      vike-vue:
+        specifier: 'catalog:'
+        version: 0.9.15(vike@0.4.267(hono@4.13.13)(srvx@1.0.5)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)))(vue@3.5.44)
+      vue:
+        specifier: 'catalog:'
+        version: 3.5.44
+    devDependencies:
+      '@playwright/test':
+        specifier: 'catalog:'
+        version: 1.64.0
+      '@tailwindcss/vite':
+        specifier: 'catalog:'
+        version: 4.3.3(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@vitejs/plugin-vue':
+        specifier: 'catalog:'
+        version: 6.0.10(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vue@3.5.44)
+      '@vitest/browser-playwright':
+        specifier: 'catalog:'
+        version: 5.0.4(playwright@1.64.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vitest@5.0.4)
+      '@vue/tsconfig':
+        specifier: 'catalog:'
+        version: 0.9.1(@typescript/typescript6@6.0.2)(vue@3.5.44)
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      playwright:
+        specifier: 'catalog:'
+        version: 1.64.0
+      tailwindcss:
+        specifier: 'catalog:'
+        version: 4.3.3
+      turbo:
+        specifier: 'catalog:'
+        version: 2.11.10
+      typescript:
+        specifier: 'catalog:'
+        version: '@typescript/typescript6@6.0.2'
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+      vite:
+        specifier: 'catalog:'
+        version: 8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.4(@types/node@24.19.2)(@vitest/browser-playwright@5.0.4)(@vitest/ui@5.0.4)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+      vitest-browser-vue:
+        specifier: 'catalog:'
+        version: 3.1.0(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(vitest@5.0.4)(vue@3.5.44)
+      vue-tsc:
+        specifier: 'catalog:'
+        version: 3.3.13(@typescript/typescript6@6.0.2)
+
+  content/default/references/vue-app:
+    dependencies:
+      '@vue/devtools-api':
+        specifier: 'catalog:'
+        version: 8.2.1
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      pinia:
+        specifier: 'catalog:'
+        version: 4.1.0(@vue/devtools-api@8.2.1)(vue@3.5.44)
+      vue:
+        specifier: 'catalog:'
+        version: 3.5.44
+    devDependencies:
+      '@playwright/test':
+        specifier: 'catalog:'
+        version: 1.64.0
+      '@tailwindcss/vite':
+        specifier: 'catalog:'
+        version: 4.3.3(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@types/web-bluetooth':
+        specifier: 'catalog:'
+        version: 0.0.21
+      '@vitejs/plugin-vue':
+        specifier: 'catalog:'
+        version: 6.0.10(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vue@3.5.44)
+      '@vitest/browser-playwright':
+        specifier: 'catalog:'
+        version: 5.0.4(playwright@1.64.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vitest@5.0.4)
+      '@vue/tsconfig':
+        specifier: 'catalog:'
+        version: 0.9.1(@typescript/typescript6@6.0.2)(vue@3.5.44)
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      playwright:
+        specifier: 'catalog:'
+        version: 1.64.0
+      typescript:
+        specifier: 'catalog:'
+        version: '@typescript/typescript6@6.0.2'
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+      vite:
+        specifier: 'catalog:'
+        version: 8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.4(@types/node@24.19.2)(@vitest/browser-playwright@5.0.4)(@vitest/ui@5.0.4)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+      vitest-browser-vue:
+        specifier: 'catalog:'
+        version: 3.1.0(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(vitest@5.0.4)(vue@3.5.44)
+      vue-tsc:
+        specifier: 'catalog:'
+        version: 3.3.13(@typescript/typescript6@6.0.2)
+
+  content/default/references/vue-hono-web:
+    dependencies:
+      '@ykdz/reference-hono-api':
+        specifier: workspace:*
+        version: link:../hono-api
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      vue:
+        specifier: 'catalog:'
+        version: 3.5.44
+    devDependencies:
+      '@tailwindcss/vite':
+        specifier: 'catalog:'
+        version: 4.3.3(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@types/web-bluetooth':
+        specifier: 'catalog:'
+        version: 0.0.21
+      '@vitejs/plugin-vue':
+        specifier: 'catalog:'
+        version: 6.0.10(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vue@3.5.44)
+      '@vitest/browser-playwright':
+        specifier: 'catalog:'
+        version: 5.0.4(playwright@1.64.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vitest@5.0.4)
+      '@vue/tsconfig':
+        specifier: 'catalog:'
+        version: 0.9.1(@typescript/typescript6@6.0.2)(vue@3.5.44)
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
+      '@ykdz/reference-workspace-root':
+        specifier: workspace:*
+        version: link:../workspace-root
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      playwright:
+        specifier: 'catalog:'
+        version: 1.64.0
+      typescript:
+        specifier: 'catalog:'
+        version: '@typescript/typescript6@6.0.2'
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+      vite:
+        specifier: 'catalog:'
+        version: 8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.4(@types/node@24.19.2)(@vitest/browser-playwright@5.0.4)(@vitest/ui@5.0.4)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+      vitest-browser-vue:
+        specifier: 'catalog:'
+        version: 3.1.0(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(vitest@5.0.4)(vue@3.5.44)
+      vue-tsc:
+        specifier: 'catalog:'
+        version: 3.3.13(@typescript/typescript6@6.0.2)
+
+  content/default/references/workspace-root:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@ykdz/default-content-authoring':
+        specifier: workspace:*
+        version: link:../../authoring
+      '@ykdz/reference-tooling-config':
+        specifier: workspace:../tooling-config
+        version: link:../tooling-config
+      '@ykdz/template-core':
+        specifier: workspace:*
+        version: link:../../../../packages/core
+      '@ykdz/template-environment':
+        specifier: workspace:*
+        version: link:../../../../packages/environment
+      '@ykdz/tooling-config':
+        specifier: workspace:*
+        version: link:../../../../packages/tooling-config
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.71.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.88.0(oxlint-tsgolint@7.0.2004)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 7.0.2004
+      turbo:
+        specifier: 'catalog:'
+        version: 2.11.10
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+      valibot:
+        specifier: 'catalog:'
+        version: 1.5.0(typescript@7.0.2)
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.1
+
   packages/checks:
     dependencies:
       '@ykdz/default-content-authoring':
@@ -530,10 +1605,10 @@ importers:
         version: link:../../content/default/authoring
       '@ykdz/reference-ts-cli':
         specifier: workspace:*
-        version: link:../../references/ts-cli
+        version: link:../../content/default/references/ts-cli
       '@ykdz/template-content':
         specifier: workspace:*
-        version: link:../content
+        version: link:../../content/default/collection
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
@@ -545,7 +1620,7 @@ importers:
         version: link:../verification-runtime
       '@ykdz/template-workspace':
         specifier: workspace:*
-        version: link:../../workspace-policies/default
+        version: link:../../content/default/composition
       '@ykdz/template-workspace-authoring':
         specifier: workspace:*
         version: link:../workspace-authoring
@@ -564,7 +1639,7 @@ importers:
         version: 24.19.2
       '@ykdz/reference-workspace-root':
         specifier: workspace:*
-        version: link:../../references/workspace-root
+        version: link:../../content/default/references/workspace-root
       '@ykdz/tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
@@ -589,103 +1664,6 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: '@typescript/typescript6@6.0.2'
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  packages/content:
-    dependencies:
-      '@ykdz/preset-rust-bin':
-        specifier: workspace:*
-        version: link:../../presets/rust-bin
-      '@ykdz/preset-ts-cli':
-        specifier: workspace:*
-        version: link:../../presets/ts-cli
-      '@ykdz/preset-ts-lib':
-        specifier: workspace:*
-        version: link:../../presets/ts-lib
-      '@ykdz/preset-vike-app':
-        specifier: workspace:*
-        version: link:../../presets/vike-app
-      '@ykdz/preset-vue-app':
-        specifier: workspace:*
-        version: link:../../presets/vue-app
-      '@ykdz/preset-vue-hono-app':
-        specifier: workspace:*
-        version: link:../../presets/vue-hono-app
-      '@ykdz/reference-hono-api':
-        specifier: workspace:*
-        version: link:../../references/hono-api
-      '@ykdz/reference-npm-publication':
-        specifier: workspace:*
-        version: link:../../references/npm-publication
-      '@ykdz/reference-rust-bin':
-        specifier: workspace:*
-        version: link:../../references/rust-bin
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../../references/tooling-config
-      '@ykdz/reference-ts-cli':
-        specifier: workspace:*
-        version: link:../../references/ts-cli
-      '@ykdz/reference-ts-lib':
-        specifier: workspace:*
-        version: link:../../references/ts-lib
-      '@ykdz/reference-vike-db':
-        specifier: workspace:*
-        version: link:../../references/vike-db
-      '@ykdz/reference-vike-migrations':
-        specifier: workspace:*
-        version: link:../../references/vike-migrations
-      '@ykdz/reference-vike-web':
-        specifier: workspace:*
-        version: link:../../references/vike-web
-      '@ykdz/reference-vue-app':
-        specifier: workspace:*
-        version: link:../../references/vue-app
-      '@ykdz/reference-vue-hono-web':
-        specifier: workspace:*
-        version: link:../../references/vue-hono-web
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../../references/workspace-root
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../core
-      '@ykdz/template-generator':
-        specifier: workspace:*
-        version: link:../generator
-      '@ykdz/template-workspace':
-        specifier: workspace:*
-        version: link:../../workspace-policies/default
-      '@ykdz/template-workspace-authoring':
-        specifier: workspace:*
-        version: link:../workspace-authoring
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/template-content-artifacts':
-        specifier: workspace:*
-        version: link:../content-artifacts
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../tooling-config
-      execa:
-        specifier: 'catalog:'
-        version: 10.1.1
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
@@ -875,972 +1853,6 @@ importers:
       '@ykdz/tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  presets/rust-bin:
-    dependencies:
-      '@ykdz/reference-rust-bin':
-        specifier: workspace:*
-        version: link:../../references/rust-bin
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../../references/tooling-config
-      '@ykdz/reference-ts-lib':
-        specifier: workspace:*
-        version: link:../../references/ts-lib
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../../references/workspace-root
-      '@ykdz/template-generator':
-        specifier: workspace:*
-        version: link:../../packages/generator
-      '@ykdz/template-workspace':
-        specifier: workspace:*
-        version: link:../../workspace-policies/default
-      '@ykdz/template-workspace-authoring':
-        specifier: workspace:*
-        version: link:../../packages/workspace-authoring
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      execa:
-        specifier: 'catalog:'
-        version: 10.1.1
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  presets/ts-cli:
-    dependencies:
-      '@ykdz/reference-ts-cli':
-        specifier: workspace:*
-        version: link:../../references/ts-cli
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/preset-ts-lib':
-        specifier: workspace:*
-        version: link:../ts-lib
-      '@ykdz/reference-npm-publication':
-        specifier: workspace:*
-        version: link:../../references/npm-publication
-      '@ykdz/reference-rust-bin':
-        specifier: workspace:*
-        version: link:../../references/rust-bin
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../../references/tooling-config
-      '@ykdz/reference-ts-lib':
-        specifier: workspace:*
-        version: link:../../references/ts-lib
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../../references/workspace-root
-      '@ykdz/template-generator':
-        specifier: workspace:*
-        version: link:../../packages/generator
-      '@ykdz/template-workspace':
-        specifier: workspace:*
-        version: link:../../workspace-policies/default
-      '@ykdz/template-workspace-authoring':
-        specifier: workspace:*
-        version: link:../../packages/workspace-authoring
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      execa:
-        specifier: 'catalog:'
-        version: 10.1.1
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  presets/ts-lib:
-    dependencies:
-      '@ykdz/reference-ts-lib':
-        specifier: workspace:*
-        version: link:../../references/ts-lib
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/reference-npm-publication':
-        specifier: workspace:*
-        version: link:../../references/npm-publication
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../../references/tooling-config
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../../references/workspace-root
-      '@ykdz/template-generator':
-        specifier: workspace:*
-        version: link:../../packages/generator
-      '@ykdz/template-workspace':
-        specifier: workspace:*
-        version: link:../../workspace-policies/default
-      '@ykdz/template-workspace-authoring':
-        specifier: workspace:*
-        version: link:../../packages/workspace-authoring
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      execa:
-        specifier: 'catalog:'
-        version: 10.1.1
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  presets/vike-app:
-    dependencies:
-      '@ykdz/reference-vike-db':
-        specifier: workspace:*
-        version: link:../../references/vike-db
-      '@ykdz/reference-vike-migrations':
-        specifier: workspace:*
-        version: link:../../references/vike-migrations
-      '@ykdz/reference-vike-web':
-        specifier: workspace:*
-        version: link:../../references/vike-web
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@ykdz/template-workspace':
-        specifier: workspace:*
-        version: link:../../workspace-policies/default
-      '@ykdz/template-workspace-authoring':
-        specifier: workspace:*
-        version: link:../../packages/workspace-authoring
-      yaml:
-        specifier: 'catalog:'
-        version: 2.9.1
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/reference-npm-publication':
-        specifier: workspace:*
-        version: link:../../references/npm-publication
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../../references/tooling-config
-      '@ykdz/reference-ts-lib':
-        specifier: workspace:*
-        version: link:../../references/ts-lib
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../../references/workspace-root
-      '@ykdz/template-generator':
-        specifier: workspace:*
-        version: link:../../packages/generator
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      execa:
-        specifier: 'catalog:'
-        version: 10.1.1
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  presets/vue-app:
-    dependencies:
-      '@ykdz/reference-vue-app':
-        specifier: workspace:*
-        version: link:../../references/vue-app
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/reference-npm-publication':
-        specifier: workspace:*
-        version: link:../../references/npm-publication
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../../references/tooling-config
-      '@ykdz/reference-ts-lib':
-        specifier: workspace:*
-        version: link:../../references/ts-lib
-      '@ykdz/template-generator':
-        specifier: workspace:*
-        version: link:../../packages/generator
-      '@ykdz/template-workspace':
-        specifier: workspace:*
-        version: link:../../workspace-policies/default
-      '@ykdz/template-workspace-authoring':
-        specifier: workspace:*
-        version: link:../../packages/workspace-authoring
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  presets/vue-hono-app:
-    dependencies:
-      '@ykdz/reference-hono-api':
-        specifier: workspace:*
-        version: link:../../references/hono-api
-      '@ykdz/reference-vue-hono-web':
-        specifier: workspace:*
-        version: link:../../references/vue-hono-web
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@ykdz/template-workspace-authoring':
-        specifier: workspace:*
-        version: link:../../packages/workspace-authoring
-    devDependencies:
-      '@playwright/test':
-        specifier: 'catalog:'
-        version: 1.64.0
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/reference-npm-publication':
-        specifier: workspace:*
-        version: link:../../references/npm-publication
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../../references/tooling-config
-      '@ykdz/reference-ts-cli':
-        specifier: workspace:*
-        version: link:../../references/ts-cli
-      '@ykdz/reference-ts-lib':
-        specifier: workspace:*
-        version: link:../../references/ts-lib
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../../references/workspace-root
-      '@ykdz/template-generator':
-        specifier: workspace:*
-        version: link:../../packages/generator
-      '@ykdz/template-workspace':
-        specifier: workspace:*
-        version: link:../../workspace-policies/default
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript:
-        specifier: 'catalog:'
-        version: '@typescript/typescript6@6.0.2'
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  references/hono-api:
-    dependencies:
-      '@hono/node-server':
-        specifier: 'catalog:'
-        version: 2.1.5(hono@4.13.13)
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      hono:
-        specifier: 'catalog:'
-        version: 4.13.13
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../tooling-config
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../workspace-root
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  references/npm-publication:
-    devDependencies:
-      '@changesets/cli':
-        specifier: 'catalog:'
-        version: 3.0.3
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  references/rust-bin:
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../workspace-root
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@ykdz/template-workspace':
-        specifier: workspace:*
-        version: link:../../workspace-policies/default
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      smol-toml:
-        specifier: 'catalog:'
-        version: 1.9.1
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  references/tooling-config:
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  references/ts-cli:
-    dependencies:
-      '@valibot/to-json-schema':
-        specifier: 'catalog:'
-        version: 1.8.0(valibot@1.5.0(typescript@7.0.2))
-      '@ykdz/cli-contract':
-        specifier: 'catalog:'
-        version: 0.3.0
-      valibot:
-        specifier: 'catalog:'
-        version: 1.5.0(typescript@7.0.2)
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/reference-npm-publication':
-        specifier: workspace:*
-        version: link:../npm-publication
-      '@ykdz/reference-tooling-config':
-        specifier: link:../tooling-config
-        version: link:../tooling-config
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../workspace-root
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  references/ts-lib:
-    dependencies:
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      valibot:
-        specifier: 'catalog:'
-        version: 1.5.0(typescript@7.0.2)
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/reference-npm-publication':
-        specifier: workspace:*
-        version: link:../npm-publication
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../tooling-config
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../workspace-root
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  references/vike-db:
-    dependencies:
-      drizzle-orm:
-        specifier: 'catalog:'
-        version: 1.0.0-rc.5-ab785fc(valibot@1.5.0(typescript@7.0.2))
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../tooling-config
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../workspace-root
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  references/vike-migrations:
-    dependencies:
-      '@ykdz/reference-vike-db':
-        specifier: workspace:*
-        version: link:../vike-db
-      drizzle-kit:
-        specifier: 'catalog:'
-        version: 1.0.0-rc.5-ab785fc
-      drizzle-orm:
-        specifier: 'catalog:'
-        version: 1.0.0-rc.5-ab785fc(valibot@1.5.0(typescript@7.0.2))
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../tooling-config
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../workspace-root
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  references/vike-web:
-    dependencies:
-      '@vikejs/hono':
-        specifier: 'catalog:'
-        version: 0.2.1(hono@4.13.13)(srvx@1.0.5)(vike@0.4.267(hono@4.13.13)(srvx@1.0.5)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)))
-      '@ykdz/reference-vike-db':
-        specifier: workspace:*
-        version: link:../vike-db
-      hono:
-        specifier: 'catalog:'
-        version: 4.13.13
-      srvx:
-        specifier: 'catalog:'
-        version: 1.0.5
-      telefunc:
-        specifier: 'catalog:'
-        version: 0.2.24(@babel/core@7.29.7)(@babel/parser@7.29.9)(@babel/types@7.29.8)(srvx@1.0.5)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
-      vike:
-        specifier: 'catalog:'
-        version: 0.4.267(hono@4.13.13)(srvx@1.0.5)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
-      vike-vue:
-        specifier: 'catalog:'
-        version: 0.9.15(vike@0.4.267(hono@4.13.13)(srvx@1.0.5)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)))(vue@3.5.44)
-      vue:
-        specifier: 'catalog:'
-        version: 3.5.44
-    devDependencies:
-      '@playwright/test':
-        specifier: 'catalog:'
-        version: 1.64.0
-      '@tailwindcss/vite':
-        specifier: 'catalog:'
-        version: 4.3.3(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@vitejs/plugin-vue':
-        specifier: 'catalog:'
-        version: 6.0.10(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vue@3.5.44)
-      '@vitest/browser-playwright':
-        specifier: 'catalog:'
-        version: 5.0.4(playwright@1.64.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vitest@5.0.4)
-      '@vue/tsconfig':
-        specifier: 'catalog:'
-        version: 0.9.1(@typescript/typescript6@6.0.2)(vue@3.5.44)
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../tooling-config
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../workspace-root
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      playwright:
-        specifier: 'catalog:'
-        version: 1.64.0
-      tailwindcss:
-        specifier: 'catalog:'
-        version: 4.3.3
-      turbo:
-        specifier: 'catalog:'
-        version: 2.11.10
-      typescript:
-        specifier: 'catalog:'
-        version: '@typescript/typescript6@6.0.2'
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-      vite:
-        specifier: 'catalog:'
-        version: 8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)
-      vitest:
-        specifier: 'catalog:'
-        version: 5.0.4(@types/node@24.19.2)(@vitest/browser-playwright@5.0.4)(@vitest/ui@5.0.4)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
-      vitest-browser-vue:
-        specifier: 'catalog:'
-        version: 3.1.0(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(vitest@5.0.4)(vue@3.5.44)
-      vue-tsc:
-        specifier: 'catalog:'
-        version: 3.3.13(@typescript/typescript6@6.0.2)
-
-  references/vue-app:
-    dependencies:
-      '@vue/devtools-api':
-        specifier: 'catalog:'
-        version: 8.2.1
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      pinia:
-        specifier: 'catalog:'
-        version: 4.1.0(@vue/devtools-api@8.2.1)(vue@3.5.44)
-      vue:
-        specifier: 'catalog:'
-        version: 3.5.44
-    devDependencies:
-      '@playwright/test':
-        specifier: 'catalog:'
-        version: 1.64.0
-      '@tailwindcss/vite':
-        specifier: 'catalog:'
-        version: 4.3.3(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@types/web-bluetooth':
-        specifier: 'catalog:'
-        version: 0.0.21
-      '@vitejs/plugin-vue':
-        specifier: 'catalog:'
-        version: 6.0.10(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vue@3.5.44)
-      '@vitest/browser-playwright':
-        specifier: 'catalog:'
-        version: 5.0.4(playwright@1.64.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vitest@5.0.4)
-      '@vue/tsconfig':
-        specifier: 'catalog:'
-        version: 0.9.1(@typescript/typescript6@6.0.2)(vue@3.5.44)
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../tooling-config
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../workspace-root
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      playwright:
-        specifier: 'catalog:'
-        version: 1.64.0
-      typescript:
-        specifier: 'catalog:'
-        version: '@typescript/typescript6@6.0.2'
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-      vite:
-        specifier: 'catalog:'
-        version: 8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)
-      vitest:
-        specifier: 'catalog:'
-        version: 5.0.4(@types/node@24.19.2)(@vitest/browser-playwright@5.0.4)(@vitest/ui@5.0.4)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
-      vitest-browser-vue:
-        specifier: 'catalog:'
-        version: 3.1.0(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(vitest@5.0.4)(vue@3.5.44)
-      vue-tsc:
-        specifier: 'catalog:'
-        version: 3.3.13(@typescript/typescript6@6.0.2)
-
-  references/vue-hono-web:
-    dependencies:
-      '@ykdz/reference-hono-api':
-        specifier: workspace:*
-        version: link:../hono-api
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      vue:
-        specifier: 'catalog:'
-        version: 3.5.44
-    devDependencies:
-      '@tailwindcss/vite':
-        specifier: 'catalog:'
-        version: 4.3.3(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@types/web-bluetooth':
-        specifier: 'catalog:'
-        version: 0.0.21
-      '@vitejs/plugin-vue':
-        specifier: 'catalog:'
-        version: 6.0.10(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vue@3.5.44)
-      '@vitest/browser-playwright':
-        specifier: 'catalog:'
-        version: 5.0.4(playwright@1.64.0)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))(vitest@5.0.4)
-      '@vue/tsconfig':
-        specifier: 'catalog:'
-        version: 0.9.1(@typescript/typescript6@6.0.2)(vue@3.5.44)
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:*
-        version: link:../tooling-config
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../workspace-root
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      playwright:
-        specifier: 'catalog:'
-        version: 1.64.0
-      typescript:
-        specifier: 'catalog:'
-        version: '@typescript/typescript6@6.0.2'
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-      vite:
-        specifier: 'catalog:'
-        version: 8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)
-      vitest:
-        specifier: 'catalog:'
-        version: 5.0.4(@types/node@24.19.2)(@vitest/browser-playwright@5.0.4)(@vitest/ui@5.0.4)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
-      vitest-browser-vue:
-        specifier: 'catalog:'
-        version: 3.1.0(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(vitest@5.0.4)(vue@3.5.44)
-      vue-tsc:
-        specifier: 'catalog:'
-        version: 3.3.13(@typescript/typescript6@6.0.2)
-
-  references/workspace-root:
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/reference-tooling-config':
-        specifier: workspace:../tooling-config
-        version: link:../tooling-config
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.88.0(oxlint-tsgolint@7.0.2004)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2004
-      turbo:
-        specifier: 'catalog:'
-        version: 2.11.10
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  workspace-policies/default:
-    dependencies:
-      '@ykdz/default-content-authoring':
-        specifier: workspace:*
-        version: link:../../content/default/authoring
-      '@ykdz/reference-workspace-root':
-        specifier: workspace:*
-        version: link:../../references/workspace-root
-      '@ykdz/template-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@ykdz/template-environment':
-        specifier: workspace:*
-        version: link:../../packages/environment
-      '@ykdz/template-generator':
-        specifier: workspace:*
-        version: link:../../packages/generator
-      ignore:
-        specifier: 'catalog:'
-        version: 7.0.12
-      jsonc-parser:
-        specifier: 'catalog:'
-        version: 3.3.1
-      smol-toml:
-        specifier: 'catalog:'
-        version: 1.9.1
-      valibot:
-        specifier: 'catalog:'
-        version: 1.5.0(typescript@7.0.2)
-      yaml:
-        specifier: 'catalog:'
-        version: 2.9.1
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.2
-      '@ykdz/tooling-config':
-        specifier: workspace:*
-        version: link:../../packages/tooling-config
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0

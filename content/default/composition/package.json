@@ -1,0 +1,94 @@
+{
+  "name": "@ykdz/template-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "dist",
+    "scripts"
+  ],
+  "type": "module",
+  "exports": {
+    "./dependency-catalog": {
+      "source": "./src/dependency-catalog.ts",
+      "types": "./dist/dependency-catalog.d.ts",
+      "default": "./dist/dependency-catalog.js"
+    },
+    "./application-requirements": {
+      "source": "./src/application-requirements.ts",
+      "types": "./dist/application-requirements.d.ts",
+      "default": "./dist/application-requirements.js"
+    },
+    "./vue-policy": {
+      "source": "./src/vue-policy.ts",
+      "types": "./dist/vue-policy.d.ts",
+      "default": "./dist/vue-policy.js"
+    },
+    "./release-toolchain-snapshot": {
+      "source": "./src/release-toolchain-snapshot.ts",
+      "types": "./dist/release-toolchain-snapshot.d.ts",
+      "default": "./dist/release-toolchain-snapshot.js"
+    },
+    "./default-package-identity": {
+      "source": "./src/default-package-identity.ts",
+      "types": "./dist/default-package-identity.d.ts",
+      "default": "./dist/default-package-identity.js"
+    },
+    "./rust-toolchain-facts": {
+      "source": "./src/rust-toolchain-facts.ts",
+      "types": "./dist/rust-toolchain-facts.d.ts",
+      "default": "./dist/rust-toolchain-facts.js"
+    },
+    "./shared-root-files": {
+      "source": "./src/shared-root-files.ts",
+      "types": "./dist/shared-root-files.d.ts",
+      "default": "./dist/shared-root-files.js"
+    },
+    "./project-requirements": {
+      "source": "./src/project-requirements.ts",
+      "types": "./dist/project-requirements.d.ts",
+      "default": "./dist/project-requirements.js"
+    },
+    "./default-composition": {
+      "source": "./src/default-composition.ts",
+      "types": "./dist/default-composition.d.ts",
+      "default": "./dist/default-composition.js"
+    },
+    "./default-generation": {
+      "source": "./src/default-generation.ts",
+      "types": "./dist/default-generation.d.ts",
+      "default": "./dist/default-generation.js"
+    }
+  },
+  "scripts": {
+    "check:author-planning-roles": "pnpm --workspace-root run author-planning-roles:workspace -- --owner-directory \"$PWD\"",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "sync:policy-snapshot": "node scripts/sync-snapshot.ts src/workspace-policy-snapshot.ts",
+    "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec 'test/**/*.light.test.ts'",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false && tsc -p tsconfig.scripts.json --noEmit --pretty false",
+    "sync:release-toolchain-snapshot": "node scripts/sync-snapshot.ts src/release-toolchain-snapshot.ts"
+  },
+  "dependencies": {
+    "@ykdz/default-content-authoring": "workspace:*",
+    "@ykdz/reference-workspace-root": "workspace:*",
+    "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-generator": "workspace:*",
+    "ignore": "catalog:",
+    "jsonc-parser": "catalog:",
+    "smol-toml": "catalog:",
+    "valibot": "catalog:",
+    "yaml": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@ykdz/template-environment": "workspace:*",
+    "@ykdz/tooling-config": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  }
+}

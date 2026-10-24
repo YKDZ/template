@@ -1,0 +1,59 @@
+{
+  "name": "@ykdz/reference-workspace-root",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./reference": "./package.json",
+    "./task-gates": "./scripts/task-gates.ts",
+    "./template": {
+      "source": "./template/definition.ts",
+      "types": "./template-dist/definition.d.ts",
+      "default": "./template-dist/definition.js"
+    },
+    "./environment": {
+      "source": "./template/environment.ts",
+      "types": "./template-dist/environment.d.ts",
+      "default": "./template-dist/environment.js"
+    },
+    "./project-github": {
+      "source": "./template/project-github.ts",
+      "types": "./template-dist/project-github.d.ts",
+      "default": "./template-dist/project-github.js"
+    }
+  },
+  "scripts": {
+    "check:author-planning-roles": "pnpm --workspace-root run author-planning-roles:workspace -- --owner-directory \"$PWD\"",
+    "typecheck:owner": "tsc -p tsconfig.node.json --noEmit --pretty false",
+    "format:check": "oxfmt --list-different --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .changeset/config.json .devcontainer resources scripts template",
+    "format:write": "oxfmt --write --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .changeset/config.json .devcontainer resources scripts template",
+    "lint": "oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts scripts template",
+    "lint:fix": "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts scripts template --fix",
+    "typecheck": "tsc --build --noEmit --pretty false",
+    "build:template": "rm -rf template-dist && tsc -p tsconfig.template.json --pretty false",
+    "check": "node --conditions=source scripts/task-gates.ts check",
+    "check:heavy": "node --conditions=source scripts/task-gates.ts check:heavy",
+    "check:full": "node --conditions=source scripts/task-gates.ts check:full",
+    "fix": "node --conditions=source scripts/task-gates.ts fix",
+    "boundaries": "turbo boundaries"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@ykdz/default-content-authoring": "workspace:*",
+    "@ykdz/reference-tooling-config": "workspace:../tooling-config",
+    "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-environment": "workspace:*",
+    "@ykdz/tooling-config": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "turbo": "catalog:",
+    "typescript-7": "catalog:",
+    "valibot": "catalog:",
+    "yaml": "catalog:"
+  },
+  "engines": {
+    "node": "24"
+  },
+  "packageManager": "pnpm@12.9.1"
+}

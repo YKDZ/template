@@ -46,7 +46,7 @@ const publicPlanningContracts: readonly PlanningRoleContract[] = [
     module: "@ykdz/default-content-authoring/reference-package",
     names: new Set(["defineReferencePackage"]),
     role: "reference" as const,
-    members: ["transformManifest", "transformDocument"],
+    members: ["targetName", "transformManifest", "transformDocument"],
   },
   {
     module: "@ykdz/template-core/reference-package",
