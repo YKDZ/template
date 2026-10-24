@@ -332,6 +332,7 @@ void describe("Template Repository native task model", () => {
   void it("为依赖正式类型出口的检查安排所属构建任务", async () => {
     const lintGraph = await runTurboDryRun("lint");
     const fixGraph = await runTurboDryRun("lint:fix");
+    const typecheckGraph = await runTurboDryRun("typecheck");
 
     for (const [lintTaskId, fixTaskId, dependencyId] of [
       [
@@ -361,6 +362,25 @@ void describe("Template Repository native task model", () => {
           .find(({ taskId }) => taskId === fixTaskId)
           ?.dependencies.includes(dependencyId),
         `${fixTaskId} 应等待 ${dependencyId}`,
+      );
+    }
+
+    for (const [taskId, dependencyId] of [
+      ["@ykdz/template#typecheck", "@ykdz/template-content-artifacts#build"],
+      [
+        "@ykdz/template-content#typecheck",
+        "@ykdz/template-content-artifacts#build",
+      ],
+      [
+        "@ykdz/template-content-artifacts#typecheck",
+        "@ykdz/template-content-artifacts#build",
+      ],
+    ] as const) {
+      assert.ok(
+        typecheckGraph.tasks
+          .find(({ taskId: candidate }) => candidate === taskId)
+          ?.dependencies.includes(dependencyId),
+        `${taskId} 应等待 ${dependencyId}`,
       );
     }
   });

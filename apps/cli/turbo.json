@@ -43,7 +43,7 @@
       "persistent": false
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"],
+      "dependsOn": ["@ykdz/template-content-artifacts#build", "^typecheck"],
       "tags": ["quality:light"],
       "cache": true,
       "inputs": ["$TURBO_DEFAULT$"],

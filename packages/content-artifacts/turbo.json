@@ -46,7 +46,7 @@
       "persistent": false
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"],
+      "dependsOn": ["build", "^typecheck"],
       "tags": ["quality:light"],
       "cache": true,
       "inputs": ["$TURBO_DEFAULT$"],
