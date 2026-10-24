@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { relative, resolve } from "node:path";
 import { describe, it } from "node:test";
 
 import { parse } from "yaml";
@@ -270,6 +271,8 @@ void describe("Fixture Verification Evidence check workflow", () => {
     const job = workflow.jobs.check;
 
     assert.deepStrictEqual(job.env, {
+      TEMPLATE_FIXTURE_WORKSPACE_DIR:
+        "${{ github.workspace }}/.fixture-workspace",
       TEMPLATE_FIXTURE_EVIDENCE_DIR:
         "${{ github.workspace }}/.fixture-evidence",
       TEMPLATE_FIXTURE_EVIDENCE_READ: "1",
@@ -457,7 +460,9 @@ void describe("Fixture Verification Evidence check workflow", () => {
   });
 
   void it("在诊断上传前清理 Fixture 容器并恢复工作区属主", async () => {
-    const steps = (await checkWorkflow()).jobs.check.steps;
+    const workflow = await checkWorkflow();
+    const check = workflow.jobs.check;
+    const steps = check.steps;
     const prerequisiteCondition =
       "always() && steps.fixture-prerequisites.outcome == 'success'";
     const cleanupIndex = steps.findIndex(
@@ -479,6 +484,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
     );
     const cleanup = steps[cleanupIndex];
     const restore = steps[restoreIndex];
+    const failureDiagnostics = steps[uploadIndex];
 
     assert.ok(cleanupIndex >= 0);
     assert.ok(restoreIndex >= 0);
@@ -493,6 +499,31 @@ void describe("Fixture Verification Evidence check workflow", () => {
       /if \[ -d \.fixture-workspace \]; then\n\s+sudo chown -hR "\$\(id -u\):\$\(id -g\)" -- \.fixture-workspace\n\s*fi/u,
     );
     assert.doesNotMatch(restore?.run ?? "", /\|\|\s*true/u);
+
+    const workspaceExpression = check.env?.TEMPLATE_FIXTURE_WORKSPACE_DIR;
+    assert.ok(typeof workspaceExpression === "string");
+    const githubWorkspace = "/home/runner/work/template/template";
+    const githubWorkspacePrefix = "${{ github.workspace }}/";
+    assert.ok(workspaceExpression.startsWith(githubWorkspacePrefix));
+    const configuredWorkspace = resolve(
+      githubWorkspace,
+      workspaceExpression.slice(githubWorkspacePrefix.length),
+    );
+    const configuredWorkspaceRelativePath = relative(
+      githubWorkspace,
+      configuredWorkspace,
+    );
+    const restoredWorkspacePath = restore?.run?.match(
+      /sudo chown -hR "\$\(id -u\):\$\(id -g\)" -- ([^\s]+)/u,
+    )?.[1];
+    const uploadedWorkspace = failureDiagnostics?.with?.path;
+
+    assert.equal(restoredWorkspacePath, configuredWorkspaceRelativePath);
+    assert.ok(typeof uploadedWorkspace === "string");
+    assert.equal(
+      uploadedWorkspace.split("\n")[0],
+      `${configuredWorkspaceRelativePath}/**`,
+    );
   });
 
   void it("always uploads CLI journey diagnostics from the durable workspace directory", async () => {
