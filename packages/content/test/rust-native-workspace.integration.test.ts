@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import {
   installContentCollection,
   prepareContentCollection,
-} from "@ykdz/template-content/artifact-builder";
+} from "@ykdz/template-content-artifacts";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { execa } from "execa";
 
@@ -134,6 +134,8 @@ void it(
       prepared = await prepareContentCollection({
         content,
         roots: [libraryPreset, rustPreset],
+        packageName: "@ykdz/template-content",
+        additionalSdkRoots: ["@ykdz/template-workspace"],
         workspaceRoot,
         root: path.join(temporaryRoot, "prepared"),
       });

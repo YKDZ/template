@@ -75,13 +75,16 @@ export type PrepareContentCollectionOptions = {
   readonly content: readonly NativeMember[];
   /** 从同一已加载集合中选择任意预设或参考入口作为闭包根。 */
   readonly roots: readonly NativeMember[];
+  /** 调用者所属集合的原生包名。 */
+  readonly packageName: string;
   readonly workspaceRoot?: string;
-  readonly packageName?: string;
   /** 外部作者工作区集合的原生清单版本。 */
   readonly collectionVersion?: string;
   readonly root?: string;
   /** 供独立作者工作区使用的原生SDK归档；不含本轮内容成员。 */
   readonly sdkArchives?: readonly PackedArtifact[];
+  /** 调用者为该集合显式选择的额外SDK闭包根。 */
+  readonly additionalSdkRoots?: readonly string[];
 };
 
 type PreparedOwnerDefinition = {
@@ -1011,6 +1014,7 @@ async function createCollectionInstallRoot(options: {
   readonly root: string;
   readonly packageName: string;
   readonly collectionVersion: string;
+  readonly additionalSdkRoots: readonly string[];
   readonly providers: readonly {
     readonly packageName: string;
     readonly packageVersion: string;
@@ -1032,6 +1036,14 @@ async function createCollectionInstallRoot(options: {
     const version = options.sdkVersions.get(name);
     if (packageRoot === undefined || version === undefined) {
       throw new Error(`集合运行依赖未由pnpm工作区解析：${name}`);
+    }
+    dependencies[name] = version;
+  }
+  for (const name of options.additionalSdkRoots) {
+    const packageRoot = options.sdkPackageRoots.get(name);
+    const version = options.sdkVersions.get(name);
+    if (packageRoot === undefined || version === undefined) {
+      throw new Error(`集合额外SDK根未由pnpm工作区解析：${name}`);
     }
     dependencies[name] = version;
   }
@@ -1061,7 +1073,7 @@ export async function prepareContentCollection(
     options.roots as readonly NativeMember[],
   );
   const buildOrder = orderedMembers(presets, members);
-  const collectionName = options.packageName ?? "@ykdz/template-content";
+  const collectionName = options.packageName;
   const workspace = await workspaceProjects(workspaceRoot, commandLog);
 
   const root =
@@ -1143,6 +1155,7 @@ export async function prepareContentCollection(
   const sdkRoots = [
     ...new Set([
       "@ykdz/template-generator",
+      ...(options.additionalSdkRoots ?? []),
       ...owners.flatMap(({ artifact }) =>
         artifact.dependencies
           .filter((dependency) =>
@@ -1262,6 +1275,7 @@ export async function prepareContentCollection(
     root,
     packageName: collectionName,
     collectionVersion,
+    additionalSdkRoots: options.additionalSdkRoots ?? [],
     providers,
     sdkPackageRoots,
     sdkVersions,

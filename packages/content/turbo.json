@@ -73,21 +73,9 @@
       "persistent": false
     },
     "test:integration": {
-      "dependsOn": ["build"],
+      "dependsOn": ["build", "@ykdz/template-content-artifacts#build"],
       "tags": ["quality:heavy"],
       "passThroughEnv": ["TEMPLATE_CONTENT_ARTIFACT_EVIDENCE_DIR"],
-      "cache": false,
-      "inputs": ["$TURBO_DEFAULT$"],
-      "outputs": [],
-      "persistent": false
-    },
-    "test:integration:content-contract": {
-      "dependsOn": [
-        "@ykdz/template-core#build",
-        "@ykdz/template-generator#build",
-        "@ykdz/template-workspace-authoring#build"
-      ],
-      "tags": ["quality:heavy"],
       "cache": false,
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],

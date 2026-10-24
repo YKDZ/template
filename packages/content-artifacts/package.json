@@ -1,0 +1,38 @@
+{
+  "name": "@ykdz/template-content-artifacts",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json --pretty false",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix --ignore-pattern dist .",
+    "lint:fix": "oxlint --format=unix --ignore-pattern dist . --fix",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false",
+    "test:integration": "node --conditions=source --experimental-strip-types --test --test-concurrency=1 --test-timeout=300000 'test/content-contract.integration.test.ts'"
+  },
+  "dependencies": {
+    "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-workspace-authoring": "workspace:*",
+    "execa": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@ykdz/template-generator": "workspace:*",
+    "@ykdz/tooling-config": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  }
+}
