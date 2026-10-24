@@ -34,11 +34,13 @@
       "tags": ["work:repair"]
     },
     "lint": {
+      "dependsOn": ["@ykdz/template-environment#build"],
       "outputs": [],
       "tags": ["quality:light"]
     },
     "lint:fix": {
       "cache": false,
+      "dependsOn": ["@ykdz/template-environment#build"],
       "outputs": [],
       "tags": ["work:repair"]
     },
