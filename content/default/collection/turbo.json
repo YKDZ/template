@@ -49,7 +49,7 @@
       "persistent": false
     },
     "lint": {
-      "dependsOn": [],
+      "dependsOn": ["@ykdz/template-content-artifacts#build"],
       "tags": ["quality:light"],
       "cache": true,
       "inputs": ["$TURBO_DEFAULT$"],
@@ -57,7 +57,7 @@
       "persistent": false
     },
     "lint:fix": {
-      "dependsOn": [],
+      "dependsOn": ["@ykdz/template-content-artifacts#build"],
       "tags": ["work:repair"],
       "cache": false,
       "inputs": [],

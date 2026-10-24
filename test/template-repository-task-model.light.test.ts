@@ -329,6 +329,42 @@ void describe("Template Repository native task model", () => {
     );
   });
 
+  void it("为依赖正式类型出口的检查安排所属构建任务", async () => {
+    const lintGraph = await runTurboDryRun("lint");
+    const fixGraph = await runTurboDryRun("lint:fix");
+
+    for (const [lintTaskId, fixTaskId, dependencyId] of [
+      [
+        "@ykdz/template#lint",
+        "@ykdz/template#lint:fix",
+        "@ykdz/template-content-artifacts#build",
+      ],
+      [
+        "@ykdz/template-content#lint",
+        "@ykdz/template-content#lint:fix",
+        "@ykdz/template-content-artifacts#build",
+      ],
+      [
+        "@ykdz/reference-workspace-root#lint",
+        "@ykdz/reference-workspace-root#lint:fix",
+        "@ykdz/template-environment#build",
+      ],
+    ] as const) {
+      assert.ok(
+        lintGraph.tasks
+          .find(({ taskId }) => taskId === lintTaskId)
+          ?.dependencies.includes(dependencyId),
+        `${lintTaskId} 应等待 ${dependencyId}`,
+      );
+      assert.ok(
+        fixGraph.tasks
+          .find(({ taskId }) => taskId === fixTaskId)
+          ?.dependencies.includes(dependencyId),
+        `${fixTaskId} 应等待 ${dependencyId}`,
+      );
+    }
+  });
+
   void it("keeps registry and Template Source checks under the checks owner", async () => {
     const checks = await readJson<Manifest>(
       "content/default/verification/package.json",
