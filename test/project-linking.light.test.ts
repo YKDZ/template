@@ -13,11 +13,15 @@ import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { defineReferencePackage } from "@ykdz/default-content-authoring/reference-package";
+import {
+  defineReferencePackage,
+  type DefaultRootDeclarationData,
+} from "@ykdz/default-content-authoring/reference-package";
 import { templateContent } from "@ykdz/template-content";
 import type { LoadedContentMember } from "@ykdz/template-core/content-identity";
 import type { PackageDefinitionId } from "@ykdz/template-core/project-blueprint";
 import { createDefaultGenerator } from "@ykdz/template-workspace/default-generation";
+import { parse as parseYaml } from "yaml";
 
 type PackageLinkIssue =
   | { readonly kind: "unknown-consumer"; readonly path: string }
@@ -31,6 +35,10 @@ type FixtureOptions = {
   readonly providerRole?: "shared-library";
   readonly consumerRole?: "runtime-service" | "native-package";
   readonly providerExports?: Readonly<Record<string, unknown>>;
+  readonly rootScriptContribution?: {
+    readonly name: string;
+    readonly command: string;
+  };
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -146,7 +154,7 @@ async function fixture(context: TestContext, options: FixtureOptions = {}) {
     packageName: "@fixture/consumer",
     exportPath: "./template",
   } as const;
-  const providerDefinition = defineReferencePackage({
+  const baseProviderDefinition = defineReferencePackage({
     manifest: providerManifest,
     resourceRoot: providerResourceRoot,
     alias: "provider",
@@ -154,6 +162,30 @@ async function fixture(context: TestContext, options: FixtureOptions = {}) {
     defaultLeafName: "provider",
     role: options.providerRole ?? "shared-library",
     resources: [{ path: "src/index.ts" }, { path: "src/feature.ts" }],
+    ...(options.rootScriptContribution === undefined
+      ? {}
+      : {
+          rootDeclaration: (): DefaultRootDeclarationData => ({
+            manifest: {
+              scripts: {
+                [options.rootScriptContribution!.name]:
+                  options.rootScriptContribution!.command,
+              },
+            },
+          }),
+        }),
+  });
+  const providerEvaluation = {
+    count: 0,
+    stableCommon: undefined as unknown,
+  };
+  const providerDefinition = Object.freeze({
+    ...baseProviderDefinition,
+    evaluate(input: Parameters<typeof baseProviderDefinition.evaluate>[0]) {
+      providerEvaluation.count += 1;
+      providerEvaluation.stableCommon = input.stableCommon;
+      return baseProviderDefinition.evaluate(input);
+    },
   });
   const consumerDefinition = defineReferencePackage({
     manifest: consumerManifest,
@@ -202,6 +234,7 @@ async function fixture(context: TestContext, options: FixtureOptions = {}) {
     content: [...templateContent, ...members],
     providerIdentity,
     consumerIdentity,
+    providerEvaluation,
     providerPackageName: "@checks/provider",
     consumerRole: options.consumerRole ?? "runtime-service",
   };
@@ -257,11 +290,15 @@ async function addProvider(
   generator: ReturnType<typeof createDefaultGenerator>,
   targetRoot: string,
   providerIdentity: FixtureResult["providerIdentity"],
+  linkFrom?: string,
 ) {
   const planned = await generator.planAdd({
     repositoryRoot: targetRoot,
     contentIdentity: providerIdentity,
-    creationInput: { packagePath: "packages/provider" },
+    creationInput: {
+      packagePath: "packages/provider",
+      ...(linkFrom === undefined ? {} : { linkFrom: [linkFrom] }),
+    },
   });
   assert.equal(planned.status, "planned", summary(planned));
   if (planned.status !== "planned") throw new Error(summary(planned));
@@ -272,6 +309,35 @@ async function addProvider(
   const committed = await generator.commitPlan(planned.plan);
   assert.equal(committed.status, "success", summary(committed));
   return provider.packageDefinitionId;
+}
+
+async function assertPublicationRoot(
+  targetRoot: string,
+  childScript?: { readonly name: string; readonly command: string },
+): Promise<void> {
+  const rootManifest = JSON.parse(
+    await readFile(path.join(targetRoot, "package.json"), "utf8"),
+  ) as {
+    readonly devDependencies?: Readonly<Record<string, string>>;
+    readonly scripts?: Readonly<Record<string, string>>;
+  };
+  assert.equal(rootManifest.devDependencies?.["@changesets/cli"], "catalog:");
+  assert.equal(typeof rootManifest.scripts?.["publication:pack"], "string");
+  assert.equal(typeof rootManifest.scripts?.["publication:publish"], "string");
+  if (childScript !== undefined) {
+    assert.equal(rootManifest.scripts?.[childScript.name], childScript.command);
+  }
+
+  const turbo = JSON.parse(
+    await readFile(path.join(targetRoot, "turbo.json"), "utf8"),
+  ) as { readonly tasks?: Readonly<Record<string, unknown>> };
+  assert.ok(turbo.tasks?.["//#publication:pack"]);
+  assert.ok(turbo.tasks?.["//#publication:publish"]);
+
+  const workspace = parseYaml(
+    await readFile(path.join(targetRoot, "pnpm-workspace.yaml"), "utf8"),
+  ) as { readonly catalog?: Readonly<Record<string, string>> };
+  assert.equal(typeof workspace.catalog?.["@changesets/cli"], "string");
 }
 
 type FixtureResult = Awaited<ReturnType<typeof fixture>>;
@@ -305,7 +371,15 @@ async function writeProviderManifest(
   >;
   await writeFile(
     manifestPath,
-    `${JSON.stringify({ ...manifest, exports: providerExports }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        ...manifest,
+        exports: providerExports,
+        operatorNote: "keep this customized provider manifest",
+      },
+      null,
+      2,
+    )}\n`,
   );
 }
 
@@ -323,6 +397,115 @@ async function committedConsumerManifest(
     await readFile(path.join(targetRoot, consumerPath, "package.json"), "utf8"),
   ) as Record<string, unknown>;
 }
+
+await test("库与CLI连接后仍形成完整发布根和catalog并提交唯一文件树", async (context) => {
+  for (const scenario of [
+    { preset: "ts-lib", consumerPath: "packages/lib" },
+    { preset: "ts-cli", consumerPath: "packages/cli" },
+  ] as const) {
+    const childScript = {
+      name: "provider:check",
+      command: "node provider-check.js",
+    };
+    const setup = await fixture(context, {
+      rootScriptContribution: childScript,
+    });
+    const initializer = createDefaultGenerator({ content: setup.content });
+    const targetRoot = path.join(setup.root, scenario.preset);
+    await initialize(initializer, targetRoot, scenario.preset);
+    await assertPublicationRoot(targetRoot);
+
+    const generator = createDefaultGenerator({ content: setup.content });
+    const planned = await generator.planAdd({
+      repositoryRoot: targetRoot,
+      contentIdentity: setup.providerIdentity,
+      creationInput: {
+        packagePath: "packages/provider",
+        linkFrom: [scenario.consumerPath],
+      },
+    });
+    assert.equal(planned.status, "planned", summary(planned));
+    if (planned.status !== "planned") throw new Error(summary(planned));
+    assert.equal(setup.providerEvaluation.count, 1);
+    assert.equal(
+      (setup.providerEvaluation.stableCommon as { nodeDeclaration?: unknown })
+        .nodeDeclaration,
+      "24.21.0",
+    );
+    assert.equal(
+      (
+        setup.providerEvaluation.stableCommon as {
+          packageManagerPin?: unknown;
+        }
+      ).packageManagerPin,
+      "pnpm@12.9.1",
+    );
+
+    const projectedPaths = new Set(
+      planned.projection.entries.map(({ path: filePath }) => filePath),
+    );
+    for (const filePath of [
+      "package.json",
+      "pnpm-workspace.yaml",
+      "turbo.json",
+      `${scenario.consumerPath}/package.json`,
+      "packages/provider/package.json",
+    ]) {
+      assert.ok(
+        projectedPaths.has(filePath),
+        `${scenario.preset}: ${filePath}`,
+      );
+    }
+
+    const committed = await generator.commitPlan(planned.plan);
+    assert.equal(committed.status, "success", summary(committed));
+    assert.equal(setup.providerEvaluation.count, 1);
+    await assertPublicationRoot(targetRoot, childScript);
+    const consumerManifest = JSON.parse(
+      await readFile(
+        path.join(targetRoot, scenario.consumerPath, "package.json"),
+        "utf8",
+      ),
+    ) as { readonly dependencies?: Readonly<Record<string, string>> };
+    assert.equal(
+      consumerManifest.dependencies?.[setup.providerPackageName],
+      "workspace:*",
+    );
+    const providerManifest = JSON.parse(
+      await readFile(
+        path.join(targetRoot, "packages/provider/package.json"),
+        "utf8",
+      ),
+    ) as { readonly name?: string };
+    assert.equal(providerManifest.name, setup.providerPackageName);
+  }
+});
+
+await test("根声明冲突在库连接规划中拒绝整树且零写入", async (context) => {
+  const setup = await fixture(context, {
+    rootScriptContribution: {
+      name: "publication:pack",
+      command: "node conflict.js",
+    },
+  });
+  const generator = createDefaultGenerator({ content: setup.content });
+  const targetRoot = path.join(setup.root, "project");
+  await initialize(generator, targetRoot, "ts-lib");
+  const before = await snapshotTree(targetRoot);
+
+  const result = await generator.planAdd({
+    repositoryRoot: targetRoot,
+    contentIdentity: setup.providerIdentity,
+    creationInput: {
+      packagePath: "packages/provider",
+      linkFrom: ["packages/lib"],
+    },
+  });
+
+  assert.equal(result.status, "operation-failure", summary(result));
+  assert.match(summary(result), /publication:pack/u);
+  assert.deepEqual(await snapshotTree(targetRoot), before);
+});
 
 await test("按当前provider导出真值决定是否注入并保留显式包连接", async (context) => {
   const setup = await fixture(context);
@@ -389,6 +572,16 @@ await test("按当前provider导出真值决定是否注入并保留显式包连
       planned,
       targetRoot,
       scenario.path,
+    );
+    const providerManifest = JSON.parse(
+      await readFile(
+        path.join(targetRoot, "packages/provider/package.json"),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    assert.equal(
+      providerManifest.operatorNote,
+      "keep this customized provider manifest",
     );
     const dependenciesMeta = manifest.dependenciesMeta;
     if (scenario.injected) {

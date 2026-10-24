@@ -69,7 +69,7 @@ await test("根目录位置本身不注入参考包业务规则", () => {
   assert.deepEqual(manifest.engines, { node: "24.21.0" });
 });
 
-await test("原生作者factory只准备快照并把完整原生文档留给组合", async () => {
+await test("原生作者factory在求值中形成普通原生文档", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "native-reference-"));
   try {
     await mkdir(path.join(root, "src"), { recursive: true });
@@ -82,6 +82,7 @@ await test("原生作者factory只准备快照并把完整原生文档留给组�
       path.join(root, "tsconfig.json"),
       JSON.stringify({ extends: "@fixture/tooling-config/node.json" }),
     );
+    await chmod(path.join(root, "tsconfig.json"), 0o751);
     await writeFile(path.join(root, "template-dist/definition.js"), "");
 
     const owner = defineReferencePackage({
@@ -112,7 +113,10 @@ await test("原生作者factory只准备快照并把完整原生文档留给组�
       instance: "independent",
       defaultLeafName: "lib",
       role: "shared-library",
-      resources: [{ path: "src/index.ts" }, { path: "tsconfig.json" }],
+      resources: [
+        { path: "src/index.ts" },
+        { path: "tsconfig.json", mode: 0o751 },
+      ],
       templateScripts: ["build:template"],
       templateExports: ["./reference", "./template"],
       templateDependencies: [
@@ -171,8 +175,23 @@ await test("原生作者factory只准备快照并把完整原生文档留给组�
       packageInput: undefined,
     });
 
-    assert.equal(contribution.files.length, 1);
-    assert.equal(contribution.files[0]?.path, "src/index.ts");
+    assert.deepEqual(
+      contribution.files.map(({ path: filePath }) => filePath).toSorted(),
+      ["package.json", "src/index.ts", "tsconfig.json"],
+    );
+    const packageManifestFile = contribution.files.find(
+      ({ path: filePath }) => filePath === "package.json",
+    );
+    assert.ok(packageManifestFile);
+    assert.equal(packageManifestFile.mode, 0);
+    const packageManifest = JSON.parse(
+      new TextDecoder().decode(packageManifestFile.content),
+    ) as Record<string, unknown>;
+    assert.equal(packageManifest.name, "@sample/lib");
+    assert.deepEqual(
+      packageManifest.exports,
+      contribution.facts.manifest.exports,
+    );
     assert.match(
       new TextDecoder().decode(contribution.files[0]?.content),
       /@sample\/tooling-config\/node\.json/u,
@@ -224,6 +243,7 @@ await test("通过公开来源别名投影外部资源且求值只用准备快�
       path.join(root, "tsconfig.json"),
       JSON.stringify({ extends: "@fixture/tooling-source/node.json" }),
     );
+    await chmod(path.join(root, "tsconfig.json"), 0o751);
     await writeFile(path.join(root, "template-dist/definition.js"), "");
     await writeFile(path.join(root, "template-dist/definition.d.ts"), "");
     await writeFile(path.join(staticRoot, "base.json"), configContent);
@@ -254,7 +274,7 @@ await test("通过公开来源别名投影外部资源且求值只用准备快�
       role: "shared-library",
       resources: [
         { path: "src/index.ts" },
-        { path: "tsconfig.json" },
+        { path: "tsconfig.json", mode: 0o751 },
         {
           path: "base.json",
           targetPath: "base.json",
@@ -368,6 +388,15 @@ await test("通过公开来源别名投影外部资源且求值只用准备快�
       tsconfig?.value.extends as string | undefined,
       "@sample/tooling-config/node.json",
     );
+    const tsconfigFile = contribution.files.find(
+      ({ path: filePath }) => filePath === "tsconfig.json",
+    );
+    assert.ok(tsconfigFile);
+    assert.equal(tsconfigFile.mode, 0o111);
+    assert.deepEqual(
+      JSON.parse(new TextDecoder().decode(tsconfigFile.content)),
+      { extends: "@sample/tooling-config/node.json" },
+    );
     const manifest = contribution.facts.nativeDocuments.find(
       ({ path: documentPath }) => documentPath === "package.json",
     )?.value;
@@ -390,4 +419,65 @@ await test("通过公开来源别名投影外部资源且求值只用准备快�
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+await test("每包输入明确延后跨包文档并携带自身当前manifest", async () => {
+  const owner = defineReferencePackage({
+    manifest: {
+      name: "@fixture/library",
+      version: "1.0.0",
+      type: "module",
+      exports: { "./reference": "./package.json" },
+    },
+    resourceRoot: new URL("../", import.meta.url),
+    alias: "library",
+    instance: "independent",
+    defaultLeafName: "library",
+    role: "shared-library",
+    resources: [],
+  });
+  const currentManifest = {
+    name: "@sample/library",
+    type: "module",
+    customField: "retained",
+  };
+  const packageInput = {
+    deferredNativeDocumentPaths: ["package.json"],
+    existing: true,
+    targetManifest: currentManifest,
+  };
+  const definition = owner.createDefinition({
+    conventions: { repositoryName: "sample", defaultPackageScope: "sample" },
+    creationInput: undefined,
+  });
+  const contribution = owner.evaluate({
+    packageDefinitionId:
+      "package-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    definition: {
+      packageDefinitionId:
+        "package-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      ...definition,
+    },
+    createdBy: "addition",
+    creationInput: undefined,
+    prepared: owner.prepare({ excludedPackagePaths: [] }),
+    bindings: new Map(),
+    conventions: { repositoryName: "sample", defaultPackageScope: "sample" },
+    stableCommon: undefined,
+    packageInput,
+  });
+
+  assert.equal(
+    contribution.files.some(
+      ({ path: filePath }) => filePath === "package.json",
+    ),
+    false,
+  );
+  assert.deepEqual(
+    contribution.facts.deferredNativeDocuments.map(
+      ({ path: documentPath }) => documentPath,
+    ),
+    ["package.json"],
+  );
+  assert.deepEqual(contribution.facts.packageInput, packageInput);
 });
