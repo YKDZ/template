@@ -96,7 +96,7 @@ export function projectCheckWorkflow(
       diagnostics
         .filter((declaration) => declaration.kind === kind)
         .map((declaration) => declaration.owner.path)
-        .toSorted((left, right) => left.localeCompare(right))
+        .toSorted((left, right) => (left < right ? -1 : left > right ? 1 : 0))
         .join("\n");
     staging.setIn(
       ["env", "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS"],

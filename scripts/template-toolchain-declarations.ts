@@ -54,6 +54,10 @@ export function readNodeEngine(manifest: {
   return typeof node === "string" ? node : "(缺失 engines.node)";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export async function readTemplateToolchainDeclarations(
   repositoryRoot: string,
 ): Promise<TemplateToolchainDeclarations> {
@@ -73,20 +77,10 @@ export async function readTemplateToolchainDeclarations(
     readonly packageManager?: unknown;
   };
   const rustDeclaration = parseToml(rustContents);
-  const workspaceDeclaration = parseYaml(workspaceContents) as unknown;
-  const workspaceCatalogValue =
-    typeof workspaceDeclaration === "object" &&
-    workspaceDeclaration !== null &&
-    !Array.isArray(workspaceDeclaration) &&
-    "catalog" in workspaceDeclaration &&
-    typeof workspaceDeclaration.catalog !== "undefined"
-      ? workspaceDeclaration.catalog
-      : undefined;
+  const workspaceDeclaration = parseYaml(workspaceContents);
   const workspaceCatalog =
-    typeof workspaceCatalogValue === "object" &&
-    workspaceCatalogValue !== null &&
-    !Array.isArray(workspaceCatalogValue)
-      ? (workspaceCatalogValue as Record<string, unknown>)
+    isRecord(workspaceDeclaration) && isRecord(workspaceDeclaration.catalog)
+      ? workspaceDeclaration.catalog
       : undefined;
   const playwrightTestVersion =
     workspaceCatalog?.["@playwright/test"] ?? workspaceCatalog?.playwright;
