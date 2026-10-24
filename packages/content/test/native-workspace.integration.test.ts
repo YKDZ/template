@@ -421,7 +421,14 @@ await it(
         "workspace:*",
       );
 
-      await execa("pnpm", ["install"], { cwd: targetRoot });
+      await execa(
+        "pnpm",
+        ["install", "--lockfile-only", "--no-frozen-lockfile"],
+        { cwd: targetRoot },
+      );
+      await execa("pnpm", ["install", "--frozen-lockfile"], {
+        cwd: targetRoot,
+      });
       const dryRun = await execa(
         "pnpm",
         ["exec", "turbo", "run", "typecheck", "build", "--dry-run=json"],
