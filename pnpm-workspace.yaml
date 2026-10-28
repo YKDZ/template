@@ -32,8 +32,8 @@ catalog:
   "@vikejs/hono": ^0.2.1
   "@vue/devtools-api": ^8.1.5
   "@vue/tsconfig": ^0.9.1
-  drizzle-kit: 1.0.0-rc.5-ab785fc
-  drizzle-orm: 1.0.0-rc.5-ab785fc
+  drizzle-kit: 1.0.0-rc.5
+  drizzle-orm: 1.0.0-rc.5
   execa: ^10.0.1
   hono: ^4.13.3
   node-diff3: ^3.2.1
