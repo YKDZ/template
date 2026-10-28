@@ -2,7 +2,7 @@
 export const releaseToolchainSnapshot = Object.freeze({
   nodeVersion: "24.21.0",
   packageManagerPin: "pnpm@12.9.1",
-  rustVersion: "1.99.0",
+  rustVersion: "1.99.1",
 } as const);
 
 export type ReleaseToolchainSnapshot = typeof releaseToolchainSnapshot;
