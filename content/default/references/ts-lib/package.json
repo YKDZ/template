@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "@ykdz/template-core": "workspace:*",
-    "valibot": "catalog:"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

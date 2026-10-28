@@ -27,7 +27,7 @@
     "jsonc-parser": "catalog:",
     "node-diff3": "catalog:",
     "toml-eslint-parser": "catalog:",
-    "valibot": "catalog:"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/eslint": "catalog:",

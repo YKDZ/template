@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 
-import * as v from "valibot";
+import { z } from "zod";
 
 /** 能力声明由根环境维护，能力选择由内容拥有者贡献。 */
 export type EditorCustomizationCapability = string;
@@ -24,26 +24,21 @@ export type EditorCustomizationDeclarations = {
   >;
 };
 
-const capabilityProjectionSchema = v.object({
-  extensions: v.array(v.string()),
-  settings: v.record(v.string(), v.unknown()),
+const capabilityProjectionSchema = z.object({
+  extensions: z.array(z.string()),
+  settings: z.record(z.string(), z.unknown()),
 });
-const editorCustomizationDeclarationsSchema = v.object({
-  capabilityOrder: v.array(v.string()),
-  capabilities: v.record(v.string(), capabilityProjectionSchema),
+const editorCustomizationDeclarationsSchema = z.object({
+  capabilityOrder: z.array(z.string()),
+  capabilities: z.record(z.string(), capabilityProjectionSchema),
 });
 
 function editorCustomizationDeclarationIssuePath(
-  issue: v.InferIssue<typeof editorCustomizationDeclarationsSchema>,
+  issue: z.core.$ZodIssue,
 ): string {
-  const segments =
-    issue.path?.flatMap((item) =>
-      typeof item.key === "string" || typeof item.key === "number"
-        ? [String(item.key)]
-        : [],
-    ) ?? [];
-
-  return segments.length === 0 ? "$" : `$.${segments.join(".")}`;
+  return issue.path.length === 0
+    ? "$"
+    : `$.${issue.path.map(String).join(".")}`;
 }
 
 function errorMessage(error: unknown): string {
@@ -79,14 +74,11 @@ export function loadEditorCustomizationDeclarations(
     );
   }
 
-  const result = v.safeParse(
-    editorCustomizationDeclarationsSchema,
-    parsedSource,
-  );
+  const result = editorCustomizationDeclarationsSchema.safeParse(parsedSource);
 
   if (!result.success) {
     throw new Error(
-      `${resourceLabel} 内容无效：${result.issues
+      `${resourceLabel} 内容无效：${result.error.issues
         .map(
           (issue) =>
             `${editorCustomizationDeclarationIssuePath(issue)}: ${issue.message}`,
@@ -95,7 +87,7 @@ export function loadEditorCustomizationDeclarations(
     );
   }
 
-  return { ...result.output, source: sourceLabel };
+  return { ...result.data, source: sourceLabel };
 }
 
 function jsonPointerToken(value: string): string {

@@ -1,4 +1,4 @@
-import * as v from "valibot";
+import { z } from "zod";
 
 import {
   assertContentIdentity,
@@ -34,34 +34,34 @@ export type GenerationRecord<Conventions = unknown, CreationInput = unknown> = {
   readonly selections: readonly GenerationRecordSelection[];
 };
 
-const contentIdentitySchema = v.strictObject({
-  namespace: v.string(),
-  packageName: v.string(),
-  exportPath: v.string(),
+const contentIdentitySchema = z.strictObject({
+  namespace: z.string(),
+  packageName: z.string(),
+  exportPath: z.string(),
 });
 
-const packageRecordSchema = v.strictObject({
-  packageDefinitionId: v.pipe(v.string(), v.regex(/^package-[a-f0-9]{64}$/)),
+const packageRecordSchema = z.strictObject({
+  packageDefinitionId: z.string().regex(/^package-[a-f0-9]{64}$/),
   contentIdentity: contentIdentitySchema,
-  createdBy: v.picklist(["initialization", "addition", "shared-dependency"]),
-  creationInput: v.nullable(v.unknown()),
-  dependencyBindings: v.record(v.string(), v.string()),
+  createdBy: z.enum(["initialization", "addition", "shared-dependency"]),
+  creationInput: z.unknown().nullable(),
+  dependencyBindings: z.record(z.string(), z.string()),
 });
 
-const selectionSchema = v.strictObject({
-  selectionId: v.pipe(v.string(), v.minLength(1)),
-  presetIdentity: v.nullable(contentIdentitySchema),
-  nodes: v.record(v.string(), v.string()),
+const selectionSchema = z.strictObject({
+  selectionId: z.string().min(1),
+  presetIdentity: contentIdentitySchema.nullable(),
+  nodes: z.record(z.string(), z.string()),
 });
 
-export const generationRecordSchema = v.strictObject({
-  schemaVersion: v.literal(6),
-  composition: v.strictObject({
+export const generationRecordSchema = z.strictObject({
+  schemaVersion: z.literal(6),
+  composition: z.strictObject({
     identity: contentIdentitySchema,
-    conventions: v.unknown(),
+    conventions: z.unknown(),
   }),
-  packages: v.array(packageRecordSchema),
-  selections: v.array(selectionSchema),
+  packages: z.array(packageRecordSchema),
+  selections: z.array(selectionSchema),
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -82,10 +82,10 @@ export function parseGenerationRecordStructure<
       `不支持的生成记录 schema ${String(value.schemaVersion)}；当前只支持 schema6`,
     );
   }
-  const parsed = v.safeParse(generationRecordSchema, value);
+  const parsed = generationRecordSchema.safeParse(value);
   if (!parsed.success) failStructure();
 
-  const record = parsed.output;
+  const record = parsed.data;
   assertContentIdentity(record.composition.identity);
   assertJsonValue(record.composition.conventions, "生成记录组合约定");
   for (const item of record.packages) {

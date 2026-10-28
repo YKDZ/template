@@ -188,9 +188,6 @@ catalogs:
     '@types/web-bluetooth':
       specifier: ^0.0.21
       version: 0.0.21
-    '@valibot/to-json-schema':
-      specifier: ^1.8.0
-      version: 1.8.0
     '@vikejs/hono':
       specifier: ^0.2.1
       version: 0.2.1
@@ -287,9 +284,6 @@ catalogs:
     typescript-7:
       specifier: npm:typescript@^7.0.2
       version: 7.0.2
-    valibot:
-      specifier: ^1.4.2
-      version: 1.5.0
     validate-npm-package-name:
       specifier: ^8.0.0
       version: 8.0.0
@@ -317,6 +311,9 @@ catalogs:
     yaml:
       specifier: ^2.9.0
       version: 2.9.1
+    zod:
+      specifier: ^4.6.7
+      version: 4.6.7
   public-cli-runtime:
     typescript:
       specifier: npm:typescript@^6.0.3
@@ -405,18 +402,12 @@ importers:
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
-      valibot:
-        specifier: 'catalog:'
-        version: 1.5.0(@typescript/typescript6@6.0.2)
       yaml:
         specifier: 'catalog:'
         version: 2.9.1
 
   apps/cli:
     dependencies:
-      '@valibot/to-json-schema':
-        specifier: 'catalog:'
-        version: 1.8.0(valibot@1.5.0(typescript@6.0.3))
       '@ykdz/cli-contract':
         specifier: 'catalog:'
         version: 0.3.0
@@ -456,15 +447,15 @@ importers:
       typescript:
         specifier: catalog:public-cli-runtime
         version: 6.0.3
-      valibot:
-        specifier: 'catalog:'
-        version: 1.5.0(typescript@6.0.3)
       validate-npm-package-name:
         specifier: 'catalog:'
         version: 8.0.0
       yaml:
         specifier: 'catalog:'
         version: 2.9.1
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -650,9 +641,6 @@ importers:
       smol-toml:
         specifier: 'catalog:'
         version: 1.9.1
-      valibot:
-        specifier: 'catalog:'
-        version: 1.5.0(typescript@7.0.2)
       yaml:
         specifier: 'catalog:'
         version: 2.9.1
@@ -1147,15 +1135,12 @@ importers:
 
   content/default/references/ts-cli:
     dependencies:
-      '@valibot/to-json-schema':
-        specifier: 'catalog:'
-        version: 1.8.0(valibot@1.5.0(typescript@7.0.2))
       '@ykdz/cli-contract':
         specifier: 'catalog:'
         version: 0.3.0
-      valibot:
+      zod:
         specifier: 'catalog:'
-        version: 1.5.0(typescript@7.0.2)
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1196,9 +1181,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../../../../packages/core
-      valibot:
+      zod:
         specifier: 'catalog:'
-        version: 1.5.0(typescript@7.0.2)
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1235,7 +1220,7 @@ importers:
     dependencies:
       drizzle-orm:
         specifier: 'catalog:'
-        version: 1.0.0-rc.5(valibot@1.5.0(typescript@7.0.2))
+        version: 1.0.0-rc.5(zod@4.6.7)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1275,10 +1260,10 @@ importers:
         version: link:../vike-db
       drizzle-kit:
         specifier: 'catalog:'
-        version: 1.0.0-rc.5(drizzle-orm@1.0.0-rc.5(valibot@1.5.0(typescript@7.0.2)))
+        version: 1.0.0-rc.5(drizzle-orm@1.0.0-rc.5(zod@4.6.7))
       drizzle-orm:
         specifier: 'catalog:'
-        version: 1.0.0-rc.5(valibot@1.5.0(typescript@7.0.2))
+        version: 1.0.0-rc.5(zod@4.6.7)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1595,12 +1580,12 @@ importers:
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
-      valibot:
-        specifier: 'catalog:'
-        version: 1.5.0(typescript@7.0.2)
       yaml:
         specifier: 'catalog:'
         version: 2.9.1
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
 
   content/default/verification:
     dependencies:
@@ -1720,9 +1705,9 @@ importers:
       toml-eslint-parser:
         specifier: 'catalog:'
         version: 1.0.3
-      valibot:
+      zod:
         specifier: 'catalog:'
-        version: 1.5.0(@typescript/typescript6@6.0.2)
+        version: 4.6.7
     devDependencies:
       '@types/eslint':
         specifier: 'catalog:'
@@ -2993,11 +2978,6 @@ packages:
     resolution: {integrity: sha512-a1zIvxlYGxCp1jPpkCsytDxGjyFwCevG/xkeGue1kS/NRF3Oxh8iZMQqdq/ojmiNKTVdXyPVJDtZ+8g8tM/FdA==}
     engines: {node: '>=22'}
 
-  '@valibot/to-json-schema@1.8.0':
-    resolution: {integrity: sha512-a0M+uwCuQZEPAo65NYkFSJ14O5c213KoSZmPdoCfuFvUhfULi4T2Z6Tpjv6lTVMW9RoLm74RpRAjNEa43KcN+g==}
-    peerDependencies:
-      valibot: ^1.5.0
-
   '@vikejs/hono@0.2.1':
     resolution: {integrity: sha512-p63PBM88spYeMe3nl8YKbgirsxlGptrBDrXb1SxqnOjXRsb7GWsmRbuGC8axDBguxHHLM8q8Zgi4pMSQPe3t2A==}
     peerDependencies:
@@ -4126,14 +4106,6 @@ packages:
     peerDependencies:
       browserslist: '>= 4.21.0'
 
-  valibot@1.5.0:
-    resolution: {integrity: sha512-nil6AkP2TChWL43Z5uJ6GTxX01CUA+g8LWUM+N/rB9NBbkUMaUsi9PUNzlUPgoKASgmx9f7eGOYpJ04/fSa6FQ==}
-    peerDependencies:
-      typescript: '>=5'
-    peerDependenciesMeta:
-      typescript:
-        optional: true
-
   validate-npm-package-name@8.0.0:
     resolution: {integrity: sha512-SCv6OOV6Xj2/3cXy3dGmADluJTNcL3o7hZAglNPTe+WYuEuvxgJzxPrSDLZhF+CwyQOubqgecjMmTJGMVLWjYQ==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
@@ -4303,6 +4275,9 @@ packages:
   yoctocolors@2.2.0:
     resolution: {integrity: sha512-xYqdZFUK/VYazNl/oCDYN+3WloWQwMfZxBoiNt6qNyk+xfOdi598muWE42rNZFp1kNOiqW936q5RhUdnpqElSg==}
     engines: {node: '>=18'}
+
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
 snapshots:
 
@@ -5135,14 +5110,6 @@ snapshots:
       - hono
       - srvx
 
-  '@valibot/to-json-schema@1.8.0(valibot@1.5.0(typescript@6.0.3))':
-    dependencies:
-      valibot: 1.5.0(typescript@6.0.3)
-
-  '@valibot/to-json-schema@1.8.0(valibot@1.5.0(typescript@7.0.2))':
-    dependencies:
-      valibot: 1.5.0(typescript@7.0.2)
-
   '@vikejs/hono@0.2.1(hono@4.13.13)(srvx@1.0.5)(vike@0.4.268(hono@4.13.13)(srvx@1.0.5)(vite@8.3.5(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)))':
     dependencies:
       '@universal-middleware/hono': 0.4.22(hono@4.13.13)(srvx@1.0.5)
@@ -5403,13 +5370,13 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  drizzle-kit@1.0.0-rc.5(drizzle-orm@1.0.0-rc.5(valibot@1.5.0(typescript@7.0.2))):
+  drizzle-kit@1.0.0-rc.5(drizzle-orm@1.0.0-rc.5(zod@4.6.7)):
     optionalDependencies:
-      drizzle-orm: 1.0.0-rc.5(valibot@1.5.0(typescript@7.0.2))
+      drizzle-orm: 1.0.0-rc.5(zod@4.6.7)
 
-  drizzle-orm@1.0.0-rc.5(valibot@1.5.0(typescript@7.0.2)):
+  drizzle-orm@1.0.0-rc.5(zod@4.6.7):
     optionalDependencies:
-      valibot: 1.5.0(typescript@7.0.2)
+      zod: 4.6.7
 
   editorconfig@3.0.2:
     dependencies:
@@ -6080,18 +6047,6 @@ snapshots:
       escalade: 3.2.0
       picocolors: 1.1.1
 
-  valibot@1.5.0(@typescript/typescript6@6.0.2):
-    optionalDependencies:
-      typescript: '@typescript/typescript6@6.0.2'
-
-  valibot@1.5.0(typescript@6.0.3):
-    optionalDependencies:
-      typescript: 6.0.3
-
-  valibot@1.5.0(typescript@7.0.2):
-    optionalDependencies:
-      typescript: 7.0.2
-
   validate-npm-package-name@8.0.0: {}
 
   vike-vue@0.9.15(vike@0.4.268(hono@4.13.13)(srvx@1.0.5)(vite@8.3.5(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)))(vue@3.5.44):
@@ -6223,3 +6178,5 @@ snapshots:
   yaml@2.9.1: {}
 
   yoctocolors@2.2.0: {}
+
+  zod@4.6.7: {}

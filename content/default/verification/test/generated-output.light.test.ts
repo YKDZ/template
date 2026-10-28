@@ -50,10 +50,10 @@ await test("在真实生成目标上检查格式与依赖目录事实", async ()
       "modules/library/package.json",
     );
     const manifest = await readFile(manifestFile, "utf8");
-    assert.match(manifest, /"valibot": "catalog:"/u);
+    assert.match(manifest, /"zod": "catalog:"/u);
     await writeFile(
       manifestFile,
-      manifest.replace('"valibot": "catalog:"', '"valibot": "^1.0.0"'),
+      manifest.replace('"zod": "catalog:"', '"zod": "^4.0.0"'),
     );
     await assert.rejects(
       validateGeneratedOutput(receipt),

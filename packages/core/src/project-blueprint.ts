@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import * as v from "valibot";
+import { z } from "zod";
 
 /** 角色由内容与所属组合解释；它不决定包目录的输出权限。 */
 export type PackageRole = string;
@@ -80,22 +80,22 @@ export type BlueprintValidationResult =
       readonly issues: readonly BlueprintValidationIssue[];
     };
 
-const packageDefinitionSchema = v.strictObject({
-  packageDefinitionId: v.pipe(v.string(), v.regex(/^package-[a-f0-9]{64}$/)),
-  name: v.string(),
-  path: v.string(),
-  role: v.string(),
+const packageDefinitionSchema = z.strictObject({
+  packageDefinitionId: z.string().regex(/^package-[a-f0-9]{64}$/),
+  name: z.string(),
+  path: z.string(),
+  role: z.string(),
 });
 
-const packageLinkIntentSchema = v.strictObject({
-  consumerId: v.pipe(v.string(), v.regex(/^package-[a-f0-9]{64}$/)),
-  providerId: v.pipe(v.string(), v.regex(/^package-[a-f0-9]{64}$/)),
+const packageLinkIntentSchema = z.strictObject({
+  consumerId: z.string().regex(/^package-[a-f0-9]{64}$/),
+  providerId: z.string().regex(/^package-[a-f0-9]{64}$/),
 });
 
-export const projectBlueprintSchema = v.strictObject({
-  schemaVersion: v.literal(4),
-  packages: v.array(packageDefinitionSchema),
-  packageLinkIntents: v.array(packageLinkIntentSchema),
+export const projectBlueprintSchema = z.strictObject({
+  schemaVersion: z.literal(4),
+  packages: z.array(packageDefinitionSchema),
+  packageLinkIntents: z.array(packageLinkIntentSchema),
 });
 
 function isNormalizedPackagePath(value: string): boolean {
@@ -115,16 +115,14 @@ function isNormalizedPackagePath(value: string): boolean {
   );
 }
 
-function blueprintIssuePath(issue: v.BaseIssue<unknown>): string {
-  let result = ".";
-  for (const item of issue.path ?? []) {
-    if (typeof item.key === "number") {
-      result += `[${item.key}]`;
-    } else if (typeof item.key === "string") {
-      result += `${result === "." ? "" : "."}${item.key}`;
-    }
-  }
-  return result;
+function blueprintIssuePath(path: readonly PropertyKey[]): string {
+  return path.reduce<string>(
+    (result, key) =>
+      typeof key === "number"
+        ? `${result}[${key}]`
+        : `${result === "." ? "." : `${result}.`}${String(key)}`,
+    ".",
+  );
 }
 
 function validateBlueprintSemantics(
@@ -237,30 +235,47 @@ function validateBlueprintSemantics(
   return issues;
 }
 
-function structureIssues(value: unknown): BlueprintValidationIssue[] {
-  const parsed = v.safeParse(projectBlueprintSchema, value);
-  if (parsed.success) return [];
-  return parsed.issues.map((issue) => {
-    const issuePath = blueprintIssuePath(issue);
+function structureIssues(
+  value: unknown,
+  issues: readonly z.core.$ZodIssue[],
+): BlueprintValidationIssue[] {
+  return issues.flatMap((issue): BlueprintValidationIssue[] => {
+    if (issue.code === "unrecognized_keys") {
+      return issue.keys.map((key) => ({
+        path: blueprintIssuePath([...issue.path, key]),
+        message: "蓝图 v4 包含未知字段",
+      }));
+    }
+    const issuePath = blueprintIssuePath(issue.path);
     if (issuePath === ".schemaVersion") {
-      return {
-        path: issuePath,
-        message: `不支持的本地模板元数据版本 ${String(isObject(value) ? value.schemaVersion : undefined)}；当前只支持 schema4`,
-      };
+      return [
+        {
+          path: issuePath,
+          message: `不支持的本地模板元数据版本 ${String(isObject(value) ? value.schemaVersion : undefined)}；当前只支持 schema4`,
+        },
+      ];
     }
-    if (
-      issue.type === "strict_object" &&
-      issue.path?.at(-1)?.origin === "key"
-    ) {
-      return {
+    const parent = issue.path
+      .slice(0, -1)
+      .reduce<unknown>(
+        (current, key) =>
+          typeof current === "object" && current !== null
+            ? Reflect.get(current, key)
+            : undefined,
+        value,
+      );
+    const key = issue.path.at(-1);
+    const missing =
+      key !== undefined &&
+      typeof parent === "object" &&
+      parent !== null &&
+      !Object.hasOwn(parent, key);
+    return [
+      {
         path: issuePath,
-        message:
-          issue.expected === "never"
-            ? "蓝图 v4 包含未知字段"
-            : "蓝图缺少必需字段",
-      };
-    }
-    return { path: issuePath, message: "字段类型或结构不符合蓝图要求" };
+        message: missing ? "蓝图缺少必需字段" : "字段类型或结构不符合蓝图要求",
+      },
+    ];
   });
 }
 
@@ -271,10 +286,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export function validateProjectBlueprint(
   value: unknown,
 ): BlueprintValidationResult {
-  const structure = structureIssues(value);
-  if (structure.length > 0) return { ok: false, issues: structure };
-
-  const parsed = v.parse(projectBlueprintSchema, value);
+  const result = projectBlueprintSchema.safeParse(value);
+  if (!result.success)
+    return { ok: false, issues: structureIssues(value, result.error.issues) };
+  const parsed = result.data;
   const blueprint: ProjectBlueprint = {
     schemaVersion: parsed.schemaVersion,
     packages: parsed.packages as readonly PersistedPackageDefinition[],
