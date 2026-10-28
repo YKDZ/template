@@ -1,6 +1,6 @@
 {
   "name": "@ykdz/template",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "description": "Project template generator for YKDZ starter projects.",
   "keywords": [
