@@ -1,4 +1,3 @@
-import { toStandardJsonSchema } from "@valibot/to-json-schema";
 import {
   CliWriteError,
   defineCli,
@@ -11,7 +10,7 @@ import {
   type WriteCliOutput,
 } from "@ykdz/cli-contract";
 import { isNodeBrokenPipe } from "@ykdz/cli-contract/node";
-import * as v from "valibot";
+import { z } from "zod";
 
 import type { CliCommandIdentity } from "./cli-command-identity.ts";
 
@@ -64,23 +63,16 @@ function createCliContract(identity: CliCommandIdentity) {
         fields: {
           name: { kind: "positional", description: "小写字母组成的记录名称" },
         },
-        input: toStandardJsonSchema(
-          v.object({
-            name: v.pipe(
-              v.string(),
-              v.regex(/^[a-z]+$/, "名称只能包含小写字母。"),
-            ),
-          }),
-        ),
+        input: z.object({
+          name: z.string().regex(/^[a-z]+$/, "名称只能包含小写字母。"),
+        }),
         success: {
           kind: "data",
           variants: {
             found: {
               description: "找到记录",
               exitCode: 0,
-              schema: toStandardJsonSchema(
-                v.object({ name: v.string(), title: v.string() }),
-              ),
+              schema: z.object({ name: z.string(), title: z.string() }),
               text: ({ name, title }) =>
                 text.line(`找到记录：${title}（${name}）`),
             },
@@ -90,7 +82,7 @@ function createCliContract(identity: CliCommandIdentity) {
           notFound: {
             description: "记录不存在",
             exitCode: 1,
-            schema: toStandardJsonSchema(v.object({ name: v.string() })),
+            schema: z.object({ name: z.string() }),
             text: ({ name }) => text.line(`未找到记录：${name}。`),
           },
         },
@@ -106,7 +98,7 @@ function createCliContract(identity: CliCommandIdentity) {
         parent: "cli",
         name: "schema",
         description: "导出完整 CLI 契约及输入/输出 Schema。",
-        input: toStandardJsonSchema(v.object({})),
+        input: z.object({}),
         fields: {},
         success: {
           kind: "data",
@@ -114,9 +106,7 @@ function createCliContract(identity: CliCommandIdentity) {
             exported: {
               description: "完整 CLI 契约",
               exitCode: 0,
-              schema: toStandardJsonSchema(
-                v.object({ manifest: v.record(v.string(), v.unknown()) }),
-              ),
+              schema: z.object({ manifest: z.record(z.string(), z.unknown()) }),
               text: ({ manifest }) =>
                 text.lines([
                   "CLI 契约",

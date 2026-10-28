@@ -79,7 +79,6 @@
     "ignore": "catalog:",
     "jsonc-parser": "catalog:",
     "smol-toml": "catalog:",
-    "valibot": "catalog:",
     "yaml": "catalog:"
   },
   "devDependencies": {

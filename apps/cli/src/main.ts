@@ -10,7 +10,7 @@ import {
   versionCapability,
 } from "@ykdz/cli-contract";
 import { isNodeBrokenPipe } from "@ykdz/cli-contract/node";
-import * as v from "valibot";
+import { z } from "zod";
 
 import {
   listPresetCatalog,
@@ -29,7 +29,6 @@ import {
   packageAdditionSchema,
   packageConflictSchema,
 } from "./result-schemas.ts";
-import { standardSchema } from "./standard-schema.ts";
 
 export type CliRuntime = ApplicationRuntime & {
   readonly argv: readonly string[];
@@ -177,24 +176,22 @@ function createCliContract(runtime: CliRuntime) {
           invalidRequest: {
             description: "初始包身份与基础配置包冲突",
             exitCode: 2,
-            schema: standardSchema(
-              v.object({
-                issues: v.array(
-                  v.object({
-                    code: v.picklist([
-                      "PRESET_UNKNOWN",
-                      "FIXED_TOPOLOGY_OVERRIDE",
-                      "INVALID_PACKAGE_NAME",
-                      "INVALID_PACKAGE_PATH",
-                      "RESERVED_PACKAGE_PATH",
-                      "INVALID_PACKAGE_SCOPE",
-                      "INVALID_REPOSITORY_SCOPE",
-                      "CONFLICTING_PACKAGE_IDENTITY",
-                    ]),
-                  }),
-                ),
-              }),
-            ),
+            schema: z.object({
+              issues: z.array(
+                z.object({
+                  code: z.enum([
+                    "PRESET_UNKNOWN",
+                    "FIXED_TOPOLOGY_OVERRIDE",
+                    "INVALID_PACKAGE_NAME",
+                    "INVALID_PACKAGE_PATH",
+                    "RESERVED_PACKAGE_PATH",
+                    "INVALID_PACKAGE_SCOPE",
+                    "INVALID_REPOSITORY_SCOPE",
+                    "CONFLICTING_PACKAGE_IDENTITY",
+                  ]),
+                }),
+              ),
+            }),
             text: ({ issues }) =>
               text.lines([
                 "初始化请求无效。",
@@ -208,15 +205,13 @@ function createCliContract(runtime: CliRuntime) {
           operationFailed: {
             description: "初始化操作失败",
             exitCode: 1,
-            schema: standardSchema(
-              v.object({
-                targetDir: v.string(),
-                error: v.object({
-                  message: v.string(),
-                  suggestion: v.string(),
-                }),
+            schema: z.object({
+              targetDir: z.string(),
+              error: z.object({
+                message: z.string(),
+                suggestion: z.string(),
               }),
-            ),
+            }),
             text: ({ targetDir, error }) =>
               text.lines([
                 error.message,
@@ -355,25 +350,23 @@ function createCliContract(runtime: CliRuntime) {
           invalidRequest: {
             description: "新增包请求无效",
             exitCode: 1,
-            schema: standardSchema(
-              v.object({
-                issues: v.array(
-                  v.object({
-                    code: v.picklist([
-                      "PRESET_UNKNOWN",
-                      "PRESET_NOT_ADDABLE",
-                      "INVALID_PACKAGE_NAME",
-                      "INVALID_PACKAGE_PATH",
-                      "RESERVED_PACKAGE_PATH",
-                      "INVALID_LINK_FROM",
-                      "RESERVED_LINK_FROM",
-                      "UNKNOWN_LINK_FROM",
-                      "UNSUPPORTED_LINK",
-                    ]),
-                  }),
-                ),
-              }),
-            ),
+            schema: z.object({
+              issues: z.array(
+                z.object({
+                  code: z.enum([
+                    "PRESET_UNKNOWN",
+                    "PRESET_NOT_ADDABLE",
+                    "INVALID_PACKAGE_NAME",
+                    "INVALID_PACKAGE_PATH",
+                    "RESERVED_PACKAGE_PATH",
+                    "INVALID_LINK_FROM",
+                    "RESERVED_LINK_FROM",
+                    "UNKNOWN_LINK_FROM",
+                    "UNSUPPORTED_LINK",
+                  ]),
+                }),
+              ),
+            }),
             text: ({ issues }) =>
               text.lines([
                 "新增包请求无效。",
@@ -401,14 +394,12 @@ function createCliContract(runtime: CliRuntime) {
           operationFailed: {
             description: "新增包操作失败",
             exitCode: 1,
-            schema: standardSchema(
-              v.object({
-                error: v.object({
-                  message: v.string(),
-                  suggestion: v.string(),
-                }),
+            schema: z.object({
+              error: z.object({
+                message: z.string(),
+                suggestion: z.string(),
               }),
-            ),
+            }),
             text: ({ error }) =>
               text.lines([error.message, `建议: ${error.suggestion}`]),
           },
@@ -500,15 +491,13 @@ function createCliContract(runtime: CliRuntime) {
         name: "validate",
         description: "只读校验项目蓝图。",
         fields: { path: { kind: "positional", description: "蓝图文件路径" } },
-        input: standardSchema(
-          v.object({ path: v.pipe(v.string(), v.nonEmpty()) }),
-        ),
+        input: z.object({ path: z.string().min(1) }),
         success: {
           kind: "data",
           variants: {
             valid: {
               description: "蓝图有效",
-              schema: standardSchema(v.object({ path: v.string() })),
+              schema: z.object({ path: z.string() }),
               exitCode: 0,
               text: () => text.line("蓝图有效。"),
             },
@@ -517,22 +506,20 @@ function createCliContract(runtime: CliRuntime) {
         failures: {
           operationFailed: {
             description: "蓝图读取或解析失败",
-            schema: standardSchema(
-              v.object({
-                path: v.string(),
-                reason: v.picklist([
-                  "not-found",
-                  "permission-denied",
-                  "not-a-file",
-                  "unreadable",
-                  "invalid-json",
-                ]),
-                error: v.object({
-                  message: v.string(),
-                  suggestion: v.string(),
-                }),
+            schema: z.object({
+              path: z.string(),
+              reason: z.enum([
+                "not-found",
+                "permission-denied",
+                "not-a-file",
+                "unreadable",
+                "invalid-json",
+              ]),
+              error: z.object({
+                message: z.string(),
+                suggestion: z.string(),
               }),
-            ),
+            }),
             exitCode: 1,
             text: ({ path, error }) =>
               text.lines([
@@ -543,14 +530,12 @@ function createCliContract(runtime: CliRuntime) {
           },
           invalid: {
             description: "蓝图无效",
-            schema: standardSchema(
-              v.object({
-                path: v.string(),
-                issues: v.array(
-                  v.object({ path: v.string(), message: v.string() }),
-                ),
-              }),
-            ),
+            schema: z.object({
+              path: z.string(),
+              issues: z.array(
+                z.object({ path: z.string(), message: z.string() }),
+              ),
+            }),
             exitCode: 1,
             text: ({ path, issues }) =>
               text.lines([
@@ -584,7 +569,7 @@ function createCliContract(runtime: CliRuntime) {
         parent: "template",
         name: "schema",
         description: "导出完整 CLI 契约及输入/输出 Schema。",
-        input: standardSchema(v.object({})),
+        input: z.object({}),
         fields: {},
         success: {
           kind: "data",
@@ -592,9 +577,7 @@ function createCliContract(runtime: CliRuntime) {
             exported: {
               description: "完整 CLI 契约",
               exitCode: 0,
-              schema: standardSchema(
-                v.object({ manifest: v.record(v.string(), v.unknown()) }),
-              ),
+              schema: z.object({ manifest: z.record(z.string(), z.unknown()) }),
               text: ({ manifest }) =>
                 text.lines([
                   "CLI 契约",
@@ -613,23 +596,21 @@ function createCliContract(runtime: CliRuntime) {
         name: "presets",
         description: "列出内置预设。",
         fields: {},
-        input: standardSchema(v.object({})),
+        input: z.object({}),
         success: {
           kind: "data",
           variants: {
             listed: {
               description: "内置预设列表",
-              schema: standardSchema(
-                v.object({
-                  presets: v.array(
-                    v.object({
-                      name: v.string(),
-                      title: v.string(),
-                      description: v.string(),
-                    }),
-                  ),
-                }),
-              ),
+              schema: z.object({
+                presets: z.array(
+                  z.object({
+                    name: z.string(),
+                    title: z.string(),
+                    description: z.string(),
+                  }),
+                ),
+              }),
               exitCode: 0,
               text: ({ presets }) =>
                 text.lines([

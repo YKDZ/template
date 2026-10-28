@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import * as v from "valibot";
+import { z } from "zod";
 
 import {
   validateInitializationInput,
@@ -9,7 +9,6 @@ import {
   type PackageAdditionInputIssue,
 } from "./input-validation.ts";
 import { cliPresets } from "./preset-catalog.ts";
-import { standardSchema } from "./standard-schema.ts";
 
 const initializationPresetChoices = cliPresets
   .filter((preset) => preset.definition.operations.includes("init"))
@@ -31,57 +30,45 @@ const initializationMessages: Record<InitializationInputIssue["code"], string> =
   };
 
 export function initializationInputSchema(cwd: string) {
-  return standardSchema(
-    v.pipe(
-      v.object({
-        dir: v.pipe(v.string(), v.nonEmpty()),
-        preset: v.picklist(initializationPresetChoices),
-        name: v.optional(
-          v.pipe(
-            v.string(),
-            v.description(
-              "无 scope 的 npm 包叶名称；仅可配置主包的预设允许覆盖。",
-            ),
-          ),
-        ),
-        path: v.optional(
-          v.pipe(
-            v.string(),
-            v.description(
-              "两个安全路径段；不能使用保留目录；仅可配置主包的预设允许覆盖。",
-            ),
-          ),
-        ),
-        scope: v.optional(
-          v.pipe(
-            v.string(),
-            v.description("有效 npm scope；省略时使用目标目录名。"),
-          ),
-        ),
-        dryRun: v.optional(v.boolean(), false),
-        todo: v.optional(v.boolean(), true),
-      }),
-      v.rawCheck(({ dataset, addIssue }) => {
-        if (!dataset.typed) return;
-        const { dir, preset, name, path: packagePath, scope } = dataset.value;
-        const result = validateInitializationInput({
-          preset,
-          targetDir: path.resolve(cwd, dir),
-          overrides: {
-            ...(name === undefined ? {} : { name }),
-            ...(packagePath === undefined ? {} : { path: packagePath }),
-            ...(scope === undefined ? {} : { scope }),
-          },
-        });
-        if (result.status === "input-invalid") {
-          for (const issue of result.issues) {
-            addIssue({ message: initializationMessages[issue.code] });
-          }
-        }
-      }),
-    ),
-    ["raw_check"],
-  );
+  return z
+    .object({
+      dir: z.string().min(1),
+      preset: z.enum(initializationPresetChoices),
+      name: z
+        .string()
+        .describe("无 scope 的 npm 包叶名称；仅可配置主包的预设允许覆盖。")
+        .optional(),
+      path: z
+        .string()
+        .describe(
+          "两个安全路径段；不能使用保留目录；仅可配置主包的预设允许覆盖。",
+        )
+        .optional(),
+      scope: z
+        .string()
+        .describe("有效 npm scope；省略时使用目标目录名。")
+        .optional(),
+      dryRun: z.boolean().default(false),
+      todo: z.boolean().default(true),
+    })
+    .superRefine(({ dir, preset, name, path: packagePath, scope }, ctx) => {
+      const result = validateInitializationInput({
+        preset,
+        targetDir: path.resolve(cwd, dir),
+        overrides: {
+          ...(name === undefined ? {} : { name }),
+          ...(packagePath === undefined ? {} : { path: packagePath }),
+          ...(scope === undefined ? {} : { scope }),
+        },
+      });
+      if (result.status === "input-invalid") {
+        for (const issue of result.issues)
+          ctx.addIssue({
+            code: "custom",
+            message: initializationMessages[issue.code],
+          });
+      }
+    });
 }
 
 const additionMessages: Record<PackageAdditionInputIssue["code"], string> = {
@@ -96,45 +83,32 @@ const additionMessages: Record<PackageAdditionInputIssue["code"], string> = {
   UNSUPPORTED_LINK: "指定的包角色不支持此链接。",
 };
 
-export const packageAdditionInputSchema = standardSchema(
-  v.pipe(
-    v.object({
-      preset: v.picklist(additionPresetChoices),
-      name: v.pipe(v.string(), v.description("无 scope 的 npm 包叶名称。")),
-      path: v.optional(
-        v.pipe(
-          v.string(),
-          v.description("两个安全路径段，不能使用保留工作区目录。"),
-        ),
-      ),
-      linkFrom: v.optional(
-        v.array(
-          v.pipe(
-            v.string(),
-            v.description(
-              "消费包路径：两个安全路径段，不能使用保留工作区目录。",
-            ),
-          ),
-        ),
-        [],
-      ),
-      dryRun: v.optional(v.boolean(), false),
-    }),
-    v.rawCheck(({ dataset, addIssue }) => {
-      if (!dataset.typed) return;
-      const input = dataset.value;
-      const result = validatePackageAdditionInput({
-        preset: input.preset,
-        packageLeafName: input.name,
-        linkFrom: input.linkFrom,
-        ...(input.path === undefined ? {} : { packagePath: input.path }),
-      });
-      if (result.status === "input-invalid") {
-        for (const issue of result.issues) {
-          addIssue({ message: additionMessages[issue.code] });
-        }
-      }
-    }),
-  ),
-  ["raw_check"],
-);
+export const packageAdditionInputSchema = z
+  .object({
+    preset: z.enum(additionPresetChoices),
+    name: z.string().describe("无 scope 的 npm 包叶名称。"),
+    path: z
+      .string()
+      .describe("两个安全路径段，不能使用保留工作区目录。")
+      .optional(),
+    linkFrom: z
+      .array(
+        z
+          .string()
+          .describe("消费包路径：两个安全路径段，不能使用保留工作区目录。"),
+      )
+      .default([]),
+    dryRun: z.boolean().default(false),
+  })
+  .superRefine((input, ctx) => {
+    const result = validatePackageAdditionInput({
+      preset: input.preset,
+      packageLeafName: input.name,
+      linkFrom: input.linkFrom,
+      ...(input.path === undefined ? {} : { packagePath: input.path }),
+    });
+    if (result.status === "input-invalid") {
+      for (const issue of result.issues)
+        ctx.addIssue({ code: "custom", message: additionMessages[issue.code] });
+    }
+  });

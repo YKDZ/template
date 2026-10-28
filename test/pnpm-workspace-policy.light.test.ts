@@ -12,7 +12,6 @@ void describe("pnpm Workspace Policy", () => {
 
     assert.ok(workspace.includes('"example>peer": "-"'));
     assert.ok(workspace.includes("injectWorkspacePackages: false"));
-    assert.ok(!workspace.includes("valibot>typescript"));
     assert.ok(!workspace.includes("pnpmfile"));
   });
 });

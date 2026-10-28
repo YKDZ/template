@@ -57,7 +57,6 @@
     "turbo": "catalog:",
     "typescript": "catalog:",
     "typescript-7": "catalog:",
-    "valibot": "catalog:",
     "yaml": "catalog:"
   },
   "engines": {

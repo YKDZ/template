@@ -84,14 +84,14 @@ export const referencePackage = defineReferencePackage({
       name: "@ykdz/default-content-authoring",
       purpose: "template-execution",
     },
-    { name: "valibot", purpose: "template-execution" },
+    { name: "zod", purpose: "template-execution" },
     { name: "yaml", purpose: "template-execution" },
   ],
   executionDependencies: [
     "@ykdz/default-content-authoring",
     "@ykdz/template-core",
     "@ykdz/template-environment",
-    "valibot",
+    "zod",
     "yaml",
   ],
   templateScripts: [

@@ -20,7 +20,6 @@ catalog:
   "@changesets/cli": 3.0.3
   "@types/eslint": ^9.6.1
   "@ykdz/cli-contract": 0.3.0
-  "@valibot/to-json-schema": ^1.8.0
   "@devcontainers/cli": 0.89.0
   "@hono/node-server": ^2.0.12
   "@playwright/test": 1.64.0
@@ -32,14 +31,14 @@ catalog:
   "@vikejs/hono": ^0.2.1
   "@vue/devtools-api": ^8.1.5
   "@vue/tsconfig": ^0.9.1
-  drizzle-kit: 1.0.0-rc.5-ab785fc
-  drizzle-orm: 1.0.0-rc.5-ab785fc
+  drizzle-kit: 1.0.0-rc.5
+  drizzle-orm: 1.0.0-rc.5
   execa: ^10.0.1
   hono: ^4.13.3
   node-diff3: ^3.2.1
   npm: 12.2.0
-  oxfmt: ^0.71.0
-  oxlint: ^1.77.0
+  oxfmt: ^0.74.0
+  oxlint: ^1.89.0
   oxlint-tsgolint: ^7.0.2001
   semver: ^7.8.5
   smol-toml: ^1.8.0
@@ -52,9 +51,9 @@ catalog:
   turbo: 2.11.10
   typescript: npm:@typescript/typescript6@^6.0.2
   typescript-7: npm:typescript@^7.0.2
-  valibot: ^1.4.2
-  vite: ^8.2.0
-  vike: ^0.4.260
+  zod: ^4.6.7
+  vite: ^8.3.5
+  vike: ^0.4.268
   vike-vue: ^0.9.12
   vitest: ^5.0.0
   vitest-browser-vue: ^3.1.0

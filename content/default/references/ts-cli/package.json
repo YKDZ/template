@@ -34,9 +34,8 @@
     "test:template": "node --conditions=source --test --test-reporter=spec 'test/template/**/*.test.ts'"
   },
   "dependencies": {
-    "@valibot/to-json-schema": "catalog:",
     "@ykdz/cli-contract": "catalog:",
-    "valibot": "catalog:"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

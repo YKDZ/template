@@ -70,7 +70,6 @@
     "build:distribution": "pnpm exec turbo run build --filter=. && node --conditions=source scripts/prepare-distribution.ts"
   },
   "dependencies": {
-    "@valibot/to-json-schema": "catalog:",
     "@ykdz/cli-contract": "catalog:",
     "@ykdz/template-content": "workspace:*",
     "@ykdz/template-core": "workspace:*",
@@ -84,9 +83,9 @@
     "proc-log": "catalog:",
     "semver": "catalog:",
     "typescript": "catalog:public-cli-runtime",
-    "valibot": "catalog:",
     "validate-npm-package-name": "catalog:",
-    "yaml": "catalog:"
+    "yaml": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
@@ -100,7 +99,6 @@
     "typescript-7": "catalog:"
   },
   "bundleDependencies": [
-    "@valibot/to-json-schema",
     "@ykdz/cli-contract",
     "hosted-git-info",
     "ignore",

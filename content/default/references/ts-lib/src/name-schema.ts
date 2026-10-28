@@ -1,3 +1,3 @@
-import * as v from "valibot";
+import { z } from "zod";
 
-export const nameSchema = v.pipe(v.string(), v.trim(), v.minLength(1));
+export const nameSchema = z.string().trim().min(1);
