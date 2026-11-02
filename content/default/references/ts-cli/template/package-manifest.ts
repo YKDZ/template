@@ -2,7 +2,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** 按目标命令名和工作区 Node 大版本转换 CLI 清单。 */
+/** 按目标命令名和工作区已测 Node 基线转换 CLI 清单。 */
 export function projectCliPackageManifest(options: {
   readonly manifest: unknown;
   readonly commandName: string;
@@ -30,6 +30,6 @@ export function projectCliPackageManifest(options: {
   return {
     ...options.manifest,
     bin: { [options.commandName]: entry[1] },
-    engines: { node: `>=${options.nodeDeclaration.split(".", 1)[0]}` },
+    engines: { node: `^${options.nodeDeclaration}` },
   };
 }

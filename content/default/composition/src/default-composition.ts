@@ -280,6 +280,7 @@ function composePresetRootContributionDeclarations(options: {
       selection,
       selectedPackages,
       rootPackage,
+      rootManifest: rootPackages[0]!.contribution.facts.manifest,
       ownerFacts,
     });
     if (
@@ -1165,6 +1166,9 @@ function compositionFilesForRoot(options: {
       reconciliation: {
         path: target,
         driver: /\.(?:json|jsonc)$/u.test(target) ? "structured" : "text",
+        ...(file.mirrorSlots === undefined
+          ? {}
+          : { mirrorSlots: file.mirrorSlots }),
       },
     });
   };
@@ -1740,6 +1744,7 @@ export function createDefaultComposition(options: {
       };
       const developmentContainer = projectWorkspaceDevelopmentContainer({
         nodeVersion: combineOptions.stableCommon.nodeDeclaration,
+        packageManagerPin: combineOptions.stableCommon.packageManagerPin,
         layers: developmentContainerLayers,
         resources: developmentContainerResources,
       });
@@ -1874,6 +1879,23 @@ export function createDefaultComposition(options: {
           path: file.path,
           content: file.content,
           mode: file.mode,
+          ...(file.path === ".devcontainer/Dockerfile"
+            ? {
+                reconciliation: {
+                  path: file.path,
+                  driver: "text" as const,
+                  mirrorSlots: [
+                    {
+                      id: "pnpm-bootstrap",
+                      location: {
+                        kind: "text-anchor" as const,
+                        name: "pnpm-bootstrap",
+                      },
+                    },
+                  ],
+                },
+              }
+            : {}),
           ...(file.path === ".devcontainer/devcontainer.json"
             ? {
                 reconciliation: {

@@ -107,7 +107,7 @@ const journey: CliJourney = {
     return commands;
   },
   async assertions({ context, results }) {
-    assert.equal(results[0]?.exitCode, 0, results[0]?.stderr);
+    assert.equal(results[0]?.exitCode, 0, results[0]?.stderr ?? "");
     const bindingFailure = results[1];
     assert.equal(bindingFailure?.exitCode, 1);
     assert.equal(bindingFailure?.stdout, "");

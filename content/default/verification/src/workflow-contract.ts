@@ -125,7 +125,7 @@ type WorkflowActionContract = {
   readonly with?: Readonly<ParsedObject>;
 };
 
-type WorkflowActionKey = "checkout" | "node" | "pnpm" | "buildx" | "upload";
+type WorkflowActionKey = "checkout" | "pnpm" | "buildx" | "upload";
 
 const workflowPolicy = {
   generatedPath: ".github/workflows/check.yml",
@@ -146,15 +146,14 @@ const workflowPolicy = {
       action: "actions/checkout",
       with: { "persist-credentials": false, "fetch-depth": 1 },
     },
-    node: {
-      name: "Set up Node.js",
-      action: "actions/setup-node",
-      with: { "node-version-file": "package.json" },
-    },
     pnpm: {
-      name: "Set up pnpm",
-      action: "pnpm/action-setup",
-      with: { cache: true },
+      name: "安装 pnpm 与 Node.js",
+      action: "pnpm/setup",
+      with: {
+        runtime: "${{ steps.node-runtime.outputs.runtime }}",
+        install: false,
+        cache: true,
+      },
     },
     buildx: {
       name: "Set up Docker Buildx",
@@ -180,10 +179,9 @@ const workflowPolicy = {
   },
 } as const;
 
-const rootActionKeys: readonly WorkflowActionKey[] = [
-  "checkout",
-  "node",
-  "pnpm",
+const rootActionSteps: readonly (readonly [number, WorkflowActionKey])[] = [
+  [0, "checkout"],
+  [2, "pnpm"],
 ];
 
 function matchesAction(value: unknown, action: string): boolean {
@@ -395,7 +393,7 @@ function assertGeneratedCheckWorkflowContract(
   ) {
     throw new Error(`${receipt.scenario.id}: Check job identity is not stable`);
   }
-  for (const [index, actionKey] of rootActionKeys.entries()) {
+  for (const [index, actionKey] of rootActionSteps) {
     const contract = workflowPolicy.actions[actionKey];
     const step = job.steps[index];
     if (
@@ -409,6 +407,18 @@ function assertGeneratedCheckWorkflowContract(
         `${receipt.scenario.id}: Check ${contract.name} step diverges from its capability contract`,
       );
     }
+  }
+  const nodeRead = job.steps[1];
+  if (
+    !isParsedObject(nodeRead) ||
+    !hasExactKeys(nodeRead, ["name", "id", "run"]) ||
+    nodeRead.id !== "node-runtime" ||
+    nodeRead.run !==
+      'echo "runtime=node@$(jq -er \'.engines.node\' package.json)" >> "$GITHUB_OUTPUT"'
+  ) {
+    throw new Error(
+      `${receipt.scenario.id}: 检查流程必须从根声明读取 Node 版本`,
+    );
   }
   const runSteps = [
     [job.steps[3], workflowPolicy.installStep],

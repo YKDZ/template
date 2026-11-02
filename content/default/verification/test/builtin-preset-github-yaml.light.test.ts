@@ -239,15 +239,15 @@ void describe("Built-in Preset GitHub YAML checker", () => {
     const source = baseline.source;
     await expectWorkflowRejected(
       baseline,
-      source.replace(/(uses: pnpm\/action-setup)@[a-f0-9]{40}/u, "$1@main"),
+      source.replace(/(uses: pnpm\/setup)@[a-f0-9]{40}/u, "$1@main"),
     );
     await expectWorkflowRejected(
       baseline,
-      source.replace("uses: pnpm/action-setup@", "uses: unexpected/setup@"),
+      source.replace("uses: pnpm/setup@", "uses: unexpected/setup@"),
     );
     await expectWorkflowRejected(
       baseline,
-      source.replace(/(uses: pnpm\/action-setup@[^ #]+) #[^\n]+/u, "$1") +
+      source.replace(/(uses: pnpm\/setup@[^ #]+) #[^\n]+/u, "$1") +
         "\n# v123\n",
     );
   });
@@ -257,8 +257,13 @@ void describe("Built-in Preset GitHub YAML checker", () => {
     const source = baseline.source;
     for (const mutated of [
       source.replace("persist-credentials: false", "persist-credentials: true"),
-      source.replace("node-version-file: package.json", "node-version: latest"),
+      source.replace(".engines.node", ".version"),
       source.replace("pnpm install --frozen-lockfile", "pnpm install"),
+      source.replace("install: false", "install: true"),
+      source.replace(
+        "runtime: ${{ steps.node-runtime.outputs.runtime }}",
+        "runtime: node@latest",
+      ),
       source.replace(
         "run: pnpm install --frozen-lockfile",
         "run: node --conditions=source scripts/task-gates.ts check",

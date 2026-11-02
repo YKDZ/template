@@ -138,6 +138,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
       ownerIdentity,
       selection,
       rootPackage: root,
+      rootManifest: {},
       selectedPackages: selectedPackages(["web", web], ["api", api]),
       ownerFacts,
     });
@@ -202,6 +203,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
           ownerIdentity: { ...ownerIdentity, namespace: "other" },
           selection,
           rootPackage: root,
+          rootManifest: {},
           selectedPackages: validPackages,
           ownerFacts,
         }),
@@ -213,6 +215,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
           ownerIdentity,
           selection: { ...selection, nodes: { web: webId } },
           rootPackage: root,
+          rootManifest: {},
           selectedPackages: validPackages,
           ownerFacts,
         }),
@@ -224,6 +227,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
           ownerIdentity,
           selection,
           rootPackage: root,
+          rootManifest: {},
           selectedPackages: selectedPackages(
             [
               "web",
@@ -244,6 +248,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
           ownerIdentity,
           selection,
           rootPackage: root,
+          rootManifest: {},
           selectedPackages: selectedPackages(
             ["web", { ...web, dependencyBindings: { "hono-api": otherApiId } }],
             ["api", api],
@@ -258,6 +263,7 @@ void describe("Vue-Hono 预设联合验收组合", () => {
           ownerIdentity,
           selection,
           rootPackage: root,
+          rootManifest: {},
           selectedPackages: selectedPackages(
             [
               "web",

@@ -28,7 +28,7 @@ void it("源码容器冻结检查当前工作树，成功后移除快照、失�
     await writeFile(
       path.join(root, "package.json"),
       JSON.stringify({
-        engines: { node: "24.21.0" },
+        engines: { node: "26.13.0" },
         packageManager: "pnpm@12.9.1",
       }),
     );
@@ -47,7 +47,7 @@ void it("源码容器冻结检查当前工作树，成功后移除快照、失�
     );
     await writeFile(
       path.join(root, ".devcontainer/Dockerfile"),
-      "FROM node:24.21.0-bookworm\n",
+      "FROM node:26.13.0-bookworm\n",
     );
     await writeFile(
       path.join(root, ".gitignore"),

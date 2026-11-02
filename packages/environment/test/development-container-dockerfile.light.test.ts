@@ -19,11 +19,11 @@ void it("校验开发容器资源并返回 Dockerfile 内容", async () => {
   try {
     await writeFile(
       path.join(sourceRoot, "base.Dockerfile"),
-      "FROM node:24\nENV CI=true\n",
+      "FROM node:26\nENV CI=true\nCOPY --from=ghcr.io/pnpm/pnpm:12.9.1 /opt/pnpm /opt/pnpm\n",
     );
     await writeFile(
       path.join(sourceRoot, "optional.Dockerfile"),
-      "RUN corepack enable\n",
+      "RUN pnpm --version\n",
     );
     const source = createTemplateSourceHandle(sourceRoot);
     const baseLayer = {
@@ -52,7 +52,7 @@ void it("校验开发容器资源并返回 Dockerfile 内容", async () => {
 
     assert.equal(
       dockerfile,
-      "FROM node:24\nENV CI=true\n\nRUN corepack enable\n",
+      "FROM node:26\nENV CI=true\nCOPY --from=ghcr.io/pnpm/pnpm:12.9.1 /opt/pnpm /opt/pnpm\n\nRUN pnpm --version\n",
     );
 
     await writeFile(

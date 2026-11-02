@@ -889,7 +889,6 @@ void it(
         process.execPath,
         [
           "--conditions=source",
-          "--experimental-strip-types",
           path.resolve("src/check-generated-registry.ts"),
           "init",
         ],

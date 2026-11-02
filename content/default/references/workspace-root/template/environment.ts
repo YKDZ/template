@@ -190,6 +190,7 @@ function baseDevelopmentContainerToolLayer(
 
 function completeWorkspaceDevelopmentContainer(options: {
   readonly nodeVersion: string;
+  readonly packageManagerPin: string;
   readonly layers?: readonly DevelopmentContainerToolLayer[];
   readonly resources: PreparedWorkspaceDevelopmentContainerResources;
 }): DevelopmentContainerToolLayerPlan & {
@@ -201,10 +202,17 @@ function completeWorkspaceDevelopmentContainer(options: {
     githubCliDevelopmentContainerToolLayer(),
     ...(options.layers ?? []),
   ];
+  const fragmentTexts = {
+    ...options.resources.dockerfileFragments,
+    "base.Dockerfile": projectPnpmBootstrapDockerfile(
+      options.resources.dockerfileFragments["base.Dockerfile"]!,
+      options.packageManagerPin,
+    ),
+  };
   const plan = planDevelopmentContainerToolLayersFromTexts({
     baseLayer: baseDevelopmentContainerToolLayer(options.nodeVersion),
     layers,
-    fragmentTexts: options.resources.dockerfileFragments,
+    fragmentTexts,
   });
   return {
     ...plan,
@@ -212,7 +220,7 @@ function completeWorkspaceDevelopmentContainer(options: {
     features: options.resources.configuration.features,
     dockerfile: developmentContainerDockerfileFromText({
       layers: plan.layers,
-      fragmentTexts: options.resources.dockerfileFragments,
+      fragmentTexts,
     }),
     probes: [
       ...plan.probes,
@@ -244,6 +252,7 @@ function completeWorkspaceDevelopmentContainer(options: {
 /** 只消费根环境快照和所选能力，投影开发容器配置。 */
 export function projectWorkspaceDevelopmentContainer(options: {
   readonly nodeVersion: string;
+  readonly packageManagerPin: string;
   readonly layers?: readonly DevelopmentContainerToolLayer[];
   readonly resources: PreparedWorkspaceDevelopmentContainerResources;
 }): ReturnType<typeof completeWorkspaceDevelopmentContainer> {
@@ -295,4 +304,18 @@ export function projectWorkspaceEditorCustomization(
     throw new Error(`未声明的编辑器能力：${unknownCapability}`);
   }
   return editorCustomizationForCapabilities(capabilities, declarations);
+}
+
+/** 原生安装镜像是根包管理器声明的派生值。 */
+export function projectPnpmBootstrapDockerfile(
+  source: string,
+  packageManagerPin: string,
+): string {
+  const version = /^pnpm@(\d+\.\d+\.\d+)$/u.exec(packageManagerPin)?.[1];
+  if (version === undefined)
+    throw new Error("pnpm 安装要求根 packageManager 声明精确版本");
+  return source.replaceAll(
+    "ghcr.io/pnpm/pnpm:__PNPM_VERSION__",
+    `ghcr.io/pnpm/pnpm:${version}`,
+  );
 }

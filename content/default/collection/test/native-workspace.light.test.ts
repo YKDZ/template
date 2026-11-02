@@ -110,7 +110,7 @@ await it("直接参考生成原生根并连续添加ts-lib与显式provider连�
     assert.equal(rootManifest.private, true);
     assert.equal(rootManifest.name, "native-demo");
     assert.equal(rootManifest.version, undefined);
-    assert.equal(rootManifest.engines.node, "24.21.0");
+    assert.equal(rootManifest.engines.node, "26.13.0");
     assert.equal(rootManifest.packageManager, "pnpm@12.9.1");
     assert.match(
       await readFile(path.join(targetRoot, "AGENTS.md"), "utf8"),

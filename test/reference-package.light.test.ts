@@ -167,7 +167,7 @@ async function evaluate(
       defaultPackageScope: "consumer",
     },
     stableCommon: {
-      nodeDeclaration: "24.21.0",
+      nodeDeclaration: "26.13.0",
       packageManagerPin: "pnpm@12.9.1",
     },
     packageInput: undefined,

@@ -237,7 +237,7 @@ function validateDockerfileFragment(
   );
   const allowedInstructions =
     fragment.kind === "base"
-      ? new Set(["ARG", "ENV", "FROM", "RUN", "SHELL"])
+      ? new Set(["ARG", "ENV", "FROM", "RUN", "SHELL", "COPY"])
       : new Set(["ARG", "ENV", "RUN"]);
 
   for (const instruction of instructions) {
@@ -245,7 +245,7 @@ function validateDockerfileFragment(
       const role = fragment.kind === "base" ? "base" : "optional";
       const allowed =
         fragment.kind === "base"
-          ? "ARG, ENV, FROM, RUN, and SHELL"
+          ? "ARG, ENV, FROM, RUN, SHELL, and COPY"
           : "ARG, ENV, and RUN";
       throw new Error(
         `Development Container Tool Layer ${fragment.identity} ${role} fragment ${fragment.from} must not use Dockerfile instruction ${instruction.name}; allowed instructions are ${allowed}.`,

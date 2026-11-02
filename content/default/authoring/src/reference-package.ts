@@ -472,10 +472,13 @@ function outputManifest(options: {
     manifest[field] = dependencies;
   }
 
-  if (isRecord(manifest.engines) && isRecord(options.stableCommon)) {
+  if (isRecord(options.stableCommon)) {
     const nodeDeclaration = options.stableCommon.nodeDeclaration;
     if (typeof nodeDeclaration === "string") {
-      manifest.engines = { ...manifest.engines, node: nodeDeclaration };
+      manifest.engines = {
+        ...(isRecord(manifest.engines) ? manifest.engines : {}),
+        node: `^${nodeDeclaration}`,
+      };
     }
   }
   return Object.freeze(manifest);

@@ -29,7 +29,7 @@ function workspaceGenerator() {
   return createDefaultGenerator({ content: templateContent });
 }
 
-async function createWorkspace() {
+async function createWorkspace(presetName = "@ykdz/preset-ts-lib") {
   const directory = await mkdtemp(
     path.join(tmpdir(), "template-toolchain-mirror-"),
   );
@@ -39,7 +39,7 @@ async function createWorkspace() {
   const initialized = await generator.init({
     targetRoot: repositoryRoot,
     selection: {
-      presets: [{ contentIdentity: presetFor("@ykdz/preset-ts-lib").identity }],
+      presets: [{ contentIdentity: presetFor(presetName).identity }],
     },
     conventions: {
       repositoryName: "demo",
@@ -191,6 +191,47 @@ afterEach(async () => {
 });
 
 void describe("Node 与 Rust 根工具链镜像", () => {
+  void it("新增包按当前根 pnpm 声明协调开发与部署引导镜像，并保留无关内容", async () => {
+    const { generator, repositoryRoot } = await createWorkspace(
+      "@ykdz/preset-vike-app",
+    );
+    const manifestPath = path.join(repositoryRoot, "package.json");
+    const manifest = await readJson<{ packageManager: string }>(manifestPath);
+    manifest.packageManager = "pnpm@12.8.1";
+    await writeJson(manifestPath, manifest);
+    const dockerfiles = [".devcontainer/Dockerfile", "Dockerfile"];
+    for (const file of dockerfiles) {
+      const target = path.join(repositoryRoot, file);
+      const source = await readFile(target, "utf8");
+      await writeFile(
+        target,
+        source.replace(
+          /ghcr\.io\/pnpm\/pnpm:[\d.]+/u,
+          "ghcr.io/pnpm/pnpm:999.0.0",
+        ) + "\n# 用户保留内容\n",
+      );
+    }
+    const added = await addTsLibrary(generator, repositoryRoot, "utilities");
+    assert.equal(added.status, "success", JSON.stringify(added));
+    if (added.status !== "success") return;
+    for (const file of dockerfiles) {
+      const source = await readFile(path.join(repositoryRoot, file), "utf8");
+      assert.match(source, /COPY --from=ghcr\.io\/pnpm\/pnpm:12\.8\.1 /u);
+      assert.ok(source.endsWith("\n# 用户保留内容\n"));
+      assert.equal(
+        added.actions.filter((action) => action.path === file).length,
+        1,
+      );
+    }
+    const next = await addTsLibrary(generator, repositoryRoot, "helpers");
+    assert.equal(next.status, "success", JSON.stringify(next));
+    if (next.status !== "success") return;
+    assert.equal(
+      next.actions.some((action) => dockerfiles.includes(action.path)),
+      false,
+    );
+  });
+
   void it("M1 初始化取根 Node 原值，漂移后协调一次且语义相等不再写入", async () => {
     const { generator, repositoryRoot } = await createWorkspace();
     const manifestPath = path.join(repositoryRoot, "package.json");

@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import {
   installContentCollection,
   prepareContentCollection,
+  type PreparedContentCollection,
 } from "@ykdz/template-content-artifacts";
 import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { execa } from "execa";
@@ -165,7 +166,7 @@ await it(
           import.meta.resolve(`@ykdz/tooling-config${exportPath.slice(1)}`),
         );
         const artifactResource:
-          | (typeof toolingOwner.artifact.resources)[number]
+          | PreparedContentCollection["owners"][number]["artifact"]["resources"][number]
           | undefined = toolingOwner.artifact.resources.find(
           ({ path: artifactPath }) => artifactPath === resourcePath,
         );
@@ -237,7 +238,7 @@ await it(
       };
       assert.equal(rootManifest.name, "packed-native-demo");
       assert.equal(rootManifest.version, undefined);
-      assert.equal(rootManifest.engines.node, "24.21.0");
+      assert.equal(rootManifest.engines.node, "26.13.0");
       assert.equal(rootManifest.packageManager, "pnpm@12.9.1");
       assert.match(
         await readFile(path.join(targetRoot, "AGENTS.md"), "utf8"),

@@ -24,7 +24,6 @@ if (forwardedArguments[0] === "--") forwardedArguments.shift();
 
 const runnerArguments = [
   "--conditions=source",
-  "--experimental-strip-types",
   "--import=./test-support/setup.ts",
   "--test",
   "--test-concurrency=1",

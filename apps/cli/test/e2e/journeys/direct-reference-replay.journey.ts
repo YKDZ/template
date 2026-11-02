@@ -135,7 +135,6 @@ const journey: CliJourney = {
         cwd: context.packageRoot,
         args: [
           ...(context.mode === "source" ? ["--conditions=source"] : []),
-          "--experimental-strip-types",
           path.join(
             context.packageRoot,
             "test/e2e/journeys/direct-reference-init.ts",
@@ -233,10 +232,10 @@ const journey: CliJourney = {
     ];
   },
   async assertions({ context, results }) {
-    assert.equal(results[0]?.exitCode, 0, results[0]?.stderr);
-    assert.equal(results[1]?.exitCode, 0, results[1]?.stderr);
+    assert.equal(results[0]?.exitCode, 0, results[0]?.stderr ?? "");
+    assert.equal(results[1]?.exitCode, 0, results[1]?.stderr ?? "");
     assert.equal(JSON.parse(results[1]?.stdout ?? "").variant, "added");
-    assert.equal(results[2]?.exitCode, 0, results[2]?.stderr);
+    assert.equal(results[2]?.exitCode, 0, results[2]?.stderr ?? "");
     assert.equal(JSON.parse(results[2]?.stdout ?? "").variant, "added");
 
     const project = path.join(context.workDir, "direct-references");

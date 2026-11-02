@@ -49,6 +49,7 @@ export type DefaultPresetRootContributionOwner<OwnerFacts = unknown> =
           DefaultPresetPackageEvaluation
         >;
         readonly rootPackage: CompositionPackage;
+        readonly rootManifest: Readonly<Record<string, unknown>>;
         readonly ownerFacts: OwnerFacts;
       }>,
     ): Readonly<{

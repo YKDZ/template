@@ -822,7 +822,7 @@ void describe("公开模板内容集合", () => {
       packageManager: string;
       scripts: Record<string, string>;
     };
-    assert.strictEqual(rootPackageManifest.engines.node, "24.21.0");
+    assert.strictEqual(rootPackageManifest.engines.node, "26.13.0");
     assert.strictEqual(rootPackageManifest.packageManager, "pnpm@12.9.1");
     assert.strictEqual(
       rootPackageManifest.scripts["user:check"],

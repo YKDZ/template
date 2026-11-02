@@ -52,7 +52,7 @@ await test("根目录位置本身不注入参考包业务规则", () => {
     bindings: new Map(),
     conventions,
     stableCommon: {
-      nodeDeclaration: "24.21.0",
+      nodeDeclaration: "26.13.0",
       packageManagerPin: "pnpm@12.9.1",
     },
     packageInput: undefined,
@@ -66,7 +66,7 @@ await test("根目录位置本身不注入参考包业务规则", () => {
   assert.equal(manifest.name, "@sample/workspace");
   assert.equal(manifest.version, "1.2.3");
   assert.equal(manifest.packageManager, "npm@10.0.0");
-  assert.deepEqual(manifest.engines, { node: "24.21.0" });
+  assert.deepEqual(manifest.engines, { node: "^26.13.0" });
 });
 
 await test("原生作者factory在求值中形成普通原生文档", async () => {

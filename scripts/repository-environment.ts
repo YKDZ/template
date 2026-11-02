@@ -59,12 +59,6 @@ export async function repositoryDevelopmentEnvironment(
         ),
         from: "repository.Dockerfile",
       },
-      buildArguments: [
-        {
-          name: "PACKAGE_MANAGER_PIN",
-          value: declarations.packageManagerDeclaration.trim(),
-        },
-      ],
       mounts: [
         {
           identity: "cargo-target",
@@ -83,6 +77,7 @@ export async function repositoryDevelopmentEnvironment(
   const repositoryDockerfile = prepareRepositoryEnvironmentDockerfile();
   const container = projectWorkspaceDevelopmentContainer({
     nodeVersion: declarations.rootNodeEngine.trim(),
+    packageManagerPin: declarations.packageManagerDeclaration.trim(),
     layers,
     resources: {
       ...environmentResources,
@@ -123,7 +118,6 @@ export async function repositoryDevelopmentEnvironment(
         "--cap-add=SYS_ADMIN",
       ],
       containerEnv: {
-        COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
         RUST_BACKTRACE: "1",
       },
       postCreateCommand: {

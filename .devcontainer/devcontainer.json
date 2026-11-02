@@ -3,10 +3,9 @@
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
-      "NODE_VERSION": "24.21.0",
+      "NODE_VERSION": "26.13.0",
       "PLAYWRIGHT_CLI_PACKAGE": "@playwright/test@1.64.0",
-      "RUST_TOOLCHAIN": "1.99.1",
-      "PACKAGE_MANAGER_PIN": "pnpm@12.9.1"
+      "RUST_TOOLCHAIN": "1.99.1"
     }
   },
   "features": {
@@ -51,7 +50,6 @@
     "--cap-add=SYS_ADMIN"
   ],
   "containerEnv": {
-    "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
     "RUST_BACKTRACE": "1"
   },
   "postCreateCommand": {
