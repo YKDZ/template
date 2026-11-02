@@ -1,5 +1,11 @@
 # 变更记录
 
+## 0.3.0
+
+### Minor Changes
+
+- Require Node.js 26.13 or newer and resolve pnpm from each project's `packageManager` declaration. Fix global pnpm executable lookup in development containers for both `root` and `node` users.
+
 ## 0.2.0
 
 - 仓库校验及生成的 TypeScript 库、CLI 统一采用 Zod 4，移除 Valibot、专用 JSON Schema 转换包与适配层。
