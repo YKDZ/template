@@ -554,7 +554,7 @@ const journey: CliJourney = {
       readonly name: string;
       readonly engines: { readonly node: string };
     };
-    assert.equal(upgradedManifest.engines.node, upgradedNode);
+    assert.equal(upgradedManifest.engines.node, `^${upgradedNode}`);
     const rootAfterAddition = JSON.parse(
       await readFile(
         path.join(context.workDir, "root-after-current-addition.json"),
