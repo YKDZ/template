@@ -380,6 +380,26 @@ void describe("pnpm 工作区约定", () => {
         );
         assert.strictEqual(rootCold.stdout.trim(), expectedPnpmVersion);
 
+        // 使用无依赖的本地工具验收全局安装及 PATH，不依赖 registry。
+        for (const user of ["root", "node"]) {
+          const globalTool = await execa("docker", [
+            "exec",
+            "--user",
+            user,
+            containerName,
+            "bash",
+            "-c",
+            `set -eu
+probe=$(mktemp -d)
+printf '%s' '{"name":"container-global-probe","version":"1.0.0","bin":{"container-global-probe":"cli.cjs"}}' > "$probe/package.json"
+printf '%s\\n' '#!/usr/bin/env node' 'console.log("GLOBAL_BIN_OK")' > "$probe/cli.cjs"
+chmod +x "$probe/cli.cjs"
+pnpm add --global --offline "$probe"
+container-global-probe`,
+          ]);
+          assert.match(globalTool.stdout, /GLOBAL_BIN_OK/u);
+        }
+
         // 不重建镜像，使用与引导版本不同的项目声明验证原生版本选择。
         await supplyRootManifest(
           JSON.stringify({

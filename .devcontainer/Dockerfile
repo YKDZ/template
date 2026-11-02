@@ -2,6 +2,8 @@ ARG NODE_VERSION
 FROM node:${NODE_VERSION}-bookworm-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# 覆盖镜像支持的两个用户，非交互命令也能直接执行全局工具。
+ENV PATH="/root/.local/share/pnpm/bin:/home/node/.local/share/pnpm/bin:$PATH"
 # @template-mirror pnpm-bootstrap
 COPY --from=ghcr.io/pnpm/pnpm:12.9.1 /opt/pnpm /opt/pnpm
 # @end-template-mirror
