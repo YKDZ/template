@@ -14,10 +14,9 @@ import { fileURLToPath } from "node:url";
 
 import { templatePresets } from "@ykdz/template-content";
 import { renderGeneratedPnpmWorkspaceYaml } from "@ykdz/template-workspace/dependency-catalog";
-import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 import { execa } from "execa";
 
-const packageManagerPin = "pnpm@11.11.0";
+const packageManagerPin = "pnpm@12.8.1";
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -62,7 +61,7 @@ const hasDocker = await dockerIsAvailable();
 void describe("pnpm Workspace Policy", () => {
   void it(
     "installs an injected workspace dependency from a frozen lockfile and synchronizes its build output",
-    { timeout: 30000 },
+    { timeout: 120000 },
     async () => {
       const root = await mkdtemp(path.join(tmpdir(), "pnpm-workspace-policy-"));
       const provider = path.join(root, "packages/provider");
@@ -111,19 +110,13 @@ void describe("pnpm Workspace Policy", () => {
       ]);
 
       const environment = { ...process.env, CI: "1" };
-      await execa("corepack", ["pnpm@11.11.0", "install", "--lockfile-only"], {
+      await execa("pnpm", ["install", "--lockfile-only"], {
         cwd: root,
         env: environment,
       });
       await execa(
-        "corepack",
-        [
-          "pnpm@11.11.0",
-          "install",
-          "--offline",
-          "--frozen-lockfile",
-          "--ignore-scripts",
-        ],
+        "pnpm",
+        ["install", "--offline", "--frozen-lockfile", "--ignore-scripts"],
         { cwd: root, env: environment },
       );
 
@@ -139,11 +132,10 @@ void describe("pnpm Workspace Policy", () => {
       assert.ok(injectedTarget.includes("node_modules/.pnpm/"));
       assert.ok(!injectedTarget.includes("packages/provider"));
       await writeFile(path.join(provider, "source.txt"), "after\n");
-      await execa(
-        "corepack",
-        ["pnpm@11.11.0", "--filter", "@fixture/provider", "run", "build"],
-        { cwd: root, env: environment },
-      );
+      await execa("pnpm", ["--filter", "@fixture/provider", "run", "build"], {
+        cwd: root,
+        env: environment,
+      });
 
       assert.strictEqual(
         await readFile(path.join(injectedProvider, "dist/version.txt"), "utf8"),
@@ -159,44 +151,24 @@ void describe("pnpm Workspace Policy", () => {
       const projectDir = await generateNodeOnlyProject("pnpm-rendered-preset-");
       const environment = { ...process.env, CI: "1" };
 
-      await execa(
-        "corepack",
-        [
-          releaseToolchainSnapshot.packageManagerPin,
-          "install",
-          "--lockfile-only",
-          "--prefer-offline",
-        ],
-        { cwd: projectDir, env: environment },
-      );
-      await execa(
-        "corepack",
-        [releaseToolchainSnapshot.packageManagerPin, "fetch"],
-        { cwd: projectDir, env: environment },
-      );
-      await execa(
-        "corepack",
-        [
-          releaseToolchainSnapshot.packageManagerPin,
-          "install",
-          "--offline",
-          "--frozen-lockfile",
-        ],
-        { cwd: projectDir, env: environment },
-      );
-      await execa(
-        "corepack",
-        [releaseToolchainSnapshot.packageManagerPin, "run", "typecheck"],
-        {
-          cwd: projectDir,
-          env: environment,
-        },
-      );
+      await execa("pnpm", ["install", "--lockfile-only", "--prefer-offline"], {
+        cwd: projectDir,
+        env: environment,
+      });
+      await execa("pnpm", ["fetch"], { cwd: projectDir, env: environment });
+      await execa("pnpm", ["install", "--offline", "--frozen-lockfile"], {
+        cwd: projectDir,
+        env: environment,
+      });
+      await execa("pnpm", ["run", "typecheck"], {
+        cwd: projectDir,
+        env: environment,
+      });
     },
   );
 
   void it(
-    "resolves the generated root packageManager at runtime for root and non-root users via the native Corepack cache",
+    "resolves the generated root packageManager at runtime for root and non-root users via native pnpm version management",
     { timeout: 300000 },
     async (context) => {
       if (!hasDocker) {
@@ -204,7 +176,7 @@ void describe("pnpm Workspace Policy", () => {
         return;
       }
 
-      const projectDir = await generateNodeOnlyProject("pnpm-corepack-users-");
+      const projectDir = await generateNodeOnlyProject("pnpm-native-users-");
       // 期望的 pnpm / node 版本都取自*生成*的根 manifest 与 M1 槽位，不新增版本常量。
       const generatedRootManifestText = await readFile(
         path.join(projectDir, "package.json"),
@@ -222,6 +194,10 @@ void describe("pnpm Workspace Policy", () => {
         /^pnpm@/u,
         "",
       );
+      await execa("pnpm", ["install", "--lockfile-only"], {
+        cwd: projectDir,
+        env: { ...process.env, CI: "1" },
+      });
       // 根 engines.node 是 Node 版本的真源，容器内实际 node --version 必须与它一致。
       const enginesNode = generatedRootManifest.engines?.node;
       if (enginesNode === undefined) {
@@ -244,8 +220,8 @@ void describe("pnpm Workspace Policy", () => {
 
       // 只用本测试独占、唯一命名的资源——绝不对共享 image id 用 --force，也绝不 prune。
       const stamp = `${process.pid}-${Date.now()}`;
-      const imageTag = `t25-pnpm-corepack-users:${stamp}`;
-      const containerName = `t25-pnpm-corepack-users-run-${stamp}`;
+      const imageTag = `t25-pnpm-native-users:${stamp}`;
+      const containerName = `t25-pnpm-native-users-run-${stamp}`;
 
       try {
         // 不再传 PACKAGE_MANAGER_PIN build arg：devcontainer 已不烘焙 pnpm pin；
@@ -322,6 +298,21 @@ void describe("pnpm Workspace Policy", () => {
           );
         };
         await supplyRootManifest(generatedRootManifestText);
+        await execa("docker", [
+          "cp",
+          `${projectDir}/.`,
+          `${containerName}:/workspace`,
+        ]);
+        await execa("docker", [
+          "exec",
+          "--user",
+          "root",
+          containerName,
+          "chown",
+          "-R",
+          "node:node",
+          "/workspace",
+        ]);
 
         // 先在容器内真实观测一次 node --version：Node 运行时版本必须与根 engines.node 一致，
         // 不能只用 build arg 文本代替。
@@ -343,7 +334,7 @@ void describe("pnpm Workspace Policy", () => {
           enginesNode,
         );
 
-        // ★ 非 root 冷态先跑——移除全局 COREPACK_HOME 后 node 用自己的可写 home 缓存；
+        // ★ 非 root 冷态先跑——node 使用自己的可写原生版本缓存；
         // 在任何 root pnpm 调用之前先跑 node，避免 root 预先下载掩盖非 root 冷态的权限失败。
         const nodeCold = await execa(
           "docker",
@@ -359,6 +350,19 @@ void describe("pnpm Workspace Policy", () => {
           { cwd: projectDir },
         );
         assert.strictEqual(nodeCold.stdout.trim(), expectedPnpmVersion);
+        await execa(
+          "docker",
+          [
+            "exec",
+            "--user",
+            "node",
+            containerName,
+            "pnpm",
+            "install",
+            "--frozen-lockfile",
+          ],
+          { cwd: projectDir },
+        );
 
         // ★ root 独立冷态——每个用户各自从自己的原生缓存解析。
         const rootCold = await execa(
@@ -399,6 +403,44 @@ void describe("pnpm Workspace Policy", () => {
         assert.strictEqual(
           nodeRepointed.stdout.trim(),
           packageManagerPin.replace(/^pnpm@/u, ""),
+        );
+        await writeFile(
+          path.join(projectDir, "package.json"),
+          JSON.stringify({
+            ...generatedRootManifest,
+            packageManager: packageManagerPin,
+          }),
+        );
+        await execa("pnpm", ["install", "--lockfile-only"], {
+          cwd: projectDir,
+          env: { ...process.env, CI: "1" },
+        });
+        await execa("docker", [
+          "cp",
+          path.join(projectDir, "pnpm-lock.yaml"),
+          `${containerName}:/workspace/pnpm-lock.yaml`,
+        ]);
+        await execa("docker", [
+          "exec",
+          "--user",
+          "root",
+          containerName,
+          "chown",
+          "node:node",
+          "/workspace/pnpm-lock.yaml",
+        ]);
+        await execa(
+          "docker",
+          [
+            "exec",
+            "--user",
+            "node",
+            containerName,
+            "pnpm",
+            "install",
+            "--frozen-lockfile",
+          ],
+          { cwd: projectDir },
         );
 
         // 共享工具层对两个用户都保持完好（系统 git 默认分支、TLS 证书库）。

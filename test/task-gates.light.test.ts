@@ -30,8 +30,7 @@ const gateEntries = [
     scriptPath: fileURLToPath(
       new URL("../scripts/run-task-gate.ts", import.meta.url),
     ),
-    command:
-      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts",
+    command: "node --conditions=source scripts/run-task-gate.ts",
   },
 ];
 
@@ -578,11 +577,10 @@ async function verifyFullGateCancellation(
   expectedExitCode: number,
 ): Promise<void> {
   const root = await createWorkspace({ waitRootLight: true });
-  const child = spawn(
-    "node",
-    ["--experimental-strip-types", taskGatesPath, "check:full"],
-    { ...workspaceProcessOptions(root), stdio: "pipe" },
-  );
+  const child = spawn("node", [taskGatesPath, "check:full"], {
+    ...workspaceProcessOptions(root),
+    stdio: "pipe",
+  });
   const childOutput: string[] = [];
   child.stdout?.on("data", (chunk: Buffer) =>
     childOutput.push(chunk.toString()),

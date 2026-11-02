@@ -65,8 +65,5 @@
     "vitest": "catalog:",
     "vitest-browser-vue": "catalog:",
     "vue-tsc": "catalog:"
-  },
-  "engines": {
-    "node": "24"
   }
 }

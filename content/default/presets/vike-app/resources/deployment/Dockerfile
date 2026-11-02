@@ -8,21 +8,12 @@ FROM node:${NODE_VERSION}-bookworm-slim AS base
 ARG APPLICATION_PACKAGE_NAME
 ARG DATABASE_PACKAGE_NAME
 ARG MIGRATION_PACKAGE_NAME
-ENV COREPACK_HOME="/corepack"
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"
+# @template-mirror pnpm-bootstrap
+COPY --from=ghcr.io/pnpm/pnpm:__PNPM_VERSION__ /opt/pnpm /opt/pnpm
+# @end-template-mirror
+RUN for bin in pnpm pn pnpx pnx; do ln -s "/opt/pnpm/pnpm" "/usr/local/bin/$bin"; done
 WORKDIR /repo
-COPY package.json /root-manifest.json
-RUN install -d -m 0755 "$COREPACK_HOME" "$PNPM_HOME" "$PNPM_HOME/bin" \
-  && corepack enable --install-directory "$PNPM_HOME" \
-  && package_manager="$(node -p "require('/root-manifest.json').packageManager")" \
-  && rm /root-manifest.json \
-  && for attempt in 1 2 3; do \
-    if corepack prepare "$package_manager" --activate; then break; fi; \
-    [ "$attempt" -lt 3 ] || exit 1; \
-    sleep 2; \
-  done \
-  && chmod -R a+rX "$COREPACK_HOME" "$PNPM_HOME"
+COPY package.json ./
 
 FROM base AS pruner
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./

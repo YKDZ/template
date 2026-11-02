@@ -502,8 +502,10 @@ export async function validatePlanMirrorSlotProjections(options: {
         `${owner} ${filePath}#${slot.id}: actual mirror slot is not explainable: ${observed.reason}`,
       );
     }
-    const projected =
-      slot.location.kind === "json-pointer"
+    const pnpmBootstrap = slot.id === "pnpm-bootstrap";
+    const projected = pnpmBootstrap
+      ? observed.scalar.trim()
+      : slot.location.kind === "json-pointer"
         ? observed.scalar
         : readArgCarrierValue(observed.scalar, slot.location.name);
     if (projected === undefined) {
@@ -512,10 +514,14 @@ export async function validatePlanMirrorSlotProjections(options: {
       );
     }
     const isRustSlot = mirrorSlotRootToken(slot) === rustMirrorSlotToken;
-    const expected = isRustSlot ? await expectedRustChannel() : rootNode;
+    const expected = pnpmBootstrap
+      ? `COPY --from=ghcr.io/pnpm/pnpm:${String((rootManifest as Record<string, unknown>).packageManager).replace(/^pnpm@/u, "")} /opt/pnpm /opt/pnpm`
+      : isRustSlot
+        ? await expectedRustChannel()
+        : rootNode;
     if (projected !== expected) {
       throw new Error(
-        `${owner} ${filePath}#${slot.id}: actual value ${JSON.stringify(projected)} differs from ${isRustSlot ? "root Rust channel" : "root engines.node"} ${JSON.stringify(expected)}`,
+        `${owner} ${filePath}#${slot.id}: actual value ${JSON.stringify(projected)} differs from ${pnpmBootstrap ? "root packageManager" : isRustSlot ? "root Rust channel" : "root engines.node"} ${JSON.stringify(expected)}`,
       );
     }
   }

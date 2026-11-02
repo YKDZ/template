@@ -1,4 +1,5 @@
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+import type { ProjectProjectionMirrorSlot } from "@ykdz/template-core/project-projection";
 import type { PackageBinding } from "@ykdz/template-core/reference-package";
 import type { TemplateSourceHandle } from "@ykdz/template-core/template-source";
 import type { NativeContentManifest } from "@ykdz/template-workspace-authoring/content-artifact";
@@ -28,6 +29,7 @@ export type DefaultNativeDocument = {
 };
 
 export type DefaultCompositionFile = {
+  readonly mirrorSlots?: readonly ProjectProjectionMirrorSlot[];
   readonly path: string;
   readonly content: Uint8Array;
   readonly mode: number;

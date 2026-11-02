@@ -398,7 +398,6 @@ async function runRuntimeDriver(
     process.execPath,
     [
       "--no-global-search-paths",
-      "--experimental-strip-types",
       ...(options.sourceConditions ? ["--conditions=source"] : []),
       driverPath,
       phase,

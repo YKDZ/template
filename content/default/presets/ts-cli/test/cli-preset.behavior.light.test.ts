@@ -179,7 +179,7 @@ void describe("TypeScript CLI 公开预设", () => {
     for (const manifest of [presetManifest, referenceManifest]) {
       assert.strictEqual(manifest.private, true);
       assert.deepStrictEqual(manifest.bin, { cli: "./dist/cli.js" });
-      assert.strictEqual(manifest.engines.node, ">=24");
+      assert.strictEqual(manifest.engines.node, "^26.13.0");
       assert.deepStrictEqual(manifest.devDependencies, {
         "@demo/tooling-config": "link:../tooling-config",
         "@types/node": "catalog:",

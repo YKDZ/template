@@ -430,7 +430,7 @@ await test("库与CLI连接后仍形成完整发布根和catalog并提交唯一�
     assert.equal(
       (setup.providerEvaluation.stableCommon as { nodeDeclaration?: unknown })
         .nodeDeclaration,
-      "24.21.0",
+      "26.13.0",
     );
     assert.equal(
       (

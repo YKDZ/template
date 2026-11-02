@@ -194,13 +194,12 @@ void describe("Fixture Verification Evidence check workflow", () => {
     const steps = (await checkWorkflow()).jobs.check.steps;
     const lightGateIndex = steps.findIndex(
       (step) =>
-        step.run ===
-        "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check",
+        step.run === "node --conditions=source scripts/run-task-gate.ts check",
     );
     const heavyGateIndex = steps.findIndex(
       (step) =>
         step.run ===
-        "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+        "node --conditions=source scripts/run-task-gate.ts check:heavy",
     );
     const dockerSetupIndex = steps.findIndex(
       (step) => step.uses === "docker/setup-buildx-action@v4",
@@ -247,7 +246,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
     const heavyGate = steps.find(
       (step) =>
         step.run ===
-        "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+        "node --conditions=source scripts/run-task-gate.ts check:heavy",
     );
     assert.strictEqual(
       heavyGate?.if,
@@ -257,7 +256,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
       steps.findIndex(
         (step) =>
           step.run ===
-          "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+          "node --conditions=source scripts/run-task-gate.ts check:heavy",
       ) > steps.findIndex((step) => step.id === "fixture-prerequisites"),
     );
     assert.strictEqual(
@@ -294,8 +293,8 @@ void describe("Fixture Verification Evidence check workflow", () => {
     });
 
     const scenarioCommands = new Set([
-      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check",
-      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+      "node --conditions=source scripts/run-task-gate.ts check",
+      "node --conditions=source scripts/run-task-gate.ts check:heavy",
     ]);
     const scenarioSteps = job.steps.filter(
       (step) => step.run !== undefined && scenarioCommands.has(step.run),
@@ -324,8 +323,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
     const check = checkWorkflowDocument.jobs.check;
     const packageCheck = check.steps.find(
       (step) =>
-        step.run ===
-        "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check",
+        step.run === "node --conditions=source scripts/run-task-gate.ts check",
     );
     const turboConfig = parse(await readFile("turbo.json", "utf8")) as Record<
       string,
@@ -346,7 +344,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
       true,
     );
     for (const command of [
-      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+      "node --conditions=source scripts/run-task-gate.ts check:heavy",
     ]) {
       assert.deepStrictEqual(
         check.steps.find((step) => step.run === command)?.env,
@@ -366,7 +364,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
   void it("runs every later scenario stage and Evidence Health after an earlier gate fails", async () => {
     const steps = (await checkWorkflow()).jobs.check.steps;
     for (const command of [
-      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+      "node --conditions=source scripts/run-task-gate.ts check:heavy",
     ]) {
       assert.ok(
         steps.find((step) => step.run === command)?.if?.includes("always()"),
@@ -386,7 +384,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
       steps.find(
         (step) =>
           step.run ===
-          "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+          "node --conditions=source scripts/run-task-gate.ts check:heavy",
       )?.if,
       steps.find((step) => step.id === "fixture-evidence-health")?.if,
     );

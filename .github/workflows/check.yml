@@ -57,21 +57,21 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
+      - name: Read Node.js version
+        id: node-runtime
+        run: echo "runtime=node@$(jq -er '.engines.node' package.json)" >> "$GITHUB_OUTPUT"
+      - name: Set up pnpm and Node.js
+        uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
         with:
-          node-version-file: package.json
-          cache: pnpm
-
+          runtime: ${{ steps.node-runtime.outputs.runtime }}
+          install: false
+          cache: true
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Check package
         id: package-check
-        run: node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check
+        run: node --conditions=source scripts/run-task-gate.ts check
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -125,7 +125,7 @@ jobs:
 
       - name: Check heavy gate
         if: always() && steps.package-check.outcome == 'success'
-        run: node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy
+        run: node --conditions=source scripts/run-task-gate.ts check:heavy
         env:
           TURBO_CONCURRENCY: "1"
           TEMPLATE_FIXTURE_TURBO_TEAM: ${{ vars.TURBO_TEAM }}

@@ -19,6 +19,7 @@ import type {
 } from "@ykdz/default-content-authoring/preset-root-contribution";
 import { databaseDependencyKey as migrationsDatabaseDependencyKey } from "@ykdz/reference-vike-migrations/template";
 import { databaseDependencyKey as webDatabaseDependencyKey } from "@ykdz/reference-vike-web/template";
+import { projectPnpmBootstrapDockerfile } from "@ykdz/reference-workspace-root/environment";
 import type { CompositionPackage } from "@ykdz/template-core/composition";
 import {
   contentIdentityKey,
@@ -672,6 +673,7 @@ function composeVikeDeploymentContribution(options: {
     DefaultPresetPackageEvaluation
   >;
   readonly rootPackage: CompositionPackage;
+  readonly rootManifest: Readonly<Record<string, unknown>>;
   readonly ownerFacts: VikeDeploymentOwnerFacts;
 }): {
   readonly rootPackageDefinitionId: CompositionPackage["packageDefinitionId"];
@@ -713,6 +715,9 @@ function composeVikeDeploymentContribution(options: {
   }
 
   const resources = options.ownerFacts.resources;
+  const packageManagerPin = options.rootManifest.packageManager;
+  if (typeof packageManagerPin !== "string")
+    throw new Error("Vike 部署缺少根 packageManager 声明");
   const buildxStep = parseVikeBuildxStep(resources.buildxStepSource);
   const rootDeclaration: DefaultRootDeclarationData = Object.freeze({
     manifest: Object.freeze({
@@ -738,12 +743,23 @@ function composeVikeDeploymentContribution(options: {
       ),
     }),
     files: Object.freeze([
-      rootFile(
-        "Dockerfile",
-        resources.dockerfile,
-        resources.dockerfileMode,
-        "resources/deployment/Dockerfile",
-      ),
+      {
+        ...rootFile(
+          "Dockerfile",
+          projectPnpmBootstrapDockerfile(
+            resources.dockerfile,
+            packageManagerPin,
+          ),
+          resources.dockerfileMode,
+          "resources/deployment/Dockerfile",
+        ),
+        mirrorSlots: [
+          {
+            id: "pnpm-bootstrap",
+            location: { kind: "text-anchor" as const, name: "pnpm-bootstrap" },
+          },
+        ],
+      },
       rootFile(
         ".dockerignore",
         resources.dockerIgnore,

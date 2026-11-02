@@ -8,25 +8,25 @@ const manifest = {
   private: true,
   bin: { "reference-cli": "./dist/cli.js" },
   files: ["dist"],
-  engines: { node: "^24.21.0" },
+  engines: { node: "^26.13.0" },
 };
 
 void describe("CLI 模板清单转换", () => {
-  void it("按目标命令名和 Node 大版本转换，并保留其余清单事实", () => {
+  void it("按目标命令名和已测 Node 基线转换，并保留其余清单事实", () => {
     assert.deepStrictEqual(
       projectCliPackageManifest({
         manifest,
         commandName: "public-cli",
-        nodeDeclaration: "24.21.0",
+        nodeDeclaration: "26.13.0",
       }),
       {
         ...manifest,
         bin: { "public-cli": "./dist/cli.js" },
-        engines: { node: ">=24" },
+        engines: { node: "^26.13.0" },
       },
     );
     assert.deepStrictEqual(manifest.bin, { "reference-cli": "./dist/cli.js" });
-    assert.deepStrictEqual(manifest.engines, { node: "^24.21.0" });
+    assert.deepStrictEqual(manifest.engines, { node: "^26.13.0" });
   });
 
   void it("拒绝不能作为目标命令名的名称", () => {

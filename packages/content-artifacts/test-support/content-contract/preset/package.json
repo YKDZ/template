@@ -22,7 +22,7 @@
     "@ykdz/template-core": "0.0.0"
   },
   "devDependencies": {
-    "@types/node": "24.19.2",
+    "@types/node": "26.6.6",
     "@ykdz/template-workspace-authoring": "0.0.0"
   }
 }

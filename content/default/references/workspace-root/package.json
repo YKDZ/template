@@ -51,9 +51,5 @@
     "typescript-7": "catalog:",
     "yaml": "catalog:",
     "zod": "catalog:"
-  },
-  "engines": {
-    "node": "24"
-  },
-  "packageManager": "pnpm@12.9.1"
+  }
 }

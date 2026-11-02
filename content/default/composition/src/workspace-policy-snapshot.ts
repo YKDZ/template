@@ -8,7 +8,7 @@ export const dependencyCatalogSnapshot: Readonly<Record<string, string>> = {
   "@playwright/test": "1.64.0",
   "@vitest/browser-playwright": "^5.0.0",
   "@tailwindcss/vite": "^4.3.3",
-  "@types/node": "^24.13.3",
+  "@types/node": "^26.0.0",
   "@types/web-bluetooth": "^0.0.21",
   "@vitejs/plugin-vue": "^6.0.8",
   "@vikejs/hono": "^0.2.1",

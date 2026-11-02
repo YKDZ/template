@@ -4,11 +4,11 @@
   "type": "module",
   "scripts": {
     "boundaries": "turbo boundaries",
-    "check": "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check",
-    "author-planning-roles:workspace": "node --conditions=source --experimental-strip-types scripts/check-author-planning-roles.ts",
-    "check:full": "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:full",
-    "check:heavy": "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
-    "fix": "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts fix",
+    "check": "node --conditions=source scripts/run-task-gate.ts check",
+    "author-planning-roles:workspace": "node --conditions=source scripts/check-author-planning-roles.ts",
+    "check:full": "node --conditions=source scripts/run-task-gate.ts check:full",
+    "check:heavy": "node --conditions=source scripts/run-task-gate.ts check:heavy",
+    "fix": "node --conditions=source scripts/run-task-gate.ts fix",
     "format:check": "oxfmt --list-different --no-error-on-unmatched-pattern package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.json tsconfig.config.json *.config.ts .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .changeset/config.json .devcontainer scripts test",
     "format:write": "oxfmt --write --no-error-on-unmatched-pattern package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.json tsconfig.config.json *.config.ts .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .changeset/config.json .devcontainer scripts test",
     "lint": "oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts scripts test",
@@ -60,7 +60,7 @@
     "yaml": "catalog:"
   },
   "engines": {
-    "node": "24.21.0"
+    "node": "26.13.0"
   },
   "packageManager": "pnpm@12.9.1"
 }

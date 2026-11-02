@@ -46,8 +46,5 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "typescript-7": "catalog:"
-  },
-  "engines": {
-    "node": "24"
   }
 }

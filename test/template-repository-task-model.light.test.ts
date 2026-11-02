@@ -224,19 +224,19 @@ void describe("Template Repository native task model", () => {
 
     assert.strictEqual(
       scripts.check,
-      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check",
+      "node --conditions=source scripts/run-task-gate.ts check",
     );
     assert.strictEqual(
       scripts["check:heavy"],
-      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+      "node --conditions=source scripts/run-task-gate.ts check:heavy",
     );
     assert.strictEqual(
       scripts["check:full"],
-      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:full",
+      "node --conditions=source scripts/run-task-gate.ts check:full",
     );
     assert.strictEqual(
       scripts.fix,
-      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts fix",
+      "node --conditions=source scripts/run-task-gate.ts fix",
     );
     assert.strictEqual(
       scripts.build,
@@ -536,7 +536,7 @@ void describe("Template Repository native task model", () => {
     const gate = inspectTaskGate(
       "check:heavy",
       process.cwd(),
-      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts",
+      "node --conditions=source scripts/run-task-gate.ts",
     );
     const heavyTasks = new Set(
       gate.plans.flatMap((plan) => plan.tasks.map((task) => task.fullName)),
