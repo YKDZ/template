@@ -57,10 +57,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Read Node.js version
+      - name: 读取 Node 版本
         id: node-runtime
         run: echo "runtime=node@$(jq -er '.engines.node' package.json)" >> "$GITHUB_OUTPUT"
-      - name: Set up pnpm and Node.js
+      - name: 安装 pnpm 与 Node.js
         uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
         with:
           runtime: ${{ steps.node-runtime.outputs.runtime }}

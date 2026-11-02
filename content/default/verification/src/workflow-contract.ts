@@ -147,7 +147,7 @@ const workflowPolicy = {
       with: { "persist-credentials": false, "fetch-depth": 1 },
     },
     pnpm: {
-      name: "Set up pnpm and Node.js",
+      name: "安装 pnpm 与 Node.js",
       action: "pnpm/setup",
       with: {
         runtime: "${{ steps.node-runtime.outputs.runtime }}",
@@ -417,7 +417,7 @@ function assertGeneratedCheckWorkflowContract(
       'echo "runtime=node@$(jq -er \'.engines.node\' package.json)" >> "$GITHUB_OUTPUT"'
   ) {
     throw new Error(
-      `${receipt.scenario.id}: Check must read the Node version from the root declaration`,
+      `${receipt.scenario.id}: 检查流程必须从根声明读取 Node 版本`,
     );
   }
   const runSteps = [

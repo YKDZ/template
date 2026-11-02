@@ -58,9 +58,9 @@ async function dockerIsAvailable(): Promise<boolean> {
 
 const hasDocker = await dockerIsAvailable();
 
-void describe("pnpm Workspace Policy", () => {
+void describe("pnpm 工作区约定", () => {
   void it(
-    "installs an injected workspace dependency from a frozen lockfile and synchronizes its build output",
+    "从冻结锁文件安装注入的工作区依赖，并同步构建产物",
     { timeout: 120000 },
     async () => {
       const root = await mkdtemp(path.join(tmpdir(), "pnpm-workspace-policy-"));
@@ -145,7 +145,7 @@ void describe("pnpm Workspace Policy", () => {
   );
 
   void it(
-    "installs a real rendered Preset from its frozen packageManager-pinned lockfile",
+    "按项目包管理器声明与冻结锁文件安装真实生成的预设",
     { timeout: 120000 },
     async () => {
       const projectDir = await generateNodeOnlyProject("pnpm-rendered-preset-");
@@ -168,7 +168,7 @@ void describe("pnpm Workspace Policy", () => {
   );
 
   void it(
-    "resolves the generated root packageManager at runtime for root and non-root users via native pnpm version management",
+    "普通用户与 root 按当前根声明切换 pnpm，并完成冻结安装",
     { timeout: 300000 },
     async (context) => {
       if (!hasDocker) {
@@ -224,8 +224,8 @@ void describe("pnpm Workspace Policy", () => {
       const containerName = `t25-pnpm-native-users-run-${stamp}`;
 
       try {
-        // 不再传 PACKAGE_MANAGER_PIN build arg：devcontainer 已不烘焙 pnpm pin；
-        // pnpm 版本在运行时从挂载进来的根 manifest 解析（M3 已取消）。
+        // 引导发行物的镜像引用已从构建时根声明派生，无需额外传版本参数；
+        // 项目实际执行版本继续由运行时挂载的当前根 manifest 决定。
         await execa(
           "docker",
           [
@@ -380,7 +380,7 @@ void describe("pnpm Workspace Policy", () => {
         );
         assert.strictEqual(rootCold.stdout.trim(), expectedPnpmVersion);
 
-        // ★ 版本从当前根 manifest 读取、并非烘焙：不重建镜像，改指向一个有限的旧夹具 pin。
+        // 不重建镜像，使用与引导版本不同的项目声明验证原生版本选择。
         await supplyRootManifest(
           JSON.stringify({
             ...generatedRootManifest,
