@@ -33,7 +33,7 @@ catalog:
   "@vue/tsconfig": ^0.9.1
   drizzle-kit: 1.0.0-rc.5
   drizzle-orm: 1.0.0-rc.5
-  execa: ^10.0.1
+  execa: ^10.2.1
   hono: ^4.13.3
   node-diff3: ^3.2.1
   npm: 12.2.0
