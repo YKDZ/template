@@ -264,8 +264,8 @@ catalogs:
       specifier: ^1.8.0
       version: 1.9.1
     srvx:
-      specifier: ^1.0.0
-      version: 1.0.5
+      specifier: ^1.0.8
+      version: 1.0.8
     tailwindcss:
       specifier: ^4.3.3
       version: 4.3.3
@@ -1300,7 +1300,7 @@ importers:
     dependencies:
       '@vikejs/hono':
         specifier: 'catalog:'
-        version: 0.2.1(hono@4.13.13)(srvx@1.0.5)(vike@0.4.268(hono@4.13.13)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)))
+        version: 0.2.1(hono@4.13.13)(srvx@1.0.8)(vike@0.4.268(hono@4.13.13)(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)))
       '@ykdz/reference-vike-db':
         specifier: workspace:*
         version: link:../vike-db
@@ -1309,16 +1309,16 @@ importers:
         version: 4.13.13
       srvx:
         specifier: 'catalog:'
-        version: 1.0.5
+        version: 1.0.8
       telefunc:
         specifier: 'catalog:'
-        version: 0.2.24(@babel/core@7.29.7)(@babel/parser@7.29.9)(@babel/types@7.29.8)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
+        version: 0.2.24(@babel/core@7.29.7)(@babel/parser@7.29.9)(@babel/types@7.29.8)(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
       vike:
         specifier: 'catalog:'
-        version: 0.4.268(hono@4.13.13)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
+        version: 0.4.268(hono@4.13.13)(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
       vike-vue:
         specifier: 'catalog:'
-        version: 0.9.15(vike@0.4.268(hono@4.13.13)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)))(vue@3.5.44)
+        version: 0.9.15(vike@0.4.268(hono@4.13.13)(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)))(vue@3.5.44)
       vue:
         specifier: 'catalog:'
         version: 3.5.44
@@ -3980,8 +3980,8 @@ packages:
     engines: {node: '>=20.16.0'}
     hasBin: true
 
-  srvx@1.0.5:
-    resolution: {integrity: sha512-KvSKRpgPG/oaq3cyT614OQ2bAa7DynuGamivCZeoZzIUULOdbQz6wUtnnVuC4+DCx2Zglzo8v5gBYmWIWYhDxA==}
+  srvx@1.0.8:
+    resolution: {integrity: sha512-ngFS/J6St4PJfHRHGjr78xkPPtbyXtdMOLNE4x/XZunEK3OhV7aGUWMHf9WTUEy6wm1U0W4okkd82ZFFWRVQTw==}
     engines: {node: '>=20.16.0'}
     hasBin: true
 
@@ -5009,9 +5009,9 @@ snapshots:
     dependencies:
       '@typescript/old': typescript@6.0.3
 
-  '@universal-deploy/netlify@0.2.4(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))':
+  '@universal-deploy/netlify@0.2.4(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))':
     dependencies:
-      '@universal-deploy/store': 0.3.0(srvx@1.0.5)
+      '@universal-deploy/store': 0.3.0(srvx@1.0.8)
       vite: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)
     transitivePeerDependencies:
       - srvx
@@ -5028,16 +5028,16 @@ snapshots:
     optionalDependencies:
       srvx: 0.12.8
 
-  '@universal-deploy/store@0.3.0(srvx@1.0.5)':
+  '@universal-deploy/store@0.3.0(srvx@1.0.8)':
     optionalDependencies:
-      srvx: 1.0.5
+      srvx: 1.0.8
 
-  '@universal-deploy/vite@0.2.2(hono@4.13.13)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))':
+  '@universal-deploy/vite@0.2.2(hono@4.13.13)(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))':
     dependencies:
-      '@universal-deploy/netlify': 0.2.4(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
+      '@universal-deploy/netlify': 0.2.4(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
       '@universal-deploy/node': 0.1.13(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
-      '@universal-deploy/store': 0.3.0(srvx@1.0.5)
-      '@universal-middleware/express': 0.5.3(hono@4.13.13)(srvx@1.0.5)
+      '@universal-deploy/store': 0.3.0(srvx@1.0.8)
+      '@universal-middleware/express': 0.5.3(hono@4.13.13)(srvx@1.0.8)
       magic-string: 0.30.21
       rou3: 1.0.0
     optionalDependencies:
@@ -5053,34 +5053,34 @@ snapshots:
       - hono
       - srvx
 
-  '@universal-middleware/core@0.4.18(hono@4.13.13)(srvx@1.0.5)':
+  '@universal-middleware/core@0.4.18(hono@4.13.13)(srvx@1.0.8)':
     dependencies:
       regexparam: 3.0.0
       tough-cookie: 6.0.2
     optionalDependencies:
       hono: 4.13.13
-      srvx: 1.0.5
+      srvx: 1.0.8
 
-  '@universal-middleware/core@0.6.2(hono@4.13.13)(srvx@1.0.5)':
+  '@universal-middleware/core@0.6.2(hono@4.13.13)(srvx@1.0.8)':
     dependencies:
       regexparam: 3.0.0
       tough-cookie: 6.0.2
     optionalDependencies:
       hono: 4.13.13
-      srvx: 1.0.5
+      srvx: 1.0.8
 
-  '@universal-middleware/core@0.7.1(hono@4.13.13)(srvx@1.0.5)':
+  '@universal-middleware/core@0.7.1(hono@4.13.13)(srvx@1.0.8)':
     dependencies:
       regexparam: 3.0.0
       tough-cookie: 6.0.2
     optionalDependencies:
       hono: 4.13.13
-      srvx: 1.0.5
+      srvx: 1.0.8
 
-  '@universal-middleware/express@0.5.3(hono@4.13.13)(srvx@1.0.5)':
+  '@universal-middleware/express@0.5.3(hono@4.13.13)(srvx@1.0.8)':
     dependencies:
-      '@universal-middleware/core': 0.6.2(hono@4.13.13)(srvx@1.0.5)
-      '@universal-middleware/node': 0.2.9(hono@4.13.13)(srvx@1.0.5)
+      '@universal-middleware/core': 0.6.2(hono@4.13.13)(srvx@1.0.8)
+      '@universal-middleware/node': 0.2.9(hono@4.13.13)(srvx@1.0.8)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -5092,9 +5092,9 @@ snapshots:
       - hono
       - srvx
 
-  '@universal-middleware/hono@0.4.22(hono@4.13.13)(srvx@1.0.5)':
+  '@universal-middleware/hono@0.4.22(hono@4.13.13)(srvx@1.0.8)':
     dependencies:
-      '@universal-middleware/core': 0.4.18(hono@4.13.13)(srvx@1.0.5)
+      '@universal-middleware/core': 0.4.18(hono@4.13.13)(srvx@1.0.8)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -5106,9 +5106,9 @@ snapshots:
       - hono
       - srvx
 
-  '@universal-middleware/node@0.2.9(hono@4.13.13)(srvx@1.0.5)':
+  '@universal-middleware/node@0.2.9(hono@4.13.13)(srvx@1.0.8)':
     dependencies:
-      '@universal-middleware/core': 0.7.1(hono@4.13.13)(srvx@1.0.5)
+      '@universal-middleware/core': 0.7.1(hono@4.13.13)(srvx@1.0.8)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -5120,11 +5120,11 @@ snapshots:
       - hono
       - srvx
 
-  '@vikejs/hono@0.2.1(hono@4.13.13)(srvx@1.0.5)(vike@0.4.268(hono@4.13.13)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)))':
+  '@vikejs/hono@0.2.1(hono@4.13.13)(srvx@1.0.8)(vike@0.4.268(hono@4.13.13)(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)))':
     dependencies:
-      '@universal-middleware/hono': 0.4.22(hono@4.13.13)(srvx@1.0.5)
+      '@universal-middleware/hono': 0.4.22(hono@4.13.13)(srvx@1.0.8)
       hono: 4.13.13
-      vike: 0.4.268(hono@4.13.13)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
+      vike: 0.4.268(hono@4.13.13)(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -5368,9 +5368,9 @@ snapshots:
 
   convert-source-map@2.0.0: {}
 
-  crossws@0.4.15(srvx@1.0.5):
+  crossws@0.4.15(srvx@1.0.8):
     optionalDependencies:
-      srvx: 1.0.5
+      srvx: 1.0.8
 
   csstype@3.2.3: {}
 
@@ -5933,7 +5933,7 @@ snapshots:
 
   srvx@0.12.8: {}
 
-  srvx@1.0.5: {}
+  srvx@1.0.8: {}
 
   std-env@4.3.0: {}
 
@@ -5943,13 +5943,13 @@ snapshots:
 
   tapable@2.3.3: {}
 
-  telefunc@0.2.24(@babel/core@7.29.7)(@babel/parser@7.29.9)(@babel/types@7.29.8)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)):
+  telefunc@0.2.24(@babel/core@7.29.7)(@babel/parser@7.29.9)(@babel/types@7.29.8)(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
       '@brillout/import': 0.2.6
       '@brillout/json-serializer': 0.5.27
       '@brillout/picocolors': 1.0.31
       '@brillout/vite-plugin-server-entry': 0.7.23
-      crossws: 0.4.15(srvx@1.0.5)
+      crossws: 0.4.15(srvx@1.0.8)
       es-module-lexer: 1.7.0
       magic-string: 0.30.21
       ts-morph: 26.0.0
@@ -6061,18 +6061,18 @@ snapshots:
 
   validate-npm-package-name@8.0.0: {}
 
-  vike-vue@0.9.15(vike@0.4.268(hono@4.13.13)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)))(vue@3.5.44):
+  vike-vue@0.9.15(vike@0.4.268(hono@4.13.13)(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)))(vue@3.5.44):
     dependencies:
       magic-string: 0.30.21
       oxc-parser: 0.104.0
       oxc-walker: 0.6.0(oxc-parser@0.104.0)
-      vike: 0.4.268(hono@4.13.13)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
+      vike: 0.4.268(hono@4.13.13)(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
       vue: 3.5.44
     transitivePeerDependencies:
       - '@emnapi/core'
       - '@emnapi/runtime'
 
-  vike@0.4.268(hono@4.13.13)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)):
+  vike@0.4.268(hono@4.13.13)(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
       '@babel/core': 7.29.7
       '@babel/types': 7.29.8
@@ -6080,10 +6080,10 @@ snapshots:
       '@brillout/json-serializer': 0.5.27
       '@brillout/picocolors': 1.0.31
       '@brillout/vite-plugin-server-entry': 0.7.23
-      '@universal-deploy/store': 0.3.0(srvx@1.0.5)
-      '@universal-deploy/vite': 0.2.2(hono@4.13.13)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
-      '@universal-middleware/core': 0.7.1(hono@4.13.13)(srvx@1.0.5)
-      '@universal-middleware/node': 0.2.9(hono@4.13.13)(srvx@1.0.5)
+      '@universal-deploy/store': 0.3.0(srvx@1.0.8)
+      '@universal-deploy/vite': 0.2.2(hono@4.13.13)(srvx@1.0.8)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
+      '@universal-middleware/core': 0.7.1(hono@4.13.13)(srvx@1.0.8)
+      '@universal-middleware/node': 0.2.9(hono@4.13.13)(srvx@1.0.8)
       cac: 6.7.14
       convert-route: 2.0.0
       es-module-lexer: 1.7.0

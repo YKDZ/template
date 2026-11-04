@@ -45,7 +45,7 @@ catalog:
   toml-eslint-parser: ^1.0.3
   pinia: ^4.0.2
   playwright: 1.64.0
-  srvx: ^1.0.0
+  srvx: ^1.0.8
   tailwindcss: ^4.3.3
   telefunc: ^0.2.22
   turbo: 2.11.10
