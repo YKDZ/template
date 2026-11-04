@@ -270,8 +270,8 @@ catalogs:
       specifier: ^4.3.3
       version: 4.3.3
     telefunc:
-      specifier: ^0.2.22
-      version: 0.2.24
+      specifier: ^0.3.1
+      version: 0.3.1
     toml-eslint-parser:
       specifier: ^1.0.3
       version: 1.0.3
@@ -1312,7 +1312,7 @@ importers:
         version: 1.0.5
       telefunc:
         specifier: 'catalog:'
-        version: 0.2.24(@babel/core@7.29.7)(@babel/parser@7.29.9)(@babel/types@7.29.8)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
+        version: 0.3.1(@babel/core@7.29.7)(@babel/parser@7.29.9)(@babel/types@7.29.8)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
       vike:
         specifier: 'catalog:'
         version: 0.4.268(hono@4.13.13)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1))
@@ -3999,8 +3999,8 @@ packages:
     resolution: {integrity: sha512-uxc/zpqFg6x7C8vOE7lh6Lbda8eEL9zmVm/PLeTPBRhh1xCgdWaQ+J1CUieGpIfm2HdtsUpRv+HshiasBMcc6A==}
     engines: {node: '>=6'}
 
-  telefunc@0.2.24:
-    resolution: {integrity: sha512-OibN84kYkT7Oaf2lOj2BCGHWvgjpxjpXICJPzYlK+cfCo196DEPsUlN2rrdBvAe+FF0edFUk8zy2ZmuGcVzS3w==}
+  telefunc@0.3.1:
+    resolution: {integrity: sha512-3f9PzCvUXVcquaBQtwMhXk38N06Dvc5X328bzMCSnkWSmXDvQJzV2zuPVyKUDw7SVNTHCpceNJLh6zT4SznCzQ==}
     engines: {node: '>=20'}
     peerDependencies:
       '@babel/core': '>=7.0.0'
@@ -5943,7 +5943,7 @@ snapshots:
 
   tapable@2.3.3: {}
 
-  telefunc@0.2.24(@babel/core@7.29.7)(@babel/parser@7.29.9)(@babel/types@7.29.8)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)):
+  telefunc@0.3.1(@babel/core@7.29.7)(@babel/parser@7.29.9)(@babel/types@7.29.8)(srvx@1.0.5)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
       '@brillout/import': 0.2.6
       '@brillout/json-serializer': 0.5.27
