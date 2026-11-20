@@ -23,7 +23,7 @@ catalog:
   "@devcontainers/cli": 0.89.0
   "@hono/node-server": ^2.0.12
   "@playwright/test": 1.64.0
-  "@vitest/browser-playwright": ^5.0.0
+  "@vitest/browser-playwright": ^5.0.5
   "@tailwindcss/vite": ^4.3.3
   "@types/node": ^26.0.0
   "@types/web-bluetooth": ^0.0.21
