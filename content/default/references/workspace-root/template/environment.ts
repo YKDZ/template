@@ -143,6 +143,7 @@ function baseDevelopmentContainerToolLayer(
     dockerfile: { source: environmentSources.base, from: "base.Dockerfile" },
     buildArguments: [{ name: "NODE_VERSION", value: nodeVersion }],
     probes: [
+      { identity: "turbo", command: "turbo", args: ["ls"] },
       { identity: "procps", command: "ps", args: ["--version"] },
       { identity: "bubblewrap", command: "bwrap", args: ["--version"] },
       {
