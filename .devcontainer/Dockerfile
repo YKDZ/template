@@ -30,6 +30,8 @@ RUN apt-get update \
     && pnpm config set store-dir /pnpm/store/root --global \
     && su -s /bin/sh node -c 'pnpm config set store-dir /pnpm/store/node --global'
 
+RUN curl -fsSL https://turborepo.dev/install | sh -s -- --install-dir /usr/local/bin --no-modify-path
+
 ARG PLAYWRIGHT_CLI_PACKAGE
 RUN npx --yes --package "${PLAYWRIGHT_CLI_PACKAGE}" playwright install --with-deps chromium
 

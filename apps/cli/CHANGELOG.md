@@ -1,5 +1,12 @@
 # 变更记录
 
+## 0.3.1
+
+### Patch Changes
+
+- 生成仓库的开发容器预装全局 Turbo，首次安装依赖前即可运行 `turbo ls`。项目依赖安装后，命令自动使用项目锁定的 Turbo 版本。
+- 生成的 `AGENTS.md` 引导代理从仓库根目录运行 `turbo ls` 查看工作区包结构。
+
 ## 0.3.0
 
 ### Minor Changes

@@ -29,3 +29,5 @@ RUN apt-get update \
     && install -d -o node -g node /pnpm/store/node /home/node/.local/share/pnpm \
     && pnpm config set store-dir /pnpm/store/root --global \
     && su -s /bin/sh node -c 'pnpm config set store-dir /pnpm/store/node --global'
+
+RUN curl -fsSL https://turborepo.dev/install | sh -s -- --install-dir /usr/local/bin --no-modify-path

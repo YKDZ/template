@@ -1,3 +1,5 @@
+本仓库是 Monorepo。首次了解时，在仓库根目录运行 `turbo ls` 查看包结构。
+
 ### 本地代理上下文
 
 `AGENTS.md`、`.agents/`、`docs/`、`.scratch/`、`.codex/`、`GLOSSARY*.md` 及其他代理本地规划或上下文文件均为本地工作区输入，不得纳入 Git 跟踪，也不得在 `.gitignore` 中为它们添加例外。
